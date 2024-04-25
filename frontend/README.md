@@ -1,4 +1,4 @@
-# Market UI ![Docker Image Version (tag)](https://img.shields.io/docker/v/beclab/market-frontend/latest) ![Docker Image Size (tag)](https://img.shields.io/docker/image-size/beclab/market-frontend/latest)
+# Market UI ![Docker Image Version (tag)](https://img.shields.io/docker/v/beclab/market-frontend/v0.1.53) ![Docker Image Size (tag)](https://img.shields.io/docker/image-size/beclab/market-frontend/v0.1.53)
 
 ## Configuring
 
