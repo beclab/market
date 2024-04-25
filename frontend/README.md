@@ -1,6 +1,4 @@
-# App Store UI( app store demo version )
-
-App store UI
+# Market UI ![Docker Image Version (tag)](https://img.shields.io/docker/v/beclab/market-frontend/latest) ![Docker Image Size (tag)](https://img.shields.io/docker/image-size/beclab/market-frontend/latest)
 
 ## Configuring
 
@@ -28,18 +26,6 @@ npm install
 
 ```bash
 npm run dev
-```
-
-### Lint the files
-
-```bash
-npm run lint
-```
-
-### Format the files
-
-```bash
-npm run format
 ```
 
 ### Build the app for production
