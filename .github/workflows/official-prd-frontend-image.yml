@@ -5,7 +5,7 @@ on:
 
   push:
     branches:
-      - "main"
+      - "release"
     tags:
       - "v*"
 
@@ -45,7 +45,7 @@ jobs:
               run: |
                 npm i -g @quasar/cli
             - name: Build official
-              run: npm install -d;PUBLIC_URL=https://app-test.jointerminus.com quasar build;
+              run: npm install -d;PUBLIC_URL=https://app.jointerminus.com quasar build;
             - run: ls dist
             - run: docker info
             - name: Build the official Docker image
