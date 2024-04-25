@@ -50,7 +50,7 @@ export const useAppStore = defineStore('app', {
 			installApps: [],
 			updateApps: [],
 			pageData: null,
-			isPublic: process.env.IS_PUBLIC === 'true',
+			isPublic: !!process.env.PUBLIC_URL,
 			queue: new AsyncQueue()
 		} as AppState;
 	},

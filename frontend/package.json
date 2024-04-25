@@ -9,11 +9,11 @@
     "lint": "eslint --ext .js,.ts,.vue ./ --fix",
     "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path .gitignore",
     "test": "echo \"No test specified\" && exit 0",
-    "dev": "IS_PUBLIC=false quasar dev",
-    "dev:public": "IS_PUBLIC=true quasar dev",
-    "build": "IS_PUBLIC=false quasar build",
-    "build:public": "IS_PUBLIC=true quasar build",
-    "build:pwa": "quasar build -m pwa"
+		"dev": "quasar dev",
+		"dev:public": "PUBLIC_URL=https://app-test.jointerminus.com quasar dev",
+		"dev:public:prd": "PUBLIC_URL=https://app.jointerminus.com quasar dev",
+		"build": "quasar build",
+		"build:pwa": "quasar build -m pwa"
   },
   "dependencies": {
     "@bytetrade/core": "^0.3.53",

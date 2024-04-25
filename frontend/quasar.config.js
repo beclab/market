@@ -65,7 +65,7 @@ module.exports = configure(function (/* ctx */) {
 			logLevel: false,
 			env: {
 				URL: process.env.URL,
-				IS_PUBLIC: process.env.IS_PUBLIC,
+				PUBLIC_URL: process.env.PUBLIC_URL,
 				WS_URL: process.env.WS_URL,
 				LOGIN_USERNAME: process.env.LOGIN_USERNAME,
 				LOGIN_PASSWORD: process.env.LOGIN_PASSWORD
@@ -113,26 +113,24 @@ module.exports = configure(function (/* ctx */) {
 		},
 		devServer: {
 			https: true,
-			host:
-				process.env.IS_PUBLIC === 'true'
-					? 'localhost'
-					: process.env.DEV_DOMAIN || 'localhost',
+			host: process.env.PUBLIC_URL
+				? 'localhost'
+				: process.env.DEV_DOMAIN || 'localhost',
 			open: true, // opens browser window automatically,
 			port: 8080,
-			proxy:
-				process.env.IS_PUBLIC === 'true'
-					? {
-							'/app-store': {
-								target: `https://app-test.jointerminus.com`,
-								changeOrigin: true
-							}
+			proxy: process.env.PUBLIC_URL
+				? {
+						'/app-store': {
+							target: process.env.PUBLIC_URL,
+							changeOrigin: true
 						}
-					: {
-							'/app-store': {
-								target: `https://market.${process.env.ACCOUNT}.myterminus.com`,
-								changeOrigin: true
-							}
+					}
+				: {
+						'/app-store': {
+							target: `https://market.${process.env.ACCOUNT}.myterminus.com`,
+							changeOrigin: true
 						}
+					}
 		},
 
 		// https://v2.quasar.dev/quasar-cli-vite/quasar-config-js#framework
