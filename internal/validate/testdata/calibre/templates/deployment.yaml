@@ -1,0 +1,123 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: calibre
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calibre
+  template:
+    metadata:
+      labels:
+        app: calibre
+    spec:
+      containers:
+      - env:
+        - name: CLI_ARGS
+        - name: GUAC_PASS
+        - name: GUAC_USER
+        - name: PGID
+          value: '1001'
+        - name: PUID
+          value: '1001'
+        - name: TZ
+          value: UTC
+        - name: UMASK_SET
+          value: '022'
+        name: calibre
+        image: linuxserver/calibre:latest
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 250m
+          limits:
+            memory: 64Mi
+            cpu: 250m
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - mountPath: /config
+          name: calibre-config
+        - mountPath: /books
+          name: calibre-data
+      - env:
+        - name: CLI_ARGS
+          value: "CLI_ARGS"
+        name: nginx
+        image: bytetrade/nginx
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 250m
+          limits:
+            memory: 604Mi
+            cpu: 350m
+        ports:
+        - containerPort: 80
+      volumes:
+      - name: calibre-config
+        hostPath:
+          type: DirectoryOrCreate
+          path:  {{ .Values.userspace.appdata }}/Calibre/config
+      - name: calibre-data
+        hostPath:
+          type: DirectoryOrCreate
+          path: {{ .Values.userspace.data }}/Calibre/books
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: {{ .Release.Namespace }}
+  name: {{ .Release.Name }}-sa
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: user-space-{{ .Values.bfl.username }}:admin
+  namespace: user-space-xx
+subjects:
+  - kind: ServiceAccount
+    namespace: {{ .Release.Namespace }}
+    name: {{ .Release.Name }}-sa
+roleRef:
+  kind: Role
+  name: admin
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: admin
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups:
+      - "*"
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - delete
