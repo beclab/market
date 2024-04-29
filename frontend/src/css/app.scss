@@ -387,3 +387,16 @@
 	font-weight: 100 700;
 	src: url('../../public/sykg-zNym6YjUruM-QrEh7-nyTnjDwKNJ_190FjzaqkNCeE.woff2') format('woff2');
 }
+
+.custom-icon-div {
+	position: relative;
+	width: 24px;
+	height: 24px;
+	overflow: hidden;
+}
+
+.active-icon {
+	position: absolute;
+	left: -24px;
+	filter: drop-shadow(24px 0 $main-style);
+}

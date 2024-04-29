@@ -547,3 +547,8 @@ export function convertLanguageCodesToNames(codes: string[]): string[] {
 
 	return codes.map((code) => languageMap[code] || 'code');
 }
+
+export function showIconAddress(name: string): string {
+	const src = '/appIcons/' + name + '.svg';
+	return src;
+}
