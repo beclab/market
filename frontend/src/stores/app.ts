@@ -275,7 +275,7 @@ export const useAppStore = defineStore('app', {
 				operation === OPERATE_ACTION.uninstall &&
 				op_status === OPERATE_STATUS.processing
 			) {
-				app.status = APP_STATUS.installing;
+				app.status = APP_STATUS.uninstalling;
 			}
 			if (
 				operation === OPERATE_ACTION.uninstall &&
