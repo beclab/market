@@ -76,12 +76,7 @@ func (h *Handler) installDev(req *restful.Request, resp *restful.Response) {
 func (h *Handler) _installApp(resp *restful.Response, token string, opt *models.InstallOptions) {
 	body, data, err := appservice.AppInstallNew(token, opt)
 	if err != nil {
-		glog.Info("body:", body)
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, err = resp.Write([]byte(body))
-		if err != nil {
-			glog.Warningf("err:%s", err)
-		}
+		respJsonWithOriginBody(resp, body)
 		return
 	}
 
@@ -107,12 +102,7 @@ func (h *Handler) _upgradeAppByInstallOpt(resp *restful.Response, token string, 
 		Source:  opt.Source,
 	})
 	if err != nil {
-		glog.Info("body:", body)
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, err = resp.Write([]byte(body))
-		if err != nil {
-			glog.Warningf("err:%s", err)
-		}
+		respJsonWithOriginBody(resp, body)
 		return
 	}
 	uidData := data["data"].(map[string]interface{})
@@ -164,12 +154,7 @@ func (h *Handler) uninstallDev(req *restful.Request, resp *restful.Response) {
 func (h *Handler) _uninstallApp(resp *restful.Response, name, token string) {
 	body, data, err := appservice.AppUninstallNew(name, token)
 	if err != nil {
-		glog.Info("body:", body)
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, err = resp.Write([]byte(body))
-		if err != nil {
-			glog.Warningf("err:%s", err)
-		}
+		respJsonWithOriginBody(resp, body)
 		return
 	}
 

@@ -207,11 +207,7 @@ func (h *Handler) cancel(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err = resp.Write([]byte(resBody))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, resBody)
 }
 
 func cancelByType(name, token, cancelTy, ty string) (string, error) {

@@ -276,3 +276,24 @@ func upgradeByType(info *models.ApplicationInfo, token string) (string, error) {
 
 	return "", fmt.Errorf("%s type %s invalid", info.Name, info.CfgType)
 }
+
+func respJsonWithOriginBody(resp *restful.Response, body string) {
+	glog.Info("body:", body)
+	info := make(map[string]interface{})
+	err := json.Unmarshal([]byte(body), &info)
+	if err != nil {
+		resInfo := map[string]any{
+			"code":    500,
+			"message": body,
+		}
+		resp.WriteAsJson(resInfo)
+		return
+	}
+
+	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
+	_, err = resp.Write([]byte(body))
+	if err != nil {
+		glog.Warningf("err:%s", err)
+	}
+	return
+}
