@@ -213,7 +213,7 @@ func (i *CommonWatchDog) getStatus() (string, string, string, error) {
 
 func (i *CommonWatchDog) updateStatus(status, progress, op, msg string) {
 	if i.haveProgress {
-		if i.status == status && i.progress == progress {
+		if i.status == status && i.progress <= progress {
 			return
 		}
 	} else if i.status == status {
