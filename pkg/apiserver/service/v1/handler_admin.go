@@ -231,11 +231,7 @@ func (h *Handler) pagesDetailRaw(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err := resp.Write([]byte(detail.(string)))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, detail.(string))
 }
 
 func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {

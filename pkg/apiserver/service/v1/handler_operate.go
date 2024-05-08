@@ -38,8 +38,7 @@ func (h *Handler) operate(req *restful.Request, resp *restful.Response) {
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -51,8 +50,7 @@ func (h *Handler) operate(req *restful.Request, resp *restful.Response) {
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -94,8 +92,7 @@ func (h *Handler) operateList(req *restful.Request, resp *restful.Response) {
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -118,8 +115,7 @@ func (h *Handler) operateHistoryListNew(req *restful.Request, resp *restful.Resp
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, _ = resp.Write([]byte(resBody))
+	respJsonWithOriginBody(resp, resBody)
 	return
 }
 
@@ -145,8 +141,7 @@ func (h *Handler) operateHistoryList(req *restful.Request, resp *restful.Respons
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -158,8 +153,7 @@ func (h *Handler) operateHistoryList(req *restful.Request, resp *restful.Respons
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -195,8 +189,7 @@ func (h *Handler) operateHistory(req *restful.Request, resp *restful.Response) {
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -208,8 +201,7 @@ func (h *Handler) operateHistory(req *restful.Request, resp *restful.Response) {
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 

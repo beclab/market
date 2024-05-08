@@ -6,7 +6,6 @@ import (
 	"market/pkg/api"
 
 	"github.com/emicklei/go-restful/v3"
-	"github.com/golang/glog"
 )
 
 //func (h *Handler) userResourceStatus(req *restful.Request, resp *restful.Response) {
@@ -47,11 +46,7 @@ func (h *Handler) curUserResourceStatus(req *restful.Request, resp *restful.Resp
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err = resp.Write([]byte(resBody))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, resBody)
 }
 
 func (h *Handler) clusterResourceStatus(req *restful.Request, resp *restful.Response) {
@@ -67,11 +62,7 @@ func (h *Handler) clusterResourceStatus(req *restful.Request, resp *restful.Resp
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err = resp.Write([]byte(resBody))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, resBody)
 }
 
 func (h *Handler) userInfo(req *restful.Request, resp *restful.Response) {
@@ -87,9 +78,5 @@ func (h *Handler) userInfo(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err = resp.Write([]byte(resBody))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, resBody)
 }

@@ -51,11 +51,7 @@ func (h *Handler) suspend(req *restful.Request, resp *restful.Response) {
 			Exec()
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err = resp.Write([]byte(resBody))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, resBody)
 }
 
 func suspendByType(name, token, ty string) (string, error) {
@@ -116,11 +112,7 @@ func (h *Handler) resume(req *restful.Request, resp *restful.Response) {
 			Exec()
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err = resp.Write([]byte(resBody))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, resBody)
 }
 
 func resumeByType(name, token, ty string) (string, error) {
