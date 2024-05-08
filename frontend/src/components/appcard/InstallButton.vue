@@ -204,12 +204,8 @@ async function onClick() {
 		case APP_STATUS.installing:
 			console.log(props.item?.name);
 			console.log('cancel installing');
-			if (props.item?.cfgType === CFG_TYPE.APPLICATION) {
-				appStore.cancelInstallingApp(props.item);
-			}
-			//temp
-			if (props.item?.cfgType === CFG_TYPE.MODEL) {
-				appStore.uninstallApp(props.item, props.development);
+			if (props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
+				appStore.cancelInstallingApp(props.item, props.development);
 			}
 			break;
 		case APP_STATUS.suspend:

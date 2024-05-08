@@ -197,8 +197,8 @@ export const useAppStore = defineStore('app', {
 			}
 		},
 
-		async cancelInstallingApp(app: AppStoreInfo) {
-			app.source = SOURCE_TYPE.Market;
+		async cancelInstallingApp(app: AppStoreInfo, isDev: boolean) {
+			app.source = isDev ? SOURCE_TYPE.Development : SOURCE_TYPE.Market;
 			console.log('cancel app start');
 			app.status = APP_STATUS.waiting;
 			this._updateLocalAppsData(app);
@@ -307,26 +307,26 @@ export const useAppStore = defineStore('app', {
 		 *                                                                     +--------------+
 		 *
 		 * Operate Status
-		 *                      cancel
-		 *                  +-----------------------------------------------------------+
-		 *                  |                                                           v
-		 *      install   +----------+     +------------+  cancel                     +-----------+
+		 *                                                cancel
+		 *                      +-----------------------------------------------------------+
+		 *                      |                                                           v
+		 *      install   +----------+     +------------+          cancel             +-----------+
 		 *     ---------> | pending  | --> |            | --------------------------> | canceled  |
 		 *                +----------+     |            |                             +-----------+
-		 *                  ^              |            |  suspend/resume/uninstall
-		 *                  | upgrade      | processing | <-----------------------------+
-		 *                  |              |            |                               |
-		 *                  |              |            |                             +-----------+
-		 *                  |              |            | --------------------------> | completed |
-		 *                  |              +------------+                             +-----------+
-		 *                  |                |                                          |
-		 *                  |                |                                          |
-		 *                  |                v                                          |
-		 *                  |              +------------+                               |
-		 *                  |              |   failed   |                               |
-		 *                  |              +------------+                               |
-		 *                  |                                                           |
-		 *                  +-----------------------------------------------------------+
+		 *                     ^           |            |     suspend/resume/uninstall
+		 *                     | upgrade   | processing | <-----------------------------+
+		 *                     |           |            |                               |
+		 *                     |           |            |                             +-----------+
+		 *                     |           |            | --------------------------> | completed |
+		 *                     |           +------------+                             +-----------+
+		 *                     |                |                                          |
+		 *                     |                |                                          |
+		 *                     |                v                                          |
+		 *                     |           +------------+                                  |
+		 *                     |           |   failed   |                                  |
+		 *                     |           +------------+                                  |
+		 *                     |                                                           |
+		 *                     +-----------------------------------------------------------+
 		 */
 		async _handleAppStatus(
 			app: AppStoreInfo,
@@ -412,7 +412,7 @@ export const useAppStore = defineStore('app', {
 		/**
 		 *
 		 * Model Status
-		 *              uninstall                                             suspend
+		 *                cancel                                             suspend
 		 *      +-----------------------------+                   +-------------------------+
 		 *      v                             |                   v                         |
 		 * +--------------+  install     +------------+     +-----------+  resume    +---------+
@@ -439,9 +439,9 @@ export const useAppStore = defineStore('app', {
 		 *                |            |               +------------+
 		 *                |            | ------------> | completed  |
 		 *                +------------+               +------------+
-		 *                  |
-		 *                  |
-		 *                  v
+		 *                      |
+		 *                      |
+		 *                      v
 		 *                +------------+
 		 *                |   failed   |
 		 *                +------------+
@@ -471,10 +471,11 @@ export const useAppStore = defineStore('app', {
 				refresh = true;
 			}
 			if (
-				operation === OPERATE_ACTION.uninstall &&
-				op_status === OPERATE_STATUS.completed
+				operation === OPERATE_ACTION.cancel &&
+				op_status === OPERATE_STATUS.canceled
 			) {
 				app.status = APP_STATUS.uninstalled;
+				refresh = true;
 			}
 			// break;
 			// case APP_STATUS.installed:
