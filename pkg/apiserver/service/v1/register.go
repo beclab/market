@@ -190,12 +190,12 @@ func AddToContainer(c *restful.Container) error {
 		Param(ws.QueryParameter("source", "source")).
 		Returns(http.StatusOK, "Success to upload the application for dev", &models.InstallationStatusResp{}))
 
-	ws.Route(ws.POST("/applications/{"+ParamAppName+"}/dev-install").
-		To(handler.devInstall).
-		Doc("install the application for dev").
-		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
-		Param(ws.FormParameter(ParamAppName, "the name of a application")).
-		Returns(http.StatusOK, "Success to begin a installation of the application for dev", &models.InstallationResponse{}))
+	//ws.Route(ws.POST("/applications/{"+ParamAppName+"}/dev-install").
+	//	To(handler.devInstall).
+	//	Doc("install the application for dev").
+	//	Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
+	//	Param(ws.FormParameter(ParamAppName, "the name of a application")).
+	//	Returns(http.StatusOK, "Success to begin a installation of the application for dev", &models.InstallationResponse{}))
 
 	ws.Route(ws.POST("/applications/{"+ParamAppName+"}/install").
 		To(handler.install).
@@ -204,12 +204,12 @@ func AddToContainer(c *restful.Container) error {
 		Param(ws.PathParameter(ParamAppName, "the name of a application")).
 		Returns(http.StatusOK, "Success to begin a installation of the application", &models.InstallationResponse{}))
 
-	ws.Route(ws.POST("/recommends/{"+ParamAppName+"}/install").
-		To(handler.installRecommend).
-		Doc("install the recommend").
-		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
-		Param(ws.PathParameter(ParamAppName, "the name of a recommend")).
-		Returns(http.StatusOK, "Success to begin a installation of the recommend", &models.InstallationResponse{}))
+	//ws.Route(ws.POST("/recommends/{"+ParamAppName+"}/install").
+	//	To(handler.installRecommend).
+	//	Doc("install the recommend").
+	//	Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
+	//	Param(ws.PathParameter(ParamAppName, "the name of a recommend")).
+	//	Returns(http.StatusOK, "Success to begin a installation of the recommend", &models.InstallationResponse{}))
 
 	ws.Route(ws.POST("/applications/{"+ParamAppName+"}/upgrade").
 		To(handler.upgrade).

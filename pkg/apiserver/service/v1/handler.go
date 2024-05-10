@@ -346,8 +346,8 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 	infoLocal, _ := boltdb.GetLocalAppInfo(appName)
 
 	infoMarket, err := appmgr.GetAppInfo(appName)
-	if err != nil {
-		api.HandleError(resp, err)
+	if err != nil && infoLocal == nil {
+		api.HandleError(resp, errors.New("not found"))
 		return
 	}
 
@@ -355,7 +355,7 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 	if info == nil {
 		info = infoMarket
 		info.Source = constants.AppFromMarket
-	} else {
+	} else if infoMarket != nil {
 		info.Version = infoMarket.Version
 	}
 

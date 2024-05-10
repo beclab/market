@@ -126,7 +126,7 @@ func (h *Handler) install(req *restful.Request, resp *restful.Response) {
 			appName, uid, token, watchdog.AppFromStore,
 			info).
 			Exec()
-	} else if info.CfgType == constants.ModelType {
+	} else if info.CfgType == constants.ModelType || info.CfgType == constants.RecommendType {
 		go h.commonWatchDogManager.NewWatchDog(watchdog.OP_INSTALL,
 			appName, uid, token, watchdog.AppFromStore, info.CfgType,
 			info).
