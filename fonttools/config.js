@@ -1,5 +1,5 @@
 // // Replace with your project root directory
-const pythonDir = "./";
+const pythonDir = "../";
 
 const codepointsFile = "MaterialIcons-Regular.txt";
 
