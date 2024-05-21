@@ -10,6 +10,7 @@ fi
 INPUT_FONT_FILE="$1"
 TEXT_FILE="$2"
 OUTPUT_FONT_FILE="$3"
+OUTPUT_FONT_PATH="$4"
 
 # Ensure pyftsubset is available
 if ! command -v pyftsubset &> /dev/null; then
@@ -29,7 +30,7 @@ else
 fi
 
 # Copy files to the specified directory
-cp $OUTPUT_FONT_FILE ../frontend/src/assets/fonts
+cp $OUTPUT_FONT_FILE $OUTPUT_FONT_PATH
 
 # Script ends
 exit 0

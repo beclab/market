@@ -46,7 +46,7 @@ jobs:
       - name: Python Icon
         run: cd ../fonttools; node python-icon.js
       - name: subset Icon
-        run: cd ../fonttools; ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2
+        run: cd ../fonttools; ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../frontend/src/assets/fonts
       - name: Install
         run: |
           npm i -g @quasar/cli
