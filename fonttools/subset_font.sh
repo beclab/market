@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script parameter check
-if [ "$#" -ne 3 ]; then
+if [ "$#" -ne 4 ]; then
     echo "Usage: $0 <input_font_file> <text_file> <output_font_file>"
     exit 1
 fi
