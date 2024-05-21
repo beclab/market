@@ -344,7 +344,8 @@
 	border-collapse: collapse;
 	width: 100%;
 }
-#readMe th, td {
+#readMe th,
+td {
 	border: 1px solid black;
 	padding: 8px;
 	text-align: left;
@@ -377,16 +378,18 @@
 	background-color: #e0e0e0;
 }
 
-.q-table th, .q-table td {
+.q-table th,
+.q-table td {
 	padding: 0 !important;
 }
 
-@font-face {
-	font-family: 'Material Symbols Rounded';
-	font-style: normal;
-	font-weight: 100 700;
-	src: url('../../public/sykg-zNym6YjUruM-QrEh7-nyTnjDwKNJ_190FjzaqkNCeE.woff2') format('woff2');
-}
+// @font-face {
+// 	font-family: 'Material Symbols Rounded';
+// 	font-style: normal;
+// 	font-weight: 100 700;
+// 	src: url('../../public/sykg-zNym6YjUruM-QrEh7-nyTnjDwKNJ_190FjzaqkNCeE.woff2')
+// 		format('woff2');
+// }
 
 .custom-icon-div {
 	position: relative;
@@ -399,4 +402,11 @@
 	position: absolute;
 	left: -24px;
 	filter: drop-shadow(24px 0 $main-style);
+}
+
+@font-face {
+	font-family: 'Material Symbols Rounded';
+	font-style: normal;
+	font-weight: 100 700;
+	src: url('../assets/MaterialSymbolsRounded.woff2') format('woff2');
 }
