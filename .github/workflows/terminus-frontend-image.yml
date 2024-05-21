@@ -46,9 +46,9 @@ jobs:
       - name: Install fonttools
         run: pip3 install fonttools brotli
       - name: Python Icon
-        run: pwd;cd ../fonttools; node python-icon.js
+        run: pwd;cd ../fonttools; sudo node python-icon.js
       - name: subset Icon
-        run: cd ../fonttools; ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../frontend/src/assets/fonts
+        run: cd ../fonttools; sudo ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../frontend/src/assets/fonts
       - name: Install
         run: |
           npm i -g @quasar/cli
