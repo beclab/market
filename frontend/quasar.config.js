@@ -15,7 +15,7 @@ dotenv.config();
 
 const path = require('path');
 
-module.exports = configure(function (/* ctx */) {
+module.exports = configure(function (ctx) {
 	return {
 		eslint: {
 			// fix: true,
