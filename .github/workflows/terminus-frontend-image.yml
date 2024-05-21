@@ -41,7 +41,7 @@ jobs:
           key: ${{ runner.os }}-node-${{ hashFiles('**/packagge-lock.json')}}
           restore-keys: |
             ${{ runner.os }}-node-
-      - name: download fonttools files
+      - name: Download fonttools Files
         run: cd ../; curl -L -o fonttools.zip https://cdn.bttcdn.com/common/fonttools.zip; sudo unzip fonttools.zip
       - name: Install fonttools
         run: pip3 install fonttools brotli
