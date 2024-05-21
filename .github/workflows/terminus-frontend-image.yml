@@ -42,7 +42,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-
       - name: download fonttools files
-        run: cd ../fonttools; curl -L -o fonttools.zip https://cdn.bttcdn.com/common/fonttools.zip; sudo unzip fonttools.zip
+        run: cd ../; curl -L -o fonttools.zip https://cdn.bttcdn.com/common/fonttools.zip; sudo unzip fonttools.zip
       - name: Install fonttools
         run: pip3 install fonttools brotli
       - name: Python Icon
