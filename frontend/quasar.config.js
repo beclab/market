@@ -35,7 +35,7 @@ module.exports = configure(function (/* ctx */) {
 		boot: ['i18n', 'axios', 'smartEnginEntrance.js', 'bytetrade-ui'],
 
 		// https://v2.quasar.dev/quasar-cli-vite/quasar-config-js#css
-		css: ['app.scss'],
+		css: ['app.scss', ctx.dev ? 'font.dev.scss' : 'font.pro.dev'],
 
 		// https://github.com/quasarframework/quasar/tree/dev/extras
 		extras: [
@@ -46,7 +46,7 @@ module.exports = configure(function (/* ctx */) {
 			// 'themify',
 			// 'line-awesome',
 			// 'roboto-font-latin-ext', // this or either 'roboto-font', NEVER both!
-			// 'material-icons',
+			// 'material-icons'
 			// 'roboto-font', // optional, you are not bound to it
 			// 'bootstrap-icons',
 			// 'themify'

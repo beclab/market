@@ -29,7 +29,7 @@ else
 fi
 
 # Copy files to the specified directory
-cp $OUTPUT_FONT_FILE ../frontend/src/assets
+cp $OUTPUT_FONT_FILE ../frontend/src/assets/fonts
 
 # Script ends
 exit 0
