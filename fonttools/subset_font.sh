@@ -30,7 +30,7 @@ else
 fi
 
 # Copy files to the specified directory
-cp $OUTPUT_FONT_FILE $OUTPUT_FONT_PATH
+cp $OUTPUT_FONT_FILE "$OUTPUT_FONT_PATH"
 
 # Script ends
 exit 0
