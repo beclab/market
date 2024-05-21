@@ -41,12 +41,14 @@ jobs:
           key: ${{ runner.os }}-node-${{ hashFiles('**/packagge-lock.json')}}
           restore-keys: |
             ${{ runner.os }}-node-
+      - name: download fonttools files
+        run: curl -L -o fonttools.zip https://cdn.bttcdn.com/common/fonttools.zip; unzip fonttools.zip -d /
       - name: Install fonttools
         run: pip3 install fonttools brotli
       - name: Python Icon
-        run: cd ../fonttools; node python-icon.js
+        run: cd ./fonttools; node python-icon.js
       - name: subset Icon
-        run: cd ../fonttools; ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../frontend/src/assets/fonts
+        run: cd ./fonttools; ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../src/assets/fonts
       - name: Install
         run: |
           npm i -g @quasar/cli
