@@ -46,7 +46,7 @@ module.exports = configure(function (ctx) {
 			// 'themify',
 			// 'line-awesome',
 			// 'roboto-font-latin-ext', // this or either 'roboto-font', NEVER both!
-			// 'material-icons'
+			'material-icons'
 			// 'roboto-font', // optional, you are not bound to it
 			// 'bootstrap-icons',
 			// 'themify'
