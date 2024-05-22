@@ -82,11 +82,7 @@ func (h *Handler) handleTerminusVersion(req *restful.Request, resp *restful.Resp
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err = resp.Write([]byte(resBody))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, resBody)
 }
 
 func (h *Handler) handleTerminusNodes(req *restful.Request, resp *restful.Response) {
@@ -102,11 +98,7 @@ func (h *Handler) handleTerminusNodes(req *restful.Request, resp *restful.Respon
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, err = resp.Write([]byte(resBody))
-	if err != nil {
-		glog.Warningf("err:%s", err)
-	}
+	respJsonWithOriginBody(resp, resBody)
 }
 
 func (h *Handler) handleMyApps(req *restful.Request, resp *restful.Response) {
@@ -116,14 +108,13 @@ func (h *Handler) handleMyApps(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	respBody, err := bfl.GetMyApps(token)
+	resBody, err := bfl.GetMyApps(token)
 	if err != nil {
-		api.HandleInternalError(resp, fmt.Errorf("list apps err:%v, resp:%s", err, respBody))
+		api.HandleInternalError(resp, fmt.Errorf("list apps err:%v, resp:%s", err, resBody))
 		return
 	}
 
-	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	_, _ = resp.Write([]byte(respBody))
+	respJsonWithOriginBody(resp, resBody)
 }
 
 func (h *Handler) list(req *restful.Request, resp *restful.Response) {
@@ -355,8 +346,8 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 	infoLocal, _ := boltdb.GetLocalAppInfo(appName)
 
 	infoMarket, err := appmgr.GetAppInfo(appName)
-	if err != nil {
-		api.HandleError(resp, err)
+	if err != nil && infoLocal == nil {
+		api.HandleError(resp, errors.New("not found"))
 		return
 	}
 
@@ -364,7 +355,7 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 	if info == nil {
 		info = infoMarket
 		info.Source = constants.AppFromMarket
-	} else {
+	} else if infoMarket != nil {
 		info.Version = infoMarket.Version
 	}
 

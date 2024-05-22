@@ -86,45 +86,43 @@
 			"
 			flat
 			dense
+			:menu-offset="[0, 4]"
 		>
-			<q-list>
-				<q-item clickable v-close-popup @click="onUninstall">
-					<q-item-section>
-						<q-item-label>{{ t('app.uninstall') }}</q-item-label>
-					</q-item-section>
-				</q-item>
-				<q-item
-					clickable
-					v-close-popup
+			<div class="column dropdown-menu text-body3">
+				<div class="dropdown-menu-item" v-close-popup @click="onUninstall">
+					{{ t('app.uninstall') }}
+				</div>
+				<div
 					v-if="
 						item.cfgType === CFG_TYPE.MODEL &&
 						item.status === APP_STATUS.installed
 					"
+					class="dropdown-menu-item q-mt-xs"
+					v-close-popup
 					@click="onLoad"
 				>
-					<q-item-section>
-						<q-item-label>{{ t('app.load') }}</q-item-label>
-					</q-item-section>
-				</q-item>
-				<q-item
-					clickable
-					v-close-popup
+					{{ t('app.load') }}
+				</div>
+				<div
 					v-if="
 						item.cfgType === CFG_TYPE.MODEL &&
 						item.status === APP_STATUS.running
 					"
+					class="dropdown-menu-item q-mt-xs"
+					v-close-popup
 					@click="onUnload"
 				>
-					<q-item-section>
-						<q-item-label>{{ t('app.unload') }}</q-item-label>
-					</q-item-section>
-				</q-item>
-				<q-item clickable v-close-popup v-if="isUpdate" @click="onUpdateOpen">
-					<q-item-section>
-						<q-item-label>{{ t('app.open') }}</q-item-label>
-					</q-item-section>
-				</q-item>
-			</q-list>
+					{{ t('app.unload') }}
+				</div>
+				<div
+					v-if="isUpdate"
+					class="dropdown-menu-item q-mt-xs"
+					v-close-popup
+					@click="onUpdateOpen"
+				>
+					{{ t('app.open') }}
+				</div>
+			</div>
 		</q-btn-dropdown>
 	</div>
 </template>
@@ -204,12 +202,8 @@ async function onClick() {
 		case APP_STATUS.installing:
 			console.log(props.item?.name);
 			console.log('cancel installing');
-			if (props.item?.cfgType === CFG_TYPE.APPLICATION) {
-				appStore.cancelInstallingApp(props.item);
-			}
-			//temp
-			if (props.item?.cfgType === CFG_TYPE.MODEL) {
-				appStore.uninstallApp(props.item, props.development);
+			if (props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
+				appStore.cancelInstallingApp(props.item, props.development);
 			}
 			break;
 		case APP_STATUS.suspend:
@@ -488,7 +482,7 @@ function updateUI() {
 		max-width: var(--statusWidth);
 		color: var(--textColor);
 		background: var(--backgroundColor);
-		border-radius: 4px var(--radius, 0px) var(--radius, 0px) 4px;
+		border-radius: 4px var(--radius, 0px) var(--radius, 0px) 4px !important;
 		height: 24px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -507,7 +501,7 @@ function updateUI() {
 		color: var(--textColor);
 		background: var(--backgroundColor);
 		height: 24px;
-		border-radius: 0px 4px 4px 0px;
+		border-radius: 0px 4px 4px 0px !important;
 		gap: 20px;
 		text-align: center;
 	}
@@ -520,7 +514,7 @@ function updateUI() {
 		color: var(--textColor);
 		background: var(--backgroundColor);
 		height: 32px;
-		border-radius: 8px var(--radius, 0px) var(--radius, 0px) 8px;
+		border-radius: 8px var(--radius, 0px) var(--radius, 0px) 8px !important;
 		font-family: Roboto;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -538,9 +532,32 @@ function updateUI() {
 		color: var(--textColor);
 		background: var(--backgroundColor);
 		height: 32px;
-		border-radius: 0px 8px 8px 0px;
+		border-radius: 0px 8px 8px 0px !important;
 		gap: 20px;
 		text-align: center;
+	}
+}
+
+.dropdown-menu {
+	overflow: hidden;
+	width: 88px;
+	border-radius: 8px;
+	padding: 8px;
+
+	.dropdown-menu-item {
+		height: 32px;
+		color: $grey-8;
+		padding: 8px 12px;
+
+		&:hover {
+			background: $grey-1;
+			border-radius: 4px;
+		}
+
+		&:active {
+			background: #3377ff1a;
+			border-radius: 4px;
+		}
 	}
 }
 </style>

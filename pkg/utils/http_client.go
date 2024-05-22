@@ -143,6 +143,12 @@ func SendHttpRequestByte(req *http.Request) ([]byte, error) {
 		return body, fmt.Errorf("http status not 200 %d msg:%s", resp.StatusCode, string(body))
 	}
 
+	debugBody := string(body)
+	if len(debugBody) > 256 {
+		debugBody = debugBody[:256]
+	}
+	glog.Infof("url:%s, method:%s, resp.StatusCode:%d, body:%s", req.URL, req.Method, resp.StatusCode, debugBody)
+
 	return body, nil
 }
 

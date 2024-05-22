@@ -8,9 +8,6 @@ const (
 	APIServerListenAddress      = ":81"
 	HelmServerListenAddress     = ":82"
 
-	MongoDBUri  = "MONGO_URL"
-	MongoDBName = "MONGO_DB"
-
 	DataPath           = "./data"
 	ChartsLocalDir     = "./data/charts"
 	ChartsLocalTempDir = "./data/chartsTmp"

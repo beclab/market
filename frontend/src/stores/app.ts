@@ -122,13 +122,7 @@ export const useAppStore = defineStore('app', {
 			bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, app);
 			console.log('install app start');
 			const response = await installApp(app.name);
-			const isOK = this._handleOperationResponse(app, response);
-			if (isOK) {
-				await this._updateWorkflowStatusByOperation(
-					app,
-					OPERATE_ACTION.install
-				);
-			}
+			this._handleOperationResponse(app, response);
 		},
 
 		async resumeApp(app: AppStoreInfo, isDev: boolean) {
@@ -138,13 +132,7 @@ export const useAppStore = defineStore('app', {
 			bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, app);
 			console.log('install app resuming');
 			const response = await resumeApp(app.name, app.cfgType);
-			const isOK = this._handleOperationResponse(app, response);
-			if (isOK) {
-				await this._updateWorkflowStatusByOperation(
-					app,
-					OPERATE_ACTION.install
-				);
-			}
+			this._handleOperationResponse(app, response);
 		},
 
 		async suspendApp(app: AppStoreInfo, isDev: boolean) {
@@ -154,13 +142,7 @@ export const useAppStore = defineStore('app', {
 			bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, app);
 			console.log('install app resuming');
 			const response = await suspendApp(app.name, app.cfgType);
-			const isOK = this._handleOperationResponse(app, response);
-			if (isOK) {
-				await this._updateWorkflowStatusByOperation(
-					app,
-					OPERATE_ACTION.install
-				);
-			}
+			this._handleOperationResponse(app, response);
 		},
 
 		async uninstallApp(app: AppStoreInfo, isDev: boolean) {
@@ -171,13 +153,7 @@ export const useAppStore = defineStore('app', {
 			console.log('uninstall app start');
 
 			const response = await uninstallApp(app.name, app.cfgType);
-			const isOK = this._handleOperationResponse(app, response);
-			if (isOK) {
-				await this._updateWorkflowStatusByOperation(
-					app,
-					OPERATE_ACTION.uninstall
-				);
-			}
+			this._handleOperationResponse(app, response);
 		},
 
 		async upgradeApp(app: AppStoreInfo) {
@@ -186,19 +162,12 @@ export const useAppStore = defineStore('app', {
 			this._updateLocalAppsData(app);
 			bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, app);
 			console.log('upgrade app start');
-
 			const response = await upgradeApp(app.name);
-			const isOK = this._handleOperationResponse(app, response);
-			if (isOK) {
-				await this._updateWorkflowStatusByOperation(
-					app,
-					OPERATE_ACTION.upgrade
-				);
-			}
+			this._handleOperationResponse(app, response);
 		},
 
-		async cancelInstallingApp(app: AppStoreInfo) {
-			app.source = SOURCE_TYPE.Market;
+		async cancelInstallingApp(app: AppStoreInfo, isDev: boolean) {
+			app.source = isDev ? SOURCE_TYPE.Development : SOURCE_TYPE.Market;
 			console.log('cancel app start');
 			app.status = APP_STATUS.waiting;
 			this._updateLocalAppsData(app);
@@ -262,32 +231,6 @@ export const useAppStore = defineStore('app', {
 		},
 
 		/**
-		 * only handle uninstall
-		 *
-		 */
-		async _handleWorkFlowStatus(
-			app: AppStoreInfo,
-			operation: string,
-			op_status: string
-		) {
-			let refresh = false;
-			if (
-				operation === OPERATE_ACTION.uninstall &&
-				op_status === OPERATE_STATUS.processing
-			) {
-				app.status = APP_STATUS.uninstalling;
-			}
-			if (
-				operation === OPERATE_ACTION.uninstall &&
-				op_status === OPERATE_STATUS.completed
-			) {
-				app.status = APP_STATUS.uninstalled;
-				refresh = true;
-			}
-			this._notificationData(app, refresh);
-		},
-
-		/**
 		 *
 		 * App Status
 		 * +-----------+  install   +---------+           +------------+            +--------------+    suspend     +---------+
@@ -307,26 +250,26 @@ export const useAppStore = defineStore('app', {
 		 *                                                                     +--------------+
 		 *
 		 * Operate Status
-		 *                      cancel
-		 *                  +-----------------------------------------------------------+
-		 *                  |                                                           v
-		 *      install   +----------+     +------------+  cancel                     +-----------+
+		 *                                                cancel
+		 *                      +-----------------------------------------------------------+
+		 *                      |                                                           v
+		 *      install   +----------+     +------------+          cancel             +-----------+
 		 *     ---------> | pending  | --> |            | --------------------------> | canceled  |
 		 *                +----------+     |            |                             +-----------+
-		 *                  ^              |            |  suspend/resume/uninstall
-		 *                  | upgrade      | processing | <-----------------------------+
-		 *                  |              |            |                               |
-		 *                  |              |            |                             +-----------+
-		 *                  |              |            | --------------------------> | completed |
-		 *                  |              +------------+                             +-----------+
-		 *                  |                |                                          |
-		 *                  |                |                                          |
-		 *                  |                v                                          |
-		 *                  |              +------------+                               |
-		 *                  |              |   failed   |                               |
-		 *                  |              +------------+                               |
-		 *                  |                                                           |
-		 *                  +-----------------------------------------------------------+
+		 *                     ^           |            |     suspend/resume/uninstall
+		 *                     | upgrade   | processing | <-----------------------------+
+		 *                     |           |            |                               |
+		 *                     |           |            |                             +-----------+
+		 *                     |           |            | --------------------------> | completed |
+		 *                     |           +------------+                             +-----------+
+		 *                     |                |                                          |
+		 *                     |                |                                          |
+		 *                     |                v                                          |
+		 *                     |           +------------+                                  |
+		 *                     |           |   failed   |                                  |
+		 *                     |           +------------+                                  |
+		 *                     |                                                           |
+		 *                     +-----------------------------------------------------------+
 		 */
 		async _handleAppStatus(
 			app: AppStoreInfo,
@@ -409,10 +352,79 @@ export const useAppStore = defineStore('app', {
 			// }
 			this._notificationData(app, refresh);
 		},
+
+		/**
+		 *  Recommend Status
+		 *
+		 *   				                upgrade/uninstall
+		 *                  +-----------------------------------+
+		 *                  v                                   |
+		 *      install   +------------+                      +-----------+
+		 *     ---------> |            | -------------------> | completed |
+		 *                | processing |                      +-----------+
+		 *                |            |                        ^
+		 *                |            | -----------------------+
+		 *                +------------+
+		 *                  |
+		 *                  |
+		 *                  v
+		 *                +------------+
+		 *                |   failed   |
+		 *                +------------+
+		 *
+		 *  Operate Status
+		 *      +-------------------------------------------------+
+		 *      v                                                 |
+		 *    +-----------+  install   +---------+  uninstall   +--------------+
+		 *    | notfound | ---------> | running | -----------> | uninstalling |
+		 *    +-----------+            +---------+              +--------------+
+		 *
+		 */
+		async _handleWorkFlowStatus(
+			app: AppStoreInfo,
+			operation: string,
+			op_status: string
+		) {
+			let refresh = false;
+			if (
+				operation === OPERATE_ACTION.install &&
+				op_status === OPERATE_STATUS.completed
+			) {
+				app.status = APP_STATUS.running;
+			}
+			if (
+				operation === OPERATE_ACTION.upgrade &&
+				op_status === OPERATE_STATUS.processing
+			) {
+				app.status = APP_STATUS.upgrading;
+			}
+			if (
+				operation === OPERATE_ACTION.upgrade &&
+				op_status === OPERATE_STATUS.completed
+			) {
+				app.status = APP_STATUS.running;
+				refresh = true;
+			}
+			if (
+				operation === OPERATE_ACTION.uninstall &&
+				op_status === OPERATE_STATUS.processing
+			) {
+				app.status = APP_STATUS.uninstalling;
+			}
+			if (
+				operation === OPERATE_ACTION.uninstall &&
+				op_status === OPERATE_STATUS.completed
+			) {
+				app.status = APP_STATUS.uninstalled;
+				refresh = true;
+			}
+			this._notificationData(app, refresh);
+		},
+
 		/**
 		 *
 		 * Model Status
-		 *              uninstall                                             suspend
+		 *                cancel                                             suspend
 		 *      +-----------------------------+                   +-------------------------+
 		 *      v                             |                   v                         |
 		 * +--------------+  install     +------------+     +-----------+  resume    +---------+
@@ -439,9 +451,9 @@ export const useAppStore = defineStore('app', {
 		 *                |            |               +------------+
 		 *                |            | ------------> | completed  |
 		 *                +------------+               +------------+
-		 *                  |
-		 *                  |
-		 *                  v
+		 *                      |
+		 *                      |
+		 *                      v
 		 *                +------------+
 		 *                |   failed   |
 		 *                +------------+
@@ -471,10 +483,11 @@ export const useAppStore = defineStore('app', {
 				refresh = true;
 			}
 			if (
-				operation === OPERATE_ACTION.uninstall &&
-				op_status === OPERATE_STATUS.completed
+				operation === OPERATE_ACTION.cancel &&
+				op_status === OPERATE_STATUS.canceled
 			) {
 				app.status = APP_STATUS.uninstalled;
+				refresh = true;
 			}
 			// break;
 			// case APP_STATUS.installed:
@@ -632,32 +645,6 @@ export const useAppStore = defineStore('app', {
 					: i18n.global.t('error.operation_preform_failure');
 			this._appBackendFailure(app, message);
 			return false;
-		},
-
-		//Only install, uninstall and upgrade
-		async _updateWorkflowStatusByOperation(
-			app: AppStoreInfo,
-			op_action: string
-		) {
-			if (app.cfgType !== CFG_TYPE.WORK_FLOW) {
-				return;
-			}
-			switch (op_action) {
-				case OPERATE_ACTION.install:
-					app.status = APP_STATUS.running;
-					break;
-				case OPERATE_ACTION.uninstall:
-					app.status = APP_STATUS.uninstalling;
-					break;
-				case OPERATE_ACTION.upgrade:
-					app.status = APP_STATUS.running;
-					app.needUpdate = false;
-					break;
-			}
-
-			bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, app);
-			this._updateLocalAppsData(app);
-			this.loadApps();
 		}
 	}
 });

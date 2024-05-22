@@ -39,8 +39,7 @@ func (h *Handler) status(req *restful.Request, resp *restful.Response) {
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -53,8 +52,7 @@ func (h *Handler) status(req *restful.Request, resp *restful.Response) {
 		}
 
 		glog.Infof("recommend.Status%s resBody:%s", appName, resBody)
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -67,8 +65,7 @@ func (h *Handler) status(req *restful.Request, resp *restful.Response) {
 		}
 
 		glog.Infof("appservice.LlmStatus:%s resBody:%s", appName, resBody)
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 }
@@ -94,8 +91,7 @@ func (h *Handler) statusList(req *restful.Request, resp *restful.Response) {
 			return
 		}
 
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -108,8 +104,7 @@ func (h *Handler) statusList(req *restful.Request, resp *restful.Response) {
 		}
 
 		glog.Infof("recommend.StatusList resBody:%s", resBody)
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 
@@ -122,8 +117,7 @@ func (h *Handler) statusList(req *restful.Request, resp *restful.Response) {
 		}
 
 		glog.Infof("appservice.LlmStatusList resBody:%s", resBody)
-		resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-		_, _ = resp.Write([]byte(resBody))
+		respJsonWithOriginBody(resp, resBody)
 		return
 	}
 }

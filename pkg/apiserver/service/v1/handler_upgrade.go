@@ -98,6 +98,11 @@ func (h *Handler) upgrade(req *restful.Request, resp *restful.Response) {
 			appName, uid, token, watchdog.AppFromStore,
 			latestInfo).
 			Exec()
+	} else if latestInfo.CfgType == constants.RecommendType {
+		go h.commonWatchDogManager.NewWatchDog(watchdog.OP_UPGRADE,
+			appName, uid, token, watchdog.AppFromStore, latestInfo.CfgType,
+			latestInfo).
+			Exec()
 	}
 
 	dealWithInstallResp(resp, resBody)

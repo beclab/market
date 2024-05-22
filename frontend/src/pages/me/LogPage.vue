@@ -48,9 +48,7 @@
 							</template>
 							<template v-slot:body-cell-message="props">
 								<q-td :props="props">
-									<div
-										style="max-width: 200px !important; white-space: pre-line"
-									>
+									<div class="log-message">
 										{{ props.row.message }}
 									</div>
 								</q-td>
@@ -185,6 +183,16 @@ onMounted(async () => {
 	width: 100%;
 	height: calc(100vh - 56px);
 	padding: 0 44px;
+
+	.log-message {
+		max-width: 500px !important;
+		white-space: pre-line;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+	}
 
 	.empty-view {
 		width: 100%;
