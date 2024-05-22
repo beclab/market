@@ -52,7 +52,7 @@ jobs:
         run: pwd;cd ./fonttools; sudo node python-icon.js
       - name: subset Icon
         run: |
-          chmod 755 fonttools
+          sudo chmod 700 fonttools
           cd ./fonttools
           ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../src/assets/fonts
       - name: Install
