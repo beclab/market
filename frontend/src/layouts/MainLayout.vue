@@ -22,10 +22,7 @@
 				>
 					<template v-if="appStore.isPublic" v-slot:header>
 						<div class="header-bar column justify-start q-px-md q-mb-xs">
-							<q-img
-								class="header-icon"
-								:src="getRequireImage('favicon-128x128.png')"
-							>
+							<q-img class="header-icon" src="icons/market-128*128.png">
 								<template v-slot:loading>
 									<q-skeleton class="header-icon" style="border-radius: 20px" />
 								</template>
