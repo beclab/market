@@ -69,6 +69,10 @@ const router = useRouter();
 const appStore = useAppStore();
 
 const clickReturn = () => {
+	if (window.history && window.history.state && !window.history.state.back) {
+		router.replace('/');
+		return;
+	}
 	appStore.removeAppItem(props.item.name);
 	router.back();
 };

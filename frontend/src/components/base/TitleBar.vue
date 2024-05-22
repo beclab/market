@@ -23,7 +23,7 @@
 </template>
 
 <script lang="ts" setup>
-import { useAppStore } from 'src/stores/app';
+import { useRouter } from 'vue-router';
 
 defineProps({
 	show: {
@@ -51,8 +51,12 @@ defineProps({
 });
 
 const emit = defineEmits(['onReturn']);
-const appStore = useAppStore();
+const router = useRouter();
 const onReturn = () => {
+	if (window.history && window.history.state && !window.history.state.back) {
+		router.replace('/');
+		return;
+	}
 	emit('onReturn');
 };
 </script>
