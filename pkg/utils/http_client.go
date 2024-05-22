@@ -148,7 +148,7 @@ func SendHttpRequestByte(req *http.Request) ([]byte, error) {
 		debugBody = debugBody[:256]
 	}
 	glog.Infof("url:%s, method:%s, resp.StatusCode:%d, body:%s", req.URL, req.Method, resp.StatusCode, debugBody)
-	
+
 	return body, nil
 }
 

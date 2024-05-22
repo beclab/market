@@ -18,7 +18,6 @@ import (
 	"market/internal/boltdb"
 	"market/internal/conf"
 	"market/internal/constants"
-	"market/internal/mongo"
 	servicev1 "market/pkg/apiserver/service/v1"
 	"net/http"
 
@@ -71,11 +70,6 @@ func (s *APIServer) PrepareRun() error {
 	err := boltdb.Init()
 	if err != nil {
 		glog.Fatalf("boltdb init err%s", err.Error())
-	}
-
-	err = mongo.Init()
-	if err != nil {
-		glog.Fatalf("mongo init err%s", err.Error())
 	}
 
 	return nil
