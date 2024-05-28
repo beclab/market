@@ -81,9 +81,6 @@ const updateAppList = () => {
 };
 
 const updateAppData = (app: AppStoreInfo) => {
-	if (resizeTimer) {
-		clearTimeout(resizeTimer);
-	}
 	resizeTimer = setTimeout(function () {
 		console.log(`update status ${app.name}`);
 		updateAppStoreList(allAppList.value, app);
