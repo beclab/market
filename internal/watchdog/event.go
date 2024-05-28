@@ -16,17 +16,18 @@ import (
 )
 
 type InstallationWatchDog struct {
-	client  *event.Client
-	uid     string
-	ctx     context.Context
-	cancel  context.CancelFunc
-	op      string
-	app     string
-	from    string
-	appInfo *models.ApplicationInfo
-	token   string
-	status  string
-	clear   func(string)
+	client   *event.Client
+	uid      string
+	ctx      context.Context
+	cancel   context.CancelFunc
+	op       string
+	app      string
+	from     string
+	progress string
+	appInfo  *models.ApplicationInfo
+	token    string
+	status   string
+	clear    func(string)
 }
 
 type EventData struct {
@@ -65,11 +66,13 @@ const (
 	//Uninstalling = "uninstalling"
 	//Upgrading    = "upgrading"
 	//Upgraded  = "upgraded"
-	Pending   = "pending"
-	Completed = "completed"
-	Canceled  = "canceled"
-	Failed    = "failed"
-	Stopping  = "stopping"
+	Pending     = "pending"
+	Downloading = "downloading"
+	Processing  = "processing"
+	Completed   = "completed"
+	Canceled    = "canceled"
+	Failed      = "failed"
+	Stopping    = "stopping"
 
 	AppFromDev   = "dev"
 	AppFromStore = "store"
@@ -132,6 +135,14 @@ func (w *Manager) DeleteWatchDog(uid string) {
 	delete(w.ManagerMap, uid)
 }
 
+func isStatusWaiting(status string) bool {
+	if status != Pending && status != Downloading {
+		return false
+	}
+
+	return true
+}
+
 func (i *InstallationWatchDog) Exec() {
 	if i == nil {
 		glog.Warning("watch dog empty return")
@@ -148,19 +159,17 @@ func (i *InstallationWatchDog) Exec() {
 		i.clear(i.uid)
 	}()
 
-	pending := true
 	statusBegin, _, _, _ := i.getStatus()
-	if statusBegin != Pending {
-		pending = false
-	}
-	for pending {
+
+	waiting := isStatusWaiting(statusBegin)
+	for waiting {
 		select {
 		case <-i.ctx.Done(): // timeout or canceled
 			status, msg, _, err := i.getStatus()
 			if err != nil {
 				glog.Error("get installation status err, ", i.app, ", ", i.uid, ", ", i.op, ", ", err)
 			}
-			glog.Infof("watch app:%s status pending ctx done, uid:%s, status:%s, msg:%s", i.app, i.uid, status, msg)
+			glog.Infof("watch app:%s status waiting ctx done, uid:%s, status:%s, msg:%s", i.app, i.uid, status, msg)
 			if status != Completed && status != Failed {
 				err = i.cancelOp()
 				if err != nil {
@@ -192,9 +201,7 @@ func (i *InstallationWatchDog) Exec() {
 			if err != nil {
 				glog.Error("get installation status err, ", i.app, ", ", i.uid, ", ", msg, ", ", err)
 			}
-			if status != Pending {
-				pending = false
-			}
+			waiting = isStatusWaiting(status)
 		}
 	}
 
@@ -419,19 +426,23 @@ func (i *InstallationWatchDog) getStatus() (string, string, string, error) {
 		return "", "", "", err
 	}
 
-	i.updateStatus(string(res.State), string(res.OpType), res.Message)
+	i.updateStatus(string(res.State), res.Progress, string(res.OpType), res.Message)
 
 	return string(res.State), res.Message, string(res.OpType), nil
 }
 
-func (i *InstallationWatchDog) updateStatus(status, op, msg string) {
-	if i.status == status {
+func (i *InstallationWatchDog) updateStatus(status, progress, op, msg string) {
+	if i.status == Downloading {
+		if i.status == status && compareFloatStrings(i.progress, progress) >= 0 {
+			return
+		}
+	} else if i.status == status {
 		return
 	}
 
-	GetStatusManager().UpdateInstallStatus(i.uid, status, op, msg)
+	GetStatusManager().UpdateInstallStatus(i.uid, status, progress, op, msg)
 
-	i.status = status
+	i.status, i.progress = status, progress
 }
 
 func (i *InstallationWatchDog) cancelOp() error {

@@ -404,9 +404,9 @@ func (h *Handler) readme(req *restful.Request, resp *restful.Response) {
 
 	readme, err := appmgr.GetReadMe(appName)
 	if err != nil {
-		api.HandleError(resp, err)
+		resp.WriteEntity(models.NewResponse(api.InternalServerError, readme, nil))
 		return
 	}
 
-	resp.Write([]byte(readme))
+	resp.WriteEntity(models.NewResponse(api.OK, readme, nil))
 }
