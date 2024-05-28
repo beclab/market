@@ -73,6 +73,7 @@ export default {
 		whats_new: 'WHATS NEW',
 		required_permissions: 'REQUIRED PERMISSIONS',
 		recommend_card: 'RECOMMEND CARD',
+		app_card: 'APP CARD',
 		model_card: 'MODEL CARD',
 		information: 'INFORMATION',
 		get_support: 'Get Support',
