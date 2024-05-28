@@ -26,7 +26,7 @@
 			@mouseover="updateHover(true)"
 			@mouseleave="updateHover(false)"
 			dense
-			:percentage="item.progress ? item.progress : undefined"
+			:percentage="item.progress ? Number(item.progress) : 0"
 			flat
 			no-caps
 		>
@@ -49,12 +49,14 @@
 					style="width: 100%; height: 100%"
 					class="row justify-center items-center"
 					v-if="
-						item.status === APP_STATUS.installing &&
-						item.cfgType === CFG_TYPE.MODEL
+						(item.status === APP_STATUS.installing &&
+							item.cfgType === CFG_TYPE.MODEL) ||
+						(item.status === APP_STATUS.downloading &&
+							item.cfgType === CFG_TYPE.APPLICATION)
 					"
 				>
 					<!--          <q-spinner-hourglass size="12px" style="margin-right: 4px"/>-->
-					{{ Number(item.progress) + '%' }}
+					{{ item.progress ? Number(item.progress) + '%' : '0%' }}
 				</div>
 				<div
 					v-if="
@@ -199,6 +201,7 @@ async function onClick() {
 			appStore.installApp(props.item, props.development);
 			break;
 		case APP_STATUS.pending:
+		case APP_STATUS.downloading:
 		case APP_STATUS.installing:
 			console.log(props.item?.name);
 			console.log('cancel installing');
@@ -372,6 +375,7 @@ function updateUI() {
 			}
 			break;
 		case APP_STATUS.installing:
+		case APP_STATUS.downloading:
 			if (hoverRef.value && props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
 				isLoading.value = false;
 				status.value = t('app.cancel');

@@ -98,9 +98,12 @@
 			</router-view>
 		</q-page-container>
 
-		<q-btn v-if="appStore.isPublic" class="btn-size-md float-btn">{{
-			t('main.install_terminus_os')
-		}}</q-btn>
+		<q-btn
+			v-if="appStore.isPublic"
+			class="btn-size-md float-btn"
+			@click="installOS"
+			>{{ t('main.install_terminus_os') }}</q-btn
+		>
 	</q-layout>
 </template>
 
@@ -317,6 +320,13 @@ const onScroll = async (info: any) => {
 	showBarShadow.value =
 		info.verticalSize > info.verticalContainerSize &&
 		info.verticalPercentage !== 1;
+};
+
+const installOS = async () => {
+	window.open(
+		'https://docs.jointerminus.com/overview/introduction/getting-started.html',
+		'_blank'
+	);
 };
 </script>
 
