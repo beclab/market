@@ -7,9 +7,17 @@
 			{{ name }}
 		</div>
 
-		<div class="custom-icon-div slip_layer_level_icon" v-if="src">
-			<img :src="showIconAddress('sym_r_group')" alt="group" />
-		</div>
+		<q-icon
+			v-if="src"
+			size="24px"
+			class="slip_layer_level_icon"
+			:src="imageRef"
+			:name="src"
+		/>
+
+		<!--		<div class="custom-icon-div slip_layer_level_icon" v-if="src">-->
+		<!--			<img :src="showIconAddress('sym_r_group')" alt="group" />-->
+		<!--		</div>-->
 
 		<div v-else class="row justify-center items-center">
 			<div class="slip_layer_level_number text-color-subTitle">{{ data }}</div>
@@ -23,7 +31,7 @@
 <script lang="ts" setup>
 import { onMounted, ref } from 'vue';
 import { getRequireImage } from 'src/utils/imageUtils';
-import { showIconAddress } from 'src/utils/utils';
+// import { showIconAddress } from 'src/utils/utils';
 
 const props = defineProps({
 	name: {
