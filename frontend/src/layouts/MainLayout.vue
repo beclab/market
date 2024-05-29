@@ -33,19 +33,19 @@
 						</div>
 					</template>
 
-					<template
-						v-slot:[`icon-${menu.key}`]
-						v-for="menu in itemsRef[0].children"
-						:key="menu.key"
-					>
-						<div class="custom-icon-div">
-							<img
-								:src="showIconAddress(menu.icon)"
-								:alt="menu.label"
-								:class="menuStore.currentItem === menu.key ? 'active-icon' : ''"
-							/>
-						</div>
-					</template>
+					<!--					<template-->
+					<!--						v-slot:[`icon-${menu.key}`]-->
+					<!--						v-for="menu in itemsRef[0].children"-->
+					<!--						:key="menu.key"-->
+					<!--					>-->
+					<!--						<div class="custom-icon-div">-->
+					<!--							<img-->
+					<!--								:src="showIconAddress(menu.icon)"-->
+					<!--								:alt="menu.label"-->
+					<!--								:class="menuStore.currentItem === menu.key ? 'active-icon' : ''"-->
+					<!--							/>-->
+					<!--						</div>-->
+					<!--					</template>-->
 				</bt-menu>
 			</bt-scroll-area>
 			<div
@@ -112,8 +112,6 @@ import { MENU_TYPE, TRANSACTION_PAGE } from '../constants/constants';
 import { useSettingStore } from 'src/stores/setting';
 import { useAppStore } from 'src/stores/app';
 import { useI18n } from 'vue-i18n';
-import { getRequireImage } from 'src/utils/imageUtils';
-import { showIconAddress } from '../utils/utils';
 
 const { t } = useI18n();
 const itemsRef = ref([
