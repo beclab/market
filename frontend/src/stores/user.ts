@@ -134,7 +134,7 @@ export const useUserStore = defineStore('userStore', {
 					if (appInfo.type === DEPENDENCIES_TYPE.system) {
 						//temp
 						if (appInfo.version == '>=0.5.0-0') {
-							console.log('intercept by temporary version : >=0.5.0-0');
+							// console.log('intercept by temporary version : >=0.5.0-0');
 							app.preflightError.push(
 								i18n.global.t('error.app_is_not_compatible_terminus_os')
 							);
@@ -145,14 +145,14 @@ export const useUserStore = defineStore('userStore', {
 							const range = new Range(appInfo.version);
 							if (range) {
 								const result = range.satisfies(new Version(this.osVersion));
-								console.log(
-									'version satisfies : ' +
-										result +
-										' version : ' +
-										this.osVersion +
-										' range : ' +
-										appInfo.version
-								);
+								// console.log(
+								// 	'version satisfies : ' +
+								// 		result +
+								// 		' version : ' +
+								// 		this.osVersion +
+								// 		' range : ' +
+								// 		appInfo.version
+								// );
 								if (result) {
 									return true;
 								}

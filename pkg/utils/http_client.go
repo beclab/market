@@ -33,7 +33,7 @@ func init() {
 				MaxIdleConnsPerHost: 10,
 				IdleConnTimeout:     time.Duration(60) * time.Second,
 			},
-			Timeout: time.Duration(30) * time.Second,
+			Timeout: time.Duration(60) * time.Second,
 		}
 	})
 }

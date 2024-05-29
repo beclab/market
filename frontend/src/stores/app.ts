@@ -195,10 +195,11 @@ export const useAppStore = defineStore('app', {
 
 				switch (app.cfgType) {
 					case CFG_TYPE.APPLICATION:
+						app.progress = progress;
 						this._handleAppStatus(app, operation, op_status);
 						break;
 					case CFG_TYPE.MODEL:
-						app.progress = progress ? progress : '0';
+						app.progress = progress;
 						this._handleModelStatus(app, operation, op_status);
 						break;
 					case CFG_TYPE.WORK_FLOW:
@@ -233,43 +234,43 @@ export const useAppStore = defineStore('app', {
 		/**
 		 *
 		 * App Status
-		 * +-----------+  install   +---------+           +------------+            +--------------+    suspend     +---------+
-		 * | uninstall | --------->| pending | ---------> | installing | ---------> |              | -------------> | suspend |
-		 * +-----------+           +---------+           +------------+             |              |               +---------+
-		 *       ^                                                                  |              |                    |
-		 *       |                                          +---------------------> |   running    |                    | resume
-		 *       |                                          |                       |              |                    |
-		 *       |                               +------------+      upgrade        |              |                +----------+
-		 *       |                               | upgrading  | <------------------ |              |<-------------+ | resuming |
-		 *       |                               +------------+                     +--------------+                +----------+
-		 *       |                                                                       |
-		 *       |                                                                       |  uninstall
-		 *       |                                                                       v
-		 *       |                                                             +--------------+
-		 *       ------------------------------------------------------------- | uninstalling |
-		 *                                                                     +--------------+
+		 * +-----------+  install   +---------+        +-------------+        +------------+         +--------------+    suspend     +---------+
+		 * | uninstall | --------->| pending | ------> | downloading |------> | installing | ------> |              | -------------> | suspend |
+		 * +-----------+           +---------+         +------------+        +------------+          |              |               +---------+
+		 *       ^                                                                                   |              |                    |
+		 *       |                                                          +----------------------> |   running    |                    | resume
+		 *       |                                                          |                        |              |                    |
+		 *       |                                                +------------+      upgrade        |              |                +----------+
+		 *       |                                                | upgrading  | <------------------ |              | <------------+ | resuming |
+		 *       |                                                +------------+                     +--------------+                +----------+
+		 *       |                                                                                       |
+		 *       |                                                                                       |  uninstall
+		 *       |                                                                                       v
+		 *       |                                                                            +--------------+
+		 *       ---------------------------------------------------------------------------- | uninstalling |
+		 *                                                                                    +--------------+
 		 *
 		 * Operate Status
 		 *                                                cancel
-		 *                      +-----------------------------------------------------------+
-		 *                      |                                                           v
-		 *      install   +----------+     +------------+          cancel             +-----------+
-		 *     ---------> | pending  | --> |            | --------------------------> | canceled  |
-		 *                +----------+     |            |                             +-----------+
-		 *                     ^           |            |     suspend/resume/uninstall
-		 *                     | upgrade   | processing | <-----------------------------+
-		 *                     |           |            |                               |
-		 *                     |           |            |                             +-----------+
-		 *                     |           |            | --------------------------> | completed |
-		 *                     |           +------------+                             +-----------+
-		 *                     |                |                                          |
-		 *                     |                |                                          |
-		 *                     |                v                                          |
-		 *                     |           +------------+                                  |
-		 *                     |           |   failed   |                                  |
-		 *                     |           +------------+                                  |
-		 *                     |                                                           |
-		 *                     +-----------------------------------------------------------+
+		 *                      +------------------------------------------------------------------------------------+
+		 *                      |                   |                                                                v
+		 *      install   +----------+       +-------------+        +------------+          cancel             +-----------+
+		 *     ---------> | pending  | ----->| downloading |------> |            | --------------------------> | canceled  |
+		 *                +----------+       +------------+         |            |                             +-----------+
+		 *                     ^             (only install)         |            |     suspend/resume/uninstall
+		 *                     | upgrade                            | processing | <---------------------------------+
+		 *                     |                                    |            |                                   |
+		 *                     |                                    |            |                             +-----------+
+		 *                     |                                    |            | --------------------------> | completed |
+		 *                     |                                    +------------+                             +-----------+
+		 *                     |                                           |                                          |
+		 *                     |                                           |                                          |
+		 *                     |                                           v                                          |
+		 *                     |                                     +------------+                                   |
+		 *                     |                                     |   failed   |                                   |
+		 *                     |                                     +------------+                                   |
+		 *                     |                                                                                      |
+		 *                     +--------------------------------------------------------------------------------------+
 		 */
 		async _handleAppStatus(
 			app: AppStoreInfo,
@@ -280,6 +281,18 @@ export const useAppStore = defineStore('app', {
 			// switch (app.status) {
 			// 	case APP_STATUS.uninstalled:
 			// 	case APP_STATUS.pending:
+			if (
+				operation === OPERATE_ACTION.install &&
+				op_status === OPERATE_STATUS.pending
+			) {
+				app.status = APP_STATUS.pending;
+			}
+			if (
+				operation === OPERATE_ACTION.install &&
+				op_status === OPERATE_STATUS.downloading
+			) {
+				app.status = APP_STATUS.downloading;
+			}
 			if (
 				operation === OPERATE_ACTION.install &&
 				op_status === OPERATE_STATUS.processing

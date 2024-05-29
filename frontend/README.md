@@ -1,5 +1,3 @@
-# Market UI ![Docker Image Version (tag)](https://img.shields.io/docker/v/beclab/market-frontend/v0.2.1) ![Docker Image Size (tag)](https://img.shields.io/docker/image-size/beclab/market-frontend/v0.2.1)
-
 ## Configuring
 
 Create an .env file with the following

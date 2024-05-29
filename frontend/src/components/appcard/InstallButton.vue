@@ -26,7 +26,7 @@
 			@mouseover="updateHover(true)"
 			@mouseleave="updateHover(false)"
 			dense
-			:percentage="item.progress ? item.progress : undefined"
+			:percentage="item.progress ? Number(item.progress) : 0"
 			flat
 			no-caps
 		>
@@ -49,12 +49,14 @@
 					style="width: 100%; height: 100%"
 					class="row justify-center items-center"
 					v-if="
-						item.status === APP_STATUS.installing &&
-						item.cfgType === CFG_TYPE.MODEL
+						(item.status === APP_STATUS.installing &&
+							item.cfgType === CFG_TYPE.MODEL) ||
+						(item.status === APP_STATUS.downloading &&
+							item.cfgType === CFG_TYPE.APPLICATION)
 					"
 				>
 					<!--          <q-spinner-hourglass size="12px" style="margin-right: 4px"/>-->
-					{{ Number(item.progress) + '%' }}
+					{{ item.progress ? Number(item.progress) + '%' : '0%' }}
 				</div>
 				<div
 					v-if="
@@ -89,9 +91,6 @@
 			:menu-offset="[0, 4]"
 		>
 			<div class="column dropdown-menu text-body3">
-				<div class="dropdown-menu-item" v-close-popup @click="onUninstall">
-					{{ t('app.uninstall') }}
-				</div>
 				<div
 					v-if="
 						item.cfgType === CFG_TYPE.MODEL &&
@@ -122,6 +121,9 @@
 				>
 					{{ t('app.open') }}
 				</div>
+				<div class="dropdown-menu-item" v-close-popup @click="onUninstall">
+					{{ t('app.uninstall') }}
+				</div>
 			</div>
 		</q-btn-dropdown>
 	</div>
@@ -135,6 +137,7 @@ import { openApplication } from 'src/api/private/operations';
 import { getRequireImage } from 'src/utils/imageUtils';
 import { useI18n } from 'vue-i18n';
 import { useUserStore } from 'src/stores/user';
+import { BtDialog } from '@bytetrade/ui';
 
 const props = defineProps({
 	item: {
@@ -199,6 +202,7 @@ async function onClick() {
 			appStore.installApp(props.item, props.development);
 			break;
 		case APP_STATUS.pending:
+		case APP_STATUS.downloading:
 		case APP_STATUS.installing:
 			console.log(props.item?.name);
 			console.log('cancel installing');
@@ -295,7 +299,27 @@ async function onUninstall() {
 		case APP_STATUS.running:
 		case APP_STATUS.suspend:
 		case APP_STATUS.installed:
-			appStore.uninstallApp(props.item, props.development);
+			BtDialog.show({
+				title: t('app.uninstall'),
+				message: t('sure_to_uninstall_the_app', { title: props.item.title }),
+				okStyle: {
+					background: '#2f6cff',
+					color: '#ffffff'
+				},
+				okText: t('base.confirm'),
+				cancel: true
+			})
+				.then((res) => {
+					if (res) {
+						console.log('click ok');
+						appStore.uninstallApp(props.item, props.development);
+					} else {
+						console.log('click cancel');
+					}
+				})
+				.catch((err) => {
+					console.log('click error', err);
+				});
 			break;
 	}
 }
@@ -365,13 +389,13 @@ function updateUI() {
 				border.value = '1px solid #3377FF';
 			} else {
 				isLoading.value = true;
-				status.value = '···';
 				textColor.value = '#FFFFFF';
 				backgroundColor.value = '#3377FF';
 				border.value = '1px solid transparent';
 			}
 			break;
 		case APP_STATUS.installing:
+		case APP_STATUS.downloading:
 			if (hoverRef.value && props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
 				isLoading.value = false;
 				status.value = t('app.cancel');

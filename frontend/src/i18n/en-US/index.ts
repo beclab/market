@@ -73,6 +73,7 @@ export default {
 		whats_new: 'WHATS NEW',
 		required_permissions: 'REQUIRED PERMISSIONS',
 		recommend_card: 'RECOMMEND CARD',
+		app_card: 'APP CARD',
 		model_card: 'MODEL CARD',
 		information: 'INFORMATION',
 		get_support: 'Get Support',
@@ -192,5 +193,7 @@ export default {
 	no_upload_chart_tips: 'You haven’t uploaded any custom chart yet.',
 	no_installed_app_tips: 'You haven’t installed anything yet.',
 	no_logs: 'There are no installation logs here.',
-	see_all: 'See All'
+	see_all: 'See All',
+	sure_to_uninstall_the_app:
+		'Are you sure you want to uninstall the application {title}？'
 };

@@ -258,6 +258,7 @@ export enum DEPENDENCIES_TYPE {
 export enum APP_STATUS {
 	//server status
 	installing = 'installing',
+	downloading = 'downloading',
 	pending = 'pending',
 	running = 'running',
 	resuming = 'resuming',
@@ -278,6 +279,7 @@ export enum APP_STATUS {
 
 export enum OPERATE_STATUS {
 	pending = 'pending',
+	downloading = 'downloading',
 	processing = 'processing',
 	canceled = 'canceled',
 	failed = 'failed',

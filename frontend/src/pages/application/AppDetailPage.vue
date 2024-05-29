@@ -390,11 +390,7 @@
 								v-if="readMeHtml && item"
 								class="q-mt-lg"
 								style="width: 100%"
-								:title="
-									item.cfgType === CFG_TYPE.MODEL
-										? t('detail.model_card')
-										: t('detail.recommend_card')
-								"
+								:title="readMeTitle(item.cfgType)"
 							>
 								<template v-slot:content>
 									<div
@@ -674,6 +670,18 @@ const language = ref('en');
 const languageLength = ref(0);
 const cfgType = ref();
 const readMeHtml = ref('');
+function readMeTitle(cfgType: CFG_TYPE) {
+	switch (cfgType) {
+		case CFG_TYPE.APPLICATION:
+			return t('detail.app_card');
+		case CFG_TYPE.WORK_FLOW:
+			return t('detail.recommend_card');
+		case CFG_TYPE.MODEL:
+			return t('detail.model_card');
+		default:
+			return 'CARD';
+	}
+}
 
 function copyCode(str: string) {
 	copyToClipboard(str)
@@ -999,14 +1007,13 @@ const markdownTask: OnUpdateUITask = {
 		readMeHtml.value = '';
 	},
 	onUpdate(app: AppStoreInfo) {
-		if (cfgType.value !== CFG_TYPE.APPLICATION) {
-			getWorkflowMarkdown(app.name).then((result) => {
-				if (result) {
-					readMeHtml.value = md.render(result);
-					// console.log(readMeHtml.value);
-				}
-			});
-		}
+		getWorkflowMarkdown(app.name).then((result) => {
+			if (result) {
+				console.log(result);
+				readMeHtml.value = md.render(result);
+				// console.log(readMeHtml.value);
+			}
+		});
 	}
 };
 

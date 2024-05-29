@@ -8,6 +8,7 @@ import (
 	"market/internal/constants"
 	"market/internal/event"
 	"market/internal/models"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -211,9 +212,26 @@ func (i *CommonWatchDog) getStatus() (string, string, string, error) {
 	return string(res.State), res.Message, string(res.OpType), nil
 }
 
+func compareFloatStrings(str1, str2 string) int {
+	num1, err1 := strconv.ParseFloat(str1, 64)
+	num2, err2 := strconv.ParseFloat(str2, 64)
+
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+
+	if num1 < num2 {
+		return -1
+	} else if num1 > num2 {
+		return 1
+	} else {
+		return 0
+	}
+}
+
 func (i *CommonWatchDog) updateStatus(status, progress, op, msg string) {
 	if i.haveProgress {
-		if i.status == status && i.progress >= progress {
+		if i.status == status && compareFloatStrings(i.progress, progress) >= 0 {
 			return
 		}
 	} else if i.status == status {

@@ -23,8 +23,10 @@ export async function getWorkflowMarkdown(name: string) {
 			globalConfig.url + '/app-store/v1/readme/' + name
 		);
 		console.log('get_workflow_markdown');
-		// console.log(response);
-		return response ? response : null;
+		if (response.code && response.code === 200) {
+			return response.message;
+		}
+		return null;
 	} catch (e) {
 		console.log(e);
 		return null;

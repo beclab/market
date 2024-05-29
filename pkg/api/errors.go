@@ -36,7 +36,8 @@ const (
 )
 
 const (
-	OK = 200
+	OK                  = 200
+	InternalServerError = 500
 
 	Success = "success"
 )

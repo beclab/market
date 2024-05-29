@@ -37,8 +37,8 @@ func GetStatusManager() *StatusManager {
 	return StatusManagerSvc
 }
 
-func (s *StatusManager) UpdateInstallStatus(uid, status, ty, msg string) {
-	s.broadcastStatus(uid, status, "", msg, ty)
+func (s *StatusManager) UpdateInstallStatus(uid, status, progress, ty, msg string) {
+	s.broadcastStatus(uid, status, progress, msg, ty)
 }
 
 func (s *StatusManager) UpdateUpgradeStatus(uid, status, ty, msg string) {
