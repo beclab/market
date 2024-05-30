@@ -276,46 +276,6 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 	dealWithInstallResp(resp, resBody)
 }
 
-//func (h *Handler) devInstall(req *restful.Request, resp *restful.Response) {
-//	token := getToken(req)
-//	if token == "" {
-//		api.HandleUnauthorized(resp, errors.New("access token not found"))
-//		return
-//	}
-//
-//	appName := req.PathParameter(ParamAppName)
-//	info, err := boltdb.GetLocalAppInfo(appName)
-//	if err != nil {
-//		glog.Warningf("GetLocalAppInfo err:%s", err.Error())
-//		api.HandleError(resp, err)
-//		return
-//	}
-//
-//	resBody, err := installByType(info, token)
-//	if err != nil {
-//		api.HandleError(resp, err)
-//		return
-//	}
-//
-//	uid, _, err := appservice.GetUidFromStatus(resBody)
-//	if err != nil {
-//		api.HandleError(resp, err)
-//		return
-//	}
-//	if info.CfgType == constants.AppType {
-//		go h.watchDogManager.NewWatchDog(watchdog.OP_INSTALL,
-//			appName, uid, token, watchdog.AppFromDev, info).
-//			Exec()
-//	} else if info.CfgType == constants.ModelType {
-//		go h.commonWatchDogManager.NewWatchDog(watchdog.OP_INSTALL,
-//			appName, uid, token, watchdog.AppFromDev, info.CfgType,
-//			info).
-//			Exec()
-//	}
-//
-//	dealWithInstallResp(resp, resBody)
-//}
-
 func findAppCfgFile(chartDirPath string) string {
 	charts, err := os.ReadDir(chartDirPath)
 	if err != nil {

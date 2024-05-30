@@ -110,6 +110,9 @@ func SendHttpRequest(req *http.Request) (string, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		glog.Warningf("url:%s, res:%s, resp.StatusCode:%d", req.URL, string(body), resp.StatusCode)
+		if len(body) != 0 {
+			return string(body), errors.New(string(body))
+		}
 		return string(body), fmt.Errorf("http status not 200 %d msg:%s", resp.StatusCode, string(body))
 	}
 
@@ -140,6 +143,9 @@ func SendHttpRequestByte(req *http.Request) ([]byte, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		glog.Warningf("url:%s, res:%s, resp.StatusCode:%d", req.URL, string(body), resp.StatusCode)
+		if len(body) != 0 {
+			return body, errors.New(string(body))
+		}
 		return body, fmt.Errorf("http status not 200 %d msg:%s", resp.StatusCode, string(body))
 	}
 
