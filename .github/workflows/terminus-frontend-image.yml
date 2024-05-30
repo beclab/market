@@ -34,6 +34,13 @@ jobs:
               uses: actions/setup-node@v1
               with:
                 node-version: '16.18'
+            - name: Cache
+              uses: actions/cache@v1
+              with:
+                path: ~/.npm
+                key: ${{ runner.os }}-node-${{ hashFiles('**/packagge-lock.json')}}
+                restore-keys: |
+                  ${{ runner.os }}-node-
             - name: Install fonttools
               run: pip3 install fonttools brotli
             - name: Download fonttools Files
@@ -47,14 +54,7 @@ jobs:
               run: |
                 sudo chmod 755 fonttools
                 cd ./fonttools
-                ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../frontend/src/assets/fonts
-            - name: Cache
-              uses: actions/cache@v1
-              with:
-                path: ~/.npm
-                key: ${{ runner.os }}-node-${{ hashFiles('**/packagge-lock.json')}}
-                restore-keys: |
-                    ${{ runner.os }}-node-
+                ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../src/assets/fonts
             - name: Install
               run: |
                 npm i -g @quasar/cli
