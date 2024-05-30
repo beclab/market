@@ -41,6 +41,9 @@ jobs:
                 key: ${{ runner.os }}-node-${{ hashFiles('**/packagge-lock.json')}}
                 restore-keys: |
                   ${{ runner.os }}-node-
+            - name: Install
+              run: |
+                npm i -g @quasar/cli;npm install -d;
             - name: Install fonttools
               run: pip3 install fonttools brotli
             - name: Download fonttools Files
@@ -55,11 +58,8 @@ jobs:
                 sudo chmod 755 fonttools
                 cd ./fonttools
                 ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../src/assets/fonts
-            - name: Install
-              run: |
-                npm i -g @quasar/cli
             - name: Build terminus
-              run: npm install -d;npm run build;
+              run: npm run build;
             - run: ls dist
             - run: docker info
             - name: Build the terminus Docker image
