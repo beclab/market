@@ -15,6 +15,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"market/pkg/utils"
@@ -49,32 +50,24 @@ func HandleInternalError(response *restful.Response, err error) {
 	Handle(http.StatusInternalServerError, response, err)
 }
 
-// HandleBadRequest writes http.StatusBadRequest and log error
-func HandleBadRequest(response *restful.Response, err error) {
-	Handle(http.StatusBadRequest, response, err)
-}
-
-func HandleNotFound(response *restful.Response, err error) {
-	Handle(http.StatusNotFound, response, err)
-}
-
-func HandleForbidden(response *restful.Response, err error) {
-	Handle(http.StatusForbidden, response, err)
-}
-
 func HandleUnauthorized(response *restful.Response, err error) {
 	Handle(http.StatusUnauthorized, response, err)
 }
 
-func HandleTooManyRequests(response *restful.Response, err error) {
-	Handle(http.StatusTooManyRequests, response, err)
-}
-
-func HandleConflict(response *restful.Response, err error) {
-	Handle(http.StatusConflict, response, err)
-}
-
 func HandleError(response *restful.Response, err error) {
+
+	glog.Info("err:", err.Error())
+	info := make(map[string]interface{})
+	errJ := json.Unmarshal([]byte(err.Error()), &info)
+	if errJ == nil {
+		response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
+		_, err = response.Write([]byte(err.Error()))
+		if err != nil {
+			glog.Warningf("err:%s", err)
+		}
+		return
+	}
+
 	var statusCode int
 	switch t := err.(type) {
 	case restful.ServiceError:
