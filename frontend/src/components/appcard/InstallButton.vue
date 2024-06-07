@@ -20,7 +20,7 @@
 			:loading="isLoading"
 			:class="larger ? 'application_install_larger' : 'application_install'"
 			:style="{
-				'--radius': showDropMenu ? '0px' : larger ? '8px' : '4px'
+				'--radius': showDropMenu ? '0' : larger ? '8px' : '4px'
 			}"
 			@click="onClick"
 			@mouseover="updateHover(true)"
@@ -82,7 +82,7 @@
 		<q-btn-dropdown
 			v-if="showDropMenu"
 			dropdown-icon="img:/arrow.svg"
-			size="10px"
+			size="10"
 			:class="
 				larger ? 'application_install_larger_more' : 'application_install_more'
 			"
@@ -137,7 +137,7 @@ import { openApplication } from 'src/api/private/operations';
 import { getRequireImage } from 'src/utils/imageUtils';
 import { useI18n } from 'vue-i18n';
 import { useUserStore } from 'src/stores/user';
-import { BtDialog } from '@bytetrade/ui';
+import { BtDialog, useColor } from '@bytetrade/ui';
 
 const props = defineProps({
 	item: {
@@ -171,9 +171,9 @@ const status = ref();
 const isDisabled = ref(false);
 const isLoading = ref<boolean>(false);
 const hoverRef = ref(false);
-const textColor = ref();
-const backgroundColor = ref();
-const border = ref();
+const textColor = ref<string>();
+const backgroundColor = ref<string>();
+const border = ref<string>();
 let hasCheck = false;
 const { t } = useI18n();
 
@@ -185,6 +185,14 @@ const showDropMenu = computed(() => {
 			props.item.status === APP_STATUS.installed)
 	);
 });
+
+const { color: blueDefault } = useColor('blue-default');
+const { color: grey } = useColor('background-3');
+const { color: ink3 } = useColor('ink-3');
+const { color: white } = useColor('ink-on-brand');
+const { color: blueAlpha } = useColor('blue-alpha');
+const { color: redAlpha } = useColor('red-alpha');
+const { color: negative } = useColor('negative');
 
 async function onClick() {
 	if (!props.item) {
@@ -303,8 +311,8 @@ async function onUninstall() {
 				title: t('app.uninstall'),
 				message: t('sure_to_uninstall_the_app', { title: props.item.title }),
 				okStyle: {
-					background: '#2f6cff',
-					color: '#ffffff'
+					background: blueDefault.value,
+					color: white.value
 				},
 				okText: t('base.confirm'),
 				cancel: true
@@ -360,14 +368,14 @@ function updateUI() {
 		case APP_STATUS.preflightFailed:
 			isDisabled.value = true;
 			status.value = t('app.get');
-			textColor.value = '#B2B0AF';
-			backgroundColor.value = '#F6F6F6';
+			textColor.value = ink3.value;
+			backgroundColor.value = grey.value;
 			border.value = '1px solid transparent';
 			break;
 		case APP_STATUS.uninstalled:
 			status.value = t('app.get');
-			textColor.value = '#3377FF';
-			backgroundColor.value = '#F6F6F6';
+			textColor.value = blueDefault.value;
+			backgroundColor.value = grey.value;
 			border.value = '1px solid transparent';
 			if (!hasCheck && userStore.initialized) {
 				userStore.frontendPreflight(props.item, APP_STATUS.uninstalled);
@@ -376,21 +384,21 @@ function updateUI() {
 			break;
 		case APP_STATUS.installable:
 			status.value = t('app.install');
-			textColor.value = '#FFFFFF';
-			backgroundColor.value = '#3377FF';
+			textColor.value = white.value;
+			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			break;
 		case APP_STATUS.pending:
 			if (hoverRef.value && props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
 				isLoading.value = false;
 				status.value = t('app.cancel');
-				textColor.value = '#3377FF';
-				backgroundColor.value = '#FFFFFF';
-				border.value = '1px solid #3377FF';
+				textColor.value = blueDefault.value;
+				backgroundColor.value = white.value;
+				border.value = `1px solid ${blueDefault.value}`;
 			} else {
 				isLoading.value = true;
-				textColor.value = '#FFFFFF';
-				backgroundColor.value = '#3377FF';
+				textColor.value = white.value;
+				backgroundColor.value = blueDefault.value;
 				border.value = '1px solid transparent';
 			}
 			break;
@@ -399,20 +407,20 @@ function updateUI() {
 			if (hoverRef.value && props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
 				isLoading.value = false;
 				status.value = t('app.cancel');
-				textColor.value = '#3377FF';
-				backgroundColor.value = '#FFFFFF';
-				border.value = '1px solid #3377FF';
+				textColor.value = blueDefault.value;
+				backgroundColor.value = white.value;
+				border.value = `1px solid ${blueDefault.value}`;
 			} else {
 				isLoading.value = true;
 				status.value = t('app.installing');
-				textColor.value = '#FFFFFF';
-				backgroundColor.value = '#3377FF';
+				textColor.value = white.value;
+				backgroundColor.value = blueDefault.value;
 				border.value = '1px solid transparent';
 			}
 			break;
 		case APP_STATUS.installed:
-			backgroundColor.value = '#3377FF1A';
-			textColor.value = '#3377FF';
+			backgroundColor.value = blueAlpha.value;
+			textColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			status.value = t('app.installed');
 			break;
@@ -430,13 +438,13 @@ function updateUI() {
 		case APP_STATUS.resuming:
 			isLoading.value = true;
 			status.value = '···';
-			textColor.value = '#FFFFFF';
-			backgroundColor.value = '#3377FF';
+			textColor.value = white.value;
+			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			break;
 		case APP_STATUS.running:
-			backgroundColor.value = '#3377FF1A';
-			textColor.value = '#3377FF';
+			backgroundColor.value = blueAlpha.value;
+			textColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			if (props.isUpdate) {
 				status.value = t('app.update');
@@ -447,23 +455,23 @@ function updateUI() {
 			}
 			break;
 		case APP_STATUS.uninstalling:
-			textColor.value = '#FFFFFF';
-			backgroundColor.value = '#3377FF';
+			textColor.value = white.value;
+			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			isLoading.value = true;
 			status.value = t('app.uninstalling');
 			break;
 		case APP_STATUS.upgrading:
-			textColor.value = '#FFFFFF';
-			backgroundColor.value = '#3377FF';
+			textColor.value = white.value;
+			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			isLoading.value = true;
 			status.value = t('app.updating');
 			break;
 		default:
 			isDisabled.value = true;
-			backgroundColor.value = '#FF4D4D1A';
-			textColor.value = '#FF4D4D';
+			backgroundColor.value = redAlpha.value;
+			textColor.value = negative.value;
 			border.value = '1px solid transparent';
 			status.value = props.item?.status;
 			break;
@@ -495,7 +503,7 @@ function updateUI() {
 		.install_btn_separator {
 			width: 1px;
 			height: 100%;
-			background: #1d5efa33;
+			background: $separator;
 		}
 	}
 
@@ -506,7 +514,7 @@ function updateUI() {
 		max-width: var(--statusWidth);
 		color: var(--textColor);
 		background: var(--backgroundColor);
-		border-radius: 4px var(--radius, 0px) var(--radius, 0px) 4px !important;
+		border-radius: 4px var(--radius, 0) var(--radius, 0) 4px !important;
 		height: 24px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -525,7 +533,7 @@ function updateUI() {
 		color: var(--textColor);
 		background: var(--backgroundColor);
 		height: 24px;
-		border-radius: 0px 4px 4px 0px !important;
+		border-radius: 0 4px 4px 0 !important;
 		gap: 20px;
 		text-align: center;
 	}
@@ -538,7 +546,7 @@ function updateUI() {
 		color: var(--textColor);
 		background: var(--backgroundColor);
 		height: 32px;
-		border-radius: 8px var(--radius, 0px) var(--radius, 0px) 8px !important;
+		border-radius: 8px var(--radius, 0) var(--radius, 0) 8px !important;
 		font-family: Roboto;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -546,7 +554,7 @@ function updateUI() {
 		font-size: 14px;
 		font-weight: 500;
 		line-height: 20px;
-		letter-spacing: 0em;
+		letter-spacing: 0;
 		text-align: center;
 		border: var(--border);
 	}
@@ -556,7 +564,7 @@ function updateUI() {
 		color: var(--textColor);
 		background: var(--backgroundColor);
 		height: 32px;
-		border-radius: 0px 8px 8px 0px !important;
+		border-radius: 0 8px 8px 0 !important;
 		gap: 20px;
 		text-align: center;
 	}
@@ -570,16 +578,16 @@ function updateUI() {
 
 	.dropdown-menu-item {
 		height: 32px;
-		color: $grey-8;
+		color: $ink-2;
 		padding: 8px 12px;
 
 		&:hover {
-			background: $grey-1;
+			background: $background-hover;
 			border-radius: 4px;
 		}
 
 		&:active {
-			background: #3377ff1a;
+			background: $background-hover;
 			border-radius: 4px;
 		}
 	}

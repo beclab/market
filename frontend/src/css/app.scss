@@ -3,22 +3,6 @@
 @import 'common/variables';
 @import 'common/card';
 
-.text-color-subTitle {
-	color: $sub-title;
-}
-
-.text-color-title {
-	color: $title;
-}
-
-.text-color-primary {
-	color: #2f6cff;
-}
-
-.text-color-prompt-message {
-	color: $prompt-message;
-}
-
 .text-color-B2C8FF {
 	color: #b2c8ff;
 }
@@ -213,10 +197,12 @@
 	padding: 0;
 }
 
-.market-error {
-	border: 1px solid #ff4d4d !important;
-	border-radius: 8px !important;
-	background: #e52e391a !important;
+.q-drawer--left.q-drawer--bordered {
+	border-right: 1px solid $separator;
+}
+
+body.body--dark .q-drawer {
+	border-color: $separator;
 }
 
 @keyframes animate {
@@ -244,12 +230,19 @@
 	padding: 0 !important;
 }
 
+#discover-html b {
+	color: $ink-1 !important;
+}
+#discover-html p {
+	color: $ink-2 !important;
+}
+
 #readMe {
 	font-size: map-get($body2, size) !important;
 	line-height: map-get($body2, line-height) !important;
 	font-weight: map-get($body2, weight) !important;
 	letter-spacing: map-get($body2, letter-spacing) !important;
-	color: #5c5551;
+	color: $ink-2;
 }
 
 #readMe img {
@@ -261,7 +254,7 @@
 	line-height: map-get($h3, line-height) !important;
 	font-weight: map-get($h3, weight) !important;
 	letter-spacing: map-get($h3, letter-spacing) !important;
-	color: #1f1814;
+	color: $ink-2;
 	margin-top: 20px;
 	margin-bottom: 20px;
 }
@@ -271,7 +264,7 @@
 	line-height: map-get($h4, line-height) !important;
 	font-weight: map-get($h4, weight) !important;
 	letter-spacing: map-get($h4, letter-spacing) !important;
-	color: #1f1814;
+	color: $ink-2;
 	margin-top: 20px;
 	margin-bottom: 12px;
 }
@@ -281,7 +274,7 @@
 	line-height: map-get($h5, line-height) !important;
 	font-weight: map-get($h5, weight) !important;
 	letter-spacing: map-get($h5, letter-spacing) !important;
-	color: #1f1814;
+	color: $ink-2;
 	margin-top: 20px;
 	margin-bottom: 12px;
 }
@@ -291,7 +284,7 @@
 	line-height: map-get($h6, line-height) !important;
 	font-weight: map-get($h6, weight) !important;
 	letter-spacing: map-get($h6, letter-spacing) !important;
-	color: #1f1814;
+	color: $ink-2;
 	margin-top: 20px;
 	margin-bottom: 12px;
 }
@@ -301,7 +294,7 @@
 	line-height: map-get($subtitle1, line-height) !important;
 	font-weight: map-get($subtitle1, weight) !important;
 	letter-spacing: map-get($subtitle1, letter-spacing) !important;
-	color: #1f1814;
+	color: $ink-2;
 	margin-top: 12px;
 	margin-bottom: 8px;
 }
@@ -311,7 +304,7 @@
 	line-height: map-get($subtitle2, line-height) !important;
 	font-weight: map-get($subtitle2, weight) !important;
 	letter-spacing: map-get($subtitle2, letter-spacing) !important;
-	color: #1f1814;
+	color: $ink-2;
 	margin-top: 12px;
 	margin-bottom: 8px;
 }
@@ -339,22 +332,24 @@
 		margin: 0;
 	}
 }
-
+#readMe a {
+	color : $info;
+}
 #readMe table {
 	border-collapse: collapse;
 	width: 100%;
 }
 #readMe th, td {
-	border: 1px solid black;
+	border: 1px solid $separator;
 	padding: 8px;
 	text-align: left;
 }
 #readMe th {
-	background-color: #f2f2f2;
+	background-color: $ink-3;
 }
 
 #readMe pre code.hljs {
-	color: #1f2328;
+	color: $ink-2;
 	background-color: #f6f8fa;
 	border-radius: 6px;
 }
@@ -368,7 +363,7 @@
 	top: 5px;
 	right: 5px;
 	background-color: #f0f0f0;
-	border: 1px solid #ddd;
+	border: 1px solid $separator;
 	border-radius: 3px;
 	cursor: pointer;
 }
@@ -382,6 +377,7 @@
 }
 
 @font-face {
+	font-display: block;
 	font-family: 'Material Symbols Rounded';
 	font-style: normal;
 	font-weight: 100 700;
@@ -398,5 +394,5 @@
 .active-icon {
 	position: absolute;
 	left: -24px;
-	filter: drop-shadow(24px 0 $main-style);
+	filter: drop-shadow(24px 0 $blue-default);
 }

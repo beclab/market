@@ -8,14 +8,14 @@
 		"
 		class="info-item-root row justify-between items-start"
 	>
-		<div class="info-title col-5 text-body2 text-grey-5">{{ title }}</div>
+		<div class="info-title col-5 text-body2 text-ink-3">{{ title }}</div>
 		<expend-text-view v-if="content" :text="content" />
 		<div v-else-if="link" class="info_link col-5" @click="emit('onLinkClick')">
 			{{ link }}
 		</div>
 		<div
 			v-else-if="contentArray"
-			class="info-content text-body2 text-grey-8 col-5"
+			class="info-content text-body2 text-ink-2 col-5"
 		>
 			{{ contentArray.join(separator) }}
 		</div>
@@ -108,7 +108,7 @@ const openUrl = (url: string) => {
 
 	.info_link {
 		@extend .info-content;
-		color: #3377ff;
+		color: $info;
 		cursor: pointer;
 		text-decoration: none;
 	}

@@ -1,9 +1,9 @@
 <template>
 	<div
 		class="slip_layer_level_item column justify-center items-center"
-		:style="{ '--line': last ? 'none' : '1px solid #EBEBEB' }"
+		:style="{ '--line': last ? 'none' : `1px solid ${separator}` }"
 	>
-		<div class="slip_layer_level_name text-color-prompt-message">
+		<div class="slip_layer_level_name text-body3 text-ink-3">
 			{{ name }}
 		</div>
 
@@ -20,9 +20,11 @@
 		<!--		</div>-->
 
 		<div v-else class="row justify-center items-center">
-			<div class="slip_layer_level_number text-color-subTitle">{{ data }}</div>
+			<div class="slip_layer_level_number text-subtitle1 text-ink-2">
+				{{ data }}
+			</div>
 		</div>
-		<div class="slip_layer_level_unit text-color-subTitle">
+		<div class="slip_layer_level_unit text-body3 text-ink-2">
 			{{ unit ? unit : '-' }}
 		</div>
 	</div>
@@ -31,7 +33,7 @@
 <script lang="ts" setup>
 import { onMounted, ref } from 'vue';
 import { getRequireImage } from 'src/utils/imageUtils';
-// import { showIconAddress } from 'src/utils/utils';
+import { useColor } from '@bytetrade/ui';
 
 const props = defineProps({
 	name: {
@@ -55,6 +57,7 @@ const props = defineProps({
 });
 
 const imageRef = ref();
+const { color: separator } = useColor('separator');
 
 onMounted(() => {
 	if (props.src) {
@@ -71,11 +74,6 @@ onMounted(() => {
 	border-right: var(--line);
 
 	.slip_layer_level_name {
-		font-family: Roboto;
-		font-size: 12px;
-		font-weight: 400;
-		line-height: 16px;
-		letter-spacing: 0em;
 		text-align: center;
 		width: 100%;
 	}
@@ -89,11 +87,6 @@ onMounted(() => {
 		height: 24px;
 		margin-top: 8px;
 		margin-bottom: 8px;
-		font-family: Roboto;
-		font-size: 16px;
-		font-weight: 500;
-		line-height: 24px;
-		letter-spacing: 0em;
 		text-align: center;
 		white-space: nowrap;
 		overflow: hidden;
@@ -101,11 +94,6 @@ onMounted(() => {
 	}
 
 	.slip_layer_level_unit {
-		font-family: Roboto;
-		font-size: 12px;
-		font-weight: 400;
-		line-height: 16px;
-		letter-spacing: 0em;
 		text-align: center;
 		width: 100%;
 		white-space: nowrap;

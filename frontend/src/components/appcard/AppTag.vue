@@ -15,7 +15,6 @@ defineProps({
 
 <style scoped lang="scss">
 .tag-view {
-	font-family: Roboto;
 	height: 20px;
 	max-width: 120px;
 	white-space: nowrap;
@@ -23,7 +22,7 @@ defineProps({
 	text-overflow: ellipsis;
 	border-radius: 20px;
 	text-transform: capitalize;
-	background: $grey-1;
-	color: $blue-6;
+	background: $background-hover;
+	color: $light-blue-default;
 }
 </style>

@@ -1,7 +1,13 @@
 <template>
 	<div
 		class="page-container-root column items-start items-center"
-		:class="isAppDetails ? 'app-detail-background' : 'app-normal-background'"
+		:class="
+			isAppDetails
+				? $q.dark.isActive
+					? 'app-normal-dark'
+					: 'app-normal-light'
+				: 'app-normal-background'
+		"
 	>
 		<div
 			class="page-container-title row justify-start"
@@ -41,6 +47,7 @@
 
 <script setup lang="ts">
 import { useAppStore } from 'src/stores/app';
+import { useQuasar } from 'quasar';
 
 const prop = defineProps({
 	modelValue: {
@@ -64,6 +71,8 @@ const prop = defineProps({
 		require: false
 	}
 });
+
+const $q = useQuasar();
 
 const thumbStyle = {
 	right: '4px',
@@ -150,10 +159,14 @@ const onScroll = async (info: any) => {
 }
 
 .app-normal-background {
-	background: #ffffff;
+	background: $background-1;
 }
 
-.app-detail-background {
+.app-normal-dark {
+	background: rgba(18, 25, 29, 1);
+}
+
+.app-detail-light {
 	background: linear-gradient(
 			175.85deg,
 			rgba(208, 230, 251, 0) 3.38%,

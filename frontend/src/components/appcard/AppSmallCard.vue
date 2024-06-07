@@ -2,7 +2,7 @@
 	<div
 		v-if="skeleton"
 		class="app-small-card row justify-between items-center"
-		:style="{ borderBottom: isLastLine ? 'none' : '1px solid #EBEBEB' }"
+		:style="{ borderBottom: isLastLine ? 'none' : `1px solid ${separator}` }"
 	>
 		<app-icon :skeleton="true" :size="56" />
 		<div class="app-small-card__right row justify-between items-center">
@@ -18,7 +18,7 @@
 		class="cursor-pointer app-small-card row justify-between items-center"
 		@click="goAppDetails"
 		:style="{
-			borderBottom: isLastLine ? '1px solid transparent' : '1px solid #EBEBEB'
+			borderBottom: isLastLine ? 'none' : `1px solid ${separator}`
 		}"
 	>
 		<app-icon :src="item.icon" :size="56" :cs-app="clusterScopedApp" />
@@ -31,17 +31,19 @@
 						: 'width: calc(100% - 72px - 22px);'
 				"
 			>
-				<div class="app-small-card__right__text__title text-color-title">
+				<div
+					class="app-small-card__right__text__title text-subtitle2 text-ink-1"
+				>
 					{{ item.title }}
 				</div>
-				<div class="app-small-card__right__text__content text-color-subTitle">
+				<div class="app-small-card__right__text__content text-body3 text-ink-2">
 					{{ item.desc }}
 				</div>
 			</div>
 			<install-button v-if="!appStore.isPublic" :item="item" />
 			<div
 				v-if="clusterScopedApp"
-				class="app-small-card__right__cluster_scoped"
+				class="app-small-card__right__cluster_scoped text-overline text-ink-3"
 			>
 				Cluster-Scoped
 			</div>
@@ -56,6 +58,7 @@ import InstallButton from 'src/components/appcard/InstallButton.vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';
 import AppIcon from 'src/components/appcard/AppIcon.vue';
+import { useColor } from '@bytetrade/ui';
 
 const router = useRouter();
 const appStore = useAppStore();
@@ -79,6 +82,7 @@ const props = defineProps({
 });
 
 const clusterScopedApp = ref(false);
+const { color: separator } = useColor('separator');
 
 onMounted(() => {
 	if (props.item && props.item.options && props.item.options.appScope) {
@@ -125,13 +129,7 @@ defineExpose({ goAppDetails });
 			margin-left: 8px;
 
 			&__title {
-				font-family: Roboto;
-				font-size: 14px;
-				font-weight: 500;
-				line-height: 20px;
 				width: 100%;
-				letter-spacing: 0em;
-				text-align: left;
 				overflow: hidden;
 				text-overflow: ellipsis;
 				display: -webkit-box;
@@ -140,36 +138,20 @@ defineExpose({ goAppDetails });
 			}
 
 			&__content {
-				font-family: Roboto;
-				width: 100%;
-				font-size: 12px;
-				font-weight: 400;
-				line-height: 16px;
-				letter-spacing: 0em;
-				text-align: left;
-				overflow: hidden;
-				text-overflow: ellipsis;
-				display: -webkit-box;
+				@extend .app-small-card__right__text__title;
 				-webkit-line-clamp: 2;
-				-webkit-box-orient: vertical;
 			}
 		}
 
 		&__cluster_scoped {
 			width: 72px;
-			font-family: Roboto;
 			position: absolute;
 			bottom: 12px;
 			right: 0;
 			text-overflow: ellipsis;
 			white-space: nowrap;
 			overflow: hidden;
-			font-size: 8px;
-			font-weight: 400;
-			line-height: 12px;
-			letter-spacing: 0em;
 			text-align: center;
-			color: var(--Grey-05, #adadad);
 		}
 	}
 }

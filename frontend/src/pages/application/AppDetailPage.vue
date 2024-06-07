@@ -51,15 +51,15 @@
 							item.status === APP_STATUS.preflightFailed &&
 							!appStore.isPublic
 						"
-						class="app-details-padding app-detail-warning row justify-start"
+						class="app-details-padding app-detail-warning bg-red-soft row justify-start"
 					>
-						<q-icon color="color-error" size="16px" name="sym_r_error" />
+						<q-icon color="negative" size="16px" name="sym_r_error" />
 						<div class="column justify-start">
-							<div class="warning-title">
+							<div class="text-body-3 text-negative q-ml-sm">
 								{{ t('unable_to_install_app') }}
 							</div>
 							<template v-for="message in item.preflightError" :key="message">
-								<div class="warning-message">
+								<div class="text-body-3 text-negative">
 									{{ `&nbsp;·&nbsp;${message}` }}
 								</div>
 							</template>
@@ -1106,34 +1106,11 @@ const clickReturn = () => {
 		}
 
 		.app-detail-warning {
-			background: #fff2f2;
 			margin-left: 44px;
 			width: calc(100% - 88px);
 			padding: 12px;
 			margin-bottom: 20px;
 			border-radius: 12px;
-
-			.warning-title {
-				font-family: Roboto;
-				font-size: 12px;
-				font-weight: 400;
-				line-height: 16px;
-				margin-left: 8px;
-				letter-spacing: 0em;
-				text-align: left;
-				color: var(--Basic-Negative, #ff4d4d);
-			}
-
-			.warning-message {
-				font-family: Roboto;
-				font-size: 12px;
-				font-weight: 400;
-				margin-top: 8px;
-				line-height: 16px;
-				letter-spacing: 0em;
-				text-align: left;
-				color: var(--Basic-Negative, #ff4d4d);
-			}
 		}
 
 		.promote-img {
@@ -1145,7 +1122,7 @@ const clickReturn = () => {
 			margin-left: 44px;
 			width: calc(100% - 88px);
 			height: 1px;
-			background: #ebebeb;
+			background: $separator;
 		}
 
 		.permission-request-grid {

@@ -1,7 +1,7 @@
 <template>
 	<div>
 		<div
-			class="expend-text-style"
+			class="text-body2 text-ink-2"
 			:class="showDescription ? 'multi-row' : 'break-all'"
 			:style="{ '--displayLine': displayLine }"
 			ref="multiRow"
@@ -9,7 +9,7 @@
 		/>
 		<span
 			v-if="needMore"
-			class="expend-text-style text-blue-6 cursor-pointer"
+			class="text-body2 text-info cursor-pointer"
 			@click="toggleDescription"
 		>
 			{{ showDescription ? lessText : moreText }}
@@ -75,16 +75,6 @@ watch(formattedDescription, () => {
 </script>
 
 <style scoped lang="scss">
-.expend-text-style {
-	font-family: Roboto;
-	font-size: 14px;
-	font-weight: 400;
-	line-height: 20px;
-	letter-spacing: 0em;
-	text-align: left;
-	color: $sub-title;
-}
-
 .multi-row {
 	overflow: visible;
 }

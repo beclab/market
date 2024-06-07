@@ -9,7 +9,7 @@
 		</div>
 		<app-small-card :skeleton="true" />
 	</div>
-	<div v-else class="column justify-start items-start" style="cursor: pointer">
+	<div v-else class="column justify-start items-start cursor-pointer">
 		<q-img
 			@click="handleImgClick"
 			class="topic-item-img"

@@ -2,9 +2,14 @@
 	<div v-if="value" class="support-client row justify-between items-center">
 		<div class="row justify-start items-center">
 			<q-img class="client-icon" :src="imageRef" />
-			<div class="info-label">{{ label }}</div>
+			<div class="text-body2 q-ml-sm text-ink-2">{{ label }}</div>
 		</div>
-		<div class="info_link" @click="onClickIcon">{{ store }}</div>
+		<div
+			class="text-body2 q-ml-sm text-info info_link cursor-pointer"
+			@click="onClickIcon"
+		>
+			{{ store }}
+		</div>
 	</div>
 </template>
 
@@ -86,26 +91,7 @@ const onClickIcon = () => {
 		height: 32px;
 	}
 
-	.info-content {
-		font-family: Roboto;
-		font-size: 14px;
-		font-weight: 400;
-		line-height: 20px;
-		letter-spacing: 0em;
-		text-align: left;
-	}
-
-	.info-label {
-		@extend .info-content;
-		margin-left: 8px;
-		color: var(--Grey-08-, #5c5551);
-		text-align: end;
-	}
-
 	.info_link {
-		@extend .info-content;
-		color: #3377ff;
-		cursor: pointer;
 		text-decoration: none;
 	}
 }

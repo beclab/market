@@ -4,7 +4,7 @@
 			<title-bar
 				:show="true"
 				:show-title="showShadow"
-				:title="i18n.t('version_history')"
+				:title="t('version_history')"
 				@onReturn="router.back()"
 				:shadow="showShadow"
 			/>
@@ -12,7 +12,7 @@
 		<template v-slot:page>
 			<div class="version-history-scroll">
 				<app-store-body
-					:label="i18n.t('version_history')"
+					:label="t('version_history')"
 					:loading="loading"
 					:title-separator="true"
 				>
@@ -24,7 +24,7 @@
 					<template v-slot:body>
 						<empty-view
 							v-if="isEmpty"
-							:label="i18n.t('no_version_history_desc')"
+							:label="t('no_version_history_desc')"
 							class="empty_view"
 						/>
 						<div v-else>
@@ -51,7 +51,7 @@ import TitleBar from 'components/base/TitleBar.vue';
 import AppStoreBody from 'components/base/AppStoreBody.vue';
 import { useI18n } from 'vue-i18n';
 
-const i18n = useI18n();
+const { t } = useI18n();
 const router = useRouter();
 const route = useRoute();
 const loading = ref(false);

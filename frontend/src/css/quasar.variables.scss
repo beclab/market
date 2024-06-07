@@ -19,9 +19,6 @@ $primary: #1976d2;
 $secondary: #26a69a;
 $accent: #9c27b0;
 
-$dark: #1d1d1d;
-$dark-page: #121212;
-
 // The container horizontal gap, which acts as the offset for breakpoints
 $gap: 32px !default;
 // 960, 1152, and 1344 have been chosen because they are divisible by both 12 and 16
@@ -32,13 +29,5 @@ $desktop: 960px+ (2 * $gap) !default;
 $widescreen: 1152px+ (2 * $gap) !default;
 // 1344px container + 4rem;
 $fullhd: 1344px+ (2 * $gap) !default;
-
-$main-style: #2f6cff;
-$title: #1f1814;
-$sub-title: #5c5551;
-$prompt-message: #b2b0af;
-$blue: #3377ff;
-$grey: #f6f6f6;
-$background: #ffffff;
 
 $breakpoint-md: 1599px !default;
