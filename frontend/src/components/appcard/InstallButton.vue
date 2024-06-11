@@ -190,9 +190,12 @@ const { color: blueDefault } = useColor('blue-default');
 const { color: grey } = useColor('background-3');
 const { color: ink3 } = useColor('ink-3');
 const { color: white } = useColor('ink-on-brand');
+const { color: background1 } = useColor('background-1');
 const { color: blueAlpha } = useColor('blue-alpha');
 const { color: redAlpha } = useColor('red-alpha');
 const { color: negative } = useColor('negative');
+const { color: orangeDefault } = useColor('orange-default');
+const { color: orangeSoft } = useColor('orange-soft');
 
 async function onClick() {
 	if (!props.item) {
@@ -393,7 +396,7 @@ function updateUI() {
 				isLoading.value = false;
 				status.value = t('app.cancel');
 				textColor.value = blueDefault.value;
-				backgroundColor.value = white.value;
+				backgroundColor.value = background1.value;
 				border.value = `1px solid ${blueDefault.value}`;
 			} else {
 				isLoading.value = true;
@@ -408,7 +411,7 @@ function updateUI() {
 				isLoading.value = false;
 				status.value = t('app.cancel');
 				textColor.value = blueDefault.value;
-				backgroundColor.value = white.value;
+				backgroundColor.value = background1.value;
 				border.value = `1px solid ${blueDefault.value}`;
 			} else {
 				isLoading.value = true;
@@ -428,8 +431,8 @@ function updateUI() {
 			if (hoverRef.value) {
 				status.value = t('app.resume');
 			} else {
-				backgroundColor.value = '#FEBE011A';
-				textColor.value = '#FEBE01';
+				backgroundColor.value = orangeSoft.value;
+				textColor.value = orangeDefault.value;
 				border.value = '1px solid transparent';
 				status.value = t('app.suspend');
 			}
@@ -437,7 +440,7 @@ function updateUI() {
 		case APP_STATUS.waiting:
 		case APP_STATUS.resuming:
 			isLoading.value = true;
-			status.value = '···';
+			status.value = '';
 			textColor.value = white.value;
 			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';

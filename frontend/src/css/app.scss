@@ -321,10 +321,10 @@ body.body--dark .q-drawer {
 }
 
 #readMe blockquote {
-	color: #adadad;
+	color: $ink-2;
 	padding: 10px 20px;
-	background-color: #fafafa;
-	border-left: 3px solid #e6e6e6;
+	background-color: $background-3;
+	border-left: 3px solid $background-2;
 	word-break: break-word;
 	margin: 0 0 20px;
 
@@ -350,7 +350,7 @@ body.body--dark .q-drawer {
 
 #readMe pre code.hljs {
 	color: $ink-2;
-	background-color: #f6f8fa;
+	background-color: $background-3;
 	border-radius: 6px;
 }
 
