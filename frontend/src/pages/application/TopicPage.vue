@@ -16,7 +16,12 @@
 					</template>
 				</q-img>
 				<div
-					class="column discover-details_app_bg justify-center items-center"
+					class="column justify-center items-center"
+					:class="
+						$q.dark.isActive
+							? 'discover-details_app_bg-dark'
+							: 'discover-details_app_bg'
+					"
 					v-show="appListRef.length > 0"
 				>
 					<app-small-card
@@ -27,7 +32,7 @@
 						v-show="appListRef"
 					/>
 				</div>
-				<div class="discover-rich" v-html="richRef" />
+				<div id="discover-html" class="discover-rich" v-html="richRef" />
 			</div>
 		</template>
 	</page-container>
@@ -43,6 +48,7 @@ import { fromBase64 } from 'js-base64';
 import { bus, BUS_EVENT, updateAppStoreList } from 'src/utils/bus';
 import PageContainer from 'components/base/PageContainer.vue';
 import AppSmallCard from 'components/appcard/AppSmallCard.vue';
+import { useQuasar } from 'quasar';
 
 const Router = useRouter();
 const richRef = ref();
@@ -54,6 +60,7 @@ const appListRef = ref<AppStoreInfo[]>([]);
 const route = useRoute();
 const appStore = useAppStore();
 const showShadow = ref(false);
+const $q = useQuasar();
 
 onMounted(async () => {
 	const topicId = Number(route.params.topicId);
@@ -121,17 +128,16 @@ const getRichText = (richText: string) => {
 		padding: 16px;
 		margin-top: 20px;
 		margin-bottom: 20px;
-		background: linear-gradient(
-			90deg,
-			#e3eeff 0%,
-			#effaff 38.41%,
-			#f3fffc 71.96%,
-			#e7fbff 100%
-		);
+		background: linear-gradient(90deg, #ebf1ff 0%, #ffffff 100%);
 		backdrop-filter: blur(6.07811px);
 		border-radius: 8px;
-		border: 1px solid #e6e4e1;
+		border: 1px solid $separator;
 		width: 100%;
+	}
+
+	.discover-details_app_bg-dark {
+		@extend .discover-details_app_bg;
+		background: linear-gradient(90deg, #222637 0%, #1f1f1f 100%);
 	}
 
 	.discover-rich {

@@ -21,11 +21,7 @@
 			</div>
 		</template>
 	</app-store-body>
-	<empty-view
-		v-else
-		:label="i18n.t('no_installed_app_tips')"
-		class="full-view"
-	/>
+	<empty-view v-else :label="t('no_installed_app_tips')" class="full-view" />
 </template>
 
 <script setup lang="ts">
@@ -37,7 +33,7 @@ import MyAppCard from 'components/appcard/MyAppCard.vue';
 import { SOURCE_TYPE } from 'src/constants/constants';
 import { useI18n } from 'vue-i18n';
 
-const i18n = useI18n();
+const { t } = useI18n();
 
 const appStore = useAppStore();
 </script>
