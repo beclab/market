@@ -611,7 +611,6 @@ import AppTitleBar from 'src/components/appintro/AppTitleBar.vue';
 import AppSmallCard from 'src/components/appcard/AppSmallCard.vue';
 import markdownit from 'markdown-it';
 import hljs from 'highlight.js';
-import 'highlight.js/styles/github.css';
 import ins_plugin from 'markdown-it-mark';
 import { OnUpdateUITask, TaskHandler } from 'src/pages/application/AppDeatil';
 import { getSuitableUnit, getValueByUnit } from 'src/utils/monitoring';
@@ -622,14 +621,30 @@ import {
 } from 'src/utils/utils';
 import { useI18n } from 'vue-i18n';
 import TitleBar from 'src/components/base/TitleBar.vue';
-import { copyToClipboard } from 'quasar';
+import { copyToClipboard, useQuasar } from 'quasar';
 import { BtNotify, NotifyDefinedType } from '@bytetrade/ui';
 
 const route = useRoute();
 const router = useRouter();
 const appStore = useAppStore();
 const { t } = useI18n();
+const $q = useQuasar();
 const item = ref<AppStoreInfo>();
+const loadHighlightStyles = () => {
+	const isDark = $q.dark.isActive;
+	const path = isDark ? '../../css/github-dark.css' : '../../css/github.css';
+	// const path = isDark
+	// 	? 'highlight.js/styles/github-dark.css'
+	// 	: 'highlight.js/styles/github.css';
+	import(path)
+		.then(() => {
+			//Do nothing
+		})
+		.catch((err) => {
+			console.error('Failed to load highlight.js style:', err);
+		});
+};
+loadHighlightStyles();
 const md = markdownit({
 	html: true,
 	linkify: true,
