@@ -922,10 +922,10 @@
     uuid "9.0.1"
     yaup "^1.8.0"
 
-"@bytetrade/ui@^0.1.5":
-  version "0.1.5"
-  resolved "https://registry.npmjs.org/@bytetrade/ui/-/ui-0.1.5.tgz"
-  integrity sha512-rpGAD/B3sSnD9Hu85LklLmYUWe1d3o2ajfOwnLfCmd/wC0TLRVLpQ2/7bGCgVm12vqFZ8UHVArJ5ic43ROjv7w==
+"@bytetrade/ui@^0.1.11":
+  version "0.1.11"
+  resolved "https://registry.npmjs.org/@bytetrade/ui/-/ui-0.1.11.tgz"
+  integrity sha512-cxXCR9xXpc8go1cLeE6Rj8RvQx69Sm12o0bCLO6iKOQ+RjPM5GjDKi074mUwsGrCdkOzvkmSqCvcVKo1wHVarQ==
   dependencies:
     "@quasar/extras" "^1.16.7"
     axios "^1.3.4"
