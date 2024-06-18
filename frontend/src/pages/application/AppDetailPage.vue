@@ -807,7 +807,10 @@ const dependenciesTask: OnUpdateUITask = {
 			app?.options.dependencies.length > 0
 		) {
 			app?.options.dependencies.forEach((appInfo) => {
-				if (appInfo.type === DEPENDENCIES_TYPE.application) {
+				if (
+					appInfo.type === DEPENDENCIES_TYPE.application ||
+					appInfo.type === DEPENDENCIES_TYPE.middleware
+				) {
 					getApp(appInfo.name).then((app) => {
 						if (app) {
 							dependencies.value.push(app);

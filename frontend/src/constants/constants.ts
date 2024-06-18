@@ -248,7 +248,8 @@ export const CATEGORIES_TYPE = {
 
 export enum DEPENDENCIES_TYPE {
 	application = 'application',
-	system = 'system'
+	system = 'system',
+	middleware = 'middleware'
 }
 
 export enum APP_STATUS {
