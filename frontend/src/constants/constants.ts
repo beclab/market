@@ -1,3 +1,5 @@
+import { CFG_TYPE } from 'src/constants/config';
+
 export interface AppStoreInfo {
 	id: string;
 	name: string;
@@ -140,12 +142,6 @@ export interface PermissionNode {
 	label: string;
 	icon?: string;
 	children: PermissionNode[];
-}
-
-export enum CFG_TYPE {
-	APPLICATION = 'app',
-	WORK_FLOW = 'recommend',
-	MODEL = 'model'
 }
 
 export enum SOURCE_TYPE {
