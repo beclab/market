@@ -36,24 +36,14 @@
 				<div
 					style="width: 100%; height: 100%"
 					class="row justify-center items-center"
-					v-if="
-						item.status === APP_STATUS.uninstalling ||
-						item.status === APP_STATUS.upgrading ||
-						(item.status === APP_STATUS.installing &&
-							item.cfgType !== CFG_TYPE.MODEL)
-					"
+					v-if="showAppStatus(item)"
 				>
 					{{ status }}
 				</div>
 				<div
 					style="width: 100%; height: 100%"
 					class="row justify-center items-center"
-					v-if="
-						(item.status === APP_STATUS.installing &&
-							item.cfgType === CFG_TYPE.MODEL) ||
-						(item.status === APP_STATUS.downloading &&
-							item.cfgType === CFG_TYPE.APPLICATION)
-					"
+					v-if="showDownloadProgress(item)"
 				>
 					<!--          <q-spinner-hourglass size="12px" style="margin-right: 4px"/>-->
 					{{ item.progress ? Number(item.progress) + '%' : '0%' }}
@@ -92,10 +82,7 @@
 		>
 			<div class="column dropdown-menu text-body3">
 				<div
-					v-if="
-						item.cfgType === CFG_TYPE.MODEL &&
-						item.status === APP_STATUS.installed
-					"
+					v-if="canLoad(item)"
 					class="dropdown-menu-item q-mt-xs"
 					v-close-popup
 					@click="onLoad"
@@ -103,10 +90,7 @@
 					{{ t('app.load') }}
 				</div>
 				<div
-					v-if="
-						item.cfgType === CFG_TYPE.MODEL &&
-						item.status === APP_STATUS.running
-					"
+					v-if="canUnload(item)"
 					class="dropdown-menu-item q-mt-xs"
 					v-close-popup
 					@click="onUnload"
@@ -131,13 +115,21 @@
 
 <script lang="ts" setup>
 import { computed, PropType, ref, watch } from 'vue';
-import { APP_STATUS, AppStoreInfo, CFG_TYPE } from 'src/constants/constants';
+import { APP_STATUS, AppStoreInfo } from 'src/constants/constants';
 import { useAppStore } from 'src/stores/app';
 import { openApplication } from 'src/api/private/operations';
 import { getRequireImage } from 'src/utils/imageUtils';
 import { useI18n } from 'vue-i18n';
 import { useUserStore } from 'src/stores/user';
 import { BtDialog, useColor } from '@bytetrade/ui';
+import {
+	showAppStatus,
+	showDownloadProgress,
+	canInstallingCancel,
+	canOpen,
+	canUnload,
+	canLoad
+} from 'src/constants/config';
 
 const props = defineProps({
 	item: {
@@ -217,7 +209,7 @@ async function onClick() {
 		case APP_STATUS.installing:
 			console.log(props.item?.name);
 			console.log('cancel installing');
-			if (props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
+			if (canInstallingCancel(props.item?.cfgType)) {
 				appStore.cancelInstallingApp(props.item, props.development);
 			}
 			break;
@@ -241,7 +233,7 @@ const openApp = () => {
 		return;
 	}
 
-	if (props.item?.cfgType === CFG_TYPE.APPLICATION) {
+	if (canOpen(props.item?.cfgType)) {
 		let app = userStore.myApps.find((app: any) => app.id == props.item?.id);
 		if (!app) {
 			return;
@@ -392,7 +384,7 @@ function updateUI() {
 			border.value = '1px solid transparent';
 			break;
 		case APP_STATUS.pending:
-			if (hoverRef.value && props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
+			if (hoverRef.value && canInstallingCancel(props.item?.cfgType)) {
 				isLoading.value = false;
 				status.value = t('app.cancel');
 				textColor.value = blueDefault.value;
@@ -407,7 +399,7 @@ function updateUI() {
 			break;
 		case APP_STATUS.installing:
 		case APP_STATUS.downloading:
-			if (hoverRef.value && props.item?.cfgType !== CFG_TYPE.WORK_FLOW) {
+			if (hoverRef.value && canInstallingCancel(props.item?.cfgType)) {
 				isLoading.value = false;
 				status.value = t('app.cancel');
 				textColor.value = blueDefault.value;
@@ -451,10 +443,10 @@ function updateUI() {
 			border.value = '1px solid transparent';
 			if (props.isUpdate) {
 				status.value = t('app.update');
-			} else if (props.item?.cfgType !== CFG_TYPE.APPLICATION) {
-				status.value = t('app.running');
-			} else {
+			} else if (canOpen(props.item?.cfgType)) {
 				status.value = t('app.open');
+			} else {
+				status.value = t('app.running');
 			}
 			break;
 		case APP_STATUS.uninstalling:

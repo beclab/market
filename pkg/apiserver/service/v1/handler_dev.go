@@ -88,7 +88,7 @@ func installOrUpgrade(name, version, token string) (bool, error) {
 func validChart(chartDir string, info *models.ApplicationInfo) (err error) {
 	switch info.CfgType {
 	case constants.AppType:
-	case constants.RecommendType, constants.AgentType, constants.ModelType: //todo
+	case constants.RecommendType, constants.AgentType, constants.ModelType, constants.MiddlewareType: //todo
 		glog.Infof("terminusManifest.type:%s do not check chart", info.CfgType)
 		return
 	default:
@@ -236,9 +236,9 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 			api.HandleError(resp, err)
 			return
 		}
-		if info.CfgType == constants.AppType {
+		if info.CfgType == constants.AppType || info.CfgType == constants.MiddlewareType {
 			go h.watchDogManager.NewWatchDog(watchdog.OP_INSTALL,
-				info.Name, uid, token, watchdog.AppFromDev, info).
+				info.Name, uid, token, watchdog.AppFromDev, info.CfgType, info).
 				Exec()
 		} else if info.CfgType == constants.ModelType || info.CfgType == constants.RecommendType {
 			go h.commonWatchDogManager.NewWatchDog(watchdog.OP_INSTALL,
@@ -266,7 +266,7 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 
 	glog.Infof("uid:%s", uid)
 
-	if info.CfgType == constants.AppType {
+	if info.CfgType == constants.AppType || info.CfgType == constants.MiddlewareType {
 		go h.upgradeWatchDogManager.NewUpgradeWatchDog(watchdog.OP_UPGRADE,
 			info.Name, uid, token, watchdog.AppFromDev,
 			info).

@@ -137,7 +137,6 @@
 import { onMounted, PropType, ref } from 'vue';
 import {
 	AppStoreInfo,
-	CFG_TYPE,
 	SOURCE_TYPE,
 	TRANSACTION_PAGE
 } from 'src/constants/constants';
@@ -149,6 +148,7 @@ import AppIcon from 'components/appcard/AppIcon.vue';
 import AppTag from 'src/components/appcard/AppTag.vue';
 import { useI18n } from 'vue-i18n';
 import { convertLanguageCodeToName } from 'src/utils/utils';
+import { CFG_TYPE } from 'src/constants/config';
 
 const router = useRouter();
 const appStore = useAppStore();

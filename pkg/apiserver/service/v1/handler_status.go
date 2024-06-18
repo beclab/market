@@ -68,6 +68,19 @@ func (h *Handler) status(req *restful.Request, resp *restful.Response) {
 		respJsonWithOriginBody(resp, resBody)
 		return
 	}
+
+	if ty == constants.MiddlewareType {
+		resBody, _, err := appservice.MiddlewareStatus(appName, token)
+		if err != nil {
+			glog.Warningf("appservice.Middleware %s resp:%s, err:%s", appName, resBody, err.Error())
+			api.HandleError(resp, err)
+			return
+		}
+
+		glog.Infof("appservice.Middleware:%s resBody:%s", appName, resBody)
+		respJsonWithOriginBody(resp, resBody)
+		return
+	}
 }
 
 func (h *Handler) statusList(req *restful.Request, resp *restful.Response) {
@@ -104,6 +117,19 @@ func (h *Handler) statusList(req *restful.Request, resp *restful.Response) {
 		}
 
 		glog.Infof("recommend.StatusList resBody:%s", resBody)
+		respJsonWithOriginBody(resp, resBody)
+		return
+	}
+
+	if ty == constants.MiddlewareType {
+		resBody, err := appservice.MiddlewareStatusList(token)
+		if err != nil {
+			glog.Warningf("appservice.MiddlewareStatusList resp:%s, err:%s", resBody, err.Error())
+			api.HandleError(resp, err)
+			return
+		}
+
+		glog.Infof("appservice.MiddlewareStatusList resBody:%s", resBody)
 		respJsonWithOriginBody(resp, resBody)
 		return
 	}

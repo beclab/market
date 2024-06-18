@@ -58,12 +58,13 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import AppStoreBody from 'components/base/AppStoreBody.vue';
 import PageContainer from 'components/base/PageContainer.vue';
-import { AppStoreInfo, CFG_TYPE } from 'src/constants/constants';
+import { AppStoreInfo } from 'src/constants/constants';
 import { useI18n } from 'vue-i18n';
 import MyAppCard from 'src/components/appcard/MyAppCard.vue';
 import { getModels } from 'src/api/difyApi';
 import AppCardGrid from 'src/components/appcard/AppCardGrid.vue';
 import { bus, BUS_EVENT, updateAppStoreList } from 'src/utils/bus';
+import { CFG_TYPE } from 'src/constants/config';
 
 const modelList = ref<AppStoreInfo[]>([]);
 const pageLoading = ref(true);

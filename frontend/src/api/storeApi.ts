@@ -17,12 +17,12 @@ export async function getAppsByNames(names: []): Promise<AppStoreInfo[]> {
 	}
 }
 
-export async function getWorkflowMarkdown(name: string) {
+export async function getMarkdown(name: string) {
 	try {
 		const response: any = await axios.get(
 			globalConfig.url + '/app-store/v1/readme/' + name
 		);
-		console.log('get_workflow_markdown');
+		console.log('getMarkdown');
 		if (response.code && response.code === 200) {
 			return response.message;
 		}

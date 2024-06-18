@@ -100,9 +100,9 @@ func (h *Handler) resume(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	if ty == constants.AppType {
+	if ty == constants.AppType || ty == constants.MiddlewareType {
 		go h.watchDogManager.NewWatchDog(watchdog.OP_RESUME,
-			appName, uid, token, "",
+			appName, uid, token, "", ty,
 			nil).
 			Exec()
 	} else if ty == constants.ModelType {

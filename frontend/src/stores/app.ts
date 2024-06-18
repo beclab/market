@@ -20,7 +20,6 @@ import {
 	APP_STATUS,
 	AppStoreInfo,
 	CATEGORIES_TYPE,
-	CFG_TYPE,
 	OPERATE_ACTION,
 	OPERATE_STATUS,
 	SOURCE_TYPE
@@ -31,6 +30,7 @@ import { AsyncQueue } from 'src/utils/asyncQueue';
 import { useUserStore } from 'src/stores/user';
 import { i18n } from 'src/boot/i18n';
 import { decodeUnicode } from 'src/utils/utils';
+import { CFG_TYPE } from 'src/constants/config';
 
 export type AppState = {
 	tempAppMap: Record<string, AppStoreInfo>;
@@ -205,6 +205,8 @@ export const useAppStore = defineStore('app', {
 					case CFG_TYPE.WORK_FLOW:
 						this._handleWorkFlowStatus(app, operation, op_status);
 						break;
+					case CFG_TYPE.MIDDLEWARE:
+						this._handleMiddlewareStatus(app, operation, op_status);
 				}
 			};
 
@@ -386,10 +388,10 @@ export const useAppStore = defineStore('app', {
 		 *                +------------+
 		 *
 		 *  Operate Status
-		 *      +-------------------------------------------------+
-		 *      v                                                 |
-		 *    +-----------+  install   +---------+  uninstall   +--------------+
-		 *    | notfound | ---------> | running | -----------> | uninstalling |
+		 *      +------------------------------------------------------+
+		 *      v                                                      |
+		 *    +-----------+  install    +--------+  uninstall   +--------------+
+		 *    | notfound  | ---------> | running | -----------> | uninstalling |
 		 *    +-----------+            +---------+              +--------------+
 		 *
 		 */
@@ -536,6 +538,120 @@ export const useAppStore = defineStore('app', {
 			// break;
 			// }
 
+			this._notificationData(app, refresh);
+		},
+
+		/**
+		 *
+		 * Middleware Status
+		 *
+		 *      +---------------------------------------------------------------------+
+		 *      v                                                                     |
+		 * +----------+  install   +------------+     +---------+  uninstall   +--------------+
+		 * | notfound | ---------> | installing | --> | running | -----------> | uninstalling |
+		 * +----------+            +------------+     +---------+              +--------------+
+		 *
+		 * Operate Status
+		 *
+		 *                               uninstall
+		 *                      +-----------------------------------+
+		 *                      v                                   |
+		 *      install   +------------+  cancel   +-----------+    |
+		 *     ---------> |            | --------> | canceled  |    |
+		 *                |            |           +-----------+    |
+		 *                |            |                            |
+		 *                | processing | ----------------+          |
+		 *                |            |                 v          |
+		 *                |            |           +-----------+    |
+		 *                |            | --------> | completed | ---+
+		 *                +------------+           +-----------+
+		 *                     |
+		 *                     |
+		 *                     v
+		 *                +------------+
+		 *                |   failed   |
+		 *                +------------+
+		 *
+		 */
+		async _handleMiddlewareStatus(
+			app: AppStoreInfo,
+			operation: string,
+			op_status: string
+		) {
+			let refresh = false;
+			// switch (app.status) {
+			// 	case APP_STATUS.uninstalled:
+			if (
+				operation === OPERATE_ACTION.install &&
+				op_status === OPERATE_STATUS.processing
+			) {
+				app.status = APP_STATUS.installing;
+			}
+			// break;
+			// case APP_STATUS.installing:
+			if (
+				operation === OPERATE_ACTION.install &&
+				op_status === OPERATE_STATUS.completed
+			) {
+				app.status = APP_STATUS.running;
+				refresh = true;
+			}
+			if (
+				operation === OPERATE_ACTION.cancel &&
+				op_status === OPERATE_STATUS.canceled
+			) {
+				app.status = APP_STATUS.uninstalled;
+				refresh = true;
+			}
+			// break;
+			// case APP_STATUS.running:
+			if (
+				operation === OPERATE_ACTION.suspend &&
+				op_status === OPERATE_STATUS.completed
+			) {
+				app.status = APP_STATUS.suspend;
+			}
+			if (
+				operation === OPERATE_ACTION.upgrade &&
+				op_status === OPERATE_STATUS.processing
+			) {
+				app.status = APP_STATUS.upgrading;
+			}
+			if (
+				operation === OPERATE_ACTION.uninstall &&
+				op_status === OPERATE_STATUS.processing
+			) {
+				app.status = APP_STATUS.uninstalling;
+			}
+			// break;
+			// case APP_STATUS.upgrading:
+			if (
+				operation === OPERATE_ACTION.upgrade &&
+				op_status === OPERATE_STATUS.completed
+			) {
+				app.status = APP_STATUS.running;
+				refresh = true;
+			}
+			// break;
+			// case APP_STATUS.resuming:
+			if (
+				operation === OPERATE_ACTION.resume &&
+				op_status === OPERATE_STATUS.completed
+			) {
+				app.status = APP_STATUS.running;
+			}
+			// break;
+			// case APP_STATUS.uninstalling:
+			if (
+				operation === OPERATE_ACTION.uninstall &&
+				op_status === OPERATE_STATUS.completed
+			) {
+				app.status = APP_STATUS.uninstalled;
+				refresh = true;
+			}
+			// break;
+			// }
+			// }
 			this._notificationData(app, refresh);
 		},
 
