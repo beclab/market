@@ -4,9 +4,9 @@
 		:class="
 			isAppDetails
 				? $q.dark.isActive
-					? 'app-normal-dark'
-					: 'app-normal-light'
-				: 'app-normal-background'
+					? 'app-detail-dark'
+					: 'app-detail-light'
+				: 'app-normal-light'
 		"
 	>
 		<div
@@ -162,7 +162,7 @@ const onScroll = async (info: any) => {
 	background: $background-1;
 }
 
-.app-normal-dark {
+.app-detail-dark {
 	background: rgba(18, 25, 29, 1);
 }
 
