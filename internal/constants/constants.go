@@ -84,6 +84,14 @@ const (
 	AppServiceModelOperateHistoryURLTempl     = "http://%s:%s/app-service/v1/models/%s/operate_history"
 	AppServiceModelOperateHistoryListURLTempl = "http://%s:%s/app-service/v1/models/operate_history"
 
+	AppServiceMiddlewareInstallURLTempl     = "http://%s:%s/app-service/v1/middlewares/%s/install"
+	AppServiceMiddlewareUninstallURLTempl   = "http://%s:%s/app-service/v1/middlewares/%s/uninstall"
+	AppServiceMiddlewareStatusURLTempl      = "http://%s:%s/app-service/v1/middlewares/%s/status"
+	AppServiceMiddlewareOperateURLTempl     = "http://%s:%s/app-service/v1/middlewares/%s/operate"
+	AppServiceMiddlewareOperateListURLTempl = "http://%s:%s/app-service/v1/middlewares/operate"
+	AppServiceMiddlewareCancelURLTempl      = "http://%s:%s/app-service/v1/middlewares/%s/cancel?type=%s"
+	AppServiceMiddlewareStatusListURLTempl  = "http://%s:%s/app-service/v1/middlewares/status"
+
 	RepoUrlTempl = "http://%s:%s/charts"
 
 	RepoUrlHostEnv = "REPO_URL_HOST"
@@ -101,10 +109,11 @@ const (
 )
 
 const (
-	AppType       = "app"
-	RecommendType = "recommend"
-	AgentType     = "agent"
-	ModelType     = "model"
+	AppType        = "app"
+	RecommendType  = "recommend"
+	AgentType      = "agent"
+	ModelType      = "model"
+	MiddlewareType = "middleware"
 )
 
 const (
@@ -113,7 +122,7 @@ const (
 )
 
 var (
-	ValidTypes = []string{AppType, RecommendType, AgentType, ModelType}
+	ValidTypes = []string{AppType, RecommendType, AgentType, ModelType, MiddlewareType}
 )
 
 func GetAppServiceHostAndPort() (string, string) {

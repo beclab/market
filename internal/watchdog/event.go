@@ -16,6 +16,7 @@ import (
 )
 
 type InstallationWatchDog struct {
+	cfgType  string
 	client   *event.Client
 	uid      string
 	ctx      context.Context
@@ -89,7 +90,7 @@ func NewWatchDogManager() *Manager {
 	return &Manager{ManagerMap: make(ManagerMap)}
 }
 
-func (w *Manager) NewWatchDog(installOp, appname, uid, token, from string, info *models.ApplicationInfo) *InstallationWatchDog {
+func (w *Manager) NewWatchDog(installOp, appname, uid, token, from, cfgType string, info *models.ApplicationInfo) *InstallationWatchDog {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if uid == "" {
@@ -113,6 +114,7 @@ func (w *Manager) NewWatchDog(installOp, appname, uid, token, from string, info 
 		app:     appname,
 		token:   token,
 		from:    from,
+		cfgType: cfgType,
 		clear:   w.DeleteWatchDog,
 	}
 	w.ManagerMap[uid] = wd
@@ -420,8 +422,18 @@ func (i *InstallationWatchDog) statusCanceled() string {
 	return "unknown"
 }
 
+func (i *InstallationWatchDog) getStatusByType() (*appservice.OperateResult, error) {
+	if i.cfgType == constants.AppType {
+		return appservice.GetOperatorResult(i.uid, i.token)
+	} else if i.cfgType == constants.MiddlewareType {
+		return appservice.GetMiddlewareOperatorResult(i.uid, i.token)
+	}
+
+	return nil, fmt.Errorf("unsupport type:%s", i.cfgType)
+}
+
 func (i *InstallationWatchDog) getStatus() (string, string, string, error) {
-	res, err := appservice.GetOperatorResult(i.uid, i.token)
+	res, err := i.getStatusByType()
 	if err != nil {
 		return "", "", "", err
 	}
@@ -446,8 +458,16 @@ func (i *InstallationWatchDog) updateStatus(status, progress, op, msg string) {
 }
 
 func (i *InstallationWatchDog) cancelOp() error {
-	_, err := appservice.AppCancel(i.uid, constants.CancelTypeTimeout, i.token)
-	return err
+	if i.cfgType == constants.AppType {
+		_, err := appservice.AppCancel(i.uid, constants.CancelTypeTimeout, i.token)
+		return err
+	}
+	if i.cfgType == constants.MiddlewareType {
+		_, _, err := appservice.MiddlewareCancel(i.uid, constants.CancelTypeTimeout, i.token)
+		return err
+	}
+
+	return nil
 }
 
 func (i *InstallationWatchDog) genEvent(status string) *EventData {

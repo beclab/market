@@ -41,13 +41,22 @@ func filterMarketAndCustomApps(in []appservice.Application) (out []appservice.Ap
 	return
 }
 
-func getRunningWorkflowList(token string) ([]*recommend.StatusData, error) {
+func getRunningWorkflowList(token string) ([]*models.StatusData, error) {
 	jsonStr, err := recommend.StatusList(token)
 	if err != nil {
 		return nil, err
 	}
 
-	return recommend.ParseWorkflowsList(jsonStr)
+	return models.ParseStatusList(jsonStr)
+}
+
+func getRunningMiddlewareList(token string) ([]*models.StatusData, error) {
+	jsonStr, err := appservice.MiddlewareStatusList(token)
+	if err != nil {
+		return nil, err
+	}
+
+	return models.ParseStatusList(jsonStr)
 }
 
 func hasGpu(token string) bool {
@@ -95,7 +104,7 @@ func getAppsMap(token string) (map[string]appservice.Application, error) {
 	return appservice.ParseAppsListToMap(jsonStr)
 }
 
-func getWorkflowsMap(token string) (map[string]*recommend.StatusData, error) {
+func getWorkflowsMap(token string) (map[string]*models.StatusData, error) {
 	if conf.GetIsPublic() {
 		return nil, nil
 	}
@@ -105,7 +114,20 @@ func getWorkflowsMap(token string) (map[string]*recommend.StatusData, error) {
 		return nil, err
 	}
 
-	return recommend.ParseWorkflowsListToMap(jsonStr)
+	return models.ParseStatusListToMap(jsonStr)
+}
+
+func getMiddlewaresMap(token string) (map[string]*models.StatusData, error) {
+	if conf.GetIsPublic() {
+		return nil, nil
+	}
+
+	jsonStr, err := appservice.MiddlewareStatusList(token)
+	if err != nil {
+		return nil, err
+	}
+
+	return models.ParseStatusListToMap(jsonStr)
 }
 
 func getModelsMap(token string) (map[string]*models.ModelStatusResponse, error) {
@@ -124,7 +146,8 @@ func getModelsMap(token string) (map[string]*models.ModelStatusResponse, error) 
 	return appservice.ParseLlmsListToMap(jsonStr)
 }
 
-func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Application, workflowMap map[string]*recommend.StatusData) []*models.ApplicationInfo {
+func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) []*models.ApplicationInfo {
+
 	var appWithStatusList []*models.ApplicationInfo
 	for _, item := range res.Items {
 		info := &models.ApplicationInfo{}
@@ -139,7 +162,7 @@ func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Applic
 			continue
 		}
 
-		getAppAndRecommendStatus(info, appsMap, workflowMap)
+		getAppAndRecommendStatus(info, appsMap, workflowMap, middlewareMap)
 
 		if (info.HasRemoveLabel() || info.HasSuspendLabel()) && info.Status == models.AppUninstalled {
 			glog.Warningf("app:%s has pass label %v not installed, pass", info.Name, info.AppLabels)
@@ -152,7 +175,7 @@ func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Applic
 	return appWithStatusList
 }
 
-func getAppAndRecommendStatus(info *models.ApplicationInfo, appsMap map[string]appservice.Application, workflowMap map[string]*recommend.StatusData) {
+func getAppAndRecommendStatus(info *models.ApplicationInfo, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) {
 	if info == nil {
 		return
 	}
@@ -163,7 +186,12 @@ func getAppAndRecommendStatus(info *models.ApplicationInfo, appsMap map[string]a
 	}
 
 	if info.CfgType == constants.RecommendType {
-		getWorkflowStatus(info, workflowMap)
+		getCommonStatus(info, workflowMap)
+		return
+	}
+
+	if info.CfgType == constants.MiddlewareType {
+		getCommonStatus(info, middlewareMap)
 		return
 	}
 }
@@ -185,14 +213,14 @@ func getAppStatus(info *models.ApplicationInfo, appsMap map[string]appservice.Ap
 	}
 }
 
-func getWorkflowStatus(info *models.ApplicationInfo, workflowMap map[string]*recommend.StatusData) {
+func getCommonStatus(info *models.ApplicationInfo, statusMap map[string]*models.StatusData) {
 	if info == nil {
 		return
 	}
 
 	//fmt.Printf("info.Name:%s, workflowMap:%v\n", info.Name, workflowMap)
 	info.Status = models.AppUninstalled
-	if ia, ok := workflowMap[info.Name]; ok {
+	if ia, ok := statusMap[info.Name]; ok {
 		info.Status = ia.ResourceStatus
 		info.CurVersion = ia.Version
 		info.InstallTime = helmtime.Time(ia.CreateTime)
@@ -237,6 +265,9 @@ func installByType(info *models.ApplicationInfo, token string) (string, error) {
 	case constants.ModelType:
 		resBody, _, err := appservice.LlmInstall(info.Name, info.Source, token)
 		return resBody, err
+	case constants.MiddlewareType:
+		resBody, _, err := appservice.MiddlewareInstall(info.Name, info.Source, token)
+		return resBody, err
 	//case constants.AgentType:
 	//	//todo
 	default:
@@ -255,6 +286,11 @@ func uninstallByType(name, cfgType, token string) (string, error) {
 
 	if cfgType == constants.ModelType {
 		body, _, err := appservice.LlmUninstall(name, token)
+		return body, err
+	}
+
+	if cfgType == constants.MiddlewareType {
+		body, _, err := appservice.MiddlewareUninstall(name, token)
 		return body, err
 	}
 
@@ -296,4 +332,8 @@ func respJsonWithOriginBody(resp *restful.Response, body string) {
 		glog.Warningf("err:%s", err)
 	}
 	return
+}
+
+func defaultAppType() string {
+	return fmt.Sprintf("%s,%s", constants.AppType, constants.MiddlewareType)
 }
