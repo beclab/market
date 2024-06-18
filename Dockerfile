@@ -31,7 +31,7 @@ RUN cd bytetrade.io/web3os/market && \
         go mod tidy 
 
 RUN cd bytetrade.io/web3os/market && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -a -o market cmd/market/main.go
+    CGO_ENABLED=0 go build -ldflags="-s -w" -a -o market cmd/market/main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
