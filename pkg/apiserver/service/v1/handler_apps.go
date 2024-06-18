@@ -60,6 +60,7 @@ func (h *Handler) handleInfos(req *restful.Request, resp *restful.Response) {
 		return
 	}
 	workflowMap, _ := getWorkflowsMap(token)
+	middlewareMap, _ := getMiddlewaresMap(token)
 
 	for i := range infoList {
 		if _, exist := infosLocal[infoList[i].Name]; exist {
@@ -72,7 +73,7 @@ func (h *Handler) handleInfos(req *restful.Request, resp *restful.Response) {
 			infoList[i].Version = infosMarket[infoList[i].Name].Version
 		}
 
-		getAppAndRecommendStatus(infoList[i], appsMap, workflowMap)
+		getAppAndRecommendStatus(infoList[i], appsMap, workflowMap, middlewareMap)
 	}
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, infoList))

@@ -121,9 +121,9 @@ func (h *Handler) install(req *restful.Request, resp *restful.Response) {
 	}
 
 	glog.Infof("uid:%s", uid)
-	if info.CfgType == constants.AppType {
+	if info.CfgType == constants.AppType || info.CfgType == constants.MiddlewareType {
 		go h.watchDogManager.NewWatchDog(watchdog.OP_INSTALL,
-			appName, uid, token, watchdog.AppFromStore,
+			appName, uid, token, watchdog.AppFromStore, info.CfgType,
 			info).
 			Exec()
 	} else if info.CfgType == constants.ModelType || info.CfgType == constants.RecommendType {
@@ -168,9 +168,9 @@ func (h *Handler) uninstall(req *restful.Request, resp *restful.Response) {
 	}
 
 	glog.Infof("uid:%s, resBody:%s", uid, resBody)
-	if ty == constants.AppType {
+	if ty == constants.AppType || ty == constants.MiddlewareType {
 		go h.watchDogManager.NewWatchDog(watchdog.OP_UNINSTALL,
-			appName, uid, token, "", nil).
+			appName, uid, token, "", ty, nil).
 			Exec()
 	} else if ty == constants.ModelType || ty == constants.RecommendType {
 		go h.commonWatchDogManager.NewWatchDog(watchdog.OP_UNINSTALL,
@@ -216,6 +216,9 @@ func cancelByType(name, token, cancelTy, ty string) (string, error) {
 		return appservice.AppCancel(name, cancelTy, token)
 	case constants.ModelType:
 		resBody, _, err := appservice.LlmCancel(name, cancelTy, token)
+		return resBody, err
+	case constants.MiddlewareType:
+		resBody, _, err := appservice.MiddlewareCancel(name, cancelTy, token)
 		return resBody, err
 	//case constants.AgentType:
 	//	//todo
