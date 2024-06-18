@@ -223,6 +223,7 @@ watch(
 				route.name === TRANSACTION_PAGE.Log ||
 				route.name === TRANSACTION_PAGE.Update ||
 				from.includes('/app/') ||
+				from.includes('/middleware/') ||
 				from.includes('/recommend/') ||
 				from.includes('/model/') ||
 				from.includes('/discover') ||

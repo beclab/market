@@ -1,3 +1,5 @@
+import { CFG_TYPE } from 'src/constants/config';
+
 export interface AppStoreInfo {
 	id: string;
 	name: string;
@@ -142,12 +144,6 @@ export interface PermissionNode {
 	children: PermissionNode[];
 }
 
-export enum CFG_TYPE {
-	APPLICATION = 'app',
-	WORK_FLOW = 'recommend',
-	MODEL = 'model'
-}
-
 export enum SOURCE_TYPE {
 	Market = 'market',
 	Development = 'custom'
@@ -252,7 +248,8 @@ export const CATEGORIES_TYPE = {
 
 export enum DEPENDENCIES_TYPE {
 	application = 'application',
-	system = 'system'
+	system = 'system',
+	middleware = 'middleware'
 }
 
 export enum APP_STATUS {

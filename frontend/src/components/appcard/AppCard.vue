@@ -4,43 +4,39 @@
 		:class="larger ? 'application_single_larger' : 'application_single_normal'"
 		:style="{
 			borderBottom: isLastLine ? 'none' : `1px solid ${separator}`,
-			'--iconSize':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '100px'
-						: '64px'
-					: larger
-						? '224px'
-						: '128px',
-			'--paddingLeft':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '12px'
-					: larger
-						? '32px'
-						: '20px',
-			'--paddingTop':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '20px'
-					: larger
-						? '8px'
-						: '0',
-			'--paddingBottom':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '20px'
-					: larger
-						? '8px'
-						: '0'
+			'--iconSize': showIcon(type)
+				? larger
+					? '100px'
+					: '64px'
+				: larger
+					? '224px'
+					: '128px',
+			'--paddingLeft': showIcon(type)
+				? larger
+					? '20px'
+					: '12px'
+				: larger
+					? '32px'
+					: '20px',
+			'--paddingTop': showIcon(type)
+				? larger
+					? '20px'
+					: '20px'
+				: larger
+					? '8px'
+					: '0',
+			'--paddingBottom': showIcon(type)
+				? larger
+					? '20px'
+					: '20px'
+				: larger
+					? '8px'
+					: '0'
 		}"
 		class="row justify-between items-center"
 	>
 		<app-icon
-			v-if="type === CFG_TYPE.APPLICATION"
+			v-if="showIcon(type)"
 			:skeleton="true"
 			:size="larger ? 100 : 64"
 		/>
@@ -83,38 +79,34 @@
 		"
 		:style="{
 			borderBottom: isLastLine ? 'none' : `1px solid ${separator}`,
-			'--iconSize':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '100px'
-						: '64px'
-					: larger
-						? '224px'
-						: '128px',
-			'--paddingLeft':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '12px'
-					: larger
-						? '32px'
-						: '20px',
-			'--paddingTop':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '20px'
-					: larger
-						? '8px'
-						: '0',
-			'--paddingBottom':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '20px'
-					: larger
-						? '8px'
-						: '0'
+			'--iconSize': showIcon(type)
+				? larger
+					? '100px'
+					: '64px'
+				: larger
+					? '224px'
+					: '128px',
+			'--paddingLeft': showIcon(type)
+				? larger
+					? '20px'
+					: '12px'
+				: larger
+					? '32px'
+					: '20px',
+			'--paddingTop': showIcon(type)
+				? larger
+					? '20px'
+					: '20px'
+				: larger
+					? '8px'
+					: '0',
+			'--paddingBottom': showIcon(type)
+				? larger
+					? '20px'
+					: '20px'
+				: larger
+					? '8px'
+					: '0'
 		}"
 		class="row justify-between items-center"
 		@click="goAppDetails"
@@ -122,7 +114,7 @@
 		@mouseleave="hoverRef = false"
 	>
 		<app-icon
-			v-if="type === CFG_TYPE.APPLICATION"
+			v-if="showIcon(type)"
 			:src="item.icon"
 			:size="larger ? 100 : 64"
 			:cs-app="clusterScopedApp"
@@ -183,11 +175,7 @@
 
 <script lang="ts" setup>
 import { onMounted, PropType, ref } from 'vue';
-import {
-	AppStoreInfo,
-	CFG_TYPE,
-	TRANSACTION_PAGE
-} from 'src/constants/constants';
+import { AppStoreInfo, TRANSACTION_PAGE } from 'src/constants/constants';
 import InstallButton from 'components/appcard/InstallButton.vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';
@@ -195,6 +183,7 @@ import AppIcon from 'components/appcard/AppIcon.vue';
 import AppFeaturedImage from 'components/appcard/AppFeaturedImage.vue';
 import { useI18n } from 'vue-i18n';
 import { useColor } from '@bytetrade/ui';
+import { CFG_TYPE, showIcon } from 'src/constants/config';
 
 const router = useRouter();
 const appStore = useAppStore();

@@ -2,7 +2,7 @@
 	<div class="app-detail-root">
 		<app-title-bar
 			:item="item"
-			:show-icon="cfgType === CFG_TYPE.APPLICATION"
+			:show-icon="showIcon(cfgType)"
 			:show-header-bar="showHeaderBar"
 			:show-install-btn="!appStore.isPublic"
 			:absolute="true"
@@ -18,9 +18,7 @@
 					<div
 						v-if="!item"
 						class="app-details-padding"
-						:style="
-							cfgType !== CFG_TYPE.APPLICATION ? 'margin-bottom:20px' : ''
-						"
+						:style="showIcon(cfgType) ? '' : 'margin-bottom:20px'"
 					>
 						<app-card
 							:type="cfgType"
@@ -32,9 +30,7 @@
 					<div
 						v-else
 						class="app-details-padding"
-						:style="
-							cfgType !== CFG_TYPE.APPLICATION ? 'margin-bottom:20px' : ''
-						"
+						:style="showIcon(cfgType) ? '' : 'margin-bottom:20px'"
 					>
 						<app-card
 							:type="cfgType"
@@ -198,11 +194,9 @@
 						<div class="column" style="width: calc(70% - 10px)">
 							<app-intro-card
 								:title="
-									cfgType === CFG_TYPE.APPLICATION
-										? t('detail.about_this_app')
-										: cfgType === CFG_TYPE.WORK_FLOW
-											? t('detail.about_this_recommend')
-											: t('detail.about_this_model')
+									t('detail.about_this_type', {
+										type: cfgType?.toLocaleUpperCase()
+									})
 								"
 								:description="item.fullDescription"
 							/>
@@ -214,7 +208,7 @@
 							/>
 
 							<app-intro-card
-								v-if="cfgType === CFG_TYPE.APPLICATION"
+								v-if="requiredPermissions(cfgType)"
 								class="q-mt-lg"
 								:title="t('detail.required_permissions')"
 							>
@@ -390,7 +384,7 @@
 								v-if="readMeHtml && item"
 								class="q-mt-lg"
 								style="width: 100%"
-								:title="readMeTitle(item.cfgType)"
+								:title="t('detail.readme')"
 							>
 								<template v-slot:content>
 									<div
@@ -590,7 +584,6 @@ import { useAppStore } from 'src/stores/app';
 import {
 	APP_STATUS,
 	AppStoreInfo,
-	CFG_TYPE,
 	CLIENT_TYPE,
 	DEPENDENCIES_TYPE,
 	PERMISSION_SYSDATA_GROUP,
@@ -599,7 +592,7 @@ import {
 } from 'src/constants/constants';
 import InstallConfiguration from 'src/components/appintro/InstallConfiguration.vue';
 import SupportClient from 'src/components/appintro/SupportClient.vue';
-import { getApp, getWorkflowMarkdown } from 'src/api/storeApi';
+import { getApp, getMarkdown } from 'src/api/storeApi';
 import PageContainer from 'src/components/base/PageContainer.vue';
 import { bus, BUS_EVENT, updateAppStoreList } from 'src/utils/bus';
 import AppIntroCard from 'src/components/appintro/AppIntroCard.vue';
@@ -623,6 +616,7 @@ import { useI18n } from 'vue-i18n';
 import TitleBar from 'src/components/base/TitleBar.vue';
 import { copyToClipboard, useQuasar } from 'quasar';
 import { BtNotify, NotifyDefinedType } from '@bytetrade/ui';
+import { requiredPermissions, showIcon } from 'src/constants/config';
 
 const route = useRoute();
 const router = useRouter();
@@ -630,12 +624,10 @@ const appStore = useAppStore();
 const { t } = useI18n();
 const $q = useQuasar();
 const item = ref<AppStoreInfo>();
+
 const loadHighlightStyles = () => {
 	const isDark = $q.dark.isActive;
 	const path = isDark ? '../../css/github-dark.css' : '../../css/github.css';
-	// const path = isDark
-	// 	? 'highlight.js/styles/github-dark.css'
-	// 	: 'highlight.js/styles/github.css';
 	import(path)
 		.then(() => {
 			//Do nothing
@@ -683,20 +675,8 @@ const entrancePermissionData = ref<PermissionNode[]>([]);
 const filePermissionData = ref<PermissionNode[]>([]);
 const language = ref('en');
 const languageLength = ref(0);
-const cfgType = ref();
+const cfgType = ref<string>();
 const readMeHtml = ref('');
-function readMeTitle(cfgType: CFG_TYPE) {
-	switch (cfgType) {
-		case CFG_TYPE.APPLICATION:
-			return t('detail.app_card');
-		case CFG_TYPE.WORK_FLOW:
-			return t('detail.recommend_card');
-		case CFG_TYPE.MODEL:
-			return t('detail.model_card');
-		default:
-			return 'CARD';
-	}
-}
 
 function copyCode(str: string) {
 	copyToClipboard(str)
@@ -827,7 +807,10 @@ const dependenciesTask: OnUpdateUITask = {
 			app?.options.dependencies.length > 0
 		) {
 			app?.options.dependencies.forEach((appInfo) => {
-				if (appInfo.type === DEPENDENCIES_TYPE.application) {
+				if (
+					appInfo.type === DEPENDENCIES_TYPE.application ||
+					appInfo.type === DEPENDENCIES_TYPE.middleware
+				) {
 					getApp(appInfo.name).then((app) => {
 						if (app) {
 							dependencies.value.push(app);
@@ -1022,7 +1005,7 @@ const markdownTask: OnUpdateUITask = {
 		readMeHtml.value = '';
 	},
 	onUpdate(app: AppStoreInfo) {
-		getWorkflowMarkdown(app.name).then((result) => {
+		getMarkdown(app.name).then((result) => {
 			if (result) {
 				console.log(result);
 				readMeHtml.value = md.render(result);
