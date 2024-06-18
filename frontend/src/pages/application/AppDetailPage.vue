@@ -14,561 +14,597 @@
 		>
 			<template v-slot:page>
 				<div class="app-detail-page column">
-					<title-bar :show="true" :show-back="true" @on-return="clickReturn" />
 					<div
-						v-if="!item"
-						class="app-details-padding"
-						:style="showIcon(cfgType) ? '' : 'margin-bottom:20px'"
-					>
-						<app-card
-							:type="cfgType"
-							:skeleton="true"
-							:larger="true"
-							:is-last-line="true"
-						/>
-					</div>
-					<div
-						v-else
-						class="app-details-padding"
-						:style="showIcon(cfgType) ? '' : 'margin-bottom:20px'"
-					>
-						<app-card
-							:type="cfgType"
-							:item="item"
-							:development="false"
-							:larger="true"
-							:is-last-line="true"
-						/>
-					</div>
-					<div
-						v-if="
-							item &&
-							item.preflightError &&
-							item.status === APP_STATUS.preflightFailed &&
-							!appStore.isPublic
+						class="full-width column"
+						:class="
+							$q.dark.isActive ? 'app-detail-top-dark' : 'app-detail-top-light'
 						"
-						class="app-details-padding app-detail-warning bg-red-soft row justify-start"
 					>
-						<q-icon color="negative" size="16px" name="sym_r_error" />
-						<div class="column justify-start">
-							<div class="text-body-3 text-negative q-ml-sm">
-								{{ t('unable_to_install_app') }}
-							</div>
-							<template v-for="message in item.preflightError" :key="message">
-								<div class="text-body-3 text-negative">
-									{{ `&nbsp;·&nbsp;${message}` }}
-								</div>
-							</template>
+						<title-bar
+							:show="true"
+							:show-back="true"
+							@on-return="clickReturn"
+						/>
+						<div
+							v-if="!item"
+							class="app-details-padding"
+							:style="showIcon(cfgType) ? '' : 'margin-bottom:20px'"
+						>
+							<app-card
+								:type="cfgType"
+								:skeleton="true"
+								:larger="true"
+								:is-last-line="true"
+							/>
 						</div>
-					</div>
-
-					<div class="app-detail-line" />
-					<div
-						class="app-details-padding app-detail-install-configuration row justify-start items-center"
-						:style="{
-							'--showSize':
-								item &&
-								item.options &&
-								item.options.appScope &&
-								item.options.appScope.clusterScoped
-									? '7'
-									: '6'
-						}"
-					>
-						<install-configuration
+						<div
+							v-else
+							class="app-details-padding"
+							:style="showIcon(cfgType) ? '' : 'margin-bottom:20px'"
+						>
+							<app-card
+								:type="cfgType"
+								:item="item"
+								:development="false"
+								:larger="true"
+								:is-last-line="true"
+							/>
+						</div>
+						<div
 							v-if="
 								item &&
-								item.options &&
-								item.options.appScope &&
-								item.options.appScope.clusterScoped
+								item.preflightError &&
+								item.status === APP_STATUS.preflightFailed &&
+								!appStore.isPublic
 							"
-							:name="t('base.scope')"
-							src="sym_r_lan"
-							:unit="t('base.cluster_app')"
-						/>
-						<install-configuration
-							:name="t('base.developer')"
-							src="sym_r_group"
-							:unit="item && item.developer"
-						/>
-						<install-configuration
-							:name="t('base.language')"
-							:data="language.toUpperCase()"
-							:unit="
-								languageLength > 0
-									? `+ ${languageLength} more`
-									: convertLanguageCodeToName(language)
-							"
-						/>
-						<install-configuration
-							:name="t('detail.require_memory')"
-							:data="
-								item && item.requiredMemory
-									? getValueByUnit(
-											item.requiredMemory,
-											getSuitableUnit(item.requiredMemory, 'memory')
-										)
-									: '-'
-							"
-							:unit="
-								item && item.requiredMemory
-									? getSuitableUnit(item.requiredMemory, 'memory')
-									: '-'
-							"
-						/>
-						<install-configuration
-							:name="t('detail.require_disk')"
-							:data="
-								item && item.requiredDisk
-									? getValueByUnit(
-											item.requiredDisk,
-											getSuitableUnit(item.requiredDisk, 'disk')
-										)
-									: '-'
-							"
-							:unit="
-								item && item.requiredDisk
-									? getSuitableUnit(item.requiredDisk, 'disk')
-									: '-'
-							"
-						/>
-						<install-configuration
-							:name="t('detail.require_cpu')"
-							:data="
-								item && item.requiredCpu
-									? getValueByUnit(
-											item.requiredCpu,
-											getSuitableUnit(item.requiredCpu, 'cpu')
-										)
-									: '-'
-							"
-							:unit="
-								item && item.requiredCpu
-									? getSuitableUnit(item.requiredCpu, 'cpu')
-									: '-'
-							"
-						/>
-						<install-configuration
-							:name="t('detail.require_gpu')"
-							:data="
-								item && item.requiredGpu
-									? getValueByUnit(
-											item.requiredGpu,
-											getSuitableUnit(item.requiredGpu, 'memory')
-										)
-									: '-'
-							"
-							:unit="
-								item && item.requiredGpu
-									? getSuitableUnit(item.requiredGpu, 'memory')
-									: '-'
-							"
-							:last="true"
-						/>
-					</div>
-
-					<app-store-swiper
-						v-if="item && item.promoteImage"
-						:data-array="item && item.promoteImage ? item.promoteImage : []"
-						show-size="3,3,2"
-						style="margin-bottom: 20px"
-					>
-						<template v-slot:swiper="{ item, index }">
-							<q-img
-								@click="showImage(index)"
-								class="promote-img"
-								ratio="1.6"
-								:src="item"
-							>
-								<template v-slot:loading>
-									<q-skeleton class="promote-img" style="height: 100%" />
-								</template>
-							</q-img>
-						</template>
-					</app-store-swiper>
-
-					<div
-						v-if="item"
-						class="app-details-padding bottom-layout row justify-between"
-					>
-						<div class="column" style="width: calc(70% - 10px)">
-							<app-intro-card
-								:title="
-									t('detail.about_this_type', {
-										type: cfgType?.toLocaleUpperCase()
-									})
-								"
-								:description="item.fullDescription"
-							/>
-
-							<app-intro-card
-								class="q-mt-lg"
-								:title="t('detail.whats_new')"
-								:description="item.upgradeDescription"
-							/>
-
-							<app-intro-card
-								v-if="requiredPermissions(cfgType)"
-								class="q-mt-lg"
-								:title="t('detail.required_permissions')"
-							>
-								<template v-slot:content>
-									<div class="permission-request-grid column justify-start">
-										<permission-request
-											v-if="item.permission"
-											name="sym_r_article"
-											:title="t('permission.files')"
-											:nodes="filePermissionData"
-										/>
-										<permission-request
-											name="sym_r_language"
-											:title="t('permission.internet')"
-											:nodes="[
-												{
-													label: t('permission.internet_label'),
-													children: [{ label: t('permission.internet_desc') }]
-												}
-											]"
-										/>
-										<permission-request
-											name="sym_r_read_more"
-											:title="t('permission.entrance')"
-											:nodes="entrancePermissionData"
-										/>
-										<permission-request
-											v-if="notificationPermission"
-											name="sym_r_notifications"
-											:title="t('permission.notifications')"
-											:nodes="[
-												{
-													label: t('permission.notifications_label'),
-													children: [
-														{ label: t('permission.notifications_desc') }
-													]
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="
-												item &&
-												item.options &&
-												item.options.analytics &&
-												item.options.analytics.enable
-											"
-											name="sym_r_bar_chart_4_bars"
-											:title="t('permission.analytics')"
-											:nodes="[
-												{
-													label: t('permission.analytics_label'),
-													children: [{ label: t('permission.analytics_desc') }]
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="item && item.options && item.options.websocket"
-											name="sym_r_captive_portal"
-											:title="t('permission.websocket')"
-											:nodes="[
-												{
-													label: t('permission.websocket_label'),
-													children: [{ label: t('permission.websocket_desc') }]
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="secretPermission"
-											class="q-mt-lg"
-											name="sym_r_lock_open"
-											:title="t('permission.secret')"
-											:nodes="[
-												{
-													label: t('permission.secret_label'),
-													children: [{ label: t('permission.secret_desc') }]
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="knowledgeBasePermission"
-											name="sym_r_cognition"
-											:title="t('permission.knowledgebase')"
-											:nodes="[
-												{
-													label: t('permission.knowledgebase_label'),
-													children: [
-														{ label: t('permission.knowledgebase_desc') }
-													]
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="
-												item && item.middleware && item.middleware.ZincSearch
-											"
-											class="q-mt-lg"
-											name="sym_r_search"
-											:title="t('base.search')"
-											:nodes="[
-												{
-													label: t('permission.search_label')
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="item && item.middleware && item.middleware.Postgres"
-											name="sym_r_animation"
-											:title="t('permission.relational_database')"
-											:nodes="[
-												{
-													label: t('permission.relational_database_label'),
-													children: [
-														{ label: t('permission.relational_database_desc') }
-													]
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="item && item.middleware && item.middleware.MongoDB"
-											name="sym_r_edit_document"
-											:title="t('permission.document_database')"
-											:nodes="[
-												{
-													label: t('permission.document_database_label'),
-													children: [
-														{ label: t('permission.document_database_desc') }
-													]
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="item && item.middleware && item.middleware.Redis"
-											name="sym_r_commit"
-											:title="t('permission.key_value_database')"
-											:nodes="[
-												{
-													label: t('permission.key_value_database_label'),
-													children: [
-														{ label: t('permission.key_value_database_desc') }
-													]
-												}
-											]"
-										/>
-
-										<permission-request
-											v-if="
-												item &&
-												item.options &&
-												item.options.appScope &&
-												item.options.appScope.clusterScoped
-											"
-											name="sym_r_lan"
-											:title="t('base.cluster_app')"
-											:nodes="[
-												{
-													label: t('permission.cluster_app_label')
-												}
-											]"
-										/>
+							class="app-details-padding app-detail-warning bg-red-soft row justify-start"
+						>
+							<q-icon color="negative" size="16px" name="sym_r_error" />
+							<div class="column justify-start">
+								<div class="text-body-3 text-negative q-ml-sm">
+									{{ t('unable_to_install_app') }}
+								</div>
+								<template v-for="message in item.preflightError" :key="message">
+									<div class="text-body-3 text-negative">
+										{{ `&nbsp;·&nbsp;${message}` }}
 									</div>
 								</template>
-							</app-intro-card>
-
-							<app-intro-card
-								v-if="readMeHtml && item"
-								class="q-mt-lg"
-								style="width: 100%"
-								:title="t('detail.readme')"
-							>
-								<template v-slot:content>
-									<div
-										style="width: 100%; max-width: 1086px"
-										id="readMe"
-										v-html="readMeHtml"
-									/>
-								</template>
-							</app-intro-card>
+							</div>
 						</div>
 
+						<div class="app-detail-line" />
 						<div
-							class="column justify-start items-start"
-							style="width: calc(30% - 10px)"
+							class="app-details-padding app-detail-install-configuration row justify-start items-center"
+							:style="{
+								'--showSize':
+									item &&
+									item.options &&
+									item.options.appScope &&
+									item.options.appScope.clusterScoped
+										? '7'
+										: '6'
+							}"
 						>
-							<app-intro-card :title="t('detail.information')">
-								<template v-slot:content>
-									<app-intro-item
-										:title="t('detail.get_support')"
-										:link-array="getDocuments()"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('detail.website')"
-										:link-array="getWebsite()"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('detail.app_version')"
-										:content="item.versionName"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('base.category')"
-										separator=" · "
-										:content-array="item.categories"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('base.developer')"
-										:content="item.developer"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('base.submitter')"
-										:content="item.submitter"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('base.language')"
-										:content-array="
-											item.language
-												? convertLanguageCodesToNames(item.language)
-												: ''
-										"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('detail.compatibility')"
-										:content="compatible"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('detail.platforms')"
-										:content-array="item.supportArch"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('detail.legal')"
-										:link-array="
-											item.legal && item.legal.length && item.legal[0]
-												? [item.legal[0]]
-												: []
-										"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('detail.license')"
-										:link-array="
-											item.license && item.license.length > 0 && item.license[0]
-												? [item.license[0]]
-												: []
-										"
-									/>
-									<app-intro-item
-										v-if="item.sourceCode"
-										class="q-mt-lg"
-										:title="t('detail.source_code')"
-										:link-array="[
-											{
-												text: t('detail.public'),
-												url: item.sourceCode
-											}
-										]"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('detail.chart_version')"
-										:content="item.version"
-									/>
-									<app-intro-item
-										class="q-mt-lg"
-										:title="t('detail.version_history')"
-										@on-link-click="goVersionHistory"
-										link="See all version"
-									/>
-								</template>
-							</app-intro-card>
+							<install-configuration
+								v-if="
+									item &&
+									item.options &&
+									item.options.appScope &&
+									item.options.appScope.clusterScoped
+								"
+								:name="t('base.scope')"
+								src="sym_r_lan"
+								:unit="t('base.cluster_app')"
+							/>
+							<install-configuration
+								:name="t('base.developer')"
+								src="sym_r_group"
+								:unit="item && item.developer"
+							/>
+							<install-configuration
+								:name="t('base.language')"
+								:data="language.toUpperCase()"
+								:unit="
+									languageLength > 0
+										? `+ ${languageLength} more`
+										: convertLanguageCodeToName(language)
+								"
+							/>
+							<install-configuration
+								:name="t('detail.require_memory')"
+								:data="
+									item && item.requiredMemory
+										? getValueByUnit(
+												item.requiredMemory,
+												getSuitableUnit(item.requiredMemory, 'memory')
+											)
+										: '-'
+								"
+								:unit="
+									item && item.requiredMemory
+										? getSuitableUnit(item.requiredMemory, 'memory')
+										: '-'
+								"
+							/>
+							<install-configuration
+								:name="t('detail.require_disk')"
+								:data="
+									item && item.requiredDisk
+										? getValueByUnit(
+												item.requiredDisk,
+												getSuitableUnit(item.requiredDisk, 'disk')
+											)
+										: '-'
+								"
+								:unit="
+									item && item.requiredDisk
+										? getSuitableUnit(item.requiredDisk, 'disk')
+										: '-'
+								"
+							/>
+							<install-configuration
+								:name="t('detail.require_cpu')"
+								:data="
+									item && item.requiredCpu
+										? getValueByUnit(
+												item.requiredCpu,
+												getSuitableUnit(item.requiredCpu, 'cpu')
+											)
+										: '-'
+								"
+								:unit="
+									item && item.requiredCpu
+										? getSuitableUnit(item.requiredCpu, 'cpu')
+										: '-'
+								"
+							/>
+							<install-configuration
+								:name="t('detail.require_gpu')"
+								:data="
+									item && item.requiredGpu
+										? getValueByUnit(
+												item.requiredGpu,
+												getSuitableUnit(item.requiredGpu, 'memory')
+											)
+										: '-'
+								"
+								:unit="
+									item && item.requiredGpu
+										? getSuitableUnit(item.requiredGpu, 'memory')
+										: '-'
+								"
+								:last="true"
+							/>
+						</div>
+					</div>
 
-							<app-intro-card :title="t('detail.get_a_client')" class="q-mt-lg">
-								<template
-									v-slot:content
-									v-if="
-										item.supportClient.ios ||
-										item.supportClient.android ||
-										item.supportClient.edge ||
-										item.supportClient.windows ||
-										item.supportClient.mac ||
-										item.supportClient.chrome ||
-										item.supportClient.linux
-									"
+					<div
+						class="full-width column"
+						:class="
+							$q.dark.isActive
+								? 'app-detail-bottom-dark'
+								: 'app-detail-bottom-light'
+						"
+						style="padding-bottom: 56px"
+					>
+						<app-store-swiper
+							v-if="item && item.promoteImage"
+							:data-array="item && item.promoteImage ? item.promoteImage : []"
+							show-size="3,3,2"
+							style="margin-bottom: 20px"
+						>
+							<template v-slot:swiper="{ item, index }">
+								<q-img
+									@click="showImage(index)"
+									class="promote-img"
+									ratio="1.6"
+									:src="item"
 								>
-									<div class="row">
-										<support-client
-											:value="item.supportClient.android"
-											:type="CLIENT_TYPE.android"
-										/>
-										<support-client
-											:value="item.supportClient.ios"
-											:type="CLIENT_TYPE.ios"
-											class="q-mt-lg"
-										/>
-										<support-client
-											:value="item.supportClient.mac"
-											:type="CLIENT_TYPE.mac"
-											class="q-mt-lg"
-										/>
-										<support-client
-											:value="item.supportClient.windows"
-											:type="CLIENT_TYPE.windows"
-											class="q-mt-lg"
-										/>
-										<support-client
-											:value="item.supportClient.chrome"
-											:type="CLIENT_TYPE.chrome"
-											class="q-mt-lg"
-										/>
-										<support-client
-											:value="item.supportClient.edge"
-											:type="CLIENT_TYPE.edge"
-											class="q-mt-lg"
-										/>
-										<support-client
-											:value="item.supportClient.linux"
-											:type="CLIENT_TYPE.linux"
-											class="q-mt-lg"
-										/>
-									</div>
-								</template>
-							</app-intro-card>
-
-							<app-intro-card
-								v-if="dependencies.length > 0"
-								class="q-mt-lg"
-								:title="t('detail.dependency')"
-							>
-								<template v-slot:content>
-									<template :key="app.name" v-for="app in dependencies">
-										<app-small-card :item="app" :is-last-line="true" />
+									<template v-slot:loading>
+										<q-skeleton class="promote-img" style="height: 100%" />
 									</template>
-								</template>
-							</app-intro-card>
+								</q-img>
+							</template>
+						</app-store-swiper>
 
-							<app-intro-card
-								v-if="references.length > 0"
-								class="q-mt-lg"
-								:title="t('detail.reference_app')"
-							>
-								<template v-slot:content>
-									<template :key="app.name" v-for="app in references">
-										<app-small-card :item="app" :is-last-line="true" />
+						<div
+							v-if="item"
+							class="app-details-padding bottom-layout row justify-between"
+						>
+							<div class="column" style="width: calc(70% - 10px)">
+								<app-intro-card
+									:title="
+										t('detail.about_this_type', {
+											type: cfgType?.toUpperCase()
+										})
+									"
+									:description="item.fullDescription"
+								/>
+
+								<app-intro-card
+									class="q-mt-lg"
+									:title="t('detail.whats_new')"
+									:description="item.upgradeDescription"
+								/>
+
+								<app-intro-card
+									v-if="requiredPermissions(cfgType)"
+									class="q-mt-lg"
+									:title="t('detail.required_permissions')"
+								>
+									<template v-slot:content>
+										<div class="permission-request-grid column justify-start">
+											<permission-request
+												v-if="item.permission"
+												name="sym_r_article"
+												:title="t('permission.files')"
+												:nodes="filePermissionData"
+											/>
+											<permission-request
+												name="sym_r_language"
+												:title="t('permission.internet')"
+												:nodes="[
+													{
+														label: t('permission.internet_label'),
+														children: [{ label: t('permission.internet_desc') }]
+													}
+												]"
+											/>
+											<permission-request
+												name="sym_r_read_more"
+												:title="t('permission.entrance')"
+												:nodes="entrancePermissionData"
+											/>
+											<permission-request
+												v-if="notificationPermission"
+												name="sym_r_notifications"
+												:title="t('permission.notifications')"
+												:nodes="[
+													{
+														label: t('permission.notifications_label'),
+														children: [
+															{ label: t('permission.notifications_desc') }
+														]
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="
+													item &&
+													item.options &&
+													item.options.analytics &&
+													item.options.analytics.enable
+												"
+												name="sym_r_bar_chart_4_bars"
+												:title="t('permission.analytics')"
+												:nodes="[
+													{
+														label: t('permission.analytics_label'),
+														children: [
+															{ label: t('permission.analytics_desc') }
+														]
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="item && item.options && item.options.websocket"
+												name="sym_r_captive_portal"
+												:title="t('permission.websocket')"
+												:nodes="[
+													{
+														label: t('permission.websocket_label'),
+														children: [
+															{ label: t('permission.websocket_desc') }
+														]
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="secretPermission"
+												class="q-mt-lg"
+												name="sym_r_lock_open"
+												:title="t('permission.secret')"
+												:nodes="[
+													{
+														label: t('permission.secret_label'),
+														children: [{ label: t('permission.secret_desc') }]
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="knowledgeBasePermission"
+												name="sym_r_cognition"
+												:title="t('permission.knowledgebase')"
+												:nodes="[
+													{
+														label: t('permission.knowledgebase_label'),
+														children: [
+															{ label: t('permission.knowledgebase_desc') }
+														]
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="
+													item && item.middleware && item.middleware.ZincSearch
+												"
+												class="q-mt-lg"
+												name="sym_r_search"
+												:title="t('base.search')"
+												:nodes="[
+													{
+														label: t('permission.search_label')
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="
+													item && item.middleware && item.middleware.Postgres
+												"
+												name="sym_r_animation"
+												:title="t('permission.relational_database')"
+												:nodes="[
+													{
+														label: t('permission.relational_database_label'),
+														children: [
+															{
+																label: t('permission.relational_database_desc')
+															}
+														]
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="
+													item && item.middleware && item.middleware.MongoDB
+												"
+												name="sym_r_edit_document"
+												:title="t('permission.document_database')"
+												:nodes="[
+													{
+														label: t('permission.document_database_label'),
+														children: [
+															{ label: t('permission.document_database_desc') }
+														]
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="item && item.middleware && item.middleware.Redis"
+												name="sym_r_commit"
+												:title="t('permission.key_value_database')"
+												:nodes="[
+													{
+														label: t('permission.key_value_database_label'),
+														children: [
+															{ label: t('permission.key_value_database_desc') }
+														]
+													}
+												]"
+											/>
+
+											<permission-request
+												v-if="
+													item &&
+													item.options &&
+													item.options.appScope &&
+													item.options.appScope.clusterScoped
+												"
+												name="sym_r_lan"
+												:title="t('base.cluster_app')"
+												:nodes="[
+													{
+														label: t('permission.cluster_app_label')
+													}
+												]"
+											/>
+										</div>
 									</template>
-								</template>
-							</app-intro-card>
+								</app-intro-card>
+
+								<app-intro-card
+									v-if="readMeHtml && item"
+									class="q-mt-lg"
+									style="width: 100%"
+									:title="t('detail.readme')"
+								>
+									<template v-slot:content>
+										<div
+											style="width: 100%; max-width: 1086px"
+											id="readMe"
+											v-html="readMeHtml"
+										/>
+									</template>
+								</app-intro-card>
+							</div>
+
+							<div
+								class="column justify-start items-start"
+								style="width: calc(30% - 10px)"
+							>
+								<app-intro-card :title="t('detail.information')">
+									<template v-slot:content>
+										<app-intro-item
+											:title="t('detail.get_support')"
+											:link-array="getDocuments()"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('detail.website')"
+											:link-array="getWebsite()"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('detail.app_version')"
+											:content="item.versionName"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('base.category')"
+											separator=" · "
+											:content-array="item.categories"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('base.developer')"
+											:content="item.developer"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('base.submitter')"
+											:content="item.submitter"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('base.language')"
+											:content-array="
+												item.language
+													? convertLanguageCodesToNames(item.language)
+													: ''
+											"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('detail.compatibility')"
+											:content="compatible"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('detail.platforms')"
+											:content-array="item.supportArch"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('detail.legal')"
+											:link-array="
+												item.legal && item.legal.length && item.legal[0]
+													? [item.legal[0]]
+													: []
+											"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('detail.license')"
+											:link-array="
+												item.license &&
+												item.license.length > 0 &&
+												item.license[0]
+													? [item.license[0]]
+													: []
+											"
+										/>
+										<app-intro-item
+											v-if="item.sourceCode"
+											class="q-mt-lg"
+											:title="t('detail.source_code')"
+											:link-array="[
+												{
+													text: t('detail.public'),
+													url: item.sourceCode
+												}
+											]"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('detail.chart_version')"
+											:content="item.version"
+										/>
+										<app-intro-item
+											class="q-mt-lg"
+											:title="t('detail.version_history')"
+											@on-link-click="goVersionHistory"
+											link="See all version"
+										/>
+									</template>
+								</app-intro-card>
+
+								<app-intro-card
+									:title="t('detail.get_a_client')"
+									class="q-mt-lg"
+								>
+									<template
+										v-slot:content
+										v-if="
+											item.supportClient.ios ||
+											item.supportClient.android ||
+											item.supportClient.edge ||
+											item.supportClient.windows ||
+											item.supportClient.mac ||
+											item.supportClient.chrome ||
+											item.supportClient.linux
+										"
+									>
+										<div class="row">
+											<support-client
+												:value="item.supportClient.android"
+												:type="CLIENT_TYPE.android"
+											/>
+											<support-client
+												:value="item.supportClient.ios"
+												:type="CLIENT_TYPE.ios"
+												class="q-mt-lg"
+											/>
+											<support-client
+												:value="item.supportClient.mac"
+												:type="CLIENT_TYPE.mac"
+												class="q-mt-lg"
+											/>
+											<support-client
+												:value="item.supportClient.windows"
+												:type="CLIENT_TYPE.windows"
+												class="q-mt-lg"
+											/>
+											<support-client
+												:value="item.supportClient.chrome"
+												:type="CLIENT_TYPE.chrome"
+												class="q-mt-lg"
+											/>
+											<support-client
+												:value="item.supportClient.edge"
+												:type="CLIENT_TYPE.edge"
+												class="q-mt-lg"
+											/>
+											<support-client
+												:value="item.supportClient.linux"
+												:type="CLIENT_TYPE.linux"
+												class="q-mt-lg"
+											/>
+										</div>
+									</template>
+								</app-intro-card>
+
+								<app-intro-card
+									v-if="dependencies.length > 0"
+									class="q-mt-lg"
+									:title="t('detail.dependency')"
+								>
+									<template v-slot:content>
+										<template :key="app.name" v-for="app in dependencies">
+											<app-small-card :item="app" :is-last-line="true" />
+										</template>
+									</template>
+								</app-intro-card>
+
+								<app-intro-card
+									v-if="references.length > 0"
+									class="q-mt-lg"
+									:title="t('detail.reference_app')"
+								>
+									<template v-slot:content>
+										<template :key="app.name" v-for="app in references">
+											<app-small-card :item="app" :is-last-line="true" />
+										</template>
+									</template>
+								</app-intro-card>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -1093,7 +1129,6 @@ const clickReturn = () => {
 	height: 100%;
 
 	.app-detail-page {
-		padding-bottom: 56px;
 		width: 100%;
 		height: 100%;
 		position: relative;
@@ -1157,5 +1192,21 @@ const clickReturn = () => {
 			width: 100%;
 		}
 	}
+}
+
+.app-detail-top-dark {
+	background: linear-gradient(175.85deg, #1f1f1f 3.38%, #12191d 96.62%);
+}
+
+.app-detail-bottom-dark {
+	background: rgba(18, 25, 29, 1);
+}
+
+.app-detail-top-light {
+	background: linear-gradient(175.85deg, #ffffff 3.38%, #f1f9ff 96.62%);
+}
+
+.app-detail-bottom-light {
+	background: rgba(241, 249, 255, 1);
 }
 </style>
