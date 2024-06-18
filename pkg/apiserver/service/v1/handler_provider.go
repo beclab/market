@@ -85,7 +85,7 @@ func (h *Handler) _installApp(resp *restful.Response, token string, opt *models.
 
 	//need parse info from chart?
 	go h.watchDogManager.NewWatchDog(watchdog.OP_INSTALL,
-		opt.App, uid, token, opt.Source, nil).
+		opt.App, uid, token, opt.Source, constants.AppType, nil).
 		Exec()
 
 	err = resp.WriteEntity(data)
@@ -162,7 +162,7 @@ func (h *Handler) _uninstallApp(resp *restful.Response, name, token string) {
 	uid := uidData["uid"].(string)
 
 	go h.watchDogManager.NewWatchDog(watchdog.OP_UNINSTALL,
-		name, uid, token, "", nil).
+		name, uid, token, "", constants.AppType, nil).
 		Exec()
 
 	err = resp.WriteEntity(data)

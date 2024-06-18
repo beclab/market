@@ -54,6 +54,18 @@ func (h *Handler) operate(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
+	if ty == constants.MiddlewareType {
+		resBody, _, err := appservice.MiddlewareOperate(appName, token)
+		if err != nil {
+			glog.Warningf("appservice.MiddlewareOperate %s resp:%s, err:%s", appName, resBody, err.Error())
+			api.HandleError(resp, err)
+			return
+		}
+
+		respJsonWithOriginBody(resp, resBody)
+		return
+	}
+
 	if ty == constants.RecommendType {
 		return
 	}
@@ -88,6 +100,17 @@ func (h *Handler) operateList(req *restful.Request, resp *restful.Response) {
 		resBody, _, err := appservice.LlmOperateList(token)
 		if err != nil {
 			glog.Warningf("appservice.LlmOperateList resp:%s, err:%s", resBody, err.Error())
+			api.HandleError(resp, err)
+			return
+		}
+
+		respJsonWithOriginBody(resp, resBody)
+		return
+	}
+	if ty == constants.MiddlewareType {
+		resBody, _, err := appservice.MiddlewareOperateList(token)
+		if err != nil {
+			glog.Warningf("appservice.MiddlewareOperateList resp:%s, err:%s", resBody, err.Error())
 			api.HandleError(resp, err)
 			return
 		}
