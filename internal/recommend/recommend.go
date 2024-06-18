@@ -42,6 +42,7 @@ func Upgrade(name, version, source, token string) (string, error) {
 	upgradeInfo := &models.UpgradeOptions{
 		RepoURL: utils.GetRepoUrl(),
 		Version: version,
+		Source:  source,
 	}
 	ms, err := json.Marshal(upgradeInfo)
 	if err != nil {
@@ -64,49 +65,4 @@ func StatusList(token string) (string, error) {
 	url := fmt.Sprintf(constants.RecommendServiceUpgradeStatusListURLTempl, host, port)
 
 	return utils.SendHttpRequestWithToken(http.MethodGet, url, token, nil)
-}
-
-func ParseWorkflowsList(str string) (apps []*StatusData, err error) {
-	var resp StatusListResp
-	err = json.Unmarshal([]byte(str), &resp)
-	if err != nil {
-		glog.Warningf("json.Unmarshal %s, err:%s", str, err.Error())
-		return
-	}
-
-	for _, app := range resp.Data {
-		if app.ResourceStatus == "notfound" {
-			continue
-		}
-		apps = append(apps, app)
-	}
-
-	return
-}
-
-func ParseWorkflowsListToMap(str string) (workflowMap map[string]*StatusData, err error) {
-	var workflows []*StatusData
-	workflows, err = ParseWorkflowsList(str)
-	if err != nil {
-		return
-	}
-
-	fmt.Printf("workflows:%v\n", workflows)
-
-	workflowMap = make(map[string]*StatusData)
-	for _, w := range workflows {
-		workflowMap[w.Metadata.Name] = w
-	}
-
-	fmt.Printf("workflowMap:%v\n", workflowMap)
-	return
-}
-
-func ConvertWorkflowsListToMap(workflows []*StatusData) (workflowMap map[string]*StatusData) {
-	workflowMap = make(map[string]*StatusData)
-	for _, w := range workflows {
-		workflowMap[w.Metadata.Name] = w
-	}
-
-	return
 }
