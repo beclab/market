@@ -103,18 +103,6 @@ export const useAppStore = defineStore('app', {
 			delete this.tempAppMap[name];
 		},
 
-		//temp function
-		async addDevApplication(name: string) {
-			const app = await getApp(name);
-			if (
-				app &&
-				app.source === SOURCE_TYPE.Development &&
-				app.cfgType === CFG_TYPE.WORK_FLOW
-			) {
-				this.installApps.unshift(app);
-			}
-		},
-
 		async installApp(app: AppStoreInfo, isDev: boolean) {
 			app.status = APP_STATUS.pending;
 			app.source = isDev ? SOURCE_TYPE.Development : SOURCE_TYPE.Market;
@@ -207,6 +195,7 @@ export const useAppStore = defineStore('app', {
 						break;
 					case CFG_TYPE.MIDDLEWARE:
 						this._handleMiddlewareStatus(app, operation, op_status);
+						break;
 				}
 			};
 

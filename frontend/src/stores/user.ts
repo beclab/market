@@ -3,6 +3,7 @@ import {
 	APP_STATUS,
 	AppStoreInfo,
 	DEPENDENCIES_TYPE,
+	Dependency,
 	ROLE_TYPE,
 	TerminusResource,
 	User,
@@ -18,6 +19,7 @@ import {
 } from 'src/api/private/user';
 import { i18n } from 'src/boot/i18n';
 import { TerminusApp } from '@bytetrade/core';
+import { CFG_TYPE } from 'src/constants/config';
 
 export type UserState = {
 	userResource: UserResource | null;
@@ -73,7 +75,14 @@ export const useUserStore = defineStore('userStore', {
 			const terminus = this._terminusOSVersionPreflight(app);
 			const userResource = this._userResourcePreflight(app);
 			const systemResource = this._systemResourcePreflight(app);
-			if (role && terminus && userResource && systemResource) {
+			const appDependencies = this._appDependenciesPreflight(app);
+			if (
+				role &&
+				terminus &&
+				userResource &&
+				systemResource &&
+				appDependencies
+			) {
 				app.status = status;
 			} else {
 				app.status = APP_STATUS.preflightFailed;
@@ -102,6 +111,22 @@ export const useUserStore = defineStore('userStore', {
 				app.preflightError.push(i18n.global.t('error.failed_get_user_role'));
 				return false;
 			}
+
+			if (app.onlyAdmin && this.user.role !== ROLE_TYPE.Admin) {
+				app.preflightError.push(
+					i18n.global.t('error.only_be_installed_by_the_admin')
+				);
+				return false;
+			}
+			if (
+				app.cfgType === CFG_TYPE.MIDDLEWARE &&
+				this.user.role !== ROLE_TYPE.Admin
+			) {
+				app.preflightError.push(
+					i18n.global.t('error.not_admin_role_install_middleware')
+				);
+				return false;
+			}
 			if (
 				app.options &&
 				app.options.appScope &&
@@ -112,9 +137,8 @@ export const useUserStore = defineStore('userStore', {
 					i18n.global.t('error.not_admin_role_install_cluster_app')
 				);
 				return false;
-			} else {
-				return true;
 			}
+			return true;
 		},
 
 		_terminusOSVersionPreflight(app: AppStoreInfo): boolean {
@@ -209,6 +233,43 @@ export const useUserStore = defineStore('userStore', {
 				isOK = false;
 			}
 			return isOK;
+		},
+
+		_appDependenciesPreflight(app: AppStoreInfo): boolean {
+			if (
+				app.options &&
+				app.options.dependencies &&
+				app.options.dependencies.length > 0
+			) {
+				const nameList = this.myApps.map((item) => item.name);
+				if (
+					this.systemResource &&
+					this.systemResource.apps &&
+					this.systemResource.apps.length > 0
+				) {
+					this.systemResource.apps.forEach((app: Dependency) => {
+						nameList.push(app.name);
+					});
+				}
+				console.log(nameList);
+
+				for (let i = 0; i < app.options.dependencies.length; i++) {
+					const appInfo = app.options.dependencies[i];
+					if (
+						appInfo.type === DEPENDENCIES_TYPE.application ||
+						appInfo.type === DEPENDENCIES_TYPE.middleware
+					) {
+						console.log(appInfo.name);
+						if (!nameList.includes(appInfo.name)) {
+							app.preflightError.push(
+								i18n.global.t('error.need_to_install_dependent_app_first')
+							);
+							return false;
+						}
+					}
+				}
+			}
+			return true;
 		},
 
 		_systemResourcePreflight(app: AppStoreInfo): boolean {

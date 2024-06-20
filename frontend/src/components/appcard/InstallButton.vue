@@ -166,8 +166,8 @@ const hoverRef = ref(false);
 const textColor = ref<string>();
 const backgroundColor = ref<string>();
 const border = ref<string>();
-let hasCheck = false;
 const { t } = useI18n();
+let hasCheck = false;
 
 const showDropMenu = computed(() => {
 	return (
@@ -177,7 +177,6 @@ const showDropMenu = computed(() => {
 			props.item.status === APP_STATUS.installed)
 	);
 });
-
 const { color: blueDefault } = useColor('blue-default');
 const { color: grey } = useColor('background-3');
 const { color: ink3 } = useColor('ink-3');
