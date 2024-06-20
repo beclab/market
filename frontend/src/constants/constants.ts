@@ -36,6 +36,8 @@ export interface AppStoreInfo {
 	requiredCpu: string;
 	rating: number;
 	target: string;
+	namespace: string;
+	onlyAdmin: boolean;
 	permission: {
 		appData: boolean;
 		appCache: boolean;
@@ -50,6 +52,7 @@ export interface AppStoreInfo {
 		ZincSearch: MiddleWareCfg;
 	};
 	options: {
+		mobileSupported: boolean;
 		analytics: {
 			enable: boolean;
 		};
@@ -172,6 +175,7 @@ export interface UserResource {
 }
 
 export interface TerminusResource {
+	apps: Dependency[];
 	metrics: {
 		cpu: Resource;
 		memory: Resource;
