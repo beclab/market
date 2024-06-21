@@ -20,7 +20,7 @@ import {
 import { i18n } from 'src/boot/i18n';
 import { TerminusApp } from '@bytetrade/core';
 import { CFG_TYPE } from 'src/constants/config';
-import { bus, BUS_EVENT } from '/@/utils/bus';
+import { bus, BUS_EVENT } from 'src/utils/bus';
 
 export type UserState = {
 	userResource: UserResource | null;
