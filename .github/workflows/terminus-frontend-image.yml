@@ -69,7 +69,7 @@ jobs:
             - name: Build and push
               uses: docker/build-push-action@v3
               with:
-                context: ./frontend
+                context: .
                 file: Dockerfile.frontend
                 push: true
                 tags: beclab/market-frontend:${{ steps.get-latest-tag.outputs.tag }}
