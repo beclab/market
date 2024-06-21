@@ -20,6 +20,7 @@ import {
 import { i18n } from 'src/boot/i18n';
 import { TerminusApp } from '@bytetrade/core';
 import { CFG_TYPE } from 'src/constants/config';
+import { bus, BUS_EVENT } from '/@/utils/bus';
 
 export type UserState = {
 	userResource: UserResource | null;
@@ -28,6 +29,7 @@ export type UserState = {
 	initialized: boolean;
 	myApps: TerminusApp[];
 	osVersion: string | null;
+	dependencies: Record<string, AppStoreInfo[]>;
 };
 
 export const useUserStore = defineStore('userStore', {
@@ -38,7 +40,8 @@ export const useUserStore = defineStore('userStore', {
 			user: null,
 			initialized: false,
 			myApps: [],
-			osVersion: null
+			osVersion: null,
+			dependencies: {}
 		} as UserState;
 	},
 
@@ -254,13 +257,14 @@ export const useUserStore = defineStore('userStore', {
 				console.log(nameList);
 
 				for (let i = 0; i < app.options.dependencies.length; i++) {
-					const appInfo = app.options.dependencies[i];
+					const dependency = app.options.dependencies[i];
 					if (
-						appInfo.type === DEPENDENCIES_TYPE.application ||
-						appInfo.type === DEPENDENCIES_TYPE.middleware
+						dependency.type === DEPENDENCIES_TYPE.application ||
+						dependency.type === DEPENDENCIES_TYPE.middleware
 					) {
-						console.log(appInfo.name);
-						if (!nameList.includes(appInfo.name)) {
+						this._saveDependencies(app, dependency);
+
+						if (!nameList.includes(dependency.name)) {
 							app.preflightError.push(
 								i18n.global.t('error.need_to_install_dependent_app_first')
 							);
@@ -270,6 +274,28 @@ export const useUserStore = defineStore('userStore', {
 				}
 			}
 			return true;
+		},
+
+		_saveDependencies(app: AppStoreInfo, dependency: Dependency) {
+			const list = this.dependencies[dependency.name];
+			if (list) {
+				const find = list.find((item) => item.name === app.name);
+				if (!find) {
+					list.push(app);
+				}
+			} else {
+				this.dependencies[dependency.name] = [app];
+			}
+		},
+
+		notifyDependencies(app: AppStoreInfo) {
+			const list = this.dependencies[app.name];
+			if (list) {
+				const find = list.find((item) => item.name === app.name);
+				if (find) {
+					bus.emit(BUS_EVENT.UPDATE_APP_DEPENDENCIES);
+				}
+			}
 		},
 
 		_systemResourcePreflight(app: AppStoreInfo): boolean {

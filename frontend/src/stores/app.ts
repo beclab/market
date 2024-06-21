@@ -652,6 +652,7 @@ export const useAppStore = defineStore('app', {
 				const store = useUserStore();
 				this.loadApps();
 				store.loadLocalResourceData();
+				store.notifyDependencies(app);
 			}
 		},
 
