@@ -51,6 +51,6 @@ jobs:
               with:
                   push: true
                   tags: beclab/market-backend:${{ steps.get-latest-tag.outputs.tag }}
-                  file: Dockerfile
+                  file: Dockerfile.server
                   platforms: linux/amd64,linux/arm64
 

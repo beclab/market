@@ -70,7 +70,7 @@ jobs:
               uses: docker/build-push-action@v3
               with:
                 context: .
-                file: Dockerfile
+                file: frontend/Dockerfile.frontend
                 push: true
                 tags: beclab/market-frontend:${{ steps.get-latest-tag.outputs.tag }}
                 platforms: linux/amd64,linux/arm64
