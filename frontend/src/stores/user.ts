@@ -278,7 +278,6 @@ export const useUserStore = defineStore('userStore', {
 		_saveDependencies(app: AppStoreInfo, dependency: Dependency) {
 			const list = this.dependencies[dependency.name];
 			if (list) {
-
 				const find = list.find((item) => item === app.name);
 				if (!find) {
 					list.push(app.name);
