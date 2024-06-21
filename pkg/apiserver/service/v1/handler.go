@@ -405,6 +405,11 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 		getCommonStatus(info, middlewareMap)
 	}
 
+	if info.Status == models.AppUninstalled {
+		info = infoMarket
+		info.Status = models.AppUninstalled
+	}
+	
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, info))
 }
 

@@ -256,13 +256,14 @@ export const useUserStore = defineStore('userStore', {
 				}
 
 				for (let i = 0; i < app.options.dependencies.length; i++) {
-					const appInfo = app.options.dependencies[i];
+					const dependency = app.options.dependencies[i];
 					if (
-						appInfo.type === DEPENDENCIES_TYPE.application ||
-						appInfo.type === DEPENDENCIES_TYPE.middleware
+						dependency.type === DEPENDENCIES_TYPE.application ||
+						dependency.type === DEPENDENCIES_TYPE.middleware
 					) {
-						console.log(appInfo.name);
-						if (!nameList.includes(appInfo.name)) {
+						this._saveDependencies(app, dependency);
+
+						if (!nameList.includes(dependency.name)) {
 							app.preflightError.push(
 								i18n.global.t('error.need_to_install_dependent_app_first')
 							);
@@ -277,6 +278,7 @@ export const useUserStore = defineStore('userStore', {
 		_saveDependencies(app: AppStoreInfo, dependency: Dependency) {
 			const list = this.dependencies[dependency.name];
 			if (list) {
+
 				const find = list.find((item) => item === app.name);
 				if (!find) {
 					list.push(app.name);
