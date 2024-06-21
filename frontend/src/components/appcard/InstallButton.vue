@@ -114,7 +114,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, PropType, ref, watch } from 'vue';
+import { computed, onBeforeMount, onMounted, PropType, ref, watch } from 'vue';
 import { APP_STATUS, AppStoreInfo } from 'src/constants/constants';
 import { useAppStore } from 'src/stores/app';
 import { openApplication } from 'src/api/private/operations';
@@ -130,6 +130,7 @@ import {
 	canUnload,
 	canLoad
 } from 'src/constants/config';
+import { bus, BUS_EVENT } from 'src/utils/bus';
 
 const props = defineProps({
 	item: {
@@ -293,6 +294,21 @@ async function onUnload() {
 	}
 }
 
+const callBack = (name) => {
+	if (props.item && name && name === props.item.name) {
+		hasCheck = false;
+		updateUI();
+	}
+};
+
+onMounted(() => {
+	bus.on(BUS_EVENT.UPDATE_APP_DEPENDENCIES, callBack);
+});
+
+onBeforeMount(() => {
+	bus.off(BUS_EVENT.UPDATE_APP_DEPENDENCIES, callBack);
+});
+
 async function onUninstall() {
 	if (!props.item) {
 		return;
@@ -365,6 +381,10 @@ function updateUI() {
 			textColor.value = ink3.value;
 			backgroundColor.value = grey.value;
 			border.value = '1px solid transparent';
+			if (!hasCheck && userStore.initialized) {
+				userStore.frontendPreflight(props.item, APP_STATUS.uninstalled);
+				hasCheck = true;
+			}
 			break;
 		case APP_STATUS.uninstalled:
 			status.value = t('app.get');

@@ -650,8 +650,11 @@ export const useAppStore = defineStore('app', {
 
 			if (refresh) {
 				const store = useUserStore();
-				this.loadApps();
-				store.loadLocalResourceData();
+				Promise.all([this.loadApps(), store.loadLocalResourceData()]).then(
+					() => {
+						store.notifyDependencies(app);
+					}
+				);
 			}
 		},
 

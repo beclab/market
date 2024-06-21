@@ -20,6 +20,7 @@ import {
 import { i18n } from 'src/boot/i18n';
 import { TerminusApp } from '@bytetrade/core';
 import { CFG_TYPE } from 'src/constants/config';
+import { bus, BUS_EVENT } from 'src/utils/bus';
 
 export type UserState = {
 	userResource: UserResource | null;
@@ -28,6 +29,7 @@ export type UserState = {
 	initialized: boolean;
 	myApps: TerminusApp[];
 	osVersion: string | null;
+	dependencies: Record<string, string[]>;
 };
 
 export const useUserStore = defineStore('userStore', {
@@ -38,7 +40,8 @@ export const useUserStore = defineStore('userStore', {
 			user: null,
 			initialized: false,
 			myApps: [],
-			osVersion: null
+			osVersion: null,
+			dependencies: {}
 		} as UserState;
 	},
 
@@ -251,7 +254,6 @@ export const useUserStore = defineStore('userStore', {
 						nameList.push(app.name);
 					});
 				}
-				console.log(nameList);
 
 				for (let i = 0; i < app.options.dependencies.length; i++) {
 					const appInfo = app.options.dependencies[i];
@@ -270,6 +272,27 @@ export const useUserStore = defineStore('userStore', {
 				}
 			}
 			return true;
+		},
+
+		_saveDependencies(app: AppStoreInfo, dependency: Dependency) {
+			const list = this.dependencies[dependency.name];
+			if (list) {
+				const find = list.find((item) => item === app.name);
+				if (!find) {
+					list.push(app.name);
+				}
+			} else {
+				this.dependencies[dependency.name] = [app.name];
+			}
+		},
+
+		notifyDependencies(app: AppStoreInfo) {
+			const list = this.dependencies[app.name];
+			if (list) {
+				list.forEach((item) => {
+					bus.emit(BUS_EVENT.UPDATE_APP_DEPENDENCIES, item);
+				});
+			}
 		},
 
 		_systemResourcePreflight(app: AppStoreInfo): boolean {

@@ -165,27 +165,6 @@ module.exports = configure(function (/* ctx */) {
 		//   electronPreload: 'src-electron/electron-preload'
 		// },
 
-		// https://v2.quasar.dev/quasar-cli-vite/developing-ssr/configuring-ssr
-		ssr: {
-			// ssrPwaHtmlFilename: 'offline.html', // do NOT use index.html as name!
-			// will mess up SSR
-
-			// extendSSRWebserverConf (esbuildConf) {},
-			// extendPackageJson (json) {},
-
-			pwa: false,
-
-			// manualStoreHydration: true,
-			// manualPostHydrationTrigger: true,
-
-			prodPort: 3000, // The default port that the production server should use
-			// (gets superseded if process.env.PORT is specified at runtime)
-
-			middlewares: [
-				'render' // keep this as last one
-			]
-		},
-
 		// https://v2.quasar.dev/quasar-cli-vite/developing-pwa/configuring-pwa
 		pwa: {
 			workboxMode: 'generateSW', // or 'injectManifest'
