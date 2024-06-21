@@ -29,7 +29,7 @@ export type UserState = {
 	initialized: boolean;
 	myApps: TerminusApp[];
 	osVersion: string | null;
-	dependencies: Record<string, AppStoreInfo[]>;
+	dependencies: Record<string, string[]>;
 };
 
 export const useUserStore = defineStore('userStore', {
@@ -254,7 +254,6 @@ export const useUserStore = defineStore('userStore', {
 						nameList.push(app.name);
 					});
 				}
-				console.log(nameList);
 
 				for (let i = 0; i < app.options.dependencies.length; i++) {
 					const dependency = app.options.dependencies[i];
@@ -279,22 +278,22 @@ export const useUserStore = defineStore('userStore', {
 		_saveDependencies(app: AppStoreInfo, dependency: Dependency) {
 			const list = this.dependencies[dependency.name];
 			if (list) {
-				const find = list.find((item) => item.name === app.name);
+
+				const find = list.find((item) => item === app.name);
 				if (!find) {
-					list.push(app);
+					list.push(app.name);
 				}
 			} else {
-				this.dependencies[dependency.name] = [app];
+				this.dependencies[dependency.name] = [app.name];
 			}
 		},
 
 		notifyDependencies(app: AppStoreInfo) {
 			const list = this.dependencies[app.name];
 			if (list) {
-				const find = list.find((item) => item.name === app.name);
-				if (find) {
-					bus.emit(BUS_EVENT.UPDATE_APP_DEPENDENCIES);
-				}
+				list.forEach((item) => {
+					bus.emit(BUS_EVENT.UPDATE_APP_DEPENDENCIES, item);
+				});
 			}
 		},
 
