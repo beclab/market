@@ -1,4 +1,4 @@
-import { CFG_TYPE } from 'src/constants/constants';
+import { CFG_TYPE } from 'src/constants/config';
 import axios from 'axios';
 
 export async function installApp(app_name: string): Promise<any> {

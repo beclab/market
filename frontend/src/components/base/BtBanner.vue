@@ -57,7 +57,6 @@ const changeActive = (index: number) => {
 .banner-background {
 	width: 100%;
 	height: 100%;
-	background-color: $background;
 	position: relative;
 
 	.banner-carousel {
@@ -81,7 +80,7 @@ const changeActive = (index: number) => {
 		.navigation-active {
 			@extend .navigation-base;
 			width: 32px;
-			background-color: $background;
+			background-color: #ffffff;
 		}
 
 		.navigation-normal {

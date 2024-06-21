@@ -3,7 +3,7 @@
 		<template v-slot:page>
 			<div class="my-page-scroll">
 				<app-store-body
-					:title="i18n.t('main.my_terminus')"
+					:title="t('main.my_terminus')"
 					:title-separator="true"
 				/>
 
@@ -77,7 +77,7 @@ import { TRANSACTION_PAGE } from 'src/constants/constants';
 const tabArray = ref(['Market', 'Custom']);
 const selectedTab = ref('Market');
 const router = useRouter();
-const i18n = useI18n();
+const { t } = useI18n();
 const appStore = useAppStore();
 
 onMounted(async () => {
@@ -129,7 +129,7 @@ const goUpdatePage = () => {
 
 	.my-page-tabs {
 		border-radius: 8px;
-		border: 1px solid var(--Grey-02, #ebebeb);
+		border: 1px solid $separator;
 	}
 
 	.my-page-panels {

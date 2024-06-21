@@ -8,14 +8,12 @@
 			class="application_bar_return cursor-pointer"
 			v-if="showBack"
 			name="sym_r_arrow_back_ios_new"
+			color="ink-1"
 			size="20px"
 			@click="onReturn"
 		/>
 		<transition name="fade">
-			<div
-				v-if="showTitle"
-				class="header-title text-subtitle2 text-color-title"
-			>
+			<div v-if="showTitle" class="header-title text-subtitle2 text-ink-1">
 				{{ title }}
 			</div>
 		</transition>
@@ -67,7 +65,6 @@ const onReturn = () => {
 	height: 56px;
 	background: transparent;
 	text-align: center;
-	color: #0a0b27;
 	z-index: 9999;
 
 	.application_bar_return {

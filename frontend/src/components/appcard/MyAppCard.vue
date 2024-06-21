@@ -38,13 +38,18 @@
 		</app-featured-image>
 		<div class="my-application-info column justify-start items-start">
 			<div class="my-application-title-layout row justify-start items-center">
-				<div class="my-application-title">{{ item.title }}</div>
-				<div v-if="version" class="my-application-version">
+				<div class="my-application-title text-h6 text-ink-1">
+					{{ item.title }}
+				</div>
+				<div
+					v-if="version"
+					class="my-application-version text-caption text-blue-default"
+				>
 					{{ item.versionName }}
 				</div>
 			</div>
 
-			<div class="my-application-content">
+			<div class="my-application-content text-body3 text-ink-3">
 				{{ item.desc }}
 			</div>
 
@@ -70,7 +75,7 @@
 								? item.categories[0]
 								: item.subCategory
 						"
-						class="text-green-5"
+						class="text-positive"
 					/>
 					<app-tag
 						:label="
@@ -91,7 +96,7 @@
 								? item.categories[0]
 								: item.subCategory
 						"
-						class="text-green-5"
+						class="text-positive"
 					/>
 					<app-tag :label="item.modelSize" class="second-tag q-ml-sm" />
 				</div>
@@ -108,9 +113,9 @@
 						"
 						:class="
 							item.cfgType === CFG_TYPE.WORK_FLOW
-								? 'text-orange-6'
+								? 'text-orange-default'
 								: item.cfgType === CFG_TYPE.MODEL
-									? 'text-red-6'
+									? 'text-negative'
 									: ''
 						"
 					/>
@@ -120,7 +125,7 @@
 								? item.categories[0]
 								: item.subCategory
 						"
-						class="second-tag text-green-5 q-ml-sm"
+						class="second-tag text-positive q-ml-sm"
 					/>
 				</div>
 			</div>
@@ -132,7 +137,6 @@
 import { onMounted, PropType, ref } from 'vue';
 import {
 	AppStoreInfo,
-	CFG_TYPE,
 	SOURCE_TYPE,
 	TRANSACTION_PAGE
 } from 'src/constants/constants';
@@ -144,6 +148,7 @@ import AppIcon from 'components/appcard/AppIcon.vue';
 import AppTag from 'src/components/appcard/AppTag.vue';
 import { useI18n } from 'vue-i18n';
 import { convertLanguageCodeToName } from 'src/utils/utils';
+import { CFG_TYPE } from 'src/constants/config';
 
 const router = useRouter();
 const appStore = useAppStore();
@@ -238,43 +243,22 @@ function goAppDetails() {
 			margin-top: 12px;
 
 			.my-application-title {
-				font-family: Roboto;
-				font-size: 16px;
-				font-weight: 700;
-				line-height: 24px;
-				letter-spacing: 0;
-				text-align: left;
-				color: $title;
 				max-width: 70%;
 			}
 
 			.my-application-version {
-				font-family: Roboto;
-				font-size: 14px;
-				font-weight: 700;
-				line-height: 20px;
-				letter-spacing: 0;
-				text-align: left;
-				color: $blue;
 				max-width: 25%;
 				margin-left: 8px;
 			}
 		}
 
 		.my-application-content {
-			font-family: Roboto;
-			font-size: 12px;
-			font-weight: 400;
 			height: 32px;
-			line-height: 16px;
-			letter-spacing: 0;
-			text-align: left;
 			overflow: hidden;
 			text-overflow: ellipsis;
 			display: -webkit-box;
 			-webkit-line-clamp: 2;
 			-webkit-box-orient: vertical;
-			color: var(--Grey-05, #adadad);
 		}
 
 		.my-application-bottom-layout {

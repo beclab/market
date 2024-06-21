@@ -1,3 +1,5 @@
+import { CFG_TYPE } from 'src/constants/config';
+
 export interface AppStoreInfo {
 	id: string;
 	name: string;
@@ -34,6 +36,8 @@ export interface AppStoreInfo {
 	requiredCpu: string;
 	rating: number;
 	target: string;
+	namespace: string;
+	onlyAdmin: boolean;
 	permission: {
 		appData: boolean;
 		appCache: boolean;
@@ -48,6 +52,7 @@ export interface AppStoreInfo {
 		ZincSearch: MiddleWareCfg;
 	};
 	options: {
+		mobileSupported: boolean;
 		analytics: {
 			enable: boolean;
 		};
@@ -142,12 +147,6 @@ export interface PermissionNode {
 	children: PermissionNode[];
 }
 
-export enum CFG_TYPE {
-	APPLICATION = 'app',
-	WORK_FLOW = 'recommend',
-	MODEL = 'model'
-}
-
 export enum SOURCE_TYPE {
 	Market = 'market',
 	Development = 'custom'
@@ -176,6 +175,7 @@ export interface UserResource {
 }
 
 export interface TerminusResource {
+	apps: Dependency[];
 	metrics: {
 		cpu: Resource;
 		memory: Resource;
@@ -252,7 +252,8 @@ export const CATEGORIES_TYPE = {
 
 export enum DEPENDENCIES_TYPE {
 	application = 'application',
-	system = 'system'
+	system = 'system',
+	middleware = 'middleware'
 }
 
 export enum APP_STATUS {

@@ -67,14 +67,10 @@ export default {
 		require_disk: 'Require Disk',
 		require_cpu: 'Require CPU',
 		require_gpu: 'Require GPU',
-		about_this_app: 'ABOUT THIS APP',
-		about_this_recommend: 'ABOUT THIS RECOMMEND',
-		about_this_model: 'ABOUT THIS MODEL',
+		about_this_type: 'ABOUT THIS {type}',
 		whats_new: 'WHATS NEW',
 		required_permissions: 'REQUIRED PERMISSIONS',
-		recommend_card: 'RECOMMEND CARD',
-		app_card: 'APP CARD',
-		model_card: 'MODEL CARD',
+		readme: 'README',
 		information: 'INFORMATION',
 		get_support: 'Get Support',
 		website: 'Website',
@@ -166,6 +162,10 @@ export default {
 		network_error: 'Network error, please try again later',
 		unknown_error: 'Unknown error',
 		failed_get_user_role: 'Failed to get user role',
+		only_be_installed_by_the_admin:
+			'This app can only be installed by the Admin.',
+		not_admin_role_install_middleware:
+			'This is a middleware, please contact your Terminus Admin to install.',
 		not_admin_role_install_cluster_app:
 			'This is a cluster app, please contact your Terminus Admin to install.',
 		failed_to_get_os_version: 'Failed to get Terminus Version',
@@ -175,6 +175,7 @@ export default {
 		user_not_enough_cpu: 'Not enough required CPU on your quota.',
 		user_not_enough_memory: 'Not enough required memory on your quota.',
 		failed_to_get_system_resource: 'Failed to get system resource',
+		need_to_install_dependent_app_first: 'Need to install dependent app first.',
 		terminus_not_enough_cpu: 'Not enough required CPU on Terminus cluster.',
 		terminus_not_enough_memory:
 			'Not enough required memory on Terminus cluster.',

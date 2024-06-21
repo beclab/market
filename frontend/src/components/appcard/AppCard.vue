@@ -3,44 +3,40 @@
 		v-if="skeleton"
 		:class="larger ? 'application_single_larger' : 'application_single_normal'"
 		:style="{
-			borderBottom: isLastLine ? 'none' : '1px solid #EBEBEB',
-			'--iconSize':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '100px'
-						: '64px'
-					: larger
-						? '224px'
-						: '128px',
-			'--paddingLeft':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '12px'
-					: larger
-						? '32px'
-						: '20px',
-			'--paddingTop':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '20px'
-					: larger
-						? '8px'
-						: '0',
-			'--paddingBottom':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '20px'
-					: larger
-						? '8px'
-						: '0'
+			borderBottom: isLastLine ? 'none' : `1px solid ${separator}`,
+			'--iconSize': showIcon(type)
+				? larger
+					? '100px'
+					: '64px'
+				: larger
+					? '224px'
+					: '128px',
+			'--paddingLeft': showIcon(type)
+				? larger
+					? '20px'
+					: '12px'
+				: larger
+					? '32px'
+					: '20px',
+			'--paddingTop': showIcon(type)
+				? larger
+					? '20px'
+					: '20px'
+				: larger
+					? '8px'
+					: '0',
+			'--paddingBottom': showIcon(type)
+				? larger
+					? '20px'
+					: '20px'
+				: larger
+					? '8px'
+					: '0'
 		}"
 		class="row justify-between items-center"
 	>
 		<app-icon
-			v-if="type === CFG_TYPE.APPLICATION"
+			v-if="showIcon(type)"
 			:skeleton="true"
 			:size="larger ? 100 : 64"
 		/>
@@ -82,39 +78,35 @@
 				: 'application_single_normal cursor-pointer'
 		"
 		:style="{
-			borderBottom: isLastLine ? 'none' : '1px solid #EBEBEB',
-			'--iconSize':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '100px'
-						: '64px'
-					: larger
-						? '224px'
-						: '128px',
-			'--paddingLeft':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '12px'
-					: larger
-						? '32px'
-						: '20px',
-			'--paddingTop':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '20px'
-					: larger
-						? '8px'
-						: '0',
-			'--paddingBottom':
-				type === CFG_TYPE.APPLICATION
-					? larger
-						? '20px'
-						: '20px'
-					: larger
-						? '8px'
-						: '0'
+			borderBottom: isLastLine ? 'none' : `1px solid ${separator}`,
+			'--iconSize': showIcon(type)
+				? larger
+					? '100px'
+					: '64px'
+				: larger
+					? '224px'
+					: '128px',
+			'--paddingLeft': showIcon(type)
+				? larger
+					? '20px'
+					: '12px'
+				: larger
+					? '32px'
+					: '20px',
+			'--paddingTop': showIcon(type)
+				? larger
+					? '20px'
+					: '20px'
+				: larger
+					? '8px'
+					: '0',
+			'--paddingBottom': showIcon(type)
+				? larger
+					? '20px'
+					: '20px'
+				: larger
+					? '8px'
+					: '0'
 		}"
 		class="row justify-between items-center"
 		@click="goAppDetails"
@@ -122,7 +114,7 @@
 		@mouseleave="hoverRef = false"
 	>
 		<app-icon
-			v-if="type === CFG_TYPE.APPLICATION"
+			v-if="showIcon(type)"
 			:src="item.icon"
 			:size="larger ? 100 : 64"
 			:cs-app="clusterScopedApp"
@@ -136,13 +128,14 @@
 
 		<div class="application_right column justify-center items-start">
 			<div class="application_title_layout row justify-start items-baseline">
-				<div class="application_title">{{ item.title }}</div>
+				<div class="application_title text-ink-1">{{ item.title }}</div>
 				<div v-if="version" class="application_version">
 					{{ item.versionName }}
 				</div>
 			</div>
 
 			<div
+				class="text-ink-3"
 				:class="
 					appStore.isPublic
 						? 'application_content_public'
@@ -163,7 +156,10 @@
 					:is-update="isUpdate"
 					:manager="manager"
 				/>
-				<div v-if="clusterScopedApp" class="application_cluster_scoped">
+				<div
+					v-if="clusterScopedApp"
+					class="application_cluster_scoped text-ink-3"
+				>
 					Cluster-Scoped
 				</div>
 			</span>
@@ -179,17 +175,15 @@
 
 <script lang="ts" setup>
 import { onMounted, PropType, ref } from 'vue';
-import {
-	AppStoreInfo,
-	CFG_TYPE,
-	TRANSACTION_PAGE
-} from 'src/constants/constants';
+import { AppStoreInfo, TRANSACTION_PAGE } from 'src/constants/constants';
 import InstallButton from 'components/appcard/InstallButton.vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';
 import AppIcon from 'components/appcard/AppIcon.vue';
 import AppFeaturedImage from 'components/appcard/AppFeaturedImage.vue';
 import { useI18n } from 'vue-i18n';
+import { useColor } from '@bytetrade/ui';
+import { CFG_TYPE, showIcon } from 'src/constants/config';
 
 const router = useRouter();
 const appStore = useAppStore();
@@ -242,6 +236,7 @@ const props = defineProps({
 });
 
 const clusterScopedApp = ref(false);
+const { color: separator } = useColor('separator');
 
 onMounted(() => {
 	if (props.item && props.item.options && props.item.options.appScope) {
@@ -297,7 +292,6 @@ function goAppDetails() {
 				letter-spacing: 0;
 				text-align: left;
 				max-width: 70%;
-				color: $title;
 			}
 
 			.application_version {
@@ -325,22 +319,11 @@ function goAppDetails() {
 			display: -webkit-box;
 			-webkit-line-clamp: 1;
 			-webkit-box-orient: vertical;
-			color: $prompt-message;
 		}
 
 		.application_content_public {
-			font-family: Roboto;
-			font-size: 12px;
-			font-weight: 400;
-			line-height: 16px;
-			letter-spacing: 0em;
-			text-align: left;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			display: -webkit-box;
-			-webkit-line-clamp: 2;
-			-webkit-box-orient: vertical;
-			color: $prompt-message;
+			@extend .application_content;
+			-webkit-line-clamp: 1;
 		}
 
 		.application_btn {
@@ -355,7 +338,6 @@ function goAppDetails() {
 				line-height: 12px;
 				letter-spacing: 0em;
 				text-align: left;
-				color: var(--Grey-05, #adadad);
 				text-overflow: ellipsis;
 				white-space: nowrap;
 				overflow: hidden;
@@ -390,7 +372,6 @@ function goAppDetails() {
 				line-height: 28px;
 				letter-spacing: 0em;
 				text-align: left;
-				color: $title;
 				max-width: 70%;
 			}
 
@@ -401,7 +382,6 @@ function goAppDetails() {
 				line-height: 20px;
 				letter-spacing: 0em;
 				text-align: left;
-				color: $blue;
 				max-width: 25%;
 				margin-left: 8px;
 			}
@@ -419,7 +399,6 @@ function goAppDetails() {
 			display: -webkit-box;
 			-webkit-line-clamp: 2;
 			-webkit-box-orient: vertical;
-			color: $prompt-message;
 		}
 
 		.application_btn {
@@ -437,7 +416,6 @@ function goAppDetails() {
 				line-height: 12px;
 				letter-spacing: 0em;
 				text-align: left;
-				color: var(--Grey-05, #adadad);
 			}
 		}
 	}

@@ -16,12 +16,10 @@
 <script lang="ts" setup>
 import { ref } from 'vue';
 import { uploadDevFile } from 'src/api/private/operations';
-import { useAppStore } from 'src/stores/app';
 import { bus, BUS_EVENT } from 'src/utils/bus';
 
 const uploadInput = ref();
 const emit = defineEmits(['onSuccess']);
-const appStore = useAppStore();
 
 function openFileInput() {
 	//clear value before onclick
@@ -35,7 +33,6 @@ async function uploadFile(event: any) {
 	if (file) {
 		const { name, message } = await uploadDevFile(file);
 		if (name) {
-			appStore.addDevApplication(name);
 			emit('onSuccess');
 		} else {
 			bus.emit(BUS_EVENT.APP_BACKEND_ERROR, message);

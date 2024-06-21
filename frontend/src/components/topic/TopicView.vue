@@ -11,7 +11,7 @@
 		<q-skeleton width="200px" height="22px" style="margin-top: 2px" />
 		<q-skeleton width="180px" height="18px" style="margin-top: 2px" />
 	</div>
-	<div v-else class="column justify-start items-start" style="cursor: pointer">
+	<div v-else class="column justify-start items-start cursor-pointer">
 		<q-img
 			class="topic-item-img"
 			:src="item.iconimg ? item.iconimg : '../appIntro.svg'"
@@ -22,9 +22,13 @@
 				<q-skeleton class="topic-item-img" />
 			</template>
 		</q-img>
-		<span class="topic-item-desc">{{ item.des }}</span>
-		<span class="topic-item-name">{{ item.name }}</span>
-		<span class="topic-item-introduction">{{ item.introduction }}</span>
+		<span class="topic-item-overflow text-ink-3 text-caption q-mt-md">{{
+			item.des
+		}}</span>
+		<span class="topic-item-overflow text-ink-1 text-h6">{{ item.name }}</span>
+		<span class="topic-item-overflow text-ink-3 text-body2">{{
+			item.introduction
+		}}</span>
 	</div>
 </template>
 
@@ -65,54 +69,11 @@ defineProps({
 	height: 100%;
 }
 
-.topic-item-desc {
-	font-family: Roboto;
-	font-size: 10px;
-	font-weight: 500;
-	line-height: 12px;
-	letter-spacing: 0em;
-	text-align: left;
-	margin-top: 12px;
-	height: auto;
-	width: auto;
-	font-style: normal;
-	color: var(--Grey-05, #adadad);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	display: -webkit-box;
-	-webkit-line-clamp: 1;
-	-webkit-box-orient: vertical;
-}
-
-.topic-item-name {
-	font-family: Roboto;
-	font-size: 16px;
-	font-weight: 700;
-	line-height: 24px;
-	letter-spacing: 0em;
+.topic-item-overflow {
 	text-align: left;
 	height: auto;
 	width: auto;
 	font-style: normal;
-	color: $title;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	display: -webkit-box;
-	-webkit-line-clamp: 1;
-	-webkit-box-orient: vertical;
-}
-
-.topic-item-introduction {
-	font-family: Roboto;
-	font-size: 14px;
-	font-weight: 400;
-	line-height: 20px;
-	letter-spacing: 0em;
-	text-align: left;
-	height: auto;
-	width: auto;
-	font-style: normal;
-	color: var(--Grey-05, #adadad);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	display: -webkit-box;

@@ -69,12 +69,7 @@
 import { onMounted, ref } from 'vue';
 import AppStoreBody from 'src/components/base/AppStoreBody.vue';
 import MyAppCard from 'src/components/appcard/MyAppCard.vue';
-import {
-	AppStoreInfo,
-	CATEGORIES_TYPE,
-	CFG_TYPE
-} from 'src/constants/constants';
-import { useRoute } from 'vue-router';
+import { AppStoreInfo, CATEGORIES_TYPE } from 'src/constants/constants';
 import { getRecommendApps } from 'src/api/storeApi';
 import PageContainer from 'src/components/base/PageContainer.vue';
 // import BtBanner from 'components/base/BtBanner.vue';
@@ -82,12 +77,10 @@ import PageContainer from 'src/components/base/PageContainer.vue';
 import { useAppStore } from 'src/stores/app';
 import AppCardGrid from 'components/appcard/AppCardGrid.vue';
 import { useI18n } from 'vue-i18n';
+import { CFG_TYPE } from 'src/constants/config';
 
-const route = useRoute();
 const latestApps = ref<AppStoreInfo[]>([]);
 const { t } = useI18n();
-
-// const categoryRef = ref(route.params.categories as string);
 
 const pageLoading = ref(true);
 const latestLoading = ref(true);

@@ -5,10 +5,14 @@
 		:style="{ '--paddingExcludeBody': `${paddingExcludeBody}px` }"
 	>
 		<div v-if="title" class="app-store-layout row justify-between items-center">
-			<div class="app-store-title">{{ title }}</div>
+			<div class="app-store-title text-h3 text-ink-1">{{ title }}</div>
 			<div class="column justify-between" style="height: 40px">
 				<div />
-				<div v-if="right" class="app-store-right" @click="onRightClick">
+				<div
+					v-if="right"
+					class="app-store-right text-subtitle2 text-info"
+					@click="onRightClick"
+				>
 					{{ right }}
 				</div>
 			</div>
@@ -18,8 +22,12 @@
 			class="app-store-layout row justify-between items-center"
 			:style="{ '--padding': noLabelPaddingBottom ? '0px' : '12px' }"
 		>
-			<div class="app-store-label">{{ label }}</div>
-			<div v-if="right" class="app-store-right" @click="onRightClick">
+			<div class="text-h4 text-ink-1">{{ label }}</div>
+			<div
+				v-if="right"
+				class="app-store-right text-subtitle2 text-info"
+				@click="onRightClick"
+			>
 				{{ right }}
 			</div>
 		</div>
@@ -98,7 +106,7 @@ const bodySlot = !!useSlots().body;
 
 	.app-store-separator {
 		width: calc(100% - var(--paddingExcludeBody) - var(--paddingExcludeBody));
-		background: #ebebeb;
+		background: $separator;
 		margin-left: var(--paddingExcludeBody);
 		margin-right: var(--paddingExcludeBody);
 		height: 1px;
@@ -111,36 +119,13 @@ const bodySlot = !!useSlots().body;
 		.app-store-title {
 			padding-left: var(--paddingExcludeBody);
 			padding-right: var(--paddingExcludeBody);
-			font-family: Roboto;
-			font-size: 32px;
-			font-weight: 700;
-			line-height: 40px;
-			letter-spacing: 0em;
-			text-align: left;
-			color: $title;
 			padding-bottom: 12px;
 		}
 
-		.app-store-label {
-			font-family: Roboto;
-			font-size: 24px;
-			font-weight: 600;
-			line-height: 32px;
-			letter-spacing: 0em;
-			text-align: left;
-			color: $title;
-		}
-
 		.app-store-right {
-			font-family: Roboto;
 			cursor: pointer;
 			text-decoration: none;
-			font-size: 14px;
-			font-weight: 500;
-			line-height: 20px;
-			letter-spacing: 0em;
 			text-align: right;
-			color: $blue;
 		}
 	}
 }

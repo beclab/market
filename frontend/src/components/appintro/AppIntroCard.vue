@@ -1,6 +1,11 @@
 <template>
-	<div class="app-intro-card-root" v-if="contentSlot || description">
-		<div class="app-intro-card-title">{{ title }}</div>
+	<div
+		class="app-intro-card-root bg-background-1"
+		v-if="contentSlot || description"
+	>
+		<div class="app-intro-card-title text-subtitle2 text-ink-1">
+			{{ title }}
+		</div>
 		<slot v-if="contentSlot" name="content" />
 		<expend-text-view :display-line="10" :text="description" />
 	</div>
@@ -31,17 +36,9 @@ const contentSlot = !!useSlots().content;
 	border-radius: 12px;
 	width: 100%;
 	height: auto;
-	background: white;
 	padding: 20px;
 
 	.app-intro-card-title {
-		font-family: Roboto;
-		font-size: 14px;
-		font-weight: 500;
-		line-height: 20px;
-		letter-spacing: 0;
-		text-align: left;
-		color: $title;
 		margin-bottom: 12px;
 		white-space: nowrap;
 		overflow: hidden;

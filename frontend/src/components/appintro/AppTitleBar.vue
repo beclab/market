@@ -9,7 +9,8 @@
 				<q-icon
 					class="application_bar_return cursor-pointer"
 					name="sym_r_arrow_back_ios_new"
-					size="20px"
+					size="20"
+					color="ink-1"
 					@click="clickReturn"
 				/>
 				<q-img v-if="showIcon" class="application_bar_img" :src="item.icon">
@@ -17,10 +18,10 @@
 						<q-skeleton width="32px" height="32px" />
 					</template>
 				</q-img>
-				<div class="application_bar_name text-color-title">
+				<div class="q-ml-md text-h5 text-ink-1">
 					{{ item.title }}
 				</div>
-				<div class="application_bar_version">{{ item.versionName }}</div>
+				<div class="q-ml-sm text-h6 text-ink-1">{{ item.versionName }}</div>
 			</div>
 			<install-button
 				v-if="showInstallBtn"
@@ -82,9 +83,9 @@ const clickReturn = () => {
 .application-details-bar {
 	height: 56px;
 	width: 100%;
-	background-color: white;
+	background-color: $background-2;
 	padding-right: 44px;
-	box-shadow: 0px 2px 4px 0px #0000001a;
+	box-shadow: 0 2px 4px 0 #0000001a;
 
 	.application_bar_return {
 		margin-left: 18px;
@@ -95,28 +96,7 @@ const clickReturn = () => {
 		height: 32px;
 		margin-left: 6px;
 		border-radius: 8px;
-		box-shadow: 0px 2px 4px 0px #0000001a;
-	}
-
-	.application_bar_name {
-		font-family: Roboto;
-		font-size: 16px;
-		font-weight: 500;
-		line-height: 24px;
-		letter-spacing: 0em;
-		text-align: left;
-		margin-left: 12px;
-	}
-
-	.application_bar_version {
-		font-family: Roboto;
-		font-size: 14px;
-		font-weight: 500;
-		line-height: 20px;
-		letter-spacing: 0em;
-		text-align: center;
-		margin-left: 8px;
-		color: #3377ff;
+		box-shadow: 0 2px 4px 0 #0000001a;
 	}
 }
 </style>

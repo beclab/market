@@ -52,9 +52,7 @@
 				v-if="!appStore.isPublic"
 				class="bottom-menu-root items-center"
 				:style="{
-					'--showShadow': showBarShadow
-						? '1px solid #EBEBEB'
-						: '1px solid white'
+					'--showShadow': showBarShadow ? '1px solid #EBEBEB' : 'none'
 				}"
 			>
 				<q-item
@@ -66,14 +64,12 @@
 					@click="changeItemMenu({ key: MENU_TYPE.MyTerminus })"
 				>
 					<q-icon name="sym_r_home" size="20px" />
-					<div class="bottom-menu-title">{{ t('main.my_terminus') }}</div>
+					<div class="text-body1 q-ml-sm">
+						{{ t('main.my_terminus') }}
+					</div>
 					<div
 						v-if="updateCount !== 0"
-						:class="
-							menuStore.currentItem === MENU_TYPE.MyTerminus
-								? 'bottom-menu-update-size-active'
-								: 'bottom-menu-update-size'
-						"
+						class="bottom-menu-update-size text-subtitle3 bg-background-3 text-ink-2"
 					>
 						{{ updateCount }}
 					</div>
@@ -227,6 +223,7 @@ watch(
 				route.name === TRANSACTION_PAGE.Log ||
 				route.name === TRANSACTION_PAGE.Update ||
 				from.includes('/app/') ||
+				from.includes('/middleware/') ||
 				from.includes('/recommend/') ||
 				from.includes('/model/') ||
 				from.includes('/discover') ||
@@ -351,44 +348,12 @@ const installOS = async () => {
 			padding-left: 8px;
 			padding-right: 8px;
 
-			.bottom-menu-title {
-				margin-left: 8px;
-				font-family: Roboto;
-				font-size: 16px;
-				font-weight: 400;
-				line-height: 24px;
-				letter-spacing: 0em;
-				text-align: start;
-			}
-
 			.bottom-menu-update-size {
-				font-family: Roboto;
-				font-size: 12px;
-				font-weight: 500;
-				line-height: 16px;
-				letter-spacing: 0em;
-				background: var(--Grey-01, #f6f6f6);
-				color: var(--Grey-08, #5c5551);
 				width: 32px;
 				height: 16px;
 				text-align: center;
 				border-radius: 8px;
 				margin-left: 8px;
-			}
-
-			.bottom-menu-update-size-active {
-				font-family: Roboto;
-				font-size: 12px;
-				font-weight: 500;
-				line-height: 16px;
-				letter-spacing: 0em;
-				color: $main-style;
-				background-color: white;
-				width: 32px;
-				height: 16px;
-				text-align: center;
-				border-radius: 8px;
-				margin-left: 4px;
 			}
 		}
 	}
@@ -406,7 +371,7 @@ const installOS = async () => {
 }
 
 .main-layout ::v-deep(.my-active-link) {
-	color: $main-style;
-	background-color: rgba(51, 119, 255, 0.1);
+	color: $blue-default;
+	background-color: $blue-soft;
 }
 </style>

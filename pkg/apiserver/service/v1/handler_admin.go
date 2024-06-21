@@ -12,7 +12,6 @@ import (
 	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/models"
-	"market/internal/recommend"
 	"market/pkg/api"
 	"reflect"
 	"sort"
@@ -40,7 +39,14 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 		api.HandleError(resp, err)
 		return
 	}
-	workflowsMap := recommend.ConvertWorkflowsListToMap(workflows)
+	workflowsMap := models.ConvertStatusListToMap(workflows)
+
+	middlewares, err := getRunningMiddlewareList(token)
+	if err != nil {
+		api.HandleError(resp, err)
+		return
+	}
+	middlewaresMap := models.ConvertStatusListToMap(middlewares)
 
 	llms, err := getRunningModelList(token)
 	llmsMap := appservice.ConvertModelsListToMap(llms)
@@ -52,6 +58,9 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 
 	for _, workflow := range workflows {
 		names = append(names, workflow.Metadata.Name)
+	}
+	for _, middleware := range middlewares {
+		names = append(names, middleware.Metadata.Name)
 	}
 
 	for _, llm := range llms {
@@ -91,6 +100,10 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 				info.CurVersion = workflowsMap[info.Name].Version
 				info.InstallTime = helmtime.Time(workflowsMap[info.Name].CreateTime)
 				info.Status = workflowsMap[info.Name].ResourceStatus
+			} else if info.CfgType == constants.MiddlewareType {
+				info.CurVersion = middlewaresMap[info.Name].Version
+				info.InstallTime = helmtime.Time(middlewaresMap[info.Name].CreateTime)
+				info.Status = middlewaresMap[info.Name].ResourceStatus
 			}
 			if info.CfgType == constants.AppType || info.CfgType == constants.RecommendType {
 				if info.Source == constants.AppFromMarket {
@@ -115,6 +128,10 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 				info.CurVersion = workflowsMap[info.Name].Version
 				info.InstallTime = helmtime.Time(workflowsMap[info.Name].CreateTime)
 				info.Status = workflowsMap[info.Name].ResourceStatus
+			} else if info.CfgType == constants.MiddlewareType {
+				info.CurVersion = middlewaresMap[info.Name].Version
+				info.InstallTime = helmtime.Time(middlewaresMap[info.Name].CreateTime)
+				info.Status = middlewaresMap[info.Name].ResourceStatus
 			} else if info.CfgType == constants.ModelType {
 				info.Status = llmsMap[info.Name].Status
 			}
@@ -162,7 +179,7 @@ func (h *Handler) workflowRecommendsDetail(req *restful.Request, resp *restful.R
 			continue
 		}
 
-		getWorkflowStatus(info, workflowMap)
+		getCommonStatus(info, workflowMap)
 		if (info.HasRemoveLabel() || info.HasSuspendLabel()) && info.Status == models.AppUninstalled {
 			glog.Warningf("workflow:%s has pass label %v not installed, pass", info.Name, info.AppLabels)
 			continue
@@ -267,6 +284,8 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 		return
 	}
 	workflowMap, _ := getWorkflowsMap(token)
+	middlewareMap, _ := getMiddlewaresMap(token)
+
 	responseNew := appmgr.Result{
 		Code:    response.Code,
 		Message: response.Message,
@@ -302,7 +321,7 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 							goto Label1
 						}
 
-						getAppAndRecommendStatus(&topic.Apps[i], appsMap, workflowMap)
+						getAppAndRecommendStatus(&topic.Apps[i], appsMap, workflowMap, middlewareMap)
 						if reflect.TypeOf(topic.Apps[i].Categories).Kind() == reflect.String {
 							oldCate := topic.Apps[i].Categories.(string)
 							topic.Apps[i].Categories = strings.Split(oldCate, ",")
@@ -330,7 +349,7 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 						glog.Warningf("app:%s has nsfw label, pass", app.Name)
 						continue
 					}
-					getAppAndRecommendStatus(app, appsMap, workflowMap)
+					getAppAndRecommendStatus(app, appsMap, workflowMap, middlewareMap)
 					if reflect.TypeOf(app.Categories).Kind() == reflect.String {
 						oldCate := app.Categories.(string)
 						app.Categories = strings.Split(oldCate, ",")
