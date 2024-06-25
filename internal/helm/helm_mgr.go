@@ -48,7 +48,7 @@ func UploadChart(chartFilePath string) error {
 
 	client := &http.Client{}
 	response, err := client.Do(request)
-	if response.Body != nil {
+	if response != nil {
 		defer response.Body.Close()
 	}
 	if err != nil {
@@ -75,7 +75,7 @@ func DeleteChart(chartName, chartVersion string) error {
 
 	client := &http.Client{}
 	response, err := client.Do(request)
-	if response.Body != nil {
+	if response != nil {
 		defer response.Body.Close()
 	}
 	if err != nil {
@@ -106,7 +106,7 @@ func CheckChartExist(chartName, chartVersion string) (bool, error) {
 
 	client := &http.Client{}
 	response, err := client.Do(request)
-	if response.Body != nil {
+	if response != nil {
 		defer response.Body.Close()
 	}
 	if err != nil {
@@ -158,7 +158,7 @@ func ListChartVersions(chartName string) ([]string, error) {
 	url := fmt.Sprintf("%s/%s", chartMuseumURL, chartName)
 
 	response, err := http.Get(url)
-	if response.Body != nil {
+	if response != nil {
 		defer response.Body.Close()
 	}
 	if err != nil {
