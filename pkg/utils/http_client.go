@@ -50,7 +50,7 @@ func Download(url, dstPath string) error {
 	}
 
 	res, err := http.Get(url)
-	if res.Body != nil {
+	if res != nil {
 		defer res.Body.Close()
 	}
 	if err != nil {
