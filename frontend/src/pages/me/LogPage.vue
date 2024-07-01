@@ -68,7 +68,7 @@
 							/>
 						</div>
 
-						<empty-view v-else :label="t('no_logs')" class="empty-view" />
+						<empty-view v-else :label="t('my.no_logs')" class="empty-view" />
 					</template>
 				</app-store-body>
 			</div>

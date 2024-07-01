@@ -27,11 +27,7 @@
 			</div>
 		</template>
 	</app-store-body>
-	<empty-view
-		v-else
-		:label="i18n.t('no_upload_chart_tips')"
-		class="full-view"
-	/>
+	<empty-view v-else :label="t('my.no_upload_chart_tips')" class="full-view" />
 </template>
 
 <script setup lang="ts">
@@ -44,12 +40,11 @@ import { SOURCE_TYPE } from 'src/constants/constants';
 import { useI18n } from 'vue-i18n';
 
 const appStore = useAppStore();
-const i18n = useI18n();
+const { t } = useI18n();
 </script>
 
 <style lang="scss" scoped>
 ::-webkit-scrollbar {
-	/*隐藏滚轮*/
 	display: none;
 }
 

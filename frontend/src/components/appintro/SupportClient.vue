@@ -17,6 +17,7 @@
 import { onMounted, PropType, ref } from 'vue';
 import { getRequireImage } from 'src/utils/imageUtils';
 import { CLIENT_TYPE } from 'src/constants/constants';
+import { i18n } from 'src/boot/i18n';
 
 const props = defineProps({
 	type: {
@@ -53,12 +54,12 @@ onMounted(() => {
 			break;
 		case CLIENT_TYPE.windows:
 			label.value = 'Windows';
-			store.value = 'Download';
+			store.value = i18n.global.t('detail.download');
 			imageRef.value = getRequireImage('client/windows.svg');
 			break;
 		case CLIENT_TYPE.linux:
 			label.value = 'Linux';
-			store.value = 'Download';
+			store.value = i18n.global.t('detail.download');
 			imageRef.value = getRequireImage('client/linux.svg');
 			break;
 		case CLIENT_TYPE.edge:
