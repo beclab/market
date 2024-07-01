@@ -62,7 +62,7 @@
 							<q-icon color="negative" size="16px" name="sym_r_error" />
 							<div class="column justify-start">
 								<div class="text-body-3 text-negative q-ml-sm">
-									{{ t('unable_to_install_app') }}
+									{{ t('my.unable_to_install_app') }}
 								</div>
 								<template v-for="message in item.preflightError" :key="message">
 									<div class="text-body-3 text-negative">
@@ -521,7 +521,7 @@
 											class="q-mt-lg"
 											:title="t('detail.version_history')"
 											@on-link-click="goVersionHistory"
-											link="See all version"
+											:link="t('detail.see_all_version')"
 										/>
 									</template>
 								</app-intro-card>

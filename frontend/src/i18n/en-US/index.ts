@@ -23,7 +23,9 @@ export default {
 		search: 'Search',
 		category: 'Category',
 		submitter: 'Submitter',
-		documents: 'Documents'
+		documents: 'Documents',
+		see_all: 'See All',
+		more: 'More'
 	},
 	main: {
 		discover: 'Discover',
@@ -35,15 +37,11 @@ export default {
 		recommendation: 'Recommendation',
 		recommend: 'Recommend',
 		models: 'Models',
+		large_language_model: 'Large Language Model',
 		my_terminus: 'My Terminus',
 		terminus: 'Terminus',
 		terminus_market: 'Terminus Market',
 		install_terminus_os: 'Install TerminusOS'
-	},
-	agent: {
-		large_language_model: 'Large Language Model',
-		trending_llms: 'Trending LLMs',
-		trending_agents: 'Trending Agents'
 	},
 	app: {
 		get: 'Get',
@@ -85,7 +83,10 @@ export default {
 		version_history: 'Version History',
 		get_a_client: 'GET A CLIENT',
 		dependency: 'DEPENDENCY',
-		reference_app: 'REFERENCE APP'
+		reference_app: 'REFERENCE APP',
+		see_all_version: 'See all version',
+		download: 'Download',
+		no_version_history_desc: 'The application has no version history.'
 	},
 	permission: {
 		files: 'Files',
@@ -185,16 +186,19 @@ export default {
 		cluster_not_support_platform:
 			'This [app/recommend/model] does not support your Terminus OS platform architecture.'
 	},
-	unable_to_install_app: 'Unable to install app',
-	update_all: 'Update All',
-	available_updates: 'Available Updates',
-	everything_up_to_date: 'Congrats, everything is up to date!',
-	version_history: 'Version History',
-	no_version_history_desc: 'The application has no version history.',
-	no_upload_chart_tips: 'You haven’t uploaded any custom chart yet.',
-	no_installed_app_tips: 'You haven’t installed anything yet.',
-	no_logs: 'There are no installation logs here.',
-	see_all: 'See All',
-	sure_to_uninstall_the_app:
-		'Are you sure you want to uninstall the application {title}？'
+	my: {
+		market: 'Market',
+		custom: 'Custom',
+		unable_to_install_app: 'Unable to install app',
+		update_all: 'Update All',
+		available_updates: 'Available Updates',
+		everything_up_to_date: 'Congrats, everything is up to date!',
+		no_upload_chart_tips: 'You haven’t uploaded any custom chart yet.',
+		no_installed_app_tips: 'You haven’t installed anything yet.',
+		no_logs: 'There are no installation logs here.',
+		sure_to_uninstall_the_app:
+			'Are you sure you want to uninstall the application {title}？',
+		upload_custom_chart: 'Upload Custom Chart',
+		logs: 'Logs'
+	}
 };

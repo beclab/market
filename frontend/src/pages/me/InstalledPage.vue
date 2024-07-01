@@ -21,7 +21,7 @@
 			</div>
 		</template>
 	</app-store-body>
-	<empty-view v-else :label="t('no_installed_app_tips')" class="full-view" />
+	<empty-view v-else :label="t('my.no_installed_app_tips')" class="full-view" />
 </template>
 
 <script setup lang="ts">

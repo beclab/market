@@ -19,6 +19,7 @@
 
 <script lang="ts" setup>
 import { onMounted, computed, ref, watch } from 'vue';
+import { i18n } from 'src/boot/i18n';
 
 const props = defineProps({
 	text: {
@@ -32,7 +33,7 @@ const props = defineProps({
 	},
 	moreText: {
 		type: String,
-		default: 'More',
+		default: i18n.global.t('base.more'),
 		require: false
 	},
 	lessText: {

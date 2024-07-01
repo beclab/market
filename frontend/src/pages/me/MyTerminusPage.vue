@@ -21,7 +21,10 @@
 						<template v-for="(item, index) in tabArray" :key="`al` + index">
 							<q-tab style="padding: 0" :name="item">
 								<template v-slot:default>
-									<bt-tab-item :selected="item === selectedTab" :label="item" />
+									<bt-tab-item
+										:selected="item === selectedTab"
+										:label="item === 'Market' ? t('my.market') : t('my.custom')"
+									/>
 								</template>
 							</q-tab>
 						</template>
@@ -32,13 +35,20 @@
 							v-if="selectedTab === 'Market'"
 							name="sym_r_upload"
 							@click="goUpdatePage"
-							label="Available Updates"
+							:label="t('my.available_updates')"
 						/>
 						<bt-upload-chart v-else>
-							<bt-label name="sym_r_upload_file" label="Upload Custom Chart" />
+							<bt-label
+								name="sym_r_upload_file"
+								:label="t('my.upload_custom_chart')"
+							/>
 						</bt-upload-chart>
 						<q-separator class="column-line" />
-						<bt-label name="sym_r_assignment" label="Logs" @click="goLogPage" />
+						<bt-label
+							name="sym_r_assignment"
+							:label="t('my.logs')"
+							@click="goLogPage"
+						/>
 					</div>
 				</div>
 

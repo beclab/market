@@ -319,7 +319,7 @@ async function onUninstall() {
 		case APP_STATUS.installed:
 			BtDialog.show({
 				title: t('app.uninstall'),
-				message: t('sure_to_uninstall_the_app', { title: props.item.title }),
+				message: t('my.sure_to_uninstall_the_app', { title: props.item.title }),
 				okStyle: {
 					background: blueDefault.value,
 					color: white.value
