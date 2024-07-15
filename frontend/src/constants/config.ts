@@ -15,8 +15,16 @@ export function canInstallingCancel(cfgType: string): boolean {
 	return cfgType !== CFG_TYPE.WORK_FLOW;
 }
 
-export function canOpen(cfgType: string): boolean {
-	return cfgType === CFG_TYPE.APPLICATION;
+export function canOpen(app: AppStoreInfo): boolean {
+	let hasEntrances = false;
+	if (app.entrances) {
+		app.entrances.forEach((item) => {
+			if (!item.invisible) {
+				hasEntrances = true;
+			}
+		});
+	}
+	return app.cfgType === CFG_TYPE.APPLICATION && hasEntrances;
 }
 
 export function requiredPermissions(cfgType: string): boolean {
