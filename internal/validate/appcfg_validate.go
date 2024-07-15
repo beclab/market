@@ -250,9 +250,10 @@ func CheckSupportedArch(cfg *AppConfiguration) error {
 	if len(cfg.Spec.SupportArch) == 0 {
 		return errors.New("spec.SupportArch can not be empty")
 	}
-	allSupportedArch := sets.String{"amd64": sets.Empty{}, "arm32v5": sets.Empty{}, "arm32v6": sets.Empty{},
-		"arm32v7": sets.Empty{}, "arm64v8": sets.Empty{}, "i386": sets.Empty{}, "ppc64le": sets.Empty{},
-		"s390x": sets.Empty{}, "mips64le": sets.Empty{}, "riscv64": sets.Empty{}, "windows-amd64": sets.Empty{}}
+	// allSupportedArch := sets.String{"amd64": sets.Empty{}, "arm32v5": sets.Empty{}, "arm32v6": sets.Empty{},
+	// 	"arm32v7": sets.Empty{}, "arm64v8": sets.Empty{}, "i386": sets.Empty{}, "ppc64le": sets.Empty{},
+	// 	"s390x": sets.Empty{}, "mips64le": sets.Empty{}, "riscv64": sets.Empty{}, "windows-amd64": sets.Empty{}}
+	allSupportedArch := sets.String{"amd64": sets.Empty{}, "arm64": sets.Empty{}}
 	for _, arch := range cfg.Spec.SupportArch {
 		if !allSupportedArch.Has(arch) {
 			return fmt.Errorf("unsupport arch: %s", arch)
