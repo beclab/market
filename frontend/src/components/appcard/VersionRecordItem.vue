@@ -1,11 +1,11 @@
 <template>
-	<div v-if="skeleton" class="version-record-root column justify-start">
+	<div v-if="skeleton" class="version-record-root q-py-lg column justify-start">
 		<div class="row justify-between items-center">
 			<q-skeleton width="50px" height="20px" />
 			<q-skeleton width="40px" height="20px" />
 		</div>
-		<q-skeleton class="version-record-desc" width="200px" height="20px" />
-		<q-skeleton style="margin-top: 2px" width="300px" height="20px" />
+		<q-skeleton class="q-mt-md" width="200px" height="20px" />
+		<q-skeleton class="q-mt-xs" width="300px" height="20px" />
 	</div>
 	<div v-else class="version-record-root q-py-lg column justify-start">
 		<div class="row justify-between items-center">

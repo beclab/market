@@ -6,7 +6,7 @@ export function getRequireImage(path: string): string {
 		return path;
 	}
 	// webpack
-	// return require(`../assets/${path}`);
+	return require(`../assets/${path}`);
 	// vite
-	return new URL(`../assets/${path}`, import.meta.url).href;
+	// return new URL(`../assets/${path}`, import.meta.url).href;
 }

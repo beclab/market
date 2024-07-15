@@ -10,6 +10,8 @@
 
 const { configure } = require('quasar/wrappers');
 const dotenv = require('dotenv');
+const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
+const TerserPlugin = require('terser-webpack-plugin');
 
 dotenv.config();
 
@@ -17,13 +19,14 @@ const path = require('path');
 
 module.exports = configure(function (/* ctx */) {
 	return {
-		eslint: {
-			// fix: true,
-			// include = [],
-			// exclude = [],
-			// rawOptions = {},
-			warnings: true,
-			errors: true
+		// https://v2.quasar.dev/quasar-cli-webpack/supporting-ts
+		supportTS: {
+			tsCheckerConfig: {
+				eslint: {
+					enabled: true,
+					files: './src/**/*.{ts,tsx,js,jsx,vue}'
+				}
+			}
 		},
 
 		// https://v2.quasar.dev/quasar-cli-vite/prefetch-feature
@@ -66,8 +69,13 @@ module.exports = configure(function (/* ctx */) {
 				LOGIN_USERNAME: process.env.LOGIN_USERNAME,
 				LOGIN_PASSWORD: process.env.LOGIN_PASSWORD
 			},
+			// analyze: true,
 
 			vueRouterMode: 'history', // available values: 'hash', 'history'
+			extractCSS: true,
+			gzip: true,
+			sourcemap: false,
+			minify: true,
 			// vueRouterBase,
 			// vueDevtools,
 			// vueOptionsAPI: false,
@@ -85,27 +93,59 @@ module.exports = configure(function (/* ctx */) {
 
 			// extendViteConf (viteConf) {},
 			// viteVuePluginOptions: {},
-			extendViteConf(viteConf) {
-				Object.assign(viteConf.resolve.alias, {
-					'@': path.join(__dirname, 'src'),
-					assets: path.join(__dirname, 'src/assets'),
-					statics: path.join(__dirname, 'src/statics'),
-					components: path.join(__dirname, 'src/components')
+			chainWebpack(chain, { isClient, isServer }) {
+				chain.resolve.alias
+					.set('assets', path.resolve('src/assets'))
+					.set('statics', path.resolve('src/statics'))
+					.set('components', path.resolve('src/components'));
+				if (isClient) {
+					chain.plugin('optimize-css').use(CssMinimizerPlugin, [
+						{
+							minimizerOptions: {
+								preset: [
+									'default',
+									{
+										mergeLonghand: false,
+										cssDeclarationSorter: false
+									}
+								]
+							}
+						}
+					]);
+				}
+				chain.plugin('terser').use(TerserPlugin, [
+					{
+						terserOptions: {
+							compress: {
+								drop_console: true,
+								pure_funcs: ['console.log']
+							}
+						}
+					}
+				]);
+				chain.optimization.splitChunks({
+					chunks: 'all', // The type of chunk that requires code segmentation
+					minSize: 20000, // Minimum split file size
+					minRemainingSize: 0, // Minimum remaining file size after segmentation
+					minChunks: 1, // The number of times it has been referenced before it is split
+					maxAsyncRequests: 30, // Maximum number of asynchronous requests
+					maxInitialRequests: 30, // Maximum number of initialization requests
+					enforceSizeThreshold: 50000,
+					cacheGroups: {
+						// Cache Group configuration
+						defaultVendors: {
+							test: /[\\/]node_modules[\\/]/,
+							priority: -10,
+							reuseExistingChunk: true
+						},
+						default: {
+							minChunks: 2,
+							priority: -20,
+							reuseExistingChunk: true // Reuse the chunk that has been split
+						}
+					}
 				});
 			}
-
-			// vitePlugins: [
-			// 	[
-			// 		'@intlify/vite-plugin-vue-i18n',
-			// 		{
-			// 			// if you want to use Vue I18n Legacy API, you need to set `compositionOnly: false`
-			// 			// compositionOnly: false,
-			//
-			// 			// you need to set i18n resource including paths !
-			// 			include: path.resolve(__dirname, './src/i18n/**')
-			// 		}
-			// 	]
-			// ]
 		},
 		devServer: {
 			https: true,

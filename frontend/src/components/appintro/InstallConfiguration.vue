@@ -31,11 +31,10 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, ref } from 'vue';
-import { getRequireImage } from 'src/utils/imageUtils';
+import { ref } from 'vue';
 import { useColor } from '@bytetrade/ui';
 
-const props = defineProps({
+defineProps({
 	name: {
 		type: String,
 		default: '',
@@ -58,12 +57,6 @@ const props = defineProps({
 
 const imageRef = ref();
 const { color: separator } = useColor('separator');
-
-onMounted(() => {
-	if (props.src) {
-		imageRef.value = getRequireImage(props.src);
-	}
-});
 </script>
 
 <style scoped lang="scss">
