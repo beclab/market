@@ -7,6 +7,7 @@ import (
 	"market/internal/appservice"
 	"market/internal/constants"
 	"market/internal/event"
+
 	//"market/internal/helm"
 	"market/internal/models"
 	"sync"
@@ -452,7 +453,7 @@ func (i *InstallationWatchDog) updateStatus(status, progress, op, msg string) {
 		return
 	}
 
-	GetStatusManager().UpdateInstallStatus(i.uid, status, progress, op, msg)
+	GetStatusManager().UpdateInstallStatus(i.uid, status, progress, op, msg, i.from)
 
 	i.status, i.progress = status, progress
 }

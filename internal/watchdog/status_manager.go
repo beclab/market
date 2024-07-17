@@ -20,6 +20,7 @@ type InstallOrUpgradeStatus struct {
 	Status   string `json:"status"`
 	Msg      string `json:"message"`
 	Progress string `json:"progress,omitempty"`
+	From     string `json:"from"`
 }
 
 var once sync.Once
@@ -37,20 +38,20 @@ func GetStatusManager() *StatusManager {
 	return StatusManagerSvc
 }
 
-func (s *StatusManager) UpdateInstallStatus(uid, status, progress, ty, msg string) {
-	s.broadcastStatus(uid, status, progress, msg, ty)
+func (s *StatusManager) UpdateInstallStatus(uid, status, progress, ty, msg string, from string) {
+	s.broadcastStatus(uid, status, progress, msg, ty, from)
 }
 
-func (s *StatusManager) UpdateUpgradeStatus(uid, status, ty, msg string) {
-	s.broadcastStatus(uid, status, "", msg, ty)
+func (s *StatusManager) UpdateUpgradeStatus(uid, status, ty, msg string, from string) {
+	s.broadcastStatus(uid, status, "", msg, ty, from)
 }
 
-func (s *StatusManager) UpdateModelInstallStatus(uid, status, progress, ty, msg string) {
-	s.broadcastStatus(uid, status, progress, msg, ty)
+func (s *StatusManager) UpdateModelInstallStatus(uid, status, progress, ty, msg string, from string) {
+	s.broadcastStatus(uid, status, progress, msg, ty, from)
 }
 
 // call when status changed
-func (s *StatusManager) broadcastStatus(uid, status, progress, msg, t string) {
+func (s *StatusManager) broadcastStatus(uid, status, progress, msg, t string, from string) {
 	resp := InstallOrUpgradeResp{
 		Code: 200,
 		Data: InstallOrUpgradeStatus{
@@ -59,6 +60,7 @@ func (s *StatusManager) broadcastStatus(uid, status, progress, msg, t string) {
 			Status:   status,
 			Progress: progress,
 			Msg:      msg,
+			From:     from,
 		},
 	}
 

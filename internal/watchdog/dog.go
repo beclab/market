@@ -3,7 +3,6 @@ package watchdog
 import (
 	"context"
 	"fmt"
-	"github.com/golang/glog"
 	"market/internal/appservice"
 	"market/internal/constants"
 	"market/internal/event"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 type CommonWatchDog struct {
@@ -238,7 +239,7 @@ func (i *CommonWatchDog) updateStatus(status, progress, op, msg string) {
 		return
 	}
 
-	GetStatusManager().UpdateModelInstallStatus(i.uid, status, progress, op, msg)
+	GetStatusManager().UpdateModelInstallStatus(i.uid, status, progress, op, msg, i.from)
 
 	i.status, i.progress = status, progress
 }

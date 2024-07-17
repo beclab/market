@@ -233,7 +233,7 @@ const openApp = () => {
 		return;
 	}
 
-	if (canOpen(props.item?.cfgType)) {
+	if (canOpen(props.item)) {
 		let app = userStore.myApps.find((app: any) => app.id == props.item?.id);
 		if (!app) {
 			return;
@@ -462,7 +462,7 @@ function updateUI() {
 			border.value = '1px solid transparent';
 			if (props.isUpdate) {
 				status.value = t('app.update');
-			} else if (canOpen(props.item?.cfgType)) {
+			} else if (canOpen(props.item)) {
 				status.value = t('app.open');
 			} else {
 				status.value = t('app.running');

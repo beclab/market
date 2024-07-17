@@ -49,6 +49,7 @@ export const useSocketStore = defineStore('websocket', {
 						console.log('onmessage body=>', body);
 						if (body && body.data) {
 							appStore.updateAppStatusBySocket(
+								body.data.from,
 								body.data.uid,
 								body.data.type,
 								body.data.status,
