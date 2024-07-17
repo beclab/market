@@ -359,12 +359,13 @@ const installOS = async () => {
 	}
 
 	.float-btn {
-		background: white;
+		background: $background-2;
+		color: $ink-1;
 		position: absolute;
 		right: 24px;
 		bottom: 64px;
 		border: 1px solid $info;
-		border-radius: 46px;
+		border-radius: 46px !important;
 		text-transform: unset;
 		box-shadow: 0 8px 40px 0 #00000033;
 	}

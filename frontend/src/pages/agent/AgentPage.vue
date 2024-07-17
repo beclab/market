@@ -29,7 +29,7 @@
 
 				<app-store-body
 					class="recommend-padding"
-					:title="t('agent.large_language_model')"
+					:title="t('main.large_language_model')"
 					:loading="pageLoading"
 					:body-margin-bottom="32"
 					:show-body="modelList.length > 0"

@@ -1,13 +1,13 @@
 import {
 	APP_STATUS,
-	AppInfo,
 	AppStoreInfo,
 	TerminusResource,
 	UserResource
 } from 'src/constants/constants';
 import axios from 'axios';
+import { TerminusApp } from '@bytetrade/core';
 
-export async function getMyApps(): Promise<AppInfo[]> {
+export async function getMyApps(): Promise<TerminusApp[]> {
 	try {
 		const { data }: any = await axios.get('/app-store/v1/myapps');
 		console.log('get_my_apps');

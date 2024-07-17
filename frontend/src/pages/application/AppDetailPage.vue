@@ -62,7 +62,7 @@
 							<q-icon color="negative" size="16px" name="sym_r_error" />
 							<div class="column justify-start">
 								<div class="text-body-3 text-negative q-ml-sm">
-									{{ t('unable_to_install_app') }}
+									{{ t('my.unable_to_install_app') }}
 								</div>
 								<template v-for="message in item.preflightError" :key="message">
 									<div class="text-body-3 text-negative">
@@ -521,7 +521,7 @@
 											class="q-mt-lg"
 											:title="t('detail.version_history')"
 											@on-link-click="goVersionHistory"
-											link="See all version"
+											:link="t('detail.see_all_version')"
 										/>
 									</template>
 								</app-intro-card>
@@ -650,8 +650,7 @@ import {
 } from 'src/utils/utils';
 import { useI18n } from 'vue-i18n';
 import TitleBar from 'src/components/base/TitleBar.vue';
-import { copyToClipboard, useQuasar } from 'quasar';
-import { BtNotify, NotifyDefinedType } from '@bytetrade/ui';
+import { useQuasar } from 'quasar';
 import { requiredPermissions, showIcon } from 'src/constants/config';
 
 const route = useRoute();
@@ -660,19 +659,16 @@ const appStore = useAppStore();
 const { t } = useI18n();
 const $q = useQuasar();
 const item = ref<AppStoreInfo>();
+const test = ref();
 
-const loadHighlightStyles = () => {
-	const isDark = $q.dark.isActive;
-	const path = isDark ? '../../css/github-dark.css' : '../../css/github.css';
-	import(path)
-		.then(() => {
-			//Do nothing
-		})
-		.catch((err) => {
-			console.error('Failed to load highlight.js style:', err);
-		});
+const loadStyle = async () => {
+	if ($q.dark.isActive) {
+		await import('highlight.js/styles/github-dark.css');
+	} else {
+		await import('highlight.js/styles/github.css');
+	}
 };
-loadHighlightStyles();
+loadStyle();
 const md = markdownit({
 	html: true,
 	linkify: true,
@@ -714,22 +710,6 @@ const languageLength = ref(0);
 const cfgType = ref<string>();
 const readMeHtml = ref('');
 
-function copyCode(str: string) {
-	copyToClipboard(str)
-		.then(() => {
-			BtNotify.show({
-				type: NotifyDefinedType.SUCCESS,
-				message: t('base.copy_success')
-			});
-		})
-		.catch(() => {
-			BtNotify.show({
-				type: NotifyDefinedType.FAILED,
-				message: t('base.copy_failure')
-			});
-		});
-}
-
 const updateApp = (app: AppStoreInfo) => {
 	console.log(`get status ${app.name}`);
 	if (app && item.value && item.value.name === app.name) {
@@ -737,6 +717,8 @@ const updateApp = (app: AppStoreInfo) => {
 		item.value.uid = app.uid;
 		console.log(`update status ${app.name}`);
 		updateAppStoreList([item.value], app);
+	}
+	if (app) {
 		updateAppStoreList(dependencies.value, app);
 		updateAppStoreList(references.value, app);
 	}
@@ -751,7 +733,7 @@ onBeforeUnmount(() => {
 });
 
 onActivated(async () => {
-	console.log('onActivated');
+	// console.log('onActivated');
 	cfgType.value = route.params.type as string;
 	await setAppItem(route.params.name as string);
 });
@@ -778,7 +760,7 @@ const getWebsite = () => {
 			const url = new URL(item.value?.website);
 			show = url.hostname;
 		} catch (e) {
-			console.log(e);
+			// console.log(e);
 		}
 
 		data.push({ text: show, url: item.value.website });
@@ -1043,7 +1025,7 @@ const markdownTask: OnUpdateUITask = {
 	onUpdate(app: AppStoreInfo) {
 		getMarkdown(app.name).then((result) => {
 			if (result) {
-				console.log(result);
+				// console.log(result);
 				readMeHtml.value = md.render(result);
 				// console.log(readMeHtml.value);
 			}

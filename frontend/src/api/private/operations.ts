@@ -97,7 +97,7 @@ export async function uploadDevFile(
 	try {
 		const formData = new FormData();
 		formData.append('name', file);
-		const response = await axios.post(
+		const response: any = await axios.post(
 			'/app-store/v1/applications/dev-upload',
 			formData,
 			{

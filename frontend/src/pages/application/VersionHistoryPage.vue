@@ -4,7 +4,7 @@
 			<title-bar
 				:show="true"
 				:show-title="showShadow"
-				:title="t('version_history')"
+				:title="t('detail.version_history')"
 				@onReturn="router.back()"
 				:shadow="showShadow"
 			/>
@@ -12,7 +12,7 @@
 		<template v-slot:page>
 			<div class="version-history-scroll">
 				<app-store-body
-					:label="t('version_history')"
+					:label="t('detail.version_history')"
 					:loading="loading"
 					:title-separator="true"
 				>
@@ -24,7 +24,7 @@
 					<template v-slot:body>
 						<empty-view
 							v-if="isEmpty"
-							:label="t('no_version_history_desc')"
+							:label="t('detail.no_version_history_desc')"
 							class="empty_view"
 						/>
 						<div v-else>

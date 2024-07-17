@@ -6,16 +6,16 @@
 		<template v-slot:page>
 			<div class="update-scroll">
 				<app-store-body
-					:title="t('available_updates')"
+					:title="t('my.available_updates')"
 					:show-body="true"
 					:title-separator="true"
 					@on-right-click="onUpdateAll"
-					:right="appStore.updateApps.length === 0 ? '' : t('update_all')"
+					:right="appStore.updateApps.length === 0 ? '' : t('my.update_all')"
 				>
 					<template v-slot:body>
 						<empty-view
 							v-if="appStore.updateApps.length === 0"
-							:label="t('everything_up_to_date')"
+							:label="t('my.everything_up_to_date')"
 							class="empty_view"
 						/>
 						<div class="app-store-workflow" style="margin-top: 32px">

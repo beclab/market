@@ -133,6 +133,8 @@ type ApplicationInfo struct {
 
 	Source    string `yaml:"source" json:"source"`
 	ModelSize string `yaml:"modelSize" json:"modelSize,omitempty"`
+	Namespace string `yaml:"namespace" json:"namespace,omitempty"`
+	OnlyAdmin bool   `yaml:"onlyAdmin" json:"onlyAdmin,omitempty"`
 }
 
 type ByInstallTime []*ApplicationInfo
@@ -224,6 +226,8 @@ type AppSpec struct {
 	License      []TextAndURL `yaml:"license" json:"license"`
 	Legal        []TextAndURL `yaml:"legal" json:"legal"`
 	ModelSize    string       `yaml:"modelSize" json:"modelSize,omitempty"`
+	Namespace    string       `yaml:"namespace" json:"namespace,omitempty"`
+	OnlyAdmin    bool         `yaml:"onlyAdmin" json:"onlyAdmin,omitempty"`
 }
 
 type Policy struct {
@@ -247,11 +251,12 @@ type Dependency struct {
 }
 
 type Options struct {
-	Policies     []Policy     `yaml:"policies" json:"policies" bson:"policies"`
-	Analytics    *Analytics   `yaml:"analytics" json:"analytics" bson:"analytics"`
-	Dependencies []Dependency `yaml:"dependencies" json:"dependencies" bson:"dependencies"`
-	AppScope     *AppScope    `yaml:"appScope" json:"appScope"`
-	WsConfig     *WsConfig    `yaml:"websocket" json:"websocket"`
+	Policies        []Policy     `yaml:"policies" json:"policies" bson:"policies"`
+	Analytics       *Analytics   `yaml:"analytics" json:"analytics" bson:"analytics"`
+	Dependencies    []Dependency `yaml:"dependencies" json:"dependencies" bson:"dependencies"`
+	AppScope        *AppScope    `yaml:"appScope" json:"appScope"`
+	WsConfig        *WsConfig    `yaml:"websocket" json:"websocket"`
+	MobileSupported bool         `yaml:"mobileSupported" json:"mobileSupported,omitempty"`
 }
 
 type AppScope struct {
@@ -305,6 +310,8 @@ func (ac *AppConfiguration) ToAppInfo() *ApplicationInfo {
 		License:      ac.Spec.License,
 		Legal:        ac.Spec.Legal,
 		ModelSize:    ac.Spec.ModelSize,
+		Namespace:    ac.Spec.Namespace,
+		OnlyAdmin:    ac.Spec.OnlyAdmin,
 	}
 }
 

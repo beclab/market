@@ -7,7 +7,8 @@ import (
 	"market/internal/appservice"
 	"market/internal/constants"
 	"market/internal/event"
-	"market/internal/helm"
+
+	//"market/internal/helm"
 	"market/internal/models"
 	"sync"
 	"time"
@@ -312,7 +313,7 @@ func (i *InstallationWatchDog) appUninstallFinished(status string) {
 	if status != Completed {
 		return
 	}
-	_ = helm.DeleteChartByName(i.app)
+	//_ = helm.DeleteChartByName(i.app)
 }
 
 func (i *InstallationWatchDog) appInstallFinished(status string) {
@@ -341,12 +342,12 @@ func uploadChartToMuseum(name string, info *models.ApplicationInfo) {
 		glog.Warningf("app:%s info:%+v has no local chart", name, info)
 	}
 
-	_ = helm.DeleteChartByName(name)
-	err := helm.UploadChart(localChart)
-	if err != nil {
-		glog.Warningf("UploadChart err %v", err)
-		return
-	}
+	//_ = helm.DeleteChartByName(name)
+	//err := helm.UploadChart(localChart)
+	//if err != nil {
+	//	glog.Warningf("UploadChart err %v", err)
+	//	return
+	//}
 
 	glog.Infof("UploadChart success, name %s, chart:%s", name, localChart)
 }
@@ -452,7 +453,7 @@ func (i *InstallationWatchDog) updateStatus(status, progress, op, msg string) {
 		return
 	}
 
-	GetStatusManager().UpdateInstallStatus(i.uid, status, progress, op, msg)
+	GetStatusManager().UpdateInstallStatus(i.uid, status, progress, op, msg, i.from)
 
 	i.status, i.progress = status, progress
 }
