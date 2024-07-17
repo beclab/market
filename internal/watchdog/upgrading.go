@@ -3,12 +3,13 @@ package watchdog
 import (
 	"context"
 	"fmt"
-	"github.com/golang/glog"
 	"market/internal/appservice"
 	"market/internal/event"
 	"market/internal/models"
 	"sync"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 type UpgradeWatchDog struct {
@@ -257,7 +258,7 @@ func (i *UpgradeWatchDog) updateStatus(status, op, msg string) {
 		return
 	}
 
-	GetStatusManager().UpdateUpgradeStatus(i.uid, status, op, msg)
+	GetStatusManager().UpdateUpgradeStatus(i.uid, status, op, msg, i.from)
 
 	i.status = status
 }
