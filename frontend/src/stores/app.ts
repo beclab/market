@@ -164,6 +164,7 @@ export const useAppStore = defineStore('app', {
 		},
 
 		updateAppStatusBySocket(
+			from: string,
 			uid: string,
 			operation: string,
 			op_status: string,
@@ -208,8 +209,14 @@ export const useAppStore = defineStore('app', {
 							(item) => item.name == appInfo.name
 						);
 						if (find) {
-							console.log('app has been added' + uid);
+							console.log('app has been added ' + uid);
 							return;
+						}
+						console.log(from);
+						if (from === 'dev') {
+							appInfo.source = SOURCE_TYPE.Development;
+						} else if (from === 'store') {
+							appInfo.source = SOURCE_TYPE.Market;
 						}
 						this.installApps.unshift(appInfo);
 						dealAppStatus(appInfo);
