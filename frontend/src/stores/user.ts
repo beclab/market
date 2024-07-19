@@ -9,7 +9,7 @@ import {
 	User,
 	UserResource
 } from 'src/constants/constants';
-import { intersection, Range, Version } from 'src/utils/utils';
+import { intersection } from 'src/utils/utils';
 import {
 	getMyApps,
 	getOsVersion,
@@ -21,6 +21,7 @@ import { i18n } from 'src/boot/i18n';
 import { TerminusApp } from '@bytetrade/core';
 import { CFG_TYPE } from 'src/constants/config';
 import { bus, BUS_EVENT } from 'src/utils/bus';
+import { Range, Version } from 'src/utils/version';
 
 export type UserState = {
 	userResource: UserResource | null;
