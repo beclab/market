@@ -10,6 +10,7 @@ import { BtNotify, NotifyDefinedType } from '@bytetrade/ui';
 import { bus, BUS_EVENT } from 'src/utils/bus';
 import { useUserStore } from 'src/stores/user';
 import { useSettingStore } from 'src/stores/setting';
+// import { testSatisfies } from 'src/utils/version';
 
 const appStore = useAppStore();
 const userStore = useUserStore();
@@ -18,6 +19,7 @@ const websocketStore = useSocketStore();
 
 onMounted(async () => {
 	if (!appStore.isPublic) {
+		// testSatisfies();
 		websocketStore.start();
 		userStore.init();
 		appStore.init();
@@ -25,7 +27,6 @@ onMounted(async () => {
 	}
 
 	bus.on(BUS_EVENT.APP_BACKEND_ERROR, onErrorMessage);
-	// await set_nsfw(false)
 });
 
 const onErrorMessage = (failureMessage: string) => {
