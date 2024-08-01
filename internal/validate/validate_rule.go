@@ -263,6 +263,10 @@ func getResourceListFromChart(chartPath string) (resources kube.ResourceList, er
 		"client": map[string]interface{}{},
 		"issuer": "issuer",
 	}
+	values["nats"] = map[string]interface{}{
+		"subjects": map[string]interface{}{},
+		"refs":     map[string]interface{}{},
+	}
 	values["bfl"] = map[string]interface{}{
 		"username": "bfl-username",
 	}
@@ -302,6 +306,7 @@ func getResourceListFromChart(chartPath string) (resources kube.ResourceList, er
 		"indexes": map[string]interface{}{},
 	}
 	values["svcs"] = map[string]interface{}{}
+	values["cluster"] = map[string]interface{}{}
 
 	ret, err := instAction.RunWithContext(context.Background(), chartRequested, values)
 	if err != nil {
