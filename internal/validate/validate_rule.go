@@ -259,6 +259,10 @@ func getResourceListFromChart(chartPath string) (resources kube.ResourceList, er
 
 	// fake values for helm dry run
 	values := make(map[string]interface{})
+	values["oidc"] = map[string]interface{}{
+		"client": map[string]interface{}{},
+		"issuer": "issuer",
+	}
 	values["bfl"] = map[string]interface{}{
 		"username": "bfl-username",
 	}
