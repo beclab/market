@@ -6,20 +6,20 @@
 			(linkArray && linkArray.length > 0) ||
 			(contentArray && contentArray.length > 0)
 		"
-		class="info-item-root row justify-between items-start"
+		class="info-item-root row justify-between items-start no-wrap"
 	>
 		<div class="info-title col-5 text-body2 text-ink-3">{{ title }}</div>
 		<expend-text-view v-if="content" :text="content" />
-		<div v-else-if="link" class="info_link col-5" @click="emit('onLinkClick')">
+		<div v-else-if="link" class="info_link col-7" @click="emit('onLinkClick')">
 			{{ link }}
 		</div>
 		<div
 			v-else-if="contentArray"
-			class="info-content text-body2 text-ink-2 col-5"
+			class="info-content text-body2 text-ink-2 col-7"
 		>
 			{{ contentArray.join(separator) }}
 		</div>
-		<div v-else-if="linkArray" class="column justify-end col-5">
+		<div v-else-if="linkArray" class="column justify-end col-7">
 			<div
 				v-for="(item, index) in linkArray"
 				:key="index"
@@ -93,7 +93,7 @@ const openUrl = (url: string) => {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		display: -webkit-box;
-		-webkit-line-clamp: 1;
+		-webkit-line-clamp: 2;
 		-webkit-box-orient: vertical;
 	}
 
@@ -102,7 +102,7 @@ const openUrl = (url: string) => {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		display: -webkit-box;
-		-webkit-line-clamp: 1;
+		-webkit-line-clamp: 2;
 		-webkit-box-orient: vertical;
 	}
 

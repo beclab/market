@@ -132,13 +132,13 @@
 									item && item.requiredDisk
 										? getValueByUnit(
 												item.requiredDisk,
-												getSuitableUnit(item.requiredDisk, 'disk')
+												getSuitableUnit(item.requiredDisk, 'memory')
 											)
 										: '-'
 								"
 								:unit="
 									item && item.requiredDisk
-										? getSuitableUnit(item.requiredDisk, 'disk')
+										? getSuitableUnit(item.requiredDisk, 'memory')
 										: '-'
 								"
 							/>
@@ -760,7 +760,7 @@ const getWebsite = () => {
 			const url = new URL(item.value?.website);
 			show = url.hostname;
 		} catch (e) {
-			// console.log(e);
+			console.log(e);
 		}
 
 		data.push({ text: show, url: item.value.website });
