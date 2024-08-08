@@ -206,42 +206,52 @@ const pageData = ref();
 const appStore = useAppStore();
 const { t } = useI18n();
 
-onMounted(async () => {
-	await fetchData(true);
+onMounted(() => {
+	fetchData(true);
 });
 
-async function fetchData(showLoading = false) {
+function fetchData(showLoading = false) {
 	if (showLoading) {
 		pageLoading.value = true;
 		topLoading.value = true;
 		latestLoading.value = true;
 	}
-	const all = await appStore.getPageData(CATEGORIES_TYPE.LOCAL.ALL);
-	console.log(all);
-	if (all && all.data) {
-		console.log(all.data);
-		pageData.value = all.data;
-		pageLoading.value = false;
+	appStore
+		.getPageData(CATEGORIES_TYPE.LOCAL.ALL)
+		.then((all) => {
+			if (all && all.data) {
+				pageData.value = all.data;
 
-		const top = pageData.value.find(
-			(item: any) => item.type === 'Default Topic' && item.id === 'Hottest'
-		);
-		if (top) {
-			topApps.value = await getTop();
-			topLoading.value = false;
-		}
+				const top = pageData.value.find(
+					(item: any) => item.type === 'Default Topic' && item.id === 'Hottest'
+				);
+				if (top) {
+					getTop()
+						.then((list) => {
+							topApps.value = list;
+						})
+						.finally(() => {
+							topLoading.value = false;
+						});
+				}
 
-		const latest = pageData.value.find(
-			(item: any) => item.type === 'Default Topic' && item.id === 'Newest'
-		);
-		if (latest) {
-			latestApps.value = await getLatest();
-			latestLoading.value = false;
-		}
-	}
-	pageLoading.value = false;
-	topLoading.value = false;
-	latestLoading.value = false;
+				const latest = pageData.value.find(
+					(item: any) => item.type === 'Default Topic' && item.id === 'Newest'
+				);
+				if (latest) {
+					getLatest()
+						.then((list) => {
+							latestApps.value = list;
+						})
+						.finally(() => {
+							latestLoading.value = false;
+						});
+				}
+			}
+		})
+		.finally(() => {
+			pageLoading.value = false;
+		});
 }
 
 const clickList = (type: string) => {
