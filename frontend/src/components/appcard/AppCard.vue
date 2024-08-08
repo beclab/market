@@ -247,6 +247,7 @@ onMounted(() => {
 });
 
 function goAppDetails() {
+	console.log('click app');
 	if (props.disabled) {
 		return;
 	}

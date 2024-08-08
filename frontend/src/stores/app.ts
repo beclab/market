@@ -34,7 +34,6 @@ import { CFG_TYPE } from 'src/constants/config';
 
 export type AppState = {
 	tempAppMap: Record<string, AppStoreInfo>;
-	initialized: boolean;
 	pageData: [] | null;
 	installApps: AppStoreInfo[];
 	updateApps: AppStoreInfo[];
@@ -46,7 +45,6 @@ export const useAppStore = defineStore('app', {
 	state: () => {
 		return {
 			tempAppMap: {},
-			initialized: false,
 			installApps: [],
 			updateApps: [],
 			pageData: null,
@@ -55,11 +53,13 @@ export const useAppStore = defineStore('app', {
 		} as AppState;
 	},
 	actions: {
+		async prefetch() {
+			this.pageData = await getPage();
+		},
 		async init() {
 			console.log('app init');
 			await this.loadApps();
 			console.log('app init requests completed');
-			this.initialized = true;
 		},
 
 		async loadApps() {
@@ -68,9 +68,6 @@ export const useAppStore = defineStore('app', {
 		},
 
 		async getPageData(category: string): Promise<any> {
-			if (!this.pageData) {
-				this.pageData = await getPage();
-			}
 			if (!this.pageData || this.pageData.length == 0) {
 				return null;
 			}
