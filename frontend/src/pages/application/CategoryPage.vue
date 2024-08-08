@@ -192,43 +192,53 @@ const topLoading = ref(true);
 const latestLoading = ref(true);
 const { t } = useI18n();
 
-onMounted(async () => {
+onMounted(() => {
 	topTitle.value = `Top App in ${categoryRef.value}`;
 	latestTitle.value = `Latest App in ${categoryRef.value}`;
-	await fetchData(true);
+	fetchData(true);
 });
 
-async function fetchData(showLoading = false) {
+function fetchData(showLoading = false) {
 	if (showLoading) {
 		pageLoading.value = true;
 		topLoading.value = true;
 		latestLoading.value = true;
 	}
-	const all = await appStore.getPageData(categoryRef.value);
-	if (all && all.data) {
-		console.log(all.data);
-		pageData.value = all.data;
-		pageLoading.value = false;
+	appStore
+		.getPageData(categoryRef.value)
+		.then((all) => {
+			if (all && all.data) {
+				pageData.value = all.data;
+				const top = pageData.value.find(
+					(item: any) => item.type === 'Default Topic' && item.id === 'Hottest'
+				);
+				if (top) {
+					getTop(categoryRef.value.toLowerCase())
+						.then((list) => {
+							topApps.value = list;
+						})
+						.finally(() => {
+							topLoading.value = false;
+						});
+				}
 
-		const top = pageData.value.find(
-			(item: any) => item.type === 'Default Topic' && item.id === 'Hottest'
-		);
-		if (top) {
-			topApps.value = await getTop(categoryRef.value.toLowerCase());
-			topLoading.value = false;
-		}
-
-		const latest = pageData.value.find(
-			(item: any) => item.type === 'Default Topic' && item.id === 'Newest'
-		);
-		if (latest) {
-			latestApps.value = await getLatest(categoryRef.value.toLowerCase());
-			latestLoading.value = false;
-		}
-	}
-	pageLoading.value = false;
-	topLoading.value = false;
-	latestLoading.value = false;
+				const latest = pageData.value.find(
+					(item: any) => item.type === 'Default Topic' && item.id === 'Newest'
+				);
+				if (latest) {
+					getLatest(categoryRef.value.toLowerCase())
+						.then((list) => {
+							latestApps.value = list;
+						})
+						.finally(() => {
+							latestLoading.value = false;
+						});
+				}
+			}
+		})
+		.finally(() => {
+			pageLoading.value = false;
+		});
 }
 
 const clickList = (type: string) => {
