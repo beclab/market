@@ -206,7 +206,11 @@ export const useUserStore = defineStore('userStore', {
 		 * @param app
 		 */
 		_userResourcePreflight(app: AppStoreInfo): boolean {
-			if (!this.userResource) {
+			if (
+				!this.userResource ||
+				!this.userResource.cpu ||
+				!this.userResource.memory
+			) {
 				app.preflightError.push(
 					i18n.global.t('error.failed_to_get_user_resource')
 				);
