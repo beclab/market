@@ -4,7 +4,7 @@
 export default {
 	base: {
 		failed: 'Action failed',
-		success: 'Action was successful',
+		success: 'Action successful',
 		application: 'Application',
 		extensions: 'Categories',
 		time: 'Time',
@@ -24,7 +24,7 @@ export default {
 		category: 'Category',
 		submitter: 'Submitter',
 		documents: 'Documents',
-		see_all: 'See All',
+		see_all: 'See all',
 		more: 'More'
 	},
 	main: {
@@ -32,7 +32,7 @@ export default {
 		productivity: 'Productivity',
 		utilities: 'Utilities',
 		entertainment: 'Entertainment',
-		social_network: 'Social Network',
+		social_network: 'Social network',
 		blockchain: 'Blockchain',
 		recommendation: 'Recommendation',
 		recommend: 'Recommend',
@@ -41,7 +41,7 @@ export default {
 		my_terminus: 'My Terminus',
 		terminus: 'Terminus',
 		terminus_market: 'Terminus Market',
-		install_terminus_os: 'Install TerminusOS'
+		install_terminus_os: 'Install Terminus'
 	},
 	app: {
 		get: 'Get',
@@ -61,144 +61,142 @@ export default {
 		updating: 'Updating'
 	},
 	detail: {
-		require_memory: 'Require Memory',
-		require_disk: 'Require Disk',
-		require_cpu: 'Require CPU',
-		require_gpu: 'Require GPU',
-		about_this_type: 'ABOUT THIS {type}',
-		whats_new: 'WHATS NEW',
-		required_permissions: 'REQUIRED PERMISSIONS',
-		readme: 'README',
-		information: 'INFORMATION',
-		get_support: 'Get Support',
+		require_memory: 'Required memory',
+		require_disk: 'Required disk',
+		require_cpu: 'Required CPU',
+		require_gpu: 'Required GPU',
+		about_this_type: 'About this {type}',
+		whats_new: "What's new",
+		required_permissions: 'Required permissions',
+		readme: 'Readme',
+		information: 'Information',
+		get_support: 'Get support',
 		website: 'Website',
-		app_version: 'App Version',
+		app_version: 'App version',
 		compatibility: 'Compatibility',
 		platforms: 'Platforms',
-		source_code: 'Source Code',
+		source_code: 'Source code',
 		public: 'Public',
 		legal: 'Legal',
 		license: 'License',
-		chart_version: 'Chart Version',
-		version_history: 'Version History',
-		get_a_client: 'GET A CLIENT',
-		dependency: 'DEPENDENCY',
-		reference_app: 'REFERENCE APP',
-		see_all_version: 'See all version',
+		chart_version: 'Chart version',
+		version_history: 'Version history',
+		get_a_client: 'Get a client',
+		dependency: 'Dependency',
+		reference_app: 'Reference apps',
+		see_all_version: 'See all versions',
 		download: 'Download',
-		no_version_history_desc: 'The application has no version history.'
+		no_version_history_desc: 'The application has no version history'
 	},
 	permission: {
 		files: 'Files',
-		files_not_store_label: 'This app will not store any files on Termius.',
-		files_access_user_data_label: 'Requires permission to access User Data.',
+		files_not_store_label: 'This app does not store any files on Terminus',
+		files_access_user_data_label: 'Permission required to access user data',
 		files_access_user_data_desc:
 			'Allow this app to read and write files in the following directories:',
-		file_store_data_folder_label: 'Requires permission to access Data folder.',
+		file_store_data_folder_label:
+			'Permission required to access the Data folder',
 		file_store_data_folder_desc:
-			'Allow this app to store persistent files in app-specific directories.',
+			'Allow this app to store persistent files in app-specific directories',
 		file_store_cache_folder_label:
-			'Requires permission to access Cache folder.',
+			'Permission required to access the Cache folder',
 		file_store_cache_folder_desc:
-			'Allow this app to store cache files in app-specific directories.',
+			'Allow this app to store cache files in app-specific directories',
 		internet: 'Internet',
-		internet_label: 'Full network access while installing and running.',
+		internet_label:
+			'Full network access required during installing and operation',
 		internet_desc:
-			'Allow this app to connect to, download from, and upload data to the Internet while installing and running.',
+			'Allow this app to connect to, download from, and upload data to the Internet while installing and operation',
 		notifications: 'Notifications',
-		notifications_label: 'Permission to send you notifications.',
+		notifications_label: 'Permission required to send you notifications',
 		notifications_desc:
-			'Allow this app to send you notifications, such as Terminus Messages, SMS, Emails, Third-party IM Messages. These can be configured in Settings.',
+			'Allow this app to send notifications, including Terminus Messages, SMS, Emails, and Third-party IM Messages. You can configure these preferences in Settings.',
 		analytics: 'Analytics',
 		analytics_label:
-			'This app uses built-in tools to collect metrics you need for website analytics.',
+			'This app uses built-in tools to collect metrics you need for website analytics',
 		analytics_desc:
-			"It will not collect your visitors' personal information, and all web data will be anonymized and stored locally on your Terminus.",
+			'No personal information is collected, and all web data is anonymized and stored locally on your Terminus',
 		websocket: 'Websocket',
 		websocket_label:
-			'Permission to use WebSocket for a two-way interactive communication between browser and Terminus.',
+			'Permission required to use WebSocket for a two-way interactive communication between browser and Terminus',
 		websocket_desc:
-			'Allow this app to send content to the webpage in your browser via WebSocket protocol.',
+			'Allow this app to send content to the webpage in your browser via WebSocket',
 		secret: 'Secret',
 		secret_label:
-			'Create and manage application configuration and secrets using Vault.',
+			'Create and manage application configuration and secrets using Vault',
 		secret_desc:
-			'Vault is a Terminus secret management platform for storing, managing, and syncing sensitive information, such as API keys, database credentials, and environment variables.',
-		knowledgebase: 'Knowledgebase',
+			"Vault is Terminus's secret management app for storing, managing, and syncing sensitive information such as API keys, database credentials, and environment variables",
+		knowledgebase: 'Knowledge base',
 		knowledgebase_label:
-			'Permission to use the data in your local knowledge base.',
+			'Permission required to access your local knowledge base',
 		knowledgebase_desc:
-			'Allow this app to use your personal data stored in Terminus local knowledge base, such as articles from subscribed RSS feeds and PDFs uploaded to Wise.',
-		search_label: 'This app supports Terminus full-text search engine.',
-		relational_database: 'Relational Database',
+			'Allows this app to use your personal data stored in Terminus local knowledge base',
+		search_label: "This app supports Terminus's full-text search engine",
+		relational_database: 'Relational database',
 		relational_database_label:
 			'This app uses PostgreSQL as its relational database',
 		relational_database_desc:
 			'PostgreSQL is provided by Terminus Middleware Service.',
-		document_database: 'Document Database',
+		document_database: 'Document database',
 		document_database_label: 'This app uses MongoDB as its document database',
 		document_database_desc:
 			'MongoDB is provided by Terminus Middleware Service.',
-		key_value_database: 'Key-Value Database',
-		key_value_database_label: 'This app uses Redis as its Key-Value  database',
+		key_value_database: 'Key-value database',
+		key_value_database_label: 'This app uses Redis as its Key-value database',
 		key_value_database_desc:
 			'Redis is provided by Terminus Middleware Service.',
 		cluster_app_label:
-			'This app will be installed at cluster level, and shared by all users in the same Terminus cluster.',
+			'This app will be installed at the cluster level, and shared by all users in the same Terminus cluster',
 		entrance: 'Entrance',
 		entrance_visibility_label:
-			'Number of different visibility entrances for this app: {desktopSize} visible, {backendSize} invisible.',
+			'Number of different visibility entrances for this app: {desktopSize} visible and {backendSize} invisible',
 		entrance_visibility_desc_first:
-			"The visible entrance allows you to access the app's UI webpage through the Terminus desktop.",
+			"The visible entrance allows you to access the app's webpage through Desktop",
 		entrance_visibility_desc_second:
 			'The invisible entrance typically operates in the backend and is used for the app to interact with other apps.',
 		entrance_auth_level_label:
-			'Number of different auth Level entrances for this app: {publicSize} public, {privateSize} private.',
+			'Number of entrances of different auth levels: {publicSize} public, {privateSize} private',
 		entrance_auth_level_desc:
-			'Public entrance is accessible to anyone on the Internet, whereas private entrance requires activation of Tailscale for access.',
+			'A public entrance is accessible to anyone on the Internet. A private entrance requires activation of Tailscale for access.',
 		entrance_two_factor_label:
 			'These entrances require Two-Factor Authentication to access: {twoFactor}'
 	},
 	error: {
-		network_error: 'Network error, please try again later',
+		network_error: 'Network error. Please try again later.',
 		unknown_error: 'Unknown error',
 		failed_get_user_role: 'Failed to get user role',
-		only_be_installed_by_the_admin:
-			'This app can only be installed by the Admin.',
+		only_be_installed_by_the_admin: 'This app can only be installed by Admin',
 		not_admin_role_install_middleware:
-			'This is a middleware, please contact your Terminus Admin to install.',
+			'Middleware component. Contact your Terminus Admin to install.',
 		not_admin_role_install_cluster_app:
-			'This is a cluster app, please contact your Terminus Admin to install.',
-		failed_to_get_os_version: 'Failed to get Terminus Version',
-		app_is_not_compatible_terminus_os:
-			'This app isn’t compatible with your Terminus OS.',
+			'Cluster app. Contact your Terminus Admin to install.',
+		failed_to_get_os_version: 'Failed to get Terminus version',
+		app_is_not_compatible_terminus_os: 'Incompatible with your Terminus',
 		failed_to_get_user_resource: 'Failed to get user resource',
-		user_not_enough_cpu: 'Not enough required CPU on your quota.',
-		user_not_enough_memory: 'Not enough required memory on your quota.',
+		user_not_enough_cpu: 'Insufficient CPU on your quota',
+		user_not_enough_memory: 'Insufficient memory on your quota',
 		failed_to_get_system_resource: 'Failed to get system resource',
-		need_to_install_dependent_app_first: 'Need to install dependent app first.',
-		terminus_not_enough_cpu: 'Not enough required CPU on Terminus cluster.',
-		terminus_not_enough_memory:
-			'Not enough required memory on Terminus cluster.',
-		terminus_not_enough_disk: 'Not enough required disk on Terminus cluster.',
-		terminus_not_enough_gpu: 'Not enough required GPU on Terminus cluster.',
-		operation_preform_failure: 'operation preform failure',
+		need_to_install_dependent_app_first: 'Need to install dependent app first',
+		terminus_not_enough_cpu: 'Insufficient CPU on the Terminus cluster',
+		terminus_not_enough_memory: 'Insufficient memory on the Terminus cluster',
+		terminus_not_enough_disk: 'Insufficient disk on the Terminus cluster',
+		terminus_not_enough_gpu: 'Insufficient GPU on the Terminus cluster',
+		operation_preform_failure: 'Operation faied',
 		cluster_not_support_platform:
-			'This [app/recommend/model] does not support your Terminus OS platform architecture.'
+			'This [app/recommend/model] does not support your Terminus platform'
 	},
 	my: {
 		market: 'Market',
 		custom: 'Custom',
 		unable_to_install_app: 'Unable to install app',
-		update_all: 'Update All',
-		available_updates: 'Available Updates',
-		everything_up_to_date: 'Congrats, everything is up to date!',
-		no_upload_chart_tips: 'You haven’t uploaded any custom chart yet.',
-		no_installed_app_tips: 'You haven’t installed anything yet.',
-		no_logs: 'There are no installation logs here.',
-		sure_to_uninstall_the_app:
-			'Are you sure you want to uninstall the application {title}？',
-		upload_custom_chart: 'Upload Custom Chart',
+		update_all: 'Update all',
+		available_updates: 'Available updates',
+		everything_up_to_date: 'Congratulations! Everything is up to date.',
+		no_upload_chart_tips: "You haven't uploaded any custom charts yet",
+		no_installed_app_tips: 'You haven’t installed anything yet',
+		no_logs: 'No installation logs available',
+		sure_to_uninstall_the_app: "Are you sure to uninstall '{title}'？",
+		upload_custom_chart: 'Upload custom chart',
 		logs: 'Logs'
 	}
 };
