@@ -93,7 +93,9 @@ export async function getOperateHistory(source: string): Promise<any> {
 	}
 }
 
-export async function getAppsBriefInfoByStatus(state: APP_STATUS[]) {
+export async function getAppsBriefInfoByStatus(
+	state: APP_STATUS[]
+): Promise<[]> {
 	try {
 		const response: any = await axios.get('/app-store/v1/apps/app', {
 			params: {

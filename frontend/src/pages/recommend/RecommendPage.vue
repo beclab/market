@@ -87,8 +87,8 @@ const latestLoading = ref(true);
 const pageData = ref();
 const appStore = useAppStore();
 
-onMounted(async () => {
-	await fetchData(true);
+onMounted(() => {
+	fetchData(true);
 });
 
 async function fetchData(showLoading = false) {
@@ -96,31 +96,31 @@ async function fetchData(showLoading = false) {
 		pageLoading.value = true;
 		latestLoading.value = true;
 	}
-	const all = await appStore.getPageData(CATEGORIES_TYPE.LOCAL.ALL);
-	console.log(all);
-	if (all && all.data) {
-		console.log(all.data);
-		pageData.value = all.data;
-		pageLoading.value = false;
+	appStore
+		.getPageData(CATEGORIES_TYPE.LOCAL.ALL)
+		.then((all) => {
+			console.log(all);
+			if (all && all.data) {
+				pageData.value = all.data;
+				pageLoading.value = false;
 
-		const latest = pageData.value.find(
-			(item: any) => item.type === 'Default Topic' && item.id === 'Newest'
-		);
-		if (latest) {
-			// await Promise.all([
-			// 	getRecommendApps(CATEGORIES_TYPE.SERVER.News),
-			// 	getRecommendApps(CATEGORIES_TYPE.SERVER.Sports),
-			// 	getRecommendApps(CATEGORIES_TYPE.SERVER.LifeStyle)
-			// ]).then(([array1, array2, array3]) => {
-			// 	latestApps.value = [...array1, ...array2, ...array3];
-			// });
-			latestApps.value = await getRecommendApps();
-
+				const latest = pageData.value.find(
+					(item: any) => item.type === 'Default Topic' && item.id === 'Newest'
+				);
+				if (latest) {
+					getRecommendApps()
+						.then((data) => {
+							latestApps.value = data;
+						})
+						.finally(() => {
+							latestLoading.value = false;
+						});
+				}
+			}
+		})
+		.finally(() => {
 			latestLoading.value = false;
-		}
-	}
-	pageLoading.value = false;
-	latestLoading.value = false;
+		});
 }
 </script>
 
