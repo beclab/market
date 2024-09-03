@@ -9,6 +9,8 @@ import { useSocketStore } from 'src/stores/websocketStore';
 import { BtNotify, NotifyDefinedType } from '@bytetrade/ui';
 import { bus, BUS_EVENT } from 'src/utils/bus';
 import { useUserStore } from 'src/stores/user';
+import { i18n } from 'src/boot/i18n';
+import { supportLanguages } from 'src/i18n';
 // import { testSatisfies } from 'src/utils/version';
 
 export default {
@@ -16,6 +18,24 @@ export default {
 		const appStore = useAppStore();
 		const websocketStore = useSocketStore();
 		const userStore = useUserStore();
+
+		let terminusLanguage = '';
+		let terminusLanguageInfo: any = document.querySelector(
+			'meta[name="terminus-language"]'
+		);
+		if (terminusLanguageInfo && terminusLanguageInfo.content) {
+			terminusLanguage = terminusLanguageInfo.content;
+		} else {
+			terminusLanguage = navigator.language;
+		}
+
+		console.log(navigator.language);
+
+		if (terminusLanguage) {
+			if (supportLanguages.find((e) => e.value == terminusLanguage)) {
+				i18n.global.locale.value = terminusLanguage as any;
+			}
+		}
 
 		onMounted(async () => {
 			await appStore.prefetch();

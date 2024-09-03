@@ -119,7 +119,7 @@ async function fetchData(showLoading = false) {
 			}
 		})
 		.finally(() => {
-			latestLoading.value = false;
+			pageLoading.value = false;
 		});
 }
 </script>
