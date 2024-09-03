@@ -18,10 +18,10 @@ export default {
 		const userStore = useUserStore();
 
 		onMounted(async () => {
+			await appStore.prefetch();
 			if (!appStore.isPublic) {
 				// testSatisfies();
 				websocketStore.start();
-				await appStore.prefetch();
 				userStore.init();
 				appStore.init();
 			}
