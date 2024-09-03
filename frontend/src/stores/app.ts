@@ -34,7 +34,7 @@ import { CFG_TYPE } from 'src/constants/config';
 
 export type AppState = {
 	tempAppMap: Record<string, AppStoreInfo>;
-	pageData: [] | null;
+	pageData: [];
 	installApps: AppStoreInfo[];
 	updateApps: AppStoreInfo[];
 	queue: AsyncQueue;
@@ -47,7 +47,7 @@ export const useAppStore = defineStore('app', {
 			tempAppMap: {},
 			installApps: [],
 			updateApps: [],
-			pageData: null,
+			pageData: [],
 			isPublic: !!process.env.PUBLIC_URL,
 			queue: new AsyncQueue()
 		} as AppState;
@@ -69,7 +69,7 @@ export const useAppStore = defineStore('app', {
 
 		async getPageData(category: string): Promise<any> {
 			if (!this.pageData || this.pageData.length == 0) {
-				return null;
+				await this.prefetch();
 			}
 			switch (category) {
 				case CATEGORIES_TYPE.LOCAL.ALL:

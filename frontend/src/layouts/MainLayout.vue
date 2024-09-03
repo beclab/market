@@ -152,12 +152,12 @@ const itemsRef = ref([
 				label: t('main.recommendation'),
 				key: MENU_TYPE.Application.Recommendation,
 				icon: 'sym_r_featured_play_list'
-			},
-			{
-				label: t('main.models'),
-				key: MENU_TYPE.Application.Models,
-				icon: 'sym_r_neurology'
 			}
+			// {
+			// 	label: t('main.models'),
+			// 	key: MENU_TYPE.Application.Models,
+			// 	icon: 'sym_r_neurology'
+			// }
 		]
 	}
 ]);
