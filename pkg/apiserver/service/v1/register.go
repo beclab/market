@@ -148,6 +148,20 @@ func AddToContainer(c *restful.Container) error {
 		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
 		Returns(http.StatusOK, "success to get app infos by names", nil))
 
+	ws.Route(ws.GET("/applications/i18ns").
+		To(handler.handleI18ns).
+		Doc("get apps i18n").
+		Reads([]string{}).
+		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
+		Returns(http.StatusOK, "success to get app i18n by names", nil))
+
+	ws.Route(ws.GET("/applications/i18ns/{"+ParamAppName+"}").
+		To(handler.handleI18n).
+		Param(ws.PathParameter(ParamAppName, "the name of the application")).
+		Doc("get application i18n by name").
+		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
+		Returns(http.StatusOK, "success to get application i18n by name", nil))
+
 	ws.Route(ws.GET("/workflow/recommend/detail").
 		To(handler.workflowRecommendsDetail).
 		Param(ws.QueryParameter("category", "category")).

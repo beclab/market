@@ -120,14 +120,15 @@ type ApplicationInfo struct {
 	Status   string `yaml:"status" json:"status,omitempty"`
 	Progress string `json:"progress,omitempty"`
 
-	Language     []string     `yaml:"language" json:"language"`
-	Submitter    string       `yaml:"submitter" json:"submitter"`
-	Doc          string       `yaml:"doc" json:"doc"`
-	Website      string       `yaml:"website" json:"website"`
-	FeatureImage string       `yaml:"featuredImage" json:"featuredImage"`
-	SourceCode   string       `yaml:"sourceCode" json:"sourceCode"`
-	License      []TextAndURL `yaml:"license" json:"license"`
-	Legal        []TextAndURL `yaml:"legal" json:"legal"`
+	Language     []string        `yaml:"language" json:"language"`
+	Submitter    string          `yaml:"submitter" json:"submitter"`
+	Doc          string          `yaml:"doc" json:"doc"`
+	Website      string          `yaml:"website" json:"website"`
+	FeatureImage string          `yaml:"featuredImage" json:"featuredImage"`
+	SourceCode   string          `yaml:"sourceCode" json:"sourceCode"`
+	License      []TextAndURL    `yaml:"license" json:"license"`
+	Legal        []TextAndURL    `yaml:"legal" json:"legal"`
+	I18n         map[string]I18n `yaml:"i18n" json:"i18n"`
 
 	AppLabels []string `yaml:"appLabels" json:"appLabels"`
 
@@ -153,6 +154,19 @@ type TextAndURL struct {
 type AppService struct {
 	Name string `yaml:"name" json:"name" bson:"name"`
 	Port int32  `yaml:"port" json:"port" bson:"port"`
+}
+
+type I18nEntrance struct {
+	Name  string `yaml:"name" json:"name" bson:"name"`
+	Title string `yaml:"title" json:"title" bson:"title"`
+}
+
+type I18n struct {
+	Title              string         `yaml:"title" json:"title" bson:"title"`
+	Entrances          []I18nEntrance `yaml:"entrances" json:"entrances" bson:"entrances"`
+	Description        string         `yaml:"description" json:"description" bson:"description"`
+	FullDescription    string         `yaml:"fullDescription" json:"fullDescription" bson:"fullDescription"`
+	UpgradeDescription string         `yaml:"upgradeDescription" json:"upgradeDescription" bson:"upgradeDescription"`
 }
 
 type SupportClient struct {

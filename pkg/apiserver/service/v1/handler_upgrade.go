@@ -71,6 +71,10 @@ func (h *Handler) upgrade(req *restful.Request, resp *restful.Response) {
 		api.HandleError(resp, err)
 		return
 	}
+	i18n := appmgr.GetAppI18n(latestInfo.ChartName, latestInfo.Language)
+	if len(i18n) > 0 {
+		latestInfo.I18n = i18n
+	}
 
 	latestInfo.Source = constants.AppFromMarket
 	err = boltdb.UpsertLocalAppInfo(latestInfo)
