@@ -33,7 +33,7 @@ func ReadAppInfo(cfgFileName string) (*models.ApplicationInfo, error) {
 	appInfo := appCfg.ToAppInfo()
 	dir := path.Dir(cfgFileName)
 	i18nMap := make(map[string]models.I18n)
-	for _, lang := range appInfo.Language {
+	for _, lang := range appInfo.Locale {
 		data, err := ioutil.ReadFile(path.Join(dir, "i18n", lang, constants.AppCfgFileName))
 		if err != nil {
 			glog.Warningf("failed to get file %s,err=%v", path.Join("i18n", lang, constants.AppCfgFileName), err)

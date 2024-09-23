@@ -228,7 +228,7 @@ func GetVersionHistory(appName string) (string, error) {
 	return bodyStr, nil
 }
 
-func GetAppI18n(chartName string, language []string) map[string]models.I18n {
+func GetAppI18n(chartName string, locale []string) map[string]models.I18n {
 	i18nMap := make(map[string]models.I18n)
 	chartDirPath := path.Join(constants.ChartsLocalDir, chartName)
 	chartPath := utils.FindChartPath(chartDirPath)
@@ -236,7 +236,7 @@ func GetAppI18n(chartName string, language []string) map[string]models.I18n {
 		return i18nMap
 	}
 
-	for _, lang := range language {
+	for _, lang := range locale {
 		data, err := ioutil.ReadFile(path.Join(chartPath, "i18n", lang, constants.AppCfgFileName))
 		if err != nil {
 			glog.Infof("Failed to read i18n info err=%v", err)

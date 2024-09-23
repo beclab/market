@@ -2,12 +2,13 @@ package models
 
 import (
 	"encoding/json"
-	"helm.sh/helm/v3/pkg/time"
 	"market/internal/constants"
 	"market/internal/models/tapr"
 	"market/pkg/utils"
 	"path"
 	"strings"
+
+	"helm.sh/helm/v3/pkg/time"
 )
 
 const (
@@ -120,7 +121,7 @@ type ApplicationInfo struct {
 	Status   string `yaml:"status" json:"status,omitempty"`
 	Progress string `json:"progress,omitempty"`
 
-	Language     []string        `yaml:"language" json:"language"`
+	Locale       []string        `yaml:"locale" json:"locale"`
 	Submitter    string          `yaml:"submitter" json:"submitter"`
 	Doc          string          `yaml:"doc" json:"doc"`
 	Website      string          `yaml:"website" json:"website"`
@@ -161,12 +162,20 @@ type I18nEntrance struct {
 	Title string `yaml:"title" json:"title" bson:"title"`
 }
 
+type I18nMetadata struct {
+	Title       string `yaml:"title" json:"title" bson:"title"`
+	Description string `yaml:"description" json:"description" bson:"description"`
+}
+
+type I18nSpec struct {
+	FullDescription    string `yaml:"fullDescription" json:"fullDescription" bson:"fullDescription"`
+	UpgradeDescription string `yaml:"upgradeDescription" json:"upgradeDescription" bson:"upgradeDescription"`
+}
+
 type I18n struct {
-	Title              string         `yaml:"title" json:"title" bson:"title"`
-	Entrances          []I18nEntrance `yaml:"entrances" json:"entrances" bson:"entrances"`
-	Description        string         `yaml:"description" json:"description" bson:"description"`
-	FullDescription    string         `yaml:"fullDescription" json:"fullDescription" bson:"fullDescription"`
-	UpgradeDescription string         `yaml:"upgradeDescription" json:"upgradeDescription" bson:"upgradeDescription"`
+	Metadata  I18nMetadata   `yaml:"metadata" json:"metadata" bson:"metadata"`
+	Entrances []I18nEntrance `yaml:"entrances" json:"entrances" bson:"entrances"`
+	Spec      I18nSpec       `yaml:"spec" json:"spec" bson:"spec"`
 }
 
 type SupportClient struct {
@@ -231,7 +240,7 @@ type AppSpec struct {
 	RequiredGPU        string        `yaml:"requiredGpu" json:"requiredGpu"`
 	RequiredCPU        string        `yaml:"requiredCpu" json:"requiredCpu"`
 
-	Language     []string     `yaml:"language" json:"language"`
+	Locale       []string     `yaml:"locale" json:"locale"`
 	Submitter    string       `yaml:"submitter" json:"submitter"`
 	Doc          string       `yaml:"doc" json:"doc"`
 	Website      string       `yaml:"website" json:"website"`
@@ -315,7 +324,7 @@ func (ac *AppConfiguration) ToAppInfo() *ApplicationInfo {
 		Options:            ac.Options,
 		Entrances:          ac.Entrances,
 
-		Language:     ac.Spec.Language,
+		Locale:       ac.Spec.Locale,
 		Submitter:    ac.Spec.Submitter,
 		Doc:          ac.Spec.Doc,
 		Website:      ac.Spec.Website,
