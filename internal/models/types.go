@@ -74,12 +74,8 @@ type MenuType struct {
 }
 
 type Localization struct {
-	ZhCN LanguageData `json:"zh-CN"`
-	EnUS LanguageData `json:"en-US"`
-}
-
-type LanguageData struct {
-	Main MainData `json:"main"`
+	ZhCN MainData `json:"zh-CN"`
+	EnUS MainData `json:"en-US"`
 }
 
 type MainData struct {
