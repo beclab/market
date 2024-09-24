@@ -78,6 +78,10 @@ func installPre(appName, token string) (*models.ApplicationInfo, error) {
 	if err != nil {
 		return info, err
 	}
+	i18n := appmgr.GetAppI18n(info.ChartName, info.Locale)
+	if len(i18n) > 0 {
+		info.I18n = i18n
+	}
 
 	info.Source = constants.AppFromMarket
 	err = boltdb.UpsertLocalAppInfo(info)

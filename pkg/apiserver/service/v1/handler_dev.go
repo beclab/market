@@ -204,6 +204,11 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 		info.Source = constants.AppFromDev
 	}
 
+	i18n := appmgr.GetAppI18n(info.ChartName, info.Locale)
+	if len(i18n) > 0 {
+		info.I18n = i18n
+	}
+
 	err = boltdb.UpsertLocalAppInfo(info)
 	if err != nil {
 		glog.Warningf("UpsertLocalAppInfo err:%s", err.Error())

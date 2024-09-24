@@ -1,4 +1,5 @@
 import { CFG_TYPE } from 'src/constants/config';
+import { i18n } from 'src/boot/i18n';
 
 export interface AppStoreInfo {
 	id: string;
@@ -207,6 +208,17 @@ export enum ROLE_TYPE {
 	Admin = 'platform-admin'
 }
 
+export interface MenuType {
+	label: string;
+	key: string;
+	icon: string;
+}
+
+export interface MenuData {
+	menuTypes: MenuType[];
+	i18n: any;
+}
+
 export enum TRANSACTION_PAGE {
 	App = 'App',
 	List = 'List',
@@ -320,4 +332,68 @@ export enum PERMISSION_SYSDATA_GROUP {
 	service_search = 'service.search',
 	secret_infisical = 'secret.infisical',
 	secret_vault = 'secret.vault'
+}
+
+export enum APP_FIELD {
+	TITLE = 'title',
+	ENTRANCES_TITLE = 'entrances?_title',
+	ENTRANCES_NAME = 'entrances?_name',
+	DESCRIPTION = 'description',
+	FULL_DESCRIPTION = 'fullDescription',
+	UPGRADE_DESCRIPTION = 'upgradeDescription'
+}
+
+export function getAppFieldI18n(
+	app: AppStoreInfo,
+	field: APP_FIELD,
+	index = -1
+) {
+	let key = '';
+	switch (field) {
+		case APP_FIELD.DESCRIPTION:
+		case APP_FIELD.TITLE:
+		case APP_FIELD.FULL_DESCRIPTION:
+		case APP_FIELD.UPGRADE_DESCRIPTION:
+			key = app.name + '_' + field;
+			break;
+		case APP_FIELD.ENTRANCES_NAME:
+		case APP_FIELD.ENTRANCES_TITLE:
+			if (index !== -1) {
+				key =
+					app.name +
+					'_' +
+					APP_FIELD.ENTRANCES_NAME.replace('?', index.toString());
+			}
+			break;
+	}
+	if (key) {
+		const exist = i18n.global.te(key);
+		// console.log(key, exist);
+		if (exist) {
+			return i18n.global.t(key);
+		}
+	}
+
+	switch (field) {
+		case APP_FIELD.DESCRIPTION:
+			return app.desc;
+		case APP_FIELD.TITLE:
+		case APP_FIELD.FULL_DESCRIPTION:
+		case APP_FIELD.UPGRADE_DESCRIPTION:
+			return app[field];
+		case APP_FIELD.ENTRANCES_NAME:
+			if (index !== -1) {
+				const array1 = app.entrances;
+				return array1[index].name;
+			} else {
+				return '';
+			}
+		case APP_FIELD.ENTRANCES_TITLE:
+			if (index !== -1) {
+				const array2 = app.entrances;
+				return array2[index].title;
+			} else {
+				return '';
+			}
+	}
 }

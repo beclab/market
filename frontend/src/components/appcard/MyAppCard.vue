@@ -39,7 +39,7 @@
 		<div class="my-application-info column justify-start items-start">
 			<div class="my-application-title-layout row justify-start items-center">
 				<div class="my-application-title text-h6 text-ink-1">
-					{{ item.title }}
+					{{ getAppFieldI18n(item, APP_FIELD.TITLE) }}
 				</div>
 				<div
 					v-if="version"
@@ -50,7 +50,7 @@
 			</div>
 
 			<div class="my-application-content text-body3 text-ink-3">
-				{{ item.desc }}
+				{{ getAppFieldI18n(item, APP_FIELD.DESCRIPTION) }}
 			</div>
 
 			<div
@@ -136,7 +136,9 @@
 <script lang="ts" setup>
 import { onMounted, PropType, ref } from 'vue';
 import {
+	APP_FIELD,
 	AppStoreInfo,
+	getAppFieldI18n,
 	SOURCE_TYPE,
 	TRANSACTION_PAGE
 } from 'src/constants/constants';

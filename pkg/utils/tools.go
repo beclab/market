@@ -23,8 +23,10 @@ import (
 	"market/internal/constants"
 	"math/rand"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang/glog"
@@ -166,4 +168,33 @@ func Md5String(s string) string {
 	hash := md5.Sum([]byte(s))
 	hashString := hex.EncodeToString(hash[:])
 	return hashString
+}
+
+func FindChartPath(chartDirPath string) string {
+	charts, err := os.ReadDir(chartDirPath)
+	if err != nil {
+		glog.Warningf("read dir %s error: %s", chartDirPath, err.Error())
+		return ""
+	}
+
+	for _, c := range charts {
+		if !c.IsDir() || strings.HasPrefix(c.Name(), ".") {
+			continue
+		}
+		appCfgFullName := path.Join(chartDirPath, c.Name(), constants.AppCfgFileName)
+		if PathExists(appCfgFullName) {
+			return path.Join(chartDirPath, c.Name())
+		}
+	}
+
+	return ""
+}
+
+func Contains(slice []string, item string) bool {
+	for _, element := range slice {
+		if element == item {
+			return true
+		}
+	}
+	return false
 }

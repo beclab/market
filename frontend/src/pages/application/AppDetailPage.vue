@@ -218,13 +218,17 @@
 											type: cfgType?.toUpperCase()
 										})
 									"
-									:description="item.fullDescription"
+									:description="
+										getAppFieldI18n(item, APP_FIELD.FULL_DESCRIPTION)
+									"
 								/>
 
 								<app-intro-card
 									class="q-mt-lg"
 									:title="t('detail.whats_new')"
-									:description="item.upgradeDescription"
+									:description="
+										getAppFieldI18n(item, APP_FIELD.UPGRADE_DESCRIPTION)
+									"
 								/>
 
 								<app-intro-card
@@ -618,10 +622,12 @@ import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';
 import {
+	APP_FIELD,
 	APP_STATUS,
 	AppStoreInfo,
 	CLIENT_TYPE,
 	DEPENDENCIES_TYPE,
+	getAppFieldI18n,
 	PERMISSION_SYSDATA_GROUP,
 	PermissionNode,
 	TRANSACTION_PAGE
@@ -659,7 +665,6 @@ const appStore = useAppStore();
 const { t } = useI18n();
 const $q = useQuasar();
 const item = ref<AppStoreInfo>();
-const test = ref();
 
 const loadStyle = async () => {
 	if ($q.dark.isActive) {
@@ -951,13 +956,13 @@ const entrancePermissionTask: OnUpdateUITask = {
 			}
 		}
 		const firstLabel = t('permission.entrance_visibility_label', {
-			desktopSize: `${desktopSize > 0 ? desktopSize : 'no'}`,
-			backendSize: ` ${backendSize > 0 ? backendSize : 'no'}`
+			desktopSize: `${desktopSize > 0 ? desktopSize : '0'}`,
+			backendSize: ` ${backendSize > 0 ? backendSize : '0'}`
 		});
 
 		const secondLabel = t('permission.entrance_auth_level_label', {
-			privateSize: `${privateSize > 0 ? privateSize : 'no'}`,
-			publicSize: ` ${publicSize > 0 ? publicSize : 'no'}`
+			privateSize: `${privateSize > 0 ? privateSize : '0'}`,
+			publicSize: ` ${publicSize > 0 ? publicSize : '0'}`
 		});
 
 		entrancePermissionData.value.push({

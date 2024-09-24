@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/helm"
@@ -19,11 +20,29 @@ import (
 )
 
 func getAppStoreServiceHost() string {
-	return os.Getenv(constants.AppStoreServiceHostEnv)
+
+	value := os.Getenv(constants.MarketProvider)
+
+	if value == "" {
+		return os.Getenv(constants.AppStoreServiceHostEnv)
+	} else {
+		return value
+	}
 }
 
 func getAppStoreServicePort() string {
 	return os.Getenv(constants.AppStoreServicePortEnv)
+}
+
+func GetAppTypes() (*models.ListResultD, error) {
+	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppTypesURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
+
+	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return decodeListResultD(bodyStr)
 }
 
 func GetApps(page, size, category, ty string) (*models.ListResultD, error) {
@@ -112,7 +131,7 @@ func GetReadMe(name string) (string, error) {
 
 func GetAppInfos(names []string) (mapInfo map[string]*models.ApplicationInfo, err error) {
 	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppInfosURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
-
+	glog.Infof("GetAppInfos --> urlTmp: %s", urlTmp)
 	var ms []byte
 	ms, err = json.Marshal(names)
 	if err != nil {
@@ -225,4 +244,28 @@ func GetVersionHistory(appName string) (string, error) {
 	}
 
 	return bodyStr, nil
+}
+
+func GetAppI18n(chartName string, locale []string) map[string]models.I18n {
+	i18nMap := make(map[string]models.I18n)
+	chartDirPath := path.Join(constants.ChartsLocalDir, chartName)
+	chartPath := utils.FindChartPath(chartDirPath)
+	if len(chartPath) == 0 {
+		return i18nMap
+	}
+
+	for _, lang := range locale {
+		data, err := ioutil.ReadFile(path.Join(chartPath, "i18n", lang, constants.AppCfgFileName))
+		if err != nil {
+			glog.Infof("Failed to read i18n info err=%v", err)
+			continue
+		}
+		var i18n models.I18n
+		err = json.Unmarshal(data, &i18n)
+		if err != nil {
+			continue
+		}
+		i18nMap[lang] = i18n
+	}
+	return i18nMap
 }

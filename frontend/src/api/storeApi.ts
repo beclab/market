@@ -108,7 +108,6 @@ export async function getTop(category?: string): Promise<AppStoreInfo[]> {
 		return [];
 	}
 }
-
 export async function getLatest(category?: string): Promise<AppStoreInfo[]> {
 	try {
 		let url = '/app-store/v1/applications/latest';
