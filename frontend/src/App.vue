@@ -4,7 +4,7 @@
 
 <script lang="ts">
 import { useAppStore } from 'src/stores/app';
-import { onBeforeUnmount, onMounted } from 'vue';
+import { onBeforeMount, onBeforeUnmount } from 'vue';
 import { useSocketStore } from 'src/stores/websocketStore';
 import { BtNotify, NotifyDefinedType } from '@bytetrade/ui';
 import { bus, BUS_EVENT } from 'src/utils/bus';
@@ -39,8 +39,7 @@ export default {
 			}
 		}
 
-		onMounted(async () => {
-			await appStore.prefetch();
+		onBeforeMount(async () => {
 			await menuStore.init();
 			if (!appStore.isPublic) {
 				// testSatisfies();

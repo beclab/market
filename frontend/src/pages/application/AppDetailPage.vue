@@ -665,7 +665,6 @@ const appStore = useAppStore();
 const { t } = useI18n();
 const $q = useQuasar();
 const item = ref<AppStoreInfo>();
-const test = ref();
 
 const loadStyle = async () => {
 	if ($q.dark.isActive) {
@@ -957,13 +956,13 @@ const entrancePermissionTask: OnUpdateUITask = {
 			}
 		}
 		const firstLabel = t('permission.entrance_visibility_label', {
-			desktopSize: `${desktopSize > 0 ? desktopSize : 'no'}`,
-			backendSize: ` ${backendSize > 0 ? backendSize : 'no'}`
+			desktopSize: `${desktopSize > 0 ? desktopSize : '0'}`,
+			backendSize: ` ${backendSize > 0 ? backendSize : '0'}`
 		});
 
 		const secondLabel = t('permission.entrance_auth_level_label', {
-			privateSize: `${privateSize > 0 ? privateSize : 'no'}`,
-			publicSize: ` ${publicSize > 0 ? publicSize : 'no'}`
+			privateSize: `${privateSize > 0 ? privateSize : '0'}`,
+			publicSize: ` ${publicSize > 0 ? publicSize : '0'}`
 		});
 
 		entrancePermissionData.value.push({

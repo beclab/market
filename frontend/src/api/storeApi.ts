@@ -108,23 +108,8 @@ export async function getTop(category?: string): Promise<AppStoreInfo[]> {
 		return [];
 	}
 }
-
-export async function getTypes(): Promise<AppStoreInfo[]> {
-	try {
-		let url = '/app-store/v1/applications/menutypes';
-		const { data }: any = await axios.get(globalConfig.url + url);
-		console.log('get_types');
-		console.log(data.items);
-		return data.items ?? [];
-	} catch (e) {
-		console.log(e);
-		return [];
-	}
-}
-
 export async function getLatest(category?: string): Promise<AppStoreInfo[]> {
 	try {
-
 		let url = '/app-store/v1/applications/latest';
 		if (category) {
 			url = url + '?category=' + category;
