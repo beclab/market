@@ -20,7 +20,14 @@ import (
 )
 
 func getAppStoreServiceHost() string {
-	return os.Getenv(constants.AppStoreServiceHostEnv)
+
+	value := os.Getenv(constants.MarketProvider)
+
+	if value == "" {
+		return os.Getenv(constants.AppStoreServiceHostEnv)
+	} else {
+		return value
+	}
 }
 
 func getAppStoreServicePort() string {

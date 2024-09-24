@@ -65,6 +65,7 @@ const (
 	AppServicePortEnv      = "APP_SERVICE_SERVICE_PORT"
 	AppStoreServiceHostEnv = "APP_SOTRE_SERVICE_SERVICE_HOST"
 	AppStoreServicePortEnv = "APP_SOTRE_SERVICE_SERVICE_PORT"
+	MarketProvider         = "MARKET_PROVIDER"
 
 	RecommendServiceInstallURLTempl           = "http://%s:%s/app-service/v1/recommends/%s/install"
 	RecommendServiceUninstallURLTempl         = "http://%s:%s/app-service/v1/recommends/%s/uninstall"

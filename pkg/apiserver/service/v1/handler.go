@@ -170,7 +170,7 @@ func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
 
 	menuTypeData := models.MenuTypeResponseData{
 		MenuTypes: []models.MenuType{
-			{Label: "main.discover", Key: "Home", Icon: "sym_r_radar"},
+			{Label: "discover", Key: "Home", Icon: "sym_r_radar"},
 		},
 		I18n: models.Localization{
 			ZhCN: models.LanguageData{
@@ -187,38 +187,38 @@ func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
 	}
 
 	if utils.Contains(types, "Productivity") {
-		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.productivity", Key: "Productivity", Icon: "sym_r_business_center"})
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "productivity", Key: "Productivity", Icon: "sym_r_business_center"})
 		menuTypeData.I18n.ZhCN.Main.Productivity = "效率"
 		menuTypeData.I18n.EnUS.Main.Productivity = "Productivity"
 	}
 
 	if utils.Contains(types, "Utilities") {
-		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.utilities", Key: "Utilities", Icon: "sym_r_extension"})
-		menuTypeData.I18n.ZhCN.Main.Productivity = "实用工具"
-		menuTypeData.I18n.EnUS.Main.Productivity = "Utilities"
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "utilities", Key: "Utilities", Icon: "sym_r_extension"})
+		menuTypeData.I18n.ZhCN.Main.Utilities = "实用工具"
+		menuTypeData.I18n.EnUS.Main.Utilities = "Utilities"
 	}
 
 	if utils.Contains(types, "Entertainment") {
-		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.entertainment", Key: "Entertainment", Icon: "sym_r_interests"})
-		menuTypeData.I18n.ZhCN.Main.Productivity = "娱乐"
-		menuTypeData.I18n.EnUS.Main.Productivity = "Entertainment"
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "entertainment", Key: "Entertainment", Icon: "sym_r_interests"})
+		menuTypeData.I18n.ZhCN.Main.Entertainment = "娱乐"
+		menuTypeData.I18n.EnUS.Main.Entertainment = "Entertainment"
 	}
 
 	if utils.Contains(types, "Social Network") {
-		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.socialNetwork", Key: "Social Network", Icon: "sym_r_group"})
-		menuTypeData.I18n.ZhCN.Main.Productivity = "社交网络"
-		menuTypeData.I18n.EnUS.Main.Productivity = "Social network"
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "socialNetwork", Key: "Social Network", Icon: "sym_r_group"})
+		menuTypeData.I18n.ZhCN.Main.SocialNetwork = "社交网络"
+		menuTypeData.I18n.EnUS.Main.SocialNetwork = "Social network"
 	}
 
 	if utils.Contains(types, "Blockchain") {
-		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.blockchain", Key: "Blockchain", Icon: "sym_r_stack"})
-		menuTypeData.I18n.ZhCN.Main.Productivity = "区块链"
-		menuTypeData.I18n.EnUS.Main.Productivity = "Blockchain"
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "blockchain", Key: "Blockchain", Icon: "sym_r_stack"})
+		menuTypeData.I18n.ZhCN.Main.Blockchain = "区块链"
+		menuTypeData.I18n.EnUS.Main.Blockchain = "Blockchain"
 	}
 
-	menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.recommendation", Key: "Recommend", Icon: "sym_r_featured_play_list"})
-	menuTypeData.I18n.ZhCN.Main.Productivity = "推荐"
-	menuTypeData.I18n.EnUS.Main.Productivity = "Recommendation"
+	menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "recommendation", Key: "Recommend", Icon: "sym_r_featured_play_list"})
+	menuTypeData.I18n.ZhCN.Main.Recommendation = "推荐"
+	menuTypeData.I18n.EnUS.Main.Recommendation = "Recommendation"
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, menuTypeData))
 }

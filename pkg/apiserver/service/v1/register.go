@@ -64,7 +64,7 @@ func AddToContainer(c *restful.Container) error {
 
 	ws.Route(ws.GET("/applications/menutypes").
 		To(handler.menuTypes).
-		Doc("get top application list").
+		Doc("get menu types list").
 		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
 		Returns(http.StatusOK, "success to get top application list", &models.MenuTypeResponse{}))
 
