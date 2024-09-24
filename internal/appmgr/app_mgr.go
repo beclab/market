@@ -27,6 +27,17 @@ func getAppStoreServicePort() string {
 	return os.Getenv(constants.AppStoreServicePortEnv)
 }
 
+func GetAppTypes() (*models.ListResultD, error) {
+	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppTypesURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
+
+	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return decodeListResultD(bodyStr)
+}
+
 func GetApps(page, size, category, ty string) (*models.ListResultD, error) {
 	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppListURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), page, size)
 	if category != "" {

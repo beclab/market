@@ -28,6 +28,7 @@ import (
 	"market/internal/models"
 	"market/internal/watchdog"
 	"market/pkg/api"
+	"market/pkg/utils"
 	"net/http"
 	"os"
 
@@ -150,6 +151,76 @@ func (h *Handler) list(req *restful.Request, resp *restful.Response) {
 	appWithStatusList := parseAppInfos(res, appsMap, workflowMap, middlewareMap)
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+}
+
+func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
+	token := getToken(req)
+	if token == "" {
+		api.HandleUnauthorized(resp, errors.New("access token not found"))
+		return
+	}
+
+	res, err := appmgr.GetAppTypes()
+	if err != nil {
+		api.HandleError(resp, err)
+		return
+	}
+
+	types := parseAppTypes(res)
+
+	menuTypeData := models.MenuTypeResponseData{
+		MenuTypes: []models.MenuType{
+			{Label: "main.discover", Key: "Home", Icon: "sym_r_radar"},
+		},
+		I18n: models.Localization{
+			ZhCN: models.LanguageData{
+				Main: models.MainData{
+					Discover: "发现",
+				},
+			},
+			EnUS: models.LanguageData{
+				Main: models.MainData{
+					Discover: "Discover",
+				},
+			},
+		},
+	}
+
+	if utils.Contains(types, "Productivity") {
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.productivity", Key: "Productivity", Icon: "sym_r_business_center"})
+		menuTypeData.I18n.ZhCN.Main.Productivity = "效率"
+		menuTypeData.I18n.EnUS.Main.Productivity = "Productivity"
+	}
+
+	if utils.Contains(types, "Utilities") {
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.utilities", Key: "Utilities", Icon: "sym_r_extension"})
+		menuTypeData.I18n.ZhCN.Main.Productivity = "实用工具"
+		menuTypeData.I18n.EnUS.Main.Productivity = "Utilities"
+	}
+
+	if utils.Contains(types, "Entertainment") {
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.entertainment", Key: "Entertainment", Icon: "sym_r_interests"})
+		menuTypeData.I18n.ZhCN.Main.Productivity = "娱乐"
+		menuTypeData.I18n.EnUS.Main.Productivity = "Entertainment"
+	}
+
+	if utils.Contains(types, "Social Network") {
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.socialNetwork", Key: "Social Network", Icon: "sym_r_group"})
+		menuTypeData.I18n.ZhCN.Main.Productivity = "社交网络"
+		menuTypeData.I18n.EnUS.Main.Productivity = "Social network"
+	}
+
+	if utils.Contains(types, "Blockchain") {
+		menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.blockchain", Key: "Blockchain", Icon: "sym_r_stack"})
+		menuTypeData.I18n.ZhCN.Main.Productivity = "区块链"
+		menuTypeData.I18n.EnUS.Main.Productivity = "Blockchain"
+	}
+
+	menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "main.recommendation", Key: "Recommend", Icon: "sym_r_featured_play_list"})
+	menuTypeData.I18n.ZhCN.Main.Productivity = "推荐"
+	menuTypeData.I18n.EnUS.Main.Productivity = "Recommendation"
+
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, menuTypeData))
 }
 
 func (h *Handler) listTop(req *restful.Request, resp *restful.Response) {
@@ -409,7 +480,7 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 		info = infoMarket
 		info.Status = models.AppUninstalled
 	}
-	
+
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, info))
 }
 

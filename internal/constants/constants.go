@@ -50,6 +50,7 @@ const (
 	AppStoreServiceAppURLTempl        = "https://%s:%s/app-store-server/v1/application/%s"
 	AppStoreServiceAppInfoURLTempl    = "https://%s:%s/app-store-server/v1/applications/info/%s"
 	AppStoreServiceAppInfosURLTempl   = "https://%s:%s/app-store-server/v1/applications/infos"
+	AppStoreServiceAppTypesURLTempl   = "https://%s:%s/app-store-server/v1/applications/types"
 	AppStoreServiceAppExistURLTempl   = "https://%s:%s/app-store-server/v1/applications/exist/%s"
 	AppStoreServiceAppListURLTempl    = "https://%s:%s/app-store-server/v1/applications?page=%s&size=%s"
 	AppStoreServiceAppTopURLTempl     = "https://%s:%s/app-store-server/v1/applications/top"

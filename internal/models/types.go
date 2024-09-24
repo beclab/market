@@ -67,6 +67,42 @@ type ListResponse struct {
 	Data ListResponseData `json:"data"`
 }
 
+type MenuType struct {
+	Label string `json:"label"`
+	Key   string `json:"key"`
+	Icon  string `json:"icon"`
+}
+
+type Localization struct {
+	ZhCN LanguageData `json:"zh-CN"`
+	EnUS LanguageData `json:"en-US"`
+}
+
+type LanguageData struct {
+	Main MainData `json:"main"`
+}
+
+type MainData struct {
+	Discover       string `json:"discover,omitempty"`
+	Productivity   string `json:"productivity,omitempty"`
+	Utilities      string `json:"utilities,omitempty"`
+	Entertainment  string `json:"entertainment,omitempty"`
+	SocialNetwork  string `json:"socialNetwork,omitempty"`
+	Blockchain     string `json:"blockchain,omitempty"`
+	Recommendation string `json:"recommendation,omitempty"`
+	Models         string `json:"models,omitempty"`
+}
+
+type MenuTypeResponseData struct {
+	MenuTypes []MenuType   `json:"menuTypes"`
+	I18n      Localization `json:"i18n"`
+}
+
+type MenuTypeResponse struct {
+	ResponseBase
+	Data MenuTypeResponseData `json:"data"`
+}
+
 type InfoResponse struct {
 	ResponseBase
 	Data ApplicationInfo `json:"data"`
