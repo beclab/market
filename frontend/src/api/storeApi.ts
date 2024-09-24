@@ -124,8 +124,7 @@ export async function getTypes(): Promise<AppStoreInfo[]> {
 
 export async function getLatest(category?: string): Promise<AppStoreInfo[]> {
 	try {
-		getTypes()
-		
+
 		let url = '/app-store/v1/applications/latest';
 		if (category) {
 			url = url + '?category=' + category;
