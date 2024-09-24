@@ -154,11 +154,11 @@ func (h *Handler) list(req *restful.Request, resp *restful.Response) {
 }
 
 func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
-	// token := getToken(req)
-	// if token == "" {
-	// 	api.HandleUnauthorized(resp, errors.New("access token not found"))
-	// 	return
-	// }
+	token := getToken(req)
+	if token == "" {
+		api.HandleUnauthorized(resp, errors.New("access token not found"))
+		return
+	}
 
 	res, err := appmgr.GetAppTypes()
 	if err != nil {
