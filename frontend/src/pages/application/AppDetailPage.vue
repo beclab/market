@@ -218,13 +218,17 @@
 											type: cfgType?.toUpperCase()
 										})
 									"
-									:description="item.fullDescription"
+									:description="
+										getAppFieldI18n(item, APP_FIELD.FULL_DESCRIPTION)
+									"
 								/>
 
 								<app-intro-card
 									class="q-mt-lg"
 									:title="t('detail.whats_new')"
-									:description="item.upgradeDescription"
+									:description="
+										getAppFieldI18n(item, APP_FIELD.UPGRADE_DESCRIPTION)
+									"
 								/>
 
 								<app-intro-card
@@ -618,10 +622,12 @@ import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';
 import {
+	APP_FIELD,
 	APP_STATUS,
 	AppStoreInfo,
 	CLIENT_TYPE,
 	DEPENDENCIES_TYPE,
+	getAppFieldI18n,
 	PERMISSION_SYSDATA_GROUP,
 	PermissionNode,
 	TRANSACTION_PAGE

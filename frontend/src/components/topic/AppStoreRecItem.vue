@@ -7,9 +7,11 @@
 			<img :src="item ? item.icon : ''" class="application_top_logo" />
 		</div>
 		<div class="modal_application_text">
-			<p class="modal_application_title">{{ item ? item.title : '' }}</p>
+			<p class="modal_application_title">
+				{{ item ? getAppFieldI18n(item, APP_FIELD.TITLE) : '' }}
+			</p>
 			<p class="modal_application_content">
-				{{ item ? item.desc : '' }}
+				{{ item ? getAppFieldI18n(item, APP_FIELD.DESCRIPTION) : '' }}
 			</p>
 		</div>
 		<div class="modal_application_install">
@@ -46,7 +48,11 @@
 <script lang="ts" setup>
 import { PropType } from 'vue';
 import { useAppStore } from 'src/stores/app';
-import { AppStoreInfo } from 'src/constants/constants';
+import {
+	APP_FIELD,
+	AppStoreInfo,
+	getAppFieldI18n
+} from 'src/constants/constants';
 
 defineProps({
 	item: {

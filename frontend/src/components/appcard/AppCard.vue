@@ -128,7 +128,9 @@
 
 		<div class="application_right column justify-center items-start">
 			<div class="application_title_layout row justify-start items-baseline">
-				<div class="application_title text-ink-1">{{ item.title }}</div>
+				<div class="application_title text-ink-1">
+					{{ getAppFieldI18n(item, APP_FIELD.TITLE) }}
+				</div>
 				<div v-if="version" class="application_version">
 					{{ item.versionName }}
 				</div>
@@ -142,7 +144,7 @@
 						: 'application_content'
 				"
 			>
-				{{ item.desc }}
+				{{ getAppFieldI18n(item, APP_FIELD.DESCRIPTION) }}
 			</div>
 			<span
 				v-if="!appStore.isPublic"
@@ -175,7 +177,12 @@
 
 <script lang="ts" setup>
 import { onMounted, PropType, ref } from 'vue';
-import { AppStoreInfo, TRANSACTION_PAGE } from 'src/constants/constants';
+import {
+	AppStoreInfo,
+	getAppFieldI18n,
+	APP_FIELD,
+	TRANSACTION_PAGE
+} from 'src/constants/constants';
 import InstallButton from 'components/appcard/InstallButton.vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';

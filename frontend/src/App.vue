@@ -11,6 +11,7 @@ import { bus, BUS_EVENT } from 'src/utils/bus';
 import { useUserStore } from 'src/stores/user';
 import { i18n } from 'src/boot/i18n';
 import { supportLanguages } from 'src/i18n';
+import { useMenuStore } from 'src/stores/menu';
 // import { testSatisfies } from 'src/utils/version';
 
 export default {
@@ -18,6 +19,7 @@ export default {
 		const appStore = useAppStore();
 		const websocketStore = useSocketStore();
 		const userStore = useUserStore();
+		const menuStore = useMenuStore();
 
 		let terminusLanguage = '';
 		let terminusLanguageInfo: any = document.querySelector(
@@ -39,6 +41,7 @@ export default {
 
 		onMounted(async () => {
 			await appStore.prefetch();
+			await menuStore.init();
 			if (!appStore.isPublic) {
 				// testSatisfies();
 				websocketStore.start();

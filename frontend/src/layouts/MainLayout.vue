@@ -104,7 +104,7 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 import { useMenuStore } from 'src/stores/menu';
 import { MENU_TYPE, TRANSACTION_PAGE } from '../constants/constants';
@@ -113,54 +113,6 @@ import { useAppStore } from 'src/stores/app';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
-const itemsRef = ref([
-	{
-		label: t('base.extensions'),
-		key: 'Application',
-		children: [
-			{
-				label: t('main.discover'),
-				key: MENU_TYPE.Application.Home,
-				icon: 'sym_r_radar'
-			},
-			{
-				label: t('main.productivity'),
-				key: MENU_TYPE.Application.Productivity,
-				icon: 'sym_r_business_center'
-			},
-			{
-				label: t('main.utilities'),
-				key: MENU_TYPE.Application.Utilities,
-				icon: 'sym_r_extension'
-			},
-			{
-				label: t('main.entertainment'),
-				key: MENU_TYPE.Application.Entertainment,
-				icon: 'sym_r_interests'
-			},
-			{
-				label: t('main.social_network'),
-				key: MENU_TYPE.Application.SocialNetwork,
-				icon: 'sym_r_group'
-			},
-			{
-				label: t('main.blockchain'),
-				key: MENU_TYPE.Application.Blockchain,
-				icon: 'sym_r_stack'
-			},
-			{
-				label: t('main.recommendation'),
-				key: MENU_TYPE.Application.Recommendation,
-				icon: 'sym_r_featured_play_list'
-			}
-			// {
-			// 	label: t('main.models'),
-			// 	key: MENU_TYPE.Application.Models,
-			// 	icon: 'sym_r_neurology'
-			// }
-		]
-	}
-]);
 const leftDrawerOpen = ref(false);
 const menuStore = useMenuStore();
 const Router = useRouter();
@@ -173,6 +125,19 @@ const keepAliveExclude = ref('LogPage');
 const appStore = useAppStore();
 const updateCount = ref(0);
 const showBarShadow = ref(false);
+
+const itemsRef = computed(() => {
+	if (menuStore.menuList.length === 0) {
+		return [];
+	}
+	return [
+		{
+			label: t('base.extensions'),
+			key: 'Application',
+			children: menuStore.menuList
+		}
+	];
+});
 
 const changeItemMenu = (data: any): void => {
 	const type = data.key;
