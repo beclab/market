@@ -181,6 +181,16 @@ func GetLocalAppInfoMap() (appMap map[string]*models.ApplicationInfo, err error)
 	appMap = make(map[string]*models.ApplicationInfo)
 	glog.Infof("Initializing GetLocalAppInfoMap")
 
+	if bdbClient == nil {
+		glog.Infof("bdbClient is nil")
+		return
+	}
+
+	if bdbClient.bdb == nil {
+		glog.Infof("bdbClient.bdb is nil")
+		return
+	}
+
 	err = bdbClient.bdb.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(LocalDevAppsBucketName))
 		if bucket == nil {
