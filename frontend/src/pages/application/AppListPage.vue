@@ -35,7 +35,7 @@
 	</page-container>
 </template>
 <script lang="ts" setup>
-import { ref, onBeforeUnmount, onMounted } from 'vue';
+import { ref, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { AppStoreInfo, CATEGORIES_TYPE } from 'src/constants/constants';
 import EmptyView from 'components/base/EmptyView.vue';
@@ -63,9 +63,6 @@ const updateApp = (app: AppStoreInfo) => {
 
 onMounted(async () => {
 	bus.on(BUS_EVENT.UPDATE_APP_STORE_INFO, updateApp);
-	if (route.params.categories || route.params.type) {
-		await fetchData();
-	}
 });
 
 onBeforeUnmount(() => {
@@ -108,6 +105,20 @@ const fetchData = async () => {
 	isEmpty.value = applications.value.length === 0;
 	loading.value = false;
 };
+
+watch(
+	() => appStore.pageData,
+	async (newValue) => {
+		if (newValue.length > 0) {
+			if (route.params.categories || route.params.type) {
+				await fetchData();
+			}
+		}
+	},
+	{
+		immediate: true
+	}
+);
 </script>
 <style lang="scss" scoped>
 .list-page {

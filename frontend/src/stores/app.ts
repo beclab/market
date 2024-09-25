@@ -159,9 +159,6 @@ export const useAppStore = defineStore('app', {
 		},
 
 		async getPageData(category: string): Promise<any> {
-			if (!this.pageData || this.pageData.length == 0) {
-				await this.prefetch();
-			}
 			switch (category) {
 				case CATEGORIES_TYPE.LOCAL.ALL:
 				case CATEGORIES_TYPE.SERVER.Productivity:
