@@ -3,10 +3,11 @@ package boltdb
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/boltdb/bolt"
-	"github.com/golang/glog"
 	"market/internal/conf"
 	"market/internal/models"
+
+	"github.com/boltdb/bolt"
+	"github.com/golang/glog"
 )
 
 func UpsertLocalAppInfo(info *models.ApplicationInfo) error {
@@ -178,12 +179,26 @@ func GetLocalAppInfos(keys []string) []*models.ApplicationInfo {
 
 func GetLocalAppInfoMap() (appMap map[string]*models.ApplicationInfo, err error) {
 	appMap = make(map[string]*models.ApplicationInfo)
+	glog.Infof("Initializing GetLocalAppInfoMap")
+
+	if bdbClient == nil {
+		glog.Infof("bdbClient is nil")
+		return
+	}
+
+	if bdbClient.bdb == nil {
+		glog.Infof("bdbClient.bdb is nil")
+		return
+	}
+
 	err = bdbClient.bdb.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(LocalDevAppsBucketName))
 		if bucket == nil {
 			glog.Warningf("bucket %s not found", LocalDevAppsBucketName)
 			return fmt.Errorf("bucket %s not found", LocalDevAppsBucketName)
 		}
+
+		glog.Infof("Successfully retrieved bucket: %s", LocalDevAppsBucketName)
 
 		cursor := bucket.Cursor()
 		for k, v := cursor.First(); k != nil; k, v = cursor.Next() {
@@ -192,14 +207,28 @@ func GetLocalAppInfoMap() (appMap map[string]*models.ApplicationInfo, err error)
 			info := &models.ApplicationInfo{}
 			err = json.Unmarshal(v, info)
 			if err != nil {
+				glog.Errorf("Failed to unmarshal value for key %s: %v", k, err)
+				continue
+			}
+
+			if info.Name == "" {
+				glog.Warningf("ApplicationInfo for key %s has empty Name field", k)
 				continue
 			}
 
 			appMap[info.Name] = info
+			glog.Infof("Added ApplicationInfo to map: %s", info.Name)
 		}
 
+		glog.Infof("Finished processing bucket: %s", LocalDevAppsBucketName)
 		return nil
 	})
+
+	if err != nil {
+		glog.Errorf("Error during GetLocalAppInfoMap: %v", err)
+	} else {
+		glog.Infof("Successfully retrieved application info map with %d entries", len(appMap))
+	}
 
 	return
 }
