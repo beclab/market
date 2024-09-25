@@ -94,7 +94,7 @@ export const useAppStore = defineStore('app', {
 												}
 											}
 										}
-									} else if (!!appData['metadata']) {
+									} else if (key === 'metadata') {
 										for (const arrayKey in appData['metadata']) {
 											if (
 												Object.prototype.hasOwnProperty.call(
@@ -109,7 +109,7 @@ export const useAppStore = defineStore('app', {
 												}
 											}
 										}
-									} else if (!!appData['spec']) {
+									} else if (key == 'spec') {
 										for (const arrayKey in appData['spec']) {
 											if (
 												Object.prototype.hasOwnProperty.call(
