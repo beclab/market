@@ -159,7 +159,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
 	AppStoreInfo,
@@ -195,7 +195,6 @@ const { t } = useI18n();
 onMounted(() => {
 	topTitle.value = `Top App in ${categoryRef.value}`;
 	latestTitle.value = `Latest App in ${categoryRef.value}`;
-	fetchData(true);
 });
 
 function fetchData(showLoading = false) {
@@ -240,6 +239,18 @@ function fetchData(showLoading = false) {
 			pageLoading.value = false;
 		});
 }
+
+watch(
+	() => appStore.pageData,
+	(newValue) => {
+		if (newValue.length > 0) {
+			fetchData(true);
+		}
+	},
+	{
+		immediate: true
+	}
+);
 
 const clickList = (type: string) => {
 	router.push({

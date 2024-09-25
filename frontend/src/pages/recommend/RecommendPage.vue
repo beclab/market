@@ -66,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { ref, watch } from 'vue';
 import AppStoreBody from 'src/components/base/AppStoreBody.vue';
 import MyAppCard from 'src/components/appcard/MyAppCard.vue';
 import { AppStoreInfo, CATEGORIES_TYPE } from 'src/constants/constants';
@@ -86,10 +86,6 @@ const pageLoading = ref(true);
 const latestLoading = ref(true);
 const pageData = ref();
 const appStore = useAppStore();
-
-onMounted(() => {
-	fetchData(true);
-});
 
 async function fetchData(showLoading = false) {
 	if (showLoading) {
@@ -122,6 +118,18 @@ async function fetchData(showLoading = false) {
 			pageLoading.value = false;
 		});
 }
+
+watch(
+	() => appStore.pageData,
+	(newValue) => {
+		if (newValue.length > 0) {
+			fetchData(true);
+		}
+	},
+	{
+		immediate: true
+	}
+);
 </script>
 
 <style lang="scss">
