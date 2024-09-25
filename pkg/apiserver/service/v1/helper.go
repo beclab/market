@@ -3,7 +3,6 @@ package v1
 import (
 	"encoding/json"
 	"fmt"
-	helmtime "helm.sh/helm/v3/pkg/time"
 	"market/internal/appservice"
 	"market/internal/boltdb"
 	"market/internal/conf"
@@ -12,6 +11,8 @@ import (
 	"market/internal/recommend"
 	"market/pkg/api"
 	"net/http"
+
+	helmtime "helm.sh/helm/v3/pkg/time"
 
 	"github.com/emicklei/go-restful/v3"
 	"github.com/golang/glog"
@@ -144,6 +145,20 @@ func getModelsMap(token string) (map[string]*models.ModelStatusResponse, error) 
 	}
 
 	return appservice.ParseLlmsListToMap(jsonStr)
+}
+
+func parseAppTypes(res *models.ListResultD) []string {
+	var stringItems []string
+	for _, rawMsg := range res.Items {
+		var str string
+		err := json.Unmarshal(rawMsg, &str)
+		if err != nil {
+			fmt.Println("Error unmarshalling:", err)
+			continue
+		}
+		stringItems = append(stringItems, str)
+	}
+	return stringItems
 }
 
 func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) []*models.ApplicationInfo {

@@ -176,7 +176,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
 	AppStoreInfo,
@@ -205,10 +205,6 @@ const latestLoading = ref(true);
 const pageData = ref();
 const appStore = useAppStore();
 const { t } = useI18n();
-
-onMounted(() => {
-	fetchData(true);
-});
 
 function fetchData(showLoading = false) {
 	if (showLoading) {
@@ -253,6 +249,18 @@ function fetchData(showLoading = false) {
 			pageLoading.value = false;
 		});
 }
+
+watch(
+	() => appStore.pageData,
+	(newValue) => {
+		if (newValue.length > 0) {
+			fetchData(true);
+		}
+	},
+	{
+		immediate: true
+	}
+);
 
 const clickList = (type: string) => {
 	router.push({

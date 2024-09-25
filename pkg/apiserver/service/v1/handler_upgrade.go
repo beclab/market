@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/emicklei/go-restful/v3"
-	"github.com/golang/glog"
 	"market/internal/appmgr"
 	"market/internal/appservice"
 	"market/internal/boltdb"
@@ -14,6 +12,9 @@ import (
 	"market/internal/watchdog"
 	"market/pkg/api"
 	"market/pkg/utils"
+
+	"github.com/emicklei/go-restful/v3"
+	"github.com/golang/glog"
 )
 
 func getVersionAndInfo(appName, token string) (curVersion string, latestInfo *models.ApplicationInfo, err error) {
@@ -70,6 +71,10 @@ func (h *Handler) upgrade(req *restful.Request, resp *restful.Response) {
 	if err != nil {
 		api.HandleError(resp, err)
 		return
+	}
+	i18n := appmgr.GetAppI18n(latestInfo.ChartName, latestInfo.Locale)
+	if len(i18n) > 0 {
+		latestInfo.I18n = i18n
 	}
 
 	latestInfo.Source = constants.AppFromMarket

@@ -2,12 +2,13 @@ package models
 
 import (
 	"encoding/json"
-	"helm.sh/helm/v3/pkg/time"
 	"market/internal/constants"
 	"market/internal/models/tapr"
 	"market/pkg/utils"
 	"path"
 	"strings"
+
+	"helm.sh/helm/v3/pkg/time"
 )
 
 const (
@@ -120,14 +121,15 @@ type ApplicationInfo struct {
 	Status   string `yaml:"status" json:"status,omitempty"`
 	Progress string `json:"progress,omitempty"`
 
-	Language     []string     `yaml:"language" json:"language"`
-	Submitter    string       `yaml:"submitter" json:"submitter"`
-	Doc          string       `yaml:"doc" json:"doc"`
-	Website      string       `yaml:"website" json:"website"`
-	FeatureImage string       `yaml:"featuredImage" json:"featuredImage"`
-	SourceCode   string       `yaml:"sourceCode" json:"sourceCode"`
-	License      []TextAndURL `yaml:"license" json:"license"`
-	Legal        []TextAndURL `yaml:"legal" json:"legal"`
+	Locale       []string        `yaml:"locale" json:"locale"`
+	Submitter    string          `yaml:"submitter" json:"submitter"`
+	Doc          string          `yaml:"doc" json:"doc"`
+	Website      string          `yaml:"website" json:"website"`
+	FeatureImage string          `yaml:"featuredImage" json:"featuredImage"`
+	SourceCode   string          `yaml:"sourceCode" json:"sourceCode"`
+	License      []TextAndURL    `yaml:"license" json:"license"`
+	Legal        []TextAndURL    `yaml:"legal" json:"legal"`
+	I18n         map[string]I18n `yaml:"i18n" json:"i18n"`
 
 	AppLabels []string `yaml:"appLabels" json:"appLabels"`
 
@@ -153,6 +155,27 @@ type TextAndURL struct {
 type AppService struct {
 	Name string `yaml:"name" json:"name" bson:"name"`
 	Port int32  `yaml:"port" json:"port" bson:"port"`
+}
+
+type I18nEntrance struct {
+	Name  string `yaml:"name" json:"name" bson:"name"`
+	Title string `yaml:"title" json:"title" bson:"title"`
+}
+
+type I18nMetadata struct {
+	Title       string `yaml:"title" json:"title" bson:"title"`
+	Description string `yaml:"description" json:"description" bson:"description"`
+}
+
+type I18nSpec struct {
+	FullDescription    string `yaml:"fullDescription" json:"fullDescription" bson:"fullDescription"`
+	UpgradeDescription string `yaml:"upgradeDescription" json:"upgradeDescription" bson:"upgradeDescription"`
+}
+
+type I18n struct {
+	Metadata  I18nMetadata   `yaml:"metadata" json:"metadata" bson:"metadata"`
+	Entrances []I18nEntrance `yaml:"entrances" json:"entrances" bson:"entrances"`
+	Spec      I18nSpec       `yaml:"spec" json:"spec" bson:"spec"`
 }
 
 type SupportClient struct {
@@ -217,7 +240,7 @@ type AppSpec struct {
 	RequiredGPU        string        `yaml:"requiredGpu" json:"requiredGpu"`
 	RequiredCPU        string        `yaml:"requiredCpu" json:"requiredCpu"`
 
-	Language     []string     `yaml:"language" json:"language"`
+	Locale       []string     `yaml:"locale" json:"locale"`
 	Submitter    string       `yaml:"submitter" json:"submitter"`
 	Doc          string       `yaml:"doc" json:"doc"`
 	Website      string       `yaml:"website" json:"website"`
@@ -301,7 +324,7 @@ func (ac *AppConfiguration) ToAppInfo() *ApplicationInfo {
 		Options:            ac.Options,
 		Entrances:          ac.Entrances,
 
-		Language:     ac.Spec.Language,
+		Locale:       ac.Spec.Locale,
 		Submitter:    ac.Spec.Submitter,
 		Doc:          ac.Spec.Doc,
 		Website:      ac.Spec.Website,

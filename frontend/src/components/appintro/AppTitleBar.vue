@@ -19,7 +19,7 @@
 					</template>
 				</q-img>
 				<div class="q-ml-md text-h5 text-ink-1">
-					{{ item.title }}
+					{{ getAppFieldI18n(item, APP_FIELD.TITLE) }}
 				</div>
 				<div class="q-ml-sm text-h6 text-ink-1">{{ item.versionName }}</div>
 			</div>
@@ -37,7 +37,11 @@
 <script lang="ts" setup>
 import InstallButton from 'components/appcard/InstallButton.vue';
 import { PropType } from 'vue';
-import { AppStoreInfo } from 'src/constants/constants';
+import {
+	APP_FIELD,
+	AppStoreInfo,
+	getAppFieldI18n
+} from 'src/constants/constants';
 import { useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';
 

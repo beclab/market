@@ -34,10 +34,10 @@
 				<div
 					class="app-small-card__right__text__title text-subtitle2 text-ink-1"
 				>
-					{{ item.title }}
+					{{ getAppFieldI18n(item, APP_FIELD.TITLE) }}
 				</div>
 				<div class="app-small-card__right__text__content text-body3 text-ink-2">
-					{{ item.desc }}
+					{{ getAppFieldI18n(item, APP_FIELD.DESCRIPTION) }}
 				</div>
 			</div>
 			<install-button v-if="!appStore.isPublic" :item="item" />
@@ -53,7 +53,12 @@
 
 <script lang="ts" setup>
 import { onMounted, PropType, ref } from 'vue';
-import { AppStoreInfo, TRANSACTION_PAGE } from 'src/constants/constants';
+import {
+	APP_FIELD,
+	AppStoreInfo,
+	getAppFieldI18n,
+	TRANSACTION_PAGE
+} from 'src/constants/constants';
 import InstallButton from 'src/components/appcard/InstallButton.vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';

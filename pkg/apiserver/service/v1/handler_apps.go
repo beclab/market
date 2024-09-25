@@ -3,15 +3,15 @@ package v1
 import (
 	"errors"
 	"fmt"
+	"github.com/emicklei/go-restful/v3"
 	"github.com/golang/glog"
+	"k8s.io/klog/v2"
 	"market/internal/appmgr"
 	"market/internal/appservice"
 	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/models"
 	"market/pkg/api"
-
-	"github.com/emicklei/go-restful/v3"
 )
 
 func (h *Handler) handleInfos(req *restful.Request, resp *restful.Response) {
@@ -145,4 +145,85 @@ func (h *Handler) appsList(req *restful.Request, resp *restful.Response) {
 	if ty == constants.RecommendType {
 		return
 	}
+}
+
+func (h *Handler) handleI18ns(req *restful.Request, resp *restful.Response) {
+	token := getToken(req)
+	if token == "" {
+		api.HandleUnauthorized(resp, errors.New("access token not found"))
+		return
+	}
+	//names := []string{"astral", "market", "firefox"}
+	names := []string{}
+	infosMarket, err := appmgr.GetAppInfos(names)
+	if err != nil {
+		api.HandleError(resp, err)
+		return
+	}
+	//klog.Infof("infosMarket: %#v", infosMarket)
+
+	infosLocal, err := boltdb.GetLocalAppInfoMap()
+	if err != nil {
+		api.HandleError(resp, err)
+		return
+	}
+
+	//klog.Infof("infosLocal: %#v", infosLocal["firefox"])
+
+	i18nList := make([]map[string]map[string]models.I18n, 0)
+
+	i18nMap := make(map[string]map[string]models.I18n)
+	for name, info := range infosMarket {
+		klog.Infof("market xxxxx: name: %v, i18n: %v", info.Name, info.I18n)
+		i18nMap[name] = info.I18n
+	}
+	for name, info := range infosLocal {
+		klog.Infof("local xxxxx: name: %v, i18n: %v", info.Name, info.I18n)
+
+		i18nMap[name] = info.I18n
+	}
+
+	klog.Infof("i18nMap: %#v", i18nMap)
+
+	for name, i18n := range i18nMap {
+		i18nList = append(i18nList, map[string]map[string]models.I18n{
+			name: i18n,
+		})
+	}
+	klog.Infof("i18nList: %#v", i18nList)
+
+
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, i18nList))
+}
+
+func (h *Handler) handleI18n(req *restful.Request, resp *restful.Response) {
+	token := getToken(req)
+	if token == "" {
+		api.HandleUnauthorized(resp, errors.New("access token not found"))
+		return
+	}
+	name := req.PathParameter(ParamAppName)
+	names := []string{name}
+	infosMarket, err := appmgr.GetAppInfos(names)
+	if err != nil {
+		api.HandleError(resp, err)
+		return
+	}
+	klog.Infof("infosMarket: %#v", infosMarket)
+
+	infosLocal, err := boltdb.GetLocalAppInfoMap()
+	if err != nil {
+		api.HandleError(resp, err)
+		return
+	}
+
+	i18nMap := make(map[string]map[string]models.I18n)
+	for name, info := range infosMarket {
+		i18nMap[name] = info.I18n
+	}
+	for name, info := range infosLocal {
+		i18nMap[name] = info.I18n
+	}
+
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, i18nMap))
 }

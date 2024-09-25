@@ -62,6 +62,12 @@ func AddToContainer(c *restful.Container) error {
 		Param(ws.QueryParameter("type", "type")).
 		Returns(http.StatusOK, "success to get application list", &models.ListResponse{}))
 
+	ws.Route(ws.GET("/applications/menutypes").
+		To(handler.menuTypes).
+		Doc("get menu types list").
+		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
+		Returns(http.StatusOK, "success to get top application list", &models.MenuTypeResponse{}))
+
 	ws.Route(ws.GET("/applications/top").
 		To(handler.listTop).
 		Doc("get top application list").
@@ -147,6 +153,20 @@ func AddToContainer(c *restful.Container) error {
 		Reads([]string{}).
 		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
 		Returns(http.StatusOK, "success to get app infos by names", nil))
+
+	ws.Route(ws.GET("/applications/i18ns").
+		To(handler.handleI18ns).
+		Doc("get apps i18n").
+		Reads([]string{}).
+		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
+		Returns(http.StatusOK, "success to get app i18n by names", nil))
+
+	ws.Route(ws.GET("/applications/i18ns/{"+ParamAppName+"}").
+		To(handler.handleI18n).
+		Param(ws.PathParameter(ParamAppName, "the name of the application")).
+		Doc("get application i18n by name").
+		Metadata(restfulspec.KeyOpenAPITags, ModuleTags).
+		Returns(http.StatusOK, "success to get application i18n by name", nil))
 
 	ws.Route(ws.GET("/workflow/recommend/detail").
 		To(handler.workflowRecommendsDetail).

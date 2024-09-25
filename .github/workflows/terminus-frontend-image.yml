@@ -48,20 +48,20 @@ jobs:
             - name: Install
               run: |
                 npm i -g @quasar/cli;npm install -d;
-            - name: Install fonttools
-              run: pip3 install fonttools brotli
-            - name: Download fonttools Files
-              run: |
-                pwd
-                curl -L -o fonttools.zip https://cdn.bttcdn.com/common/fonttools.zip
-                unzip fonttools.zip
-            - name: Python Icon
-              run: pwd; cd ./fonttools; sudo node python-icon.js
-            - name: subset Icon
-              run: |
-                sudo chmod 755 fonttools
-                cd ./fonttools
-                ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../src/assets/fonts
+#            - name: Install fonttools
+#              run: pip3 install fonttools brotli
+#            - name: Download fonttools Files
+#              run: |
+#                pwd
+#                curl -L -o fonttools.zip https://cdn.bttcdn.com/common/fonttools.zip
+#                unzip fonttools.zip
+#            - name: Python Icon
+#              run: pwd; cd ./fonttools; sudo node python-icon.js
+#            - name: subset Icon
+#              run: |
+#                sudo chmod 755 fonttools
+#                cd ./fonttools
+#                ./subset_font.sh nyTnjDwKNJ_190FjzaqkNCeE.woff2 unicodes.txt MaterialSymbolsRounded.woff2 ../src/assets/fonts
             - name: Build terminus
               run: npm run build;
             - run: ls dist

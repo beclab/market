@@ -31,6 +31,7 @@ import { useUserStore } from 'src/stores/user';
 import { i18n } from 'src/boot/i18n';
 import { decodeUnicode } from 'src/utils/utils';
 import { CFG_TYPE } from 'src/constants/config';
+import { getAppMultiLanguage } from 'src/api/language';
 
 export type AppState = {
 	tempAppMap: Record<string, AppStoreInfo>;
@@ -54,6 +55,96 @@ export const useAppStore = defineStore('app', {
 	},
 	actions: {
 		async prefetch() {
+			const appList: any[] = await getAppMultiLanguage();
+
+			const languageMap = {};
+
+			for (let i = 0; i < appList.length; i++) {
+				const data = appList[i];
+				for (const app in data) {
+					const languages = data[app];
+
+					for (const lang in languages) {
+						if (Object.prototype.hasOwnProperty.call(languages, lang)) {
+							const appData = languages[lang];
+
+							if (!languageMap[lang]) {
+								languageMap[lang] = {};
+							}
+
+							for (const key in appData) {
+								if (Object.prototype.hasOwnProperty.call(appData, key)) {
+									const value = appData[key];
+
+									if (Array.isArray(value) && value.length > 0) {
+										for (let i = 0; i < value.length; i++) {
+											const arrayObj = value[i];
+											for (const arrayKey in arrayObj) {
+												if (
+													Object.prototype.hasOwnProperty.call(
+														arrayObj,
+														arrayKey
+													)
+												) {
+													const arrayValue = arrayObj[arrayKey];
+													{
+														const resultKey = `${app}_${key}${i}_${arrayKey}`;
+														languageMap[lang][resultKey] = arrayValue;
+													}
+												}
+											}
+										}
+									} else if (key === 'metadata') {
+										for (const arrayKey in appData['metadata']) {
+											if (
+												Object.prototype.hasOwnProperty.call(
+													appData['metadata'],
+													arrayKey
+												)
+											) {
+												const arrayValue = appData['metadata'][arrayKey];
+												{
+													const resultKey = `${app}_${arrayKey}`;
+													languageMap[lang][resultKey] = arrayValue;
+												}
+											}
+										}
+									} else if (key == 'spec') {
+										for (const arrayKey in appData['spec']) {
+											if (
+												Object.prototype.hasOwnProperty.call(
+													appData['spec'],
+													arrayKey
+												)
+											) {
+												const arrayValue = appData['spec'][arrayKey];
+												{
+													const resultKey = `${app}_${arrayKey}`;
+													languageMap[lang][resultKey] = arrayValue;
+												}
+											}
+										}
+									} else {
+										const resultKey = `${app}_${key}`;
+										languageMap[lang][resultKey] = value;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			console.log(languageMap);
+
+			for (const language in languageMap) {
+				i18n.global.mergeLocaleMessage(language, languageMap[language]);
+				console.log(
+					`========>>>>>> Merged messages for locale ${language}:`,
+					i18n.global.getLocaleMessage(language)
+				);
+			}
+
 			this.pageData = await getPage();
 		},
 		async init() {
@@ -68,9 +159,6 @@ export const useAppStore = defineStore('app', {
 		},
 
 		async getPageData(category: string): Promise<any> {
-			if (!this.pageData || this.pageData.length == 0) {
-				await this.prefetch();
-			}
 			switch (category) {
 				case CATEGORIES_TYPE.LOCAL.ALL:
 				case CATEGORIES_TYPE.SERVER.Productivity:
