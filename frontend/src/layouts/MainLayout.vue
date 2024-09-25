@@ -284,7 +284,7 @@ const onScroll = async (info: any) => {
 
 const installOS = async () => {
 	window.open(
-		'https://docs.jointerminus.com/overview/introduction/getting-started.html',
+		'https://docs.jointerminus.com/overview/introduction/getting-started',
 		'_blank'
 	);
 };
