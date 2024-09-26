@@ -18,8 +18,9 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { i18n } from 'src/boot/i18n';
+import { encode } from 'he';
 
 const props = defineProps({
 	text: {
@@ -47,7 +48,7 @@ const showDescription = ref(false);
 const needMore = ref(false);
 
 const formattedDescription = computed(() => {
-	return props.text.replace(/(\r\n|\n|\r)/gm, '<br/>');
+	return encode(props.text).replace(/\r\n|\n|\r/g, '<br/>');
 });
 
 const multiRow = ref<HTMLElement | null>(null);

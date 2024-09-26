@@ -348,52 +348,59 @@ export function getAppFieldI18n(
 	field: APP_FIELD,
 	index = -1
 ) {
-	let key = '';
-	switch (field) {
-		case APP_FIELD.DESCRIPTION:
-		case APP_FIELD.TITLE:
-		case APP_FIELD.FULL_DESCRIPTION:
-		case APP_FIELD.UPGRADE_DESCRIPTION:
-			key = app.name + '_' + field;
-			break;
-		case APP_FIELD.ENTRANCES_NAME:
-		case APP_FIELD.ENTRANCES_TITLE:
-			if (index !== -1) {
-				key =
-					app.name +
-					'_' +
-					APP_FIELD.ENTRANCES_NAME.replace('?', index.toString());
-			}
-			break;
-	}
-	if (key) {
-		const exist = i18n.global.te(key);
-		// console.log(key, exist);
-		if (exist) {
-			return i18n.global.t(key);
+	const defaultConfig = () => {
+		switch (field) {
+			case APP_FIELD.DESCRIPTION:
+				return app.desc;
+			case APP_FIELD.TITLE:
+			case APP_FIELD.FULL_DESCRIPTION:
+			case APP_FIELD.UPGRADE_DESCRIPTION:
+				return app[field];
+			case APP_FIELD.ENTRANCES_NAME:
+				if (index !== -1) {
+					const array1 = app.entrances;
+					return array1[index].name;
+				} else {
+					return '';
+				}
+			case APP_FIELD.ENTRANCES_TITLE:
+				if (index !== -1) {
+					const array2 = app.entrances;
+					return array2[index].title;
+				} else {
+					return '';
+				}
 		}
-	}
-
-	switch (field) {
-		case APP_FIELD.DESCRIPTION:
-			return app.desc;
-		case APP_FIELD.TITLE:
-		case APP_FIELD.FULL_DESCRIPTION:
-		case APP_FIELD.UPGRADE_DESCRIPTION:
-			return app[field];
-		case APP_FIELD.ENTRANCES_NAME:
-			if (index !== -1) {
-				const array1 = app.entrances;
-				return array1[index].name;
-			} else {
-				return '';
+	};
+	try {
+		let key = '';
+		switch (field) {
+			case APP_FIELD.DESCRIPTION:
+			case APP_FIELD.TITLE:
+			case APP_FIELD.FULL_DESCRIPTION:
+			case APP_FIELD.UPGRADE_DESCRIPTION:
+				key = app.name + '_' + field;
+				break;
+			case APP_FIELD.ENTRANCES_NAME:
+			case APP_FIELD.ENTRANCES_TITLE:
+				if (index !== -1) {
+					key =
+						app.name +
+						'_' +
+						APP_FIELD.ENTRANCES_NAME.replace('?', index.toString());
+				}
+				break;
+		}
+		if (key) {
+			const exist = i18n.global.te(key);
+			if (exist) {
+				return i18n.global.t(key);
 			}
-		case APP_FIELD.ENTRANCES_TITLE:
-			if (index !== -1) {
-				const array2 = app.entrances;
-				return array2[index].title;
-			} else {
-				return '';
-			}
+		}
+		return defaultConfig();
+	} catch (e) {
+		console.log(`${app.name} ${field} i18n config error`);
+		console.log(e);
+		return defaultConfig();
 	}
 }
