@@ -113,16 +113,16 @@ module.exports = configure(function (/* ctx */) {
 						}
 					]);
 				}
-				chain.plugin('terser').use(TerserPlugin, [
-					{
-						terserOptions: {
-							compress: {
-								drop_console: true,
-								pure_funcs: ['console.log']
-							}
-						}
-					}
-				]);
+				// chain.plugin('terser').use(TerserPlugin, [
+				// 	{
+				// 		terserOptions: {
+				// 			compress: {
+				// 				drop_console: true,
+				// 				pure_funcs: ['console.log']
+				// 			}
+				// 		}
+				// 	}
+				// ]);
 				chain.optimization.splitChunks({
 					chunks: 'all', // The type of chunk that requires code segmentation
 					minSize: 20000, // Minimum split file size
