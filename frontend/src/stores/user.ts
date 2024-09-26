@@ -262,10 +262,7 @@ export const useUserStore = defineStore('userStore', {
 
 				for (let i = 0; i < app.options.dependencies.length; i++) {
 					const dependency = app.options.dependencies[i];
-					if (
-						dependency.type === DEPENDENCIES_TYPE.application ||
-						dependency.type === DEPENDENCIES_TYPE.middleware
-					) {
+					if (dependency.type === DEPENDENCIES_TYPE.middleware) {
 						this._saveDependencies(app, dependency);
 
 						if (!nameList.includes(dependency.name)) {
