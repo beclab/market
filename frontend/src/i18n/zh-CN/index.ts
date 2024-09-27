@@ -179,5 +179,30 @@ export default {
 		sure_to_uninstall_the_app: '您确定要卸载“{title}”吗？',
 		upload_custom_chart: '上传自定义 chart',
 		logs: '日志'
-	}
+	},
+	//temp
+	discover_amazing_apps: '发现精彩应用',
+	featured_app: '精选应用',
+	control_your_own_social_network: '掌控自己的社交网络。',
+	decentralized_social_media: '去中心化社交媒体',
+	get_started: '开始',
+	booster_your_software_development_productivity: '提升软件开发效率。',
+	enjoy_coding_on_terminus: '在 Terminus 上享受编码',
+	diving_into_ai_image_generation: '探索 AI 图像生成。',
+	unleashing_your_creativity: '释放你的创造力！',
+	great_on_terminus: '在 Terminus 上表现出色',
+	mastering_your_photo_with_a_personal_library: '打造个人图库，掌控您的照片',
+	organize_your_memories: '整理您的回忆',
+	nocode_solution_for_your_data_management: '无代码数据管理方案。',
+	build_databases_as_spreadsheets: '轻松构建数据库',
+	top_app_in: '{category}最受欢迎应用',
+	latest_app_in: '{category}最新应用',
+	communitys_choices: '社区推荐',
+	top_app_on_terminus: 'Terminus 最受欢迎应用',
+	latest_app_on_terminus: 'Terminus 最新应用',
+	featured_apps_in_discover: '发现精选应用',
+	featured_apps_in_productivity: '效率精选应用',
+	featured_apps_in_utilities: '实用工具精选应用',
+	featured_apps_in_entertainment: '娱乐精选应用',
+	featured_apps_in_social_network: '社交网络精选应用'
 };

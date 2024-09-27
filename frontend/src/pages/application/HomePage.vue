@@ -27,7 +27,7 @@
 				<template v-for="(item, index) in pageData" :key="index">
 					<app-store-body
 						v-if="item.type === 'Topic' && item.topicType === 'Discover'"
-						:label="item.name"
+						:label="getTempI18nValue(item.name)"
 						:padding-exclude-body="44"
 						:bottom-separator="true"
 						:loading="pageLoading"
@@ -58,7 +58,7 @@
 
 					<app-store-body
 						v-if="item.type === 'Topic' && item.topicType === 'Categories'"
-						:label="item.name"
+						:label="getTempI18nValue(item.name)"
 						:padding-exclude-body="44"
 						:bottom-separator="true"
 						:loading="pageLoading"
@@ -89,7 +89,7 @@
 						class="home-padding"
 						:loading="pageLoading"
 						:show-body="item.content.length > 0"
-						:label="item.name"
+						:label="getTempI18nValue(item.name)"
 						:right="t('base.see_all')"
 						:no-label-padding-bottom="true"
 						:bottom-separator="true"
@@ -119,7 +119,7 @@
 						class="home-padding"
 						:loading="topLoading"
 						:show-body="topApps.length > 0"
-						label="Top App on Terminus"
+						:label="t('top_app_on_terminus')"
 						:right="t('base.see_all')"
 						:no-label-padding-bottom="true"
 						:bottom-separator="true"
@@ -146,7 +146,7 @@
 						class="home-padding"
 						:loading="latestLoading"
 						:show-body="latestApps.length > 0"
-						label="Latest App on Terminus"
+						:label="t('latest_app_on_terminus')"
 						:right="t('base.see_all')"
 						:no-label-padding-bottom="true"
 						@on-right-click="clickList(CATEGORIES_TYPE.LOCAL.LATEST)"
@@ -181,6 +181,7 @@ import { useRouter } from 'vue-router';
 import {
 	AppStoreInfo,
 	CATEGORIES_TYPE,
+	getTempI18nValue,
 	TRANSACTION_PAGE
 } from 'src/constants/constants';
 import PageContainer from 'components/base/PageContainer.vue';
