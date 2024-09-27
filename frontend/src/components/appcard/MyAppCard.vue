@@ -72,15 +72,15 @@
 					<app-tag
 						:label="
 							item.categories && item.categories.length > 0
-								? item.categories[0]
+								? getTempI18nValue(item.categories[0], true)
 								: item.subCategory
 						"
 						class="text-positive"
 					/>
 					<app-tag
 						:label="
-							item.language && item.language.length > 0
-								? convertLanguageCodeToName(item.language[0])
+							item.locale && item.locale.length > 0
+								? convertLanguageCodeToName(item.locale[0])
 								: ''
 						"
 						class="second-tag q-ml-sm"
@@ -93,7 +93,7 @@
 					<app-tag
 						:label="
 							item.categories && item.categories.length > 0
-								? item.categories[0]
+								? getTempI18nValue(item.categories[0], true)
 								: item.subCategory
 						"
 						class="text-positive"
@@ -122,7 +122,7 @@
 					<app-tag
 						:label="
 							item.categories && item.categories.length > 0
-								? item.categories[0]
+								? getTempI18nValue(item.categories[0], true)
 								: item.subCategory
 						"
 						class="second-tag text-positive q-ml-sm"
@@ -140,7 +140,8 @@ import {
 	AppStoreInfo,
 	getAppFieldI18n,
 	SOURCE_TYPE,
-	TRANSACTION_PAGE
+	TRANSACTION_PAGE,
+	getTempI18nValue
 } from 'src/constants/constants';
 import InstallButton from 'src/components/appcard/InstallButton.vue';
 import { useRouter } from 'vue-router';

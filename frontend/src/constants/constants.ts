@@ -74,7 +74,7 @@ export interface AppStoreInfo {
 	installTime: string;
 	uid: string;
 	status: APP_STATUS;
-	language: string[];
+	locale: string[];
 	submitter: string;
 	doc: string;
 	website: string;
@@ -402,5 +402,32 @@ export function getAppFieldI18n(
 		console.log(`${app.name} ${field} i18n config error`);
 		console.log(e);
 		return defaultConfig();
+	}
+}
+
+export function getTempI18nValue(input, camelCase = false) {
+	try {
+		let key = input.toLowerCase();
+		if (camelCase) {
+			key = key.replace(/(?:\s+)([a-z])/g, (match, letter) =>
+				letter.toUpperCase()
+			);
+			key = key.replace(/[^a-zA-Z0-9_]/g, '');
+		} else {
+			key = key.replace(/\s+/g, '_');
+			key = key.replace(/[^a-z0-9_]/g, '');
+		}
+
+		if (key) {
+			const exist = i18n.global.te(key);
+			if (exist) {
+				return i18n.global.t(key);
+			}
+		}
+		return input;
+	} catch (e) {
+		console.log(`${input} i18n get error`);
+		console.log(e);
+		return input;
 	}
 }

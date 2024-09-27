@@ -1,9 +1,5 @@
 <template>
-	<div
-		v-if="skeleton"
-		class="column justify-start items-start"
-		style="cursor: pointer"
-	>
+	<div v-if="skeleton" class="column justify-start items-start">
 		<div class="topic-skeleton-square">
 			<q-skeleton class="topic-skeleton-item" />
 		</div>
@@ -11,7 +7,7 @@
 		<q-skeleton width="200px" height="22px" style="margin-top: 2px" />
 		<q-skeleton width="180px" height="18px" style="margin-top: 2px" />
 	</div>
-	<div v-else class="column justify-start items-start cursor-pointer">
+	<div v-else class="column justify-start items-start">
 		<q-img
 			class="topic-item-img"
 			:src="item.iconimg ? item.iconimg : '../appIntro.svg'"
@@ -23,18 +19,20 @@
 			</template>
 		</q-img>
 		<span class="topic-item-overflow text-ink-3 text-caption q-mt-md">{{
-			item.des
+			getTempI18nValue(item.des)
 		}}</span>
-		<span class="topic-item-overflow text-ink-1 text-h6">{{ item.name }}</span>
+		<span class="topic-item-overflow text-ink-1 text-h6">{{
+			getTempI18nValue(item.name)
+		}}</span>
 		<span class="topic-item-overflow text-ink-3 text-body2">{{
-			item.introduction
+			getTempI18nValue(item.introduction)
 		}}</span>
 	</div>
 </template>
 
 <script setup lang="ts">
 import { PropType } from 'vue';
-import { TopicInfo } from 'src/constants/constants';
+import { getTempI18nValue, TopicInfo } from 'src/constants/constants';
 
 defineProps({
 	item: {

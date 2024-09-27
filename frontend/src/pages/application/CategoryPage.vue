@@ -3,7 +3,7 @@
 		<template v-slot:page>
 			<div class="category-page">
 				<app-store-body
-					:title="categoryRef"
+					:title="getTempI18nValue(categoryRef, true)"
 					:bottom-separator="true"
 					:padding-exclude-body="44"
 				/>
@@ -41,7 +41,7 @@
 
 					<app-store-body
 						v-if="item.type === 'Topic' && item.topicType === 'Categories'"
-						:label="item.name"
+						:label="t(getTempI18nValue(item.name))"
 						:padding-exclude-body="44"
 						:bottom-separator="true"
 						:loading="pageLoading"
@@ -72,7 +72,7 @@
 						class="category-padding"
 						:loading="pageLoading"
 						:show-body="item.content.length > 0"
-						:label="item.name"
+						:label="t(getTempI18nValue(item.name))"
 						:right="t('base.see_all')"
 						:no-label-padding-bottom="true"
 						:bottom-separator="true"
@@ -102,7 +102,11 @@
 						class="category-padding"
 						:loading="topLoading"
 						:show-body="topApps.length > 0"
-						:label="topTitle"
+						:label="
+							t('top_app_in', {
+								category: getTempI18nValue(categoryRef, true)
+							})
+						"
 						:right="t('base.see_all')"
 						:no-label-padding-bottom="true"
 						:bottom-separator="true"
@@ -129,7 +133,11 @@
 						class="category-padding"
 						:loading="latestLoading"
 						:show-body="latestApps.length > 0"
-						:label="latestTitle"
+						:label="
+							t('latest_app_in', {
+								category: getTempI18nValue(categoryRef, true)
+							})
+						"
 						:right="t('base.see_all')"
 						:no-label-padding-bottom="true"
 						@on-right-click="clickList(CATEGORIES_TYPE.LOCAL.LATEST)"
@@ -159,11 +167,12 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
 	AppStoreInfo,
 	CATEGORIES_TYPE,
+	getTempI18nValue,
 	TRANSACTION_PAGE
 } from 'src/constants/constants';
 import PageContainer from 'components/base/PageContainer.vue';
@@ -179,23 +188,15 @@ import { useI18n } from 'vue-i18n';
 
 const router = useRouter();
 const route = useRoute();
-
 const topApps = ref<AppStoreInfo[]>([]);
 const latestApps = ref<AppStoreInfo[]>([]);
 const categoryRef = ref(route.params.categories as string);
-const topTitle = ref();
-const latestTitle = ref();
 const pageData = ref();
 const appStore = useAppStore();
 const pageLoading = ref(true);
 const topLoading = ref(true);
 const latestLoading = ref(true);
 const { t } = useI18n();
-
-onMounted(() => {
-	topTitle.value = `Top App in ${categoryRef.value}`;
-	latestTitle.value = `Latest App in ${categoryRef.value}`;
-});
 
 function fetchData(showLoading = false) {
 	if (showLoading) {

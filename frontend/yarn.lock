@@ -1526,6 +1526,11 @@
   resolved "https://registry.npmmirror.com/@types/har-format/-/har-format-1.2.11.tgz"
   integrity sha512-T232/TneofqK30AD1LRrrf8KnjLvzrjWDp7eWST5KoiSzrBfRsLrWDPk4STQPW4NZG6v2MltnduBVmakbZOBIQ==
 
+"@types/he@^1.2.3":
+  version "1.2.3"
+  resolved "https://registry.npmjs.org/@types/he/-/he-1.2.3.tgz"
+  integrity sha512-q67/qwlxblDzEDvzHhVkwc1gzVWxaNxeyHUBF4xElrvjL11O+Ytze+1fGpBHlr/H9myiBUaUXNnNPmBHxxfAcA==
+
 "@types/html-minifier-terser@^6.0.0":
   version "6.1.0"
   resolved "https://registry.npmjs.org/@types/html-minifier-terser/-/html-minifier-terser-6.1.0.tgz"

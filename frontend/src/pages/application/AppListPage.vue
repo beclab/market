@@ -9,7 +9,22 @@
 			<title-bar
 				:show-back="true"
 				:show="true"
-				:title="title"
+				:title="
+					category === CATEGORIES_TYPE.LOCAL.ALL
+						? t(
+								type === CATEGORIES_TYPE.LOCAL.LATEST
+									? 'latest_app_on_terminus'
+									: 'top_app_on_terminus'
+							)
+						: t(
+								type === CATEGORIES_TYPE.LOCAL.LATEST
+									? 'latest_app_in'
+									: 'top_app_in',
+								{
+									category: getTempI18nValue(category, true)
+								}
+							)
+				"
 				:show-title="showShadow"
 				:shadow="showShadow"
 				@onReturn="router.back()"
@@ -37,7 +52,11 @@
 <script lang="ts" setup>
 import { ref, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { AppStoreInfo, CATEGORIES_TYPE } from 'src/constants/constants';
+import {
+	AppStoreInfo,
+	CATEGORIES_TYPE,
+	getTempI18nValue
+} from 'src/constants/constants';
 import EmptyView from 'components/base/EmptyView.vue';
 import TitleBar from 'components/base/TitleBar.vue';
 import { getLatest, getTop } from 'src/api/storeApi';
@@ -46,6 +65,7 @@ import PageContainer from 'src/components/base/PageContainer.vue';
 import AppCard from 'components/appcard/AppCard.vue';
 import AppCardHideBorder from 'components/appcard/AppCardHideBorder.vue';
 import { useAppStore } from 'src/stores/app';
+import { useI18n } from 'vue-i18n';
 
 const showShadow = ref(false);
 const router = useRouter();
@@ -53,8 +73,10 @@ const route = useRoute();
 const applications = ref<AppStoreInfo[]>([]);
 const loading = ref(false);
 const isEmpty = ref(false);
-const title = ref();
 const appStore = useAppStore();
+const { t } = useI18n();
+const category = ref();
+const type = ref();
 
 const updateApp = (app: AppStoreInfo) => {
 	console.log(`list update status ${app.name}`);
@@ -72,32 +94,27 @@ onBeforeUnmount(() => {
 const fetchData = async () => {
 	loading.value = true;
 	console.log(route.params);
-	const category = route.params.categories as string;
-	const type = route.params.type as string;
-	if (!category) {
+	category.value = route.params.categories as string;
+	type.value = route.params.type as string;
+	if (!category.value) {
 		bus.emit(BUS_EVENT.APP_BACKEND_ERROR, 'category error');
 		return;
 	}
-	let request = category.toLowerCase();
-	let titleSuffix = `in ${category}`;
-	if (category === CATEGORIES_TYPE.LOCAL.ALL) {
-		titleSuffix = 'on Terminus';
+	let request = category.value.toLowerCase();
+	if (category.value === CATEGORIES_TYPE.LOCAL.ALL) {
 		request = '';
 	}
-	if (type === CATEGORIES_TYPE.LOCAL.TOP) {
-		title.value = `Top App ${titleSuffix}`;
+	if (type.value === CATEGORIES_TYPE.LOCAL.TOP) {
 		applications.value = await getTop(request);
-	} else if (type === CATEGORIES_TYPE.LOCAL.LATEST) {
-		title.value = `Latest App ${titleSuffix}`;
+	} else if (type.value === CATEGORIES_TYPE.LOCAL.LATEST) {
 		applications.value = await getLatest(request);
-	} else if (type === CATEGORIES_TYPE.LOCAL.RECOMMENDS) {
-		const categoryData = await appStore.getPageData(category);
+	} else if (type.value === CATEGORIES_TYPE.LOCAL.RECOMMENDS) {
+		const categoryData = await appStore.getPageData(category.value);
 		if (categoryData && categoryData.data) {
 			console.log(categoryData.data);
 			categoryData.data.forEach((item: any) => {
 				if (item.type === 'Recommends') {
 					applications.value = item.content;
-					title.value = item.name;
 				}
 			});
 		}
