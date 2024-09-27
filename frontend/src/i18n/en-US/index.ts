@@ -198,5 +198,34 @@ export default {
 		sure_to_uninstall_the_app: "Are you sure to uninstall '{title}'？",
 		upload_custom_chart: 'Upload custom chart',
 		logs: 'Logs'
-	}
+	},
+
+	//temp
+	discover_amazing_apps: 'Discover amazing apps',
+	featured_app: 'FEATURED APP',
+	control_your_own_social_network: 'Control your own social network.',
+	decentralized_social_media: 'Decentralized social media',
+	get_started: 'GET STARTED',
+	booster_your_software_development_productivity:
+		'Boost your software development productivity.',
+	enjoy_coding_on_terminus: 'Enjoy coding on Terminus',
+	diving_into_ai_image_generation: 'Dive into AI image generation.',
+	unleashing_your_creativity: 'Unleash your creativity!',
+	great_on_terminus: 'GREAT ON TERMINUS',
+	mastering_your_photo_with_a_personal_library:
+		'Master your photos with a personal library.',
+	organize_your_memories: 'Organize your memories',
+	nocode_solution_for_your_data_management:
+		'No-code solution for your data management.',
+	build_databases_as_spreadsheets: 'Build databases as spreadsheets',
+	top_app_in: 'Top apps in {category}',
+	latest_app_in: 'Latest apps in {category}',
+	communitys_choices: 'Community choices',
+	top_app_on_terminus: 'Top apps on Terminus',
+	latest_app_on_terminus: 'Latest apps on Terminus',
+	featured_apps_in_discover: 'Featured apps in Discover',
+	featured_apps_in_productivity: 'Featured apps in Productivity',
+	featured_apps_in_utilities: 'Featured apps in Utilities',
+	featured_apps_in_entertainment: 'Featured apps in Entertainment',
+	featured_apps_in_social_network: 'Featured apps in Social Network'
 };

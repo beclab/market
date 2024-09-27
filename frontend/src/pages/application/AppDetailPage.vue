@@ -105,8 +105,8 @@
 								:name="t('base.language')"
 								:data="language.toUpperCase()"
 								:unit="
-									languageLength > 0
-										? `+ ${languageLength} more`
+									item && item.locale.length > 0
+										? `+ ${item.locale.length - 1} more`
 										: convertLanguageCodeToName(language)
 								"
 							/>
@@ -454,7 +454,11 @@
 											class="q-mt-lg"
 											:title="t('base.category')"
 											separator=" · "
-											:content-array="item.categories"
+											:content-array="
+												item.categories.map((category) => {
+													return getTempI18nValue(category, true);
+												})
+											"
 										/>
 										<app-intro-item
 											class="q-mt-lg"
@@ -470,8 +474,8 @@
 											class="q-mt-lg"
 											:title="t('base.language')"
 											:content-array="
-												item.language
-													? convertLanguageCodesToNames(item.language)
+												item.locale
+													? convertLanguageCodesToNames(item.locale)
 													: ''
 											"
 										/>
@@ -628,6 +632,7 @@ import {
 	CLIENT_TYPE,
 	DEPENDENCIES_TYPE,
 	getAppFieldI18n,
+	getTempI18nValue,
 	PERMISSION_SYSDATA_GROUP,
 	PermissionNode,
 	TRANSACTION_PAGE
@@ -711,7 +716,6 @@ const compatible = ref<string>('');
 const entrancePermissionData = ref<PermissionNode[]>([]);
 const filePermissionData = ref<PermissionNode[]>([]);
 const language = ref('en');
-const languageLength = ref(0);
 const cfgType = ref<string>();
 const readMeHtml = ref('');
 
@@ -1012,13 +1016,10 @@ const appScopeTask: OnUpdateUITask = {
 const languageTask: OnUpdateUITask = {
 	onInit() {
 		language.value = 'en';
-		languageLength.value = 0;
 	},
 	onUpdate(app: AppStoreInfo) {
-		if (app.language) {
-			language.value = app.language[0];
-			languageLength.value =
-				app.language.length > 0 ? 0 : app.language.length - 1;
+		if (app.locale) {
+			language.value = app.locale[0];
 		}
 	}
 };

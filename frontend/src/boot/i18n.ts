@@ -1,6 +1,6 @@
 import { boot } from 'quasar/wrappers';
 import { createI18n } from 'vue-i18n';
-
+import { get } from 'lodash';
 import messages, { defaultLanguage } from 'src/i18n';
 
 export type MessageLanguages = keyof typeof messages;
@@ -24,7 +24,11 @@ declare module 'vue-i18n' {
 export const i18n = createI18n({
 	locale: defaultLanguage,
 	legacy: false,
-	messages
+	messages,
+	//https://github.com/intlify/vue-i18n/issues/118
+	//https://github.com/intlify/vue-i18n/issues/531#issuecomment-1589250658
+	messageResolver: (obj, path) =>
+		get(obj, path, '')?.replaceAll(/@/g, "{'@'}") || null
 });
 
 export default boot(({ app }) => {
