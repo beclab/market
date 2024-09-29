@@ -69,10 +69,10 @@ func installPre(appName, token string) (*models.ApplicationInfo, error) {
 		return info, errors.New("get chart name failed")
 	}
 
-	err = checkDep(info, token)
-	if err != nil {
-		return info, err
-	}
+	// err = checkDep(info, token)
+	// if err != nil {
+	// 	return info, err
+	// }
 
 	err = appmgr.DownloadAppTgz(info.ChartName)
 	if err != nil {
