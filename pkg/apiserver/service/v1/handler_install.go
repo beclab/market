@@ -34,9 +34,9 @@ func checkDep(app *models.ApplicationInfo, token string) error {
 		return err
 	}
 
-	// if len(depsResp.Data) <= 0 {
-	// 	return nil
-	// }
+	if len(depsResp.Data) <= 0 {
+		return nil
+	}
 
 	notInstalled, err := json.Marshal(depsResp.Data)
 	if err != nil {
@@ -69,10 +69,10 @@ func installPre(appName, token string) (*models.ApplicationInfo, error) {
 		return info, errors.New("get chart name failed")
 	}
 
-	err = checkDep(info, token)
-	if err != nil {
-		return info, err
-	}
+	// err = checkDep(info, token)
+	// if err != nil {
+	// 	return info, err
+	// }
 
 	err = appmgr.DownloadAppTgz(info.ChartName)
 	if err != nil {
