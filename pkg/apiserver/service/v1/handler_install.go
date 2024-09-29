@@ -34,9 +34,9 @@ func checkDep(app *models.ApplicationInfo, token string) error {
 		return err
 	}
 
-	if len(depsResp.Data) <= 0 {
-		return nil
-	}
+	// if len(depsResp.Data) <= 0 {
+	// 	return nil
+	// }
 
 	notInstalled, err := json.Marshal(depsResp.Data)
 	if err != nil {
