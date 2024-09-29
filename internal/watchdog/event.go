@@ -139,7 +139,7 @@ func (w *Manager) DeleteWatchDog(uid string) {
 }
 
 func isStatusWaiting(status string) bool {
-	if status != Pending && status != Downloading {
+	if status != Pending {
 		return false
 	}
 
