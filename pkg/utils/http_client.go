@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/golang/glog"
 	"io"
 	"market/internal/constants"
 	"net"
@@ -13,6 +12,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 var (
@@ -120,7 +121,7 @@ func SendHttpRequest(req *http.Request) (string, error) {
 	if len(debugBody) > 256 {
 		debugBody = debugBody[:256]
 	}
-	glog.Infof("url:%s, method:%s, resp.StatusCode:%d, body:%s", req.URL, req.Method, resp.StatusCode, debugBody)
+	// glog.Infof("url:%s, method:%s, resp.StatusCode:%d, body:%s", req.URL, req.Method, resp.StatusCode, debugBody)
 
 	return string(body), nil
 }
@@ -153,7 +154,7 @@ func SendHttpRequestByte(req *http.Request) ([]byte, error) {
 	if len(debugBody) > 256 {
 		debugBody = debugBody[:256]
 	}
-	glog.Infof("url:%s, method:%s, resp.StatusCode:%d, body:%s", req.URL, req.Method, resp.StatusCode, debugBody)
+	// glog.Infof("url:%s, method:%s, resp.StatusCode:%d, body:%s", req.URL, req.Method, resp.StatusCode, debugBody)
 
 	return body, nil
 }
