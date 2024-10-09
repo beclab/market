@@ -52,8 +52,10 @@ func checkHaveProgress(installOp, cfgType string) bool {
 
 func (w *ModelManager) GetProgress(uid string) string {
 	if w.ModelManagerMap[uid] == nil {
+		glog.Info("GetProgress:", uid, "nil")
 		return ""
 	} else {
+		glog.Info("GetProgress:", uid, w.ModelManagerMap[uid].progress)
 		return w.ModelManagerMap[uid].progress
 	}
 
