@@ -50,6 +50,15 @@ func checkHaveProgress(installOp, cfgType string) bool {
 	return false
 }
 
+func (w *ModelManager) GetProgress(uid string) string {
+	if w.ModelManagerMap[uid] == nil {
+		return ""
+	} else {
+		return w.ModelManagerMap[uid].progress
+	}
+
+}
+
 func (w *ModelManager) NewWatchDog(installOp, appName, uid, token, from, cfgType string, info *models.ApplicationInfo) *CommonWatchDog {
 	w.mu.Lock()
 	defer w.mu.Unlock()

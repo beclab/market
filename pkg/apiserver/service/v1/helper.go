@@ -161,7 +161,7 @@ func parseAppTypes(res *models.ListResultD) []string {
 	return stringItems
 }
 
-func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) []*models.ApplicationInfo {
+func parseAppInfos(h *Handler, res *models.ListResultD, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) []*models.ApplicationInfo {
 
 	var appWithStatusList []*models.ApplicationInfo
 	for _, item := range res.Items {
@@ -183,6 +183,9 @@ func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Applic
 			glog.Warningf("app:%s has pass label %v not installed, pass", info.Name, info.AppLabels)
 			continue
 		}
+
+		// merge app info
+		info.Progress = h.commonWatchDogManager.GetProgress(info.AppID)
 
 		appWithStatusList = append(appWithStatusList, info)
 	}
