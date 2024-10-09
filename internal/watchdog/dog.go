@@ -51,14 +51,15 @@ func checkHaveProgress(installOp, cfgType string) bool {
 }
 
 func (w *ModelManager) GetProgress(uid string) string {
-	if w.ModelManagerMap[uid] == nil {
-		glog.Info("GetProgress:", uid, "nil")
+
+	manager, exists := w.ModelManagerMap[uid]
+	if !exists || manager == nil {
+		glog.Info("GetProgress:", uid, "not found or nil")
 		return ""
-	} else {
-		glog.Info("GetProgress:", uid, w.ModelManagerMap[uid].progress)
-		return w.ModelManagerMap[uid].progress
 	}
 
+	glog.Info("GetProgress:", uid, manager.progress)
+	return manager.progress
 }
 
 func (w *ModelManager) NewWatchDog(installOp, appName, uid, token, from, cfgType string, info *models.ApplicationInfo) *CommonWatchDog {

@@ -185,7 +185,7 @@ func parseAppInfos(h *Handler, res *models.ListResultD, appsMap map[string]appse
 		}
 
 		// merge app info
-		info.Progress = h.commonWatchDogManager.GetProgress(info.AppID)
+		info.Progress = h.commonWatchDogManager.GetProgress(info.Name)
 
 		appWithStatusList = append(appWithStatusList, info)
 	}
