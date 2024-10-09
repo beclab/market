@@ -91,6 +91,7 @@ func (w *ModelManager) NewWatchDog(installOp, appName, uid, token, from, cfgType
 		clear:        w.DeleteWatchDog,
 	}
 	w.ModelManagerMap[uid] = wd
+	glog.Info("NewWatchDog:", uid)
 
 	return wd
 }
