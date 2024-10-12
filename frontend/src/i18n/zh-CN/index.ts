@@ -34,7 +34,7 @@ export default {
 		entertainment: '娱乐',
 		social_network: '社交网络',
 		blockchain: '区块链',
-		recommendation: '推荐',
+		recommendation: '推荐算法',
 		recommend: '推荐',
 		models: '模型',
 		large_language_model: '大语言模型',
@@ -83,7 +83,7 @@ export default {
 		version_history: '版本历史',
 		get_a_client: '获取客户端',
 		dependency: '依赖项',
-		reference_app: '参考应用',
+		reference_app: '授权应用',
 		see_all_version: '查看所有版本',
 		download: '下载',
 		no_version_history_desc: '该应用没有版本历史记录'

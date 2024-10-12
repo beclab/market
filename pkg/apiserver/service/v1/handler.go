@@ -213,7 +213,7 @@ func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
 	}
 
 	menuTypeData.MenuTypes = append(menuTypeData.MenuTypes, models.MenuType{Label: "recommendation", Key: "Recommend", Icon: "sym_r_featured_play_list"})
-	menuTypeData.I18n.ZhCN.Recommendation = "推荐"
+	menuTypeData.I18n.ZhCN.Recommendation = "推荐算法"
 	menuTypeData.I18n.EnUS.Recommendation = "Recommendation"
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, menuTypeData))

@@ -105,7 +105,7 @@
 								:name="t('base.language')"
 								:data="language.toUpperCase()"
 								:unit="
-									item && item.locale.length > 0
+									item && item.locale.length > 1
 										? `+ ${item.locale.length - 1} more`
 										: convertLanguageCodeToName(language)
 								"
