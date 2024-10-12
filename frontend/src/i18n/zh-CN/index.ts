@@ -34,7 +34,7 @@ export default {
 		entertainment: '娱乐',
 		social_network: '社交网络',
 		blockchain: '区块链',
-		recommendation: '推荐',
+		recommendation: '推荐算法',
 		recommend: '推荐',
 		models: '模型',
 		large_language_model: '大语言模型',
