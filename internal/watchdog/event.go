@@ -91,6 +91,18 @@ func NewWatchDogManager() *Manager {
 	return &Manager{ManagerMap: make(ManagerMap)}
 }
 
+func (w *Manager) GetProgress(uid string) string {
+
+	manager, exists := w.ManagerMap[uid]
+	if !exists || manager == nil {
+		glog.Info("GetProgress-Event:", uid, "not found or nil")
+		return ""
+	}
+
+	glog.Info("GetProgress-Event:", uid, manager.progress)
+	return manager.progress
+}
+
 func (w *Manager) NewWatchDog(installOp, appname, uid, token, from, cfgType string, info *models.ApplicationInfo) *InstallationWatchDog {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -119,6 +131,7 @@ func (w *Manager) NewWatchDog(installOp, appname, uid, token, from, cfgType stri
 		clear:   w.DeleteWatchDog,
 	}
 	w.ManagerMap[uid] = wd
+	glog.Info("NewWatchDog-Event:", uid)
 
 	return wd
 }

@@ -148,7 +148,7 @@ func (h *Handler) list(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
 }
@@ -247,7 +247,8 @@ func (h *Handler) listTop(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
 }
 
@@ -281,7 +282,7 @@ func (h *Handler) listLatest(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
 }
@@ -360,7 +361,7 @@ func (h *Handler) search(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
 
 	_ = resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
 }
@@ -402,7 +403,7 @@ func (h *Handler) searchPost(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
 }
