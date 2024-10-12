@@ -83,7 +83,7 @@ export default {
 		version_history: '版本历史',
 		get_a_client: '获取客户端',
 		dependency: '依赖项',
-		reference_app: '参考应用',
+		reference_app: '授权应用',
 		see_all_version: '查看所有版本',
 		download: '下载',
 		no_version_history_desc: '该应用没有版本历史记录'
