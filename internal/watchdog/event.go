@@ -231,7 +231,8 @@ func (i *InstallationWatchDog) Exec() {
 		return
 	}
 
-	i.ctx, i.cancel = context.WithTimeout(context.Background(), 15*time.Minute)
+	// i.ctx, i.cancel = context.WithTimeout(context.Background(), 15*time.Minute)
+	i.ctx = context.Background()
 
 	for {
 		select {
