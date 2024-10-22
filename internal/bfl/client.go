@@ -74,6 +74,9 @@ func GetMyAppsInternal() (string, error) {
 
 	responseData := resp.Result().(*event.Response)
 
+	glog.Info("responseData:")
+	glog.Info(responseData)
+
 	if responseData.Code != 0 {
 		glog.Warningf("url:%s post %s responseData.Code:%d not 0", bflMyAppsUrlInternal, "", responseData.Code)
 		return "", errors.New(responseData.Message)
