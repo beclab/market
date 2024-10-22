@@ -18,6 +18,7 @@ import (
 	"market/internal/boltdb"
 	"market/internal/conf"
 	"market/internal/constants"
+	"market/internal/monitor"
 	servicev1 "market/pkg/apiserver/service/v1"
 	"net/http"
 
@@ -71,6 +72,8 @@ func (s *APIServer) PrepareRun() error {
 	if err != nil {
 		glog.Fatalf("boltdb init err%s", err.Error())
 	}
+
+	monitor.Start()
 
 	return nil
 }

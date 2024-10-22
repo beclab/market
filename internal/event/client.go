@@ -47,18 +47,18 @@ const (
 )
 
 type Client struct {
-	httpClient *resty.Client
+	HttpClient *resty.Client
 }
 
 func NewClient() *Client {
 	c := resty.New()
 
 	return &Client{
-		httpClient: c.SetTimeout(2 * time.Second),
+		HttpClient: c.SetTimeout(2 * time.Second),
 	}
 }
 
-func (c *Client) getAccessToken() (string, error) {
+func (c *Client) GetAccessToken() (string, error) {
 	url := fmt.Sprintf("http://%s/permission/v1alpha1/access", eventServer)
 	now := time.Now().UnixMilli() / 1000
 
@@ -86,7 +86,7 @@ func (c *Client) getAccessToken() (string, error) {
 		return "", err
 	}
 
-	resp, err := c.httpClient.R().
+	resp, err := c.HttpClient.R().
 		SetHeader(restful.HEADER_ContentType, restful.MIME_JSON).
 		SetBody(postData).
 		SetResult(&AccessTokenResp{}).
