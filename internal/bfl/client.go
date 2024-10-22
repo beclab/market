@@ -70,16 +70,23 @@ func GetMyAppsInternal() (string, error) {
 		return "", errors.New(string(resp.Body()))
 	}
 
-	responseData := resp.Result().(*string)
+	// responseData := resp.Result().(*string)
 
-	// responseData := resp.Result().(*event.Response)
+	responseData := resp.Result().(*event.Response)
 
-	// if responseData.Code != 0 {
-	// 	glog.Warningf("url:%s post %s responseData.Code:%d not 0", bflMyAppsUrlInternal, "", responseData.Code)
-	// 	return "", errors.New(responseData.Message)
-	// }
+	if responseData.Code != 0 {
+		glog.Warningf("url:%s post %s responseData.Code:%d not 0", bflMyAppsUrlInternal, "", responseData.Code)
+		return "", errors.New(responseData.Message)
+	}
 
 	glog.Infof("url:%s post %s success responseData:%#v", bflMyAppsUrlInternal, "", *responseData)
 
-	return *responseData, err
+	return getData(*responseData), err
+}
+
+func getData(responseData event.Response) string {
+	if data, ok := responseData.Data.(string); ok {
+		return data
+	}
+	return ""
 }
