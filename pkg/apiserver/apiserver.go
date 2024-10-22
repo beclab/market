@@ -74,7 +74,7 @@ func (s *APIServer) PrepareRun() error {
 	}
 
 	glog.Info("call monitor Start")
-	monitor.Start()
+	go monitor.Start()
 
 	return nil
 }
