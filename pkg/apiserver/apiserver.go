@@ -73,6 +73,7 @@ func (s *APIServer) PrepareRun() error {
 		glog.Fatalf("boltdb init err%s", err.Error())
 	}
 
+	glog.Info("call monitor Start")
 	monitor.Start()
 
 	return nil

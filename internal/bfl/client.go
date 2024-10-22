@@ -32,6 +32,7 @@ func GetMyApps(token string) (string, error) {
 
 func GetMyAppsInternal() (string, error) {
 
+	glog.Info("call GetMyAppsInternal")
 	bflMyAppsUrlInternal := fmt.Sprintf("http://%s/system-server/v1alpha1/app/service.bfl/v1/UserApps", os.Getenv("OS_SYSTEM_SERVER"))
 
 	if eventClient == nil {
