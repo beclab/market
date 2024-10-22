@@ -40,7 +40,7 @@ func GetMyAppsInternal() (string, error) {
 	}
 
 	if accessToken == nil {
-		token, err := eventClient.GetAccessToken()
+		token, err := eventClient.GetMyAppsAccessToken()
 		if err != nil {
 			eventClient = nil
 			return "", err
