@@ -123,7 +123,7 @@ func (c *Client) GetMyAppsAccessToken() (string, error) {
 		Timestamp: now,
 		Token:     string(encode),
 		Perm: PermissionRequire{
-			Group:    GroupID,
+			Group:    "service.bfl",
 			Version:  EventVersion,
 			DataType: "app",
 			Ops: []string{
