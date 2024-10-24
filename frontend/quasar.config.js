@@ -163,7 +163,7 @@ module.exports = configure(function (/* ctx */) {
 					}
 				: {
 						'/app-store': {
-							target: `https://market.${process.env.ACCOUNT}.myterminus.com`,
+							target: `https://market.local.${process.env.ACCOUNT}.myterminus.com`,
 							changeOrigin: true
 						}
 					}

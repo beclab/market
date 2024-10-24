@@ -9,10 +9,10 @@
 			'--width': larger ? '88px' : '72px',
 			'--statusWidth': larger
 				? showDropMenu
-					? 'calc(100% - 21px)'
+					? 'calc(100% - 25px)'
 					: '100%'
 				: showDropMenu
-					? 'calc(100% - 17px)'
+					? 'calc(100% - 21px)'
 					: '100%'
 		}"
 	>
@@ -65,22 +65,27 @@
 		<div
 			v-if="showDropMenu"
 			class="install_btn_separator_bg items-center"
-			:style="{ background: backgroundColor, height: larger ? '32px' : '24px' }"
+			:style="{
+				background: backgroundColor,
+				height: larger ? '32px' : '24px',
+				'--paddingY': larger ? '8px' : '6px'
+			}"
 		>
 			<div class="install_btn_separator" />
 		</div>
 		<q-btn-dropdown
 			v-if="showDropMenu"
 			dropdown-icon="img:/arrow.svg"
-			size="10"
+			:size="larger ? '12px' : '9px'"
 			:class="
 				larger ? 'application_install_larger_more' : 'application_install_more'
 			"
+			content-class="dropdown-menu"
 			flat
 			dense
 			:menu-offset="[0, 4]"
 		>
-			<div class="column dropdown-menu text-body3">
+			<div class="column text-body3">
 				<div
 					v-if="canLoad(item)"
 					class="dropdown-menu-item q-mt-xs"
@@ -509,15 +514,14 @@ function updateUI() {
 	padding: 0;
 
 	.install_btn_separator_bg {
-		width: 1px;
+		width: 5px;
 		height: 100%;
-		padding-top: 4px;
-		padding-bottom: 4px;
+		padding: var(--paddingY) 2px;
 
 		.install_btn_separator {
 			width: 1px;
 			height: 100%;
-			background: $separator;
+			background: $btn-stroke;
 		}
 	}
 
@@ -584,26 +588,19 @@ function updateUI() {
 	}
 }
 
-.dropdown-menu {
-	overflow: hidden;
-	width: 88px;
-	border-radius: 8px;
-	padding: 8px;
+.dropdown-menu-item {
+	height: 32px;
+	color: $ink-2;
+	padding: 8px 12px;
 
-	.dropdown-menu-item {
-		height: 32px;
-		color: $ink-2;
-		padding: 8px 12px;
+	&:hover {
+		background: $background-hover;
+		border-radius: 4px;
+	}
 
-		&:hover {
-			background: $background-hover;
-			border-radius: 4px;
-		}
-
-		&:active {
-			background: $background-hover;
-			border-radius: 4px;
-		}
+	&:active {
+		background: $background-hover;
+		border-radius: 4px;
 	}
 }
 </style>

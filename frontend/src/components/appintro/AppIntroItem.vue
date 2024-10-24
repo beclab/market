@@ -9,7 +9,7 @@
 		class="info-item-root row justify-between items-start no-wrap"
 	>
 		<div class="info-title col-5 text-body2 text-ink-3">{{ title }}</div>
-		<expend-text-view v-if="content" :text="content" />
+		<expend-text-view v-if="content" :text="content" align="right" />
 		<div v-else-if="link" class="info_link col-7" @click="emit('onLinkClick')">
 			{{ link }}
 		</div>
