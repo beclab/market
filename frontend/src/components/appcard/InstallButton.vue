@@ -98,6 +98,22 @@
 					{{ t('app.unload') }}
 				</div>
 				<div
+					v-if="canResume(item)"
+					class="dropdown-menu-item q-mt-xs"
+					v-close-popup
+					@click="onResume"
+				>
+					{{ t('app.resume') }}
+				</div>
+				<div
+					v-if="canSuspend(item)"
+					class="dropdown-menu-item q-mt-xs"
+					v-close-popup
+					@click="onSuspend"
+				>
+					{{ t('app.suspend') }}
+				</div>
+				<div
 					v-if="isUpdate"
 					class="dropdown-menu-item q-mt-xs"
 					v-close-popup
@@ -128,7 +144,9 @@ import {
 	canInstallingCancel,
 	canOpen,
 	canUnload,
-	canLoad
+	canLoad,
+	canResume,
+	canSuspend
 } from 'src/constants/config';
 import { bus, BUS_EVENT } from 'src/utils/bus';
 
@@ -160,7 +178,6 @@ const props = defineProps({
 
 const appStore = useAppStore();
 const userStore = useUserStore();
-const status = ref();
 const isDisabled = ref(false);
 const isLoading = ref<boolean>(false);
 const hoverRef = ref(false);
@@ -168,6 +185,7 @@ const textColor = ref<string>();
 const backgroundColor = ref<string>();
 const border = ref<string>();
 const { t } = useI18n();
+const status = ref();
 let hasCheck = false;
 
 const showDropMenu = computed(() => {
@@ -186,8 +204,8 @@ const { color: background1 } = useColor('background-1');
 const { color: blueAlpha } = useColor('blue-alpha');
 const { color: redAlpha } = useColor('red-alpha');
 const { color: negative } = useColor('negative');
-const { color: orangeDefault } = useColor('orange-default');
-const { color: orangeSoft } = useColor('orange-soft');
+// const { color: orangeDefault } = useColor('orange-default');
+// const { color: orangeSoft } = useColor('orange-soft');
 
 async function onClick() {
 	if (!props.item) {
@@ -214,7 +232,7 @@ async function onClick() {
 			}
 			break;
 		case APP_STATUS.suspend:
-			appStore.resumeApp(props.item, props.development);
+			onSuspendTips();
 			break;
 		case APP_STATUS.running: {
 			console.log(props.item);
@@ -270,6 +288,27 @@ const openApp = () => {
 	}
 };
 
+const checkSuspendEntranceCrash = () => {
+	if (!props.item) {
+		return false;
+	}
+
+	if (canOpen(props.item)) {
+		let app = userStore.myApps.find((app: any) => app.id == props.item?.id);
+		if (!app) {
+			return false;
+		}
+		console.log(app);
+
+		const entrance = app.entrances?.find((entrance) => !entrance.invisible);
+		console.log(entrance);
+
+		return entrance && entrance.state === 'crash';
+	} else {
+		return false;
+	}
+};
+
 async function onLoad() {
 	if (!props.item) {
 		return;
@@ -278,6 +317,30 @@ async function onLoad() {
 	switch (props.item?.status) {
 		case APP_STATUS.installed:
 			appStore.resumeApp(props.item, props.development);
+			break;
+	}
+}
+
+async function onResume() {
+	if (!props.item) {
+		return;
+	}
+
+	switch (props.item?.status) {
+		case APP_STATUS.suspend:
+			appStore.resumeApp(props.item, props.development);
+			break;
+	}
+}
+
+async function onSuspend() {
+	if (!props.item) {
+		return;
+	}
+
+	switch (props.item?.status) {
+		case APP_STATUS.suspend:
+			appStore.suspendApp(props.item, props.development);
 			break;
 	}
 }
@@ -326,6 +389,40 @@ async function onUninstall() {
 				},
 				okText: t('base.confirm'),
 				cancel: true
+			})
+				.then((res) => {
+					if (res) {
+						console.log('click ok');
+						appStore.uninstallApp(props.item, props.development);
+					} else {
+						console.log('click cancel');
+					}
+				})
+				.catch((err) => {
+					console.log('click error', err);
+				});
+			break;
+	}
+}
+
+async function onSuspendTips() {
+	if (!props.item) {
+		return;
+	}
+	const isCrash = checkSuspendEntranceCrash();
+	switch (props.item?.status) {
+		case APP_STATUS.suspend:
+			BtDialog.show({
+				title: isCrash ? t('app.crash') : t('app.suspend'),
+				message: isCrash
+					? t('my.application_has_crashed')
+					: t('my.application_has_been_suspended'),
+				okStyle: {
+					background: blueDefault.value,
+					color: white.value
+				},
+				okText: t('base.ok'),
+				cancel: false
 			})
 				.then((res) => {
 					if (res) {
@@ -432,29 +529,45 @@ function updateUI() {
 				border.value = '1px solid transparent';
 			}
 			break;
+		case APP_STATUS.initializing:
+			if (hoverRef.value && canInstallingCancel(props.item?.cfgType)) {
+				isLoading.value = false;
+				status.value = t('app.cancel');
+				textColor.value = blueDefault.value;
+				backgroundColor.value = background1.value;
+				border.value = `1px solid ${blueDefault.value}`;
+			} else {
+				isLoading.value = true;
+				status.value = t('app.initializing');
+				textColor.value = white.value;
+				backgroundColor.value = blueDefault.value;
+				border.value = '1px solid transparent';
+			}
+			break;
 		case APP_STATUS.installed:
 			backgroundColor.value = blueAlpha.value;
 			textColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			status.value = t('app.installed');
 			break;
-		case APP_STATUS.suspend:
-			if (hoverRef.value) {
-				status.value = t('app.resume');
-			} else {
-				backgroundColor.value = orangeSoft.value;
-				textColor.value = orangeDefault.value;
-				border.value = '1px solid transparent';
-				status.value = t('app.suspend');
-			}
-			break;
 		case APP_STATUS.waiting:
-		case APP_STATUS.resuming:
 			isLoading.value = true;
 			status.value = '';
 			textColor.value = white.value;
 			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
+			break;
+		case APP_STATUS.resuming:
+			backgroundColor.value = blueAlpha.value;
+			textColor.value = blueDefault.value;
+			border.value = '1px solid transparent';
+			status.value = t('app.resuming');
+			break;
+		case APP_STATUS.suspend:
+			backgroundColor.value = blueAlpha.value;
+			textColor.value = blueDefault.value;
+			border.value = '1px solid transparent';
+			status.value = t('app.open');
 			break;
 		case APP_STATUS.running:
 			backgroundColor.value = blueAlpha.value;

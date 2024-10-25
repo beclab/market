@@ -314,24 +314,38 @@ export const useAppStore = defineStore('app', {
 			}
 		},
 
+		async updateAppEntranceBySocket(app) {
+			const install = this.installApps.find((item) => item.name == app.id);
+			if (install) {
+				install.entrances = app.entrances;
+				if (
+					app.state === APP_STATUS.suspend ||
+					app.state === APP_STATUS.resuming
+				) {
+					install.status = app.state;
+					this._notificationData(app, false);
+				}
+			}
+		},
+
 		/**
 		 *
 		 * App Status
-		 * +-----------+  install   +---------+        +-------------+        +------------+         +--------------+    suspend     +---------+
-		 * | uninstall | --------->| pending | ------> | downloading |------> | installing | ------> |              | -------------> | suspend |
-		 * +-----------+           +---------+         +------------+        +------------+          |              |               +---------+
-		 *       ^                                                                                   |              |                    |
-		 *       |                                                          +----------------------> |   running    |                    | resume
-		 *       |                                                          |                        |              |                    |
-		 *       |                                                +------------+      upgrade        |              |                +----------+
-		 *       |                                                | upgrading  | <------------------ |              | <------------+ | resuming |
-		 *       |                                                +------------+                     +--------------+                +----------+
-		 *       |                                                                                       |
-		 *       |                                                                                       |  uninstall
-		 *       |                                                                                       v
-		 *       |                                                                            +--------------+
-		 *       ---------------------------------------------------------------------------- | uninstalling |
-		 *                                                                                    +--------------+
+		 * +-----------+  install   +---------+        +-------------+        +------------+        +------------+       +--------------+    suspend     +---------+
+		 * | uninstall | --------->| pending | ------> | downloading |------> | installing | ------ |initializing| ----> |              | -------------> | suspend |
+		 * +-----------+           +---------+         +------------+        +------------+         +------------+       |              |               +---------+
+		 *       ^                                                                                                       |              |                    |
+		 *       |                                                                              +----------------------> |   running    |                    | resume
+		 *       |                                                                              |                        |              |                    |
+		 *       |                                                                    +------------+      upgrade        |              |                +----------+
+		 *       |                                                                    | upgrading  | <------------------ |              | <------------+ | resuming |
+		 *       |                                                                    +------------+                     +--------------+                +----------+
+		 *       |                                                                                                           |
+		 *       |                                                                                                           |  uninstall
+		 *       |                                                                                                           v
+		 *       |                                                                                                +--------------+
+		 *       ------------------------------------------------------------------------------------------------ | uninstalling |
+		 *                                                                                                        +--------------+
 		 *
 		 * Operate Status
 		 *                                                cancel
@@ -361,9 +375,6 @@ export const useAppStore = defineStore('app', {
 			op_status: string
 		) {
 			let refresh = false;
-			// switch (app.status) {
-			// 	case APP_STATUS.uninstalled:
-			// 	case APP_STATUS.pending:
 			if (
 				operation === OPERATE_ACTION.install &&
 				op_status === OPERATE_STATUS.pending
@@ -382,8 +393,12 @@ export const useAppStore = defineStore('app', {
 			) {
 				app.status = APP_STATUS.installing;
 			}
-			// break;
-			// case APP_STATUS.installing:
+			if (
+				operation === OPERATE_ACTION.install &&
+				op_status === OPERATE_STATUS.initializing
+			) {
+				app.status = APP_STATUS.initializing;
+			}
 			if (
 				operation === OPERATE_ACTION.install &&
 				op_status === OPERATE_STATUS.completed
@@ -398,8 +413,6 @@ export const useAppStore = defineStore('app', {
 				app.status = APP_STATUS.uninstalled;
 				refresh = true;
 			}
-			// break;
-			// case APP_STATUS.running:
 			if (
 				operation === OPERATE_ACTION.suspend &&
 				op_status === OPERATE_STATUS.completed
@@ -418,8 +431,6 @@ export const useAppStore = defineStore('app', {
 			) {
 				app.status = APP_STATUS.uninstalling;
 			}
-			// break;
-			// case APP_STATUS.upgrading:
 			if (
 				operation === OPERATE_ACTION.upgrade &&
 				op_status === OPERATE_STATUS.completed
@@ -427,16 +438,12 @@ export const useAppStore = defineStore('app', {
 				app.status = APP_STATUS.running;
 				refresh = true;
 			}
-			// break;
-			// case APP_STATUS.resuming:
 			if (
 				operation === OPERATE_ACTION.resume &&
 				op_status === OPERATE_STATUS.completed
 			) {
 				app.status = APP_STATUS.running;
 			}
-			// break;
-			// case APP_STATUS.uninstalling:
 			if (
 				operation === OPERATE_ACTION.uninstall &&
 				op_status === OPERATE_STATUS.completed
@@ -444,8 +451,6 @@ export const useAppStore = defineStore('app', {
 				app.status = APP_STATUS.uninstalled;
 				refresh = true;
 			}
-			// break;
-			// }
 			this._notificationData(app, refresh);
 		},
 

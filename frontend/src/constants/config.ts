@@ -39,6 +39,18 @@ export function canLoad(app: AppStoreInfo): boolean {
 	return app.cfgType === CFG_TYPE.MODEL && app.status === APP_STATUS.installed;
 }
 
+export function canSuspend(app: AppStoreInfo): boolean {
+	return (
+		app.cfgType === CFG_TYPE.APPLICATION && app.status === APP_STATUS.running
+	);
+}
+
+export function canResume(app: AppStoreInfo): boolean {
+	return (
+		app.cfgType === CFG_TYPE.APPLICATION && app.status === APP_STATUS.suspend
+	);
+}
+
 export function showDownloadProgress(app: AppStoreInfo): boolean {
 	return (
 		(app.status === APP_STATUS.installing && app.cfgType === CFG_TYPE.MODEL) ||
@@ -51,6 +63,7 @@ export function showAppStatus(app: AppStoreInfo): boolean {
 	return (
 		app.status === APP_STATUS.uninstalling ||
 		app.status === APP_STATUS.upgrading ||
+		app.status === APP_STATUS.initializing ||
 		(app.status === APP_STATUS.installing && app.cfgType !== CFG_TYPE.MODEL)
 	);
 }
