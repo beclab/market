@@ -7,6 +7,8 @@ import (
 	"market/internal/event"
 	"time"
 
+	"market/internal/watchdog"
+
 	"github.com/golang/glog"
 	"go.etcd.io/bbolt"
 )
@@ -47,6 +49,12 @@ type Response struct {
 			Items []Item `json:"items"`
 		} `json:"data"`
 	} `json:"data"`
+}
+
+type EventForSocket struct {
+	Code int    `json:"code"`
+	Type string `json:"type"`
+	App  Item   `json:"app"`
 }
 
 var eventClient *event.Client = nil
@@ -112,6 +120,12 @@ func checkState(jsonData string) {
 					eventClient.CreateEvent("entrance-state-event",
 						fmt.Sprintf("App %s entrance %s state is change to %s", item.Name, entrance.Name, entrance.State),
 						item)
+
+					watchdog.BroadcastMessage(EventForSocket{
+						Code: 200,
+						Type: "entrance-state-event",
+						App:  item,
+					})
 				}
 
 				// save state to db
