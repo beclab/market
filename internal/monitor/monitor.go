@@ -126,6 +126,24 @@ func checkState(jsonData string) {
 						Type: "entrance-state-event",
 						App:  item,
 					})
+
+					if item.State == "initializing" {
+
+						resp := watchdog.InstallOrUpgradeResp{
+							Code: 200,
+							Data: watchdog.InstallOrUpgradeStatus{
+								Uid:      item.Name,
+								Type:     "install",
+								Status:   "initializing",
+								Progress: "100",
+								Msg:      "",
+								From:     "",
+							},
+						}
+
+						watchdog.BroadcastMessage(resp)
+					}
+
 				}
 
 				// save state to db
