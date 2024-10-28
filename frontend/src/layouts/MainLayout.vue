@@ -60,7 +60,7 @@
 					clickable
 					:active="menuStore.currentItem === MENU_TYPE.MyTerminus"
 					active-class="my-active-link"
-					class="bottom-menu row justify-start items-center cursor-pointer"
+					class="text-ink-2 bottom-menu row justify-start items-center cursor-pointer"
 					@click="changeItemMenu({ key: MENU_TYPE.MyTerminus })"
 				>
 					<q-icon name="sym_r_home" size="20px" />
@@ -337,7 +337,7 @@ const installOS = async () => {
 }
 
 .main-layout ::v-deep(.my-active-link) {
-	color: $blue-default;
-	background-color: $blue-soft;
+	color: $blue-default !important;
+	background-color: $blue-soft !important;
 }
 </style>
