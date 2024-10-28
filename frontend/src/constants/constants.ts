@@ -273,6 +273,7 @@ export enum APP_STATUS {
 	installing = 'installing',
 	downloading = 'downloading',
 	pending = 'pending',
+	initializing = 'initializing',
 	running = 'running',
 	resuming = 'resuming',
 	suspend = 'suspend',
@@ -297,7 +298,8 @@ export enum OPERATE_STATUS {
 	canceled = 'canceled',
 	failed = 'failed',
 	completed = 'completed',
-	suspend = 'suspend'
+	suspend = 'suspend',
+	initializing = 'initializing'
 }
 
 export enum OPERATE_ACTION {
