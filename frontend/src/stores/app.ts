@@ -315,15 +315,17 @@ export const useAppStore = defineStore('app', {
 		},
 
 		async updateAppEntranceBySocket(app) {
-			const install = this.installApps.find((item) => item.name == app.id);
+			const install = this.installApps.find((item) => item.id == app.id);
 			if (install) {
-				install.entrances = app.entrances;
 				if (
 					app.state === APP_STATUS.suspend ||
-					app.state === APP_STATUS.resuming
+					app.state === APP_STATUS.resuming ||
+					app.state === APP_STATUS.running
 				) {
+					install.entrances = app.entrances;
 					install.status = app.state;
-					this._notificationData(app, false);
+					console.log('=====>', install);
+					this._notificationData(install, false);
 				}
 			}
 		},
@@ -413,12 +415,12 @@ export const useAppStore = defineStore('app', {
 				app.status = APP_STATUS.uninstalled;
 				refresh = true;
 			}
-			if (
-				operation === OPERATE_ACTION.suspend &&
-				op_status === OPERATE_STATUS.completed
-			) {
-				app.status = APP_STATUS.suspend;
-			}
+			// if (
+			// 	operation === OPERATE_ACTION.suspend &&
+			// 	op_status === OPERATE_STATUS.completed
+			// ) {
+			// 	app.status = APP_STATUS.suspend;
+			// }
 			if (
 				operation === OPERATE_ACTION.upgrade &&
 				op_status === OPERATE_STATUS.processing
@@ -438,12 +440,12 @@ export const useAppStore = defineStore('app', {
 				app.status = APP_STATUS.running;
 				refresh = true;
 			}
-			if (
-				operation === OPERATE_ACTION.resume &&
-				op_status === OPERATE_STATUS.completed
-			) {
-				app.status = APP_STATUS.running;
-			}
+			// if (
+			// 	operation === OPERATE_ACTION.resume &&
+			// 	op_status === OPERATE_STATUS.completed
+			// ) {
+			// 	app.status = APP_STATUS.running;
+			// }
 			if (
 				operation === OPERATE_ACTION.uninstall &&
 				op_status === OPERATE_STATUS.completed
@@ -822,7 +824,7 @@ export const useAppStore = defineStore('app', {
 					console.log('install delete ' + app.name);
 				} else {
 					this.installApps.splice(index, 1, app);
-					console.log('install replace ' + app.name);
+					console.log('install replace ', app);
 				}
 			} else {
 				if (app.status === APP_STATUS.running) {

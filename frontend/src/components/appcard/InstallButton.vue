@@ -339,7 +339,7 @@ async function onSuspend() {
 	}
 
 	switch (props.item?.status) {
-		case APP_STATUS.suspend:
+		case APP_STATUS.running:
 			appStore.suspendApp(props.item, props.development);
 			break;
 	}
@@ -427,7 +427,6 @@ async function onSuspendTips() {
 				.then((res) => {
 					if (res) {
 						console.log('click ok');
-						appStore.uninstallApp(props.item, props.development);
 					} else {
 						console.log('click cancel');
 					}
@@ -550,6 +549,7 @@ function updateUI() {
 			border.value = '1px solid transparent';
 			status.value = t('app.installed');
 			break;
+		case APP_STATUS.resuming:
 		case APP_STATUS.waiting:
 			isLoading.value = true;
 			status.value = '';
@@ -557,12 +557,12 @@ function updateUI() {
 			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			break;
-		case APP_STATUS.resuming:
-			backgroundColor.value = blueAlpha.value;
-			textColor.value = blueDefault.value;
-			border.value = '1px solid transparent';
-			status.value = t('app.resuming');
-			break;
+		// case APP_STATUS.resuming:
+		// 	backgroundColor.value = blueAlpha.value;
+		// 	textColor.value = blueDefault.value;
+		// 	border.value = '1px solid transparent';
+		// 	status.value = t('app.resuming');
+		// 	break;
 		case APP_STATUS.suspend:
 			backgroundColor.value = blueAlpha.value;
 			textColor.value = blueDefault.value;
