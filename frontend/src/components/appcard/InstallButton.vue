@@ -236,9 +236,6 @@ async function onClick() {
 				appStore.cancelInstallingApp(props.item, props.development);
 			}
 			break;
-		case APP_STATUS.suspend:
-			onSuspendTips();
-			break;
 		case APP_STATUS.running: {
 			console.log(props.item);
 			if (props.isUpdate) {
@@ -270,47 +267,32 @@ const openApp = () => {
 			return;
 		}
 
-		if (window.top == window) {
-			const href = window.location.href;
-			console.log(href);
-			const host = href.split('//')[1];
-			console.log(host);
-			const isLocal = host.startsWith('market.local');
-			if (isLocal) {
-				const s = entrance.url.split('.');
-				s.splice(1, 0, 'local');
-				const url = s.join('.');
-				console.log(url);
-				window.open('//' + url, '_blank');
-			} else {
-				window.open('//' + entrance.url, '_blank');
-			}
+		if (entrance.state === 'crash') {
+			onSuspendTips(true);
+		} else if (entrance.state === 'suspend') {
+			onSuspendTips(false);
 		} else {
-			openApplication(entrance.id);
+			if (window.top == window) {
+				const href = window.location.href;
+				console.log(href);
+				const host = href.split('//')[1];
+				console.log(host);
+				const isLocal = host.startsWith('market.local');
+				if (isLocal) {
+					const s = entrance.url.split('.');
+					s.splice(1, 0, 'local');
+					const url = s.join('.');
+					console.log(url);
+					window.open('//' + url, '_blank');
+				} else {
+					window.open('//' + entrance.url, '_blank');
+				}
+			} else {
+				openApplication(entrance.id);
+			}
 		}
 	} else {
 		return;
-	}
-};
-
-const checkSuspendEntranceCrash = () => {
-	if (!props.item) {
-		return false;
-	}
-
-	if (canOpen(props.item)) {
-		let app = userStore.myApps.find((app: any) => app.id == props.item?.id);
-		if (!app) {
-			return false;
-		}
-		console.log(app);
-
-		const entrance = app.entrances?.find((entrance) => !entrance.invisible);
-		console.log(entrance);
-
-		return entrance && entrance.state === 'crash';
-	} else {
-		return false;
 	}
 };
 
@@ -410,11 +392,10 @@ async function onUninstall() {
 	}
 }
 
-async function onSuspendTips() {
+async function onSuspendTips(isCrash: boolean) {
 	if (!props.item) {
 		return;
 	}
-	const isCrash = checkSuspendEntranceCrash();
 	switch (props.item?.status) {
 		case APP_STATUS.suspend:
 			BtDialog.show({
@@ -562,17 +543,11 @@ function updateUI() {
 			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			break;
-		// case APP_STATUS.resuming:
-		// 	backgroundColor.value = blueAlpha.value;
-		// 	textColor.value = blueDefault.value;
-		// 	border.value = '1px solid transparent';
-		// 	status.value = t('app.resuming');
-		// 	break;
 		case APP_STATUS.suspend:
 			backgroundColor.value = blueAlpha.value;
 			textColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
-			status.value = t('app.open');
+			status.value = t('app.suspend');
 			break;
 		case APP_STATUS.running:
 			backgroundColor.value = blueAlpha.value;
