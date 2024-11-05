@@ -38,10 +38,10 @@ export default {
 		recommend: 'Recommend',
 		models: 'Models',
 		large_language_model: 'Large Language Model',
-		my_terminus: 'My Terminus',
-		terminus: 'Terminus',
-		terminus_market: 'Terminus Market',
-		install_terminus_os: 'Install Terminus'
+		my_terminus: 'My Olares',
+		terminus: 'Olares',
+		terminus_market: 'Olares Market',
+		install_terminus_os: 'Install Olares'
 	},
 	app: {
 		get: 'Get',
@@ -93,7 +93,7 @@ export default {
 	},
 	permission: {
 		files: 'Files',
-		files_not_store_label: 'This app does not store any files on Terminus',
+		files_not_store_label: 'This app does not store any files on Olares',
 		files_access_user_data_label: 'Permission required to access user data',
 		files_access_user_data_desc:
 			'Allow this app to read and write files in the following directories:',
@@ -113,43 +113,41 @@ export default {
 		notifications: 'Notifications',
 		notifications_label: 'Permission required to send you notifications',
 		notifications_desc:
-			'Allow this app to send notifications, including Terminus Messages, SMS, Emails, and Third-party IM Messages. You can configure these preferences in Settings.',
+			'Allow this app to send notifications, including Olares Messages, SMS, Emails, and Third-party IM Messages. You can configure these preferences in Settings.',
 		analytics: 'Analytics',
 		analytics_label:
 			'This app uses built-in tools to collect metrics you need for website analytics',
 		analytics_desc:
-			'No personal information is collected, and all web data is anonymized and stored locally on your Terminus',
+			'No personal information is collected, and all web data is anonymized and stored locally on your Olares',
 		websocket: 'Websocket',
 		websocket_label:
-			'Permission required to use WebSocket for a two-way interactive communication between browser and Terminus',
+			'Permission required to use WebSocket for a two-way interactive communication between browser and Olares',
 		websocket_desc:
 			'Allow this app to send content to the webpage in your browser via WebSocket',
 		secret: 'Secret',
 		secret_label:
 			'Create and manage application configuration and secrets using Vault',
 		secret_desc:
-			"Vault is Terminus's secret management app for storing, managing, and syncing sensitive information such as API keys, database credentials, and environment variables",
+			"Vault is Olares's secret management app for storing, managing, and syncing sensitive information such as API keys, database credentials, and environment variables",
 		knowledgebase: 'Knowledge base',
 		knowledgebase_label:
 			'Permission required to access your local knowledge base',
 		knowledgebase_desc:
-			'Allows this app to use your personal data stored in Terminus local knowledge base',
-		search_label: "This app supports Terminus's full-text search engine",
+			'Allows this app to use your personal data stored in Olares local knowledge base',
+		search_label: "This app supports Olares's full-text search engine",
 		relational_database: 'Relational database',
 		relational_database_label:
 			'This app uses PostgreSQL as its relational database',
 		relational_database_desc:
-			'PostgreSQL is provided by Terminus Middleware Service.',
+			'PostgreSQL is provided by Olares Middleware Service.',
 		document_database: 'Document database',
 		document_database_label: 'This app uses MongoDB as its document database',
-		document_database_desc:
-			'MongoDB is provided by Terminus Middleware Service.',
+		document_database_desc: 'MongoDB is provided by Olares Middleware Service.',
 		key_value_database: 'Key-value database',
 		key_value_database_label: 'This app uses Redis as its Key-value database',
-		key_value_database_desc:
-			'Redis is provided by Terminus Middleware Service.',
+		key_value_database_desc: 'Redis is provided by Olares Middleware Service.',
 		cluster_app_label:
-			'This app will be installed at the cluster level, and shared by all users in the same Terminus cluster',
+			'This app will be installed at the cluster level, and shared by all users in the same Olares cluster',
 		entrance: 'Entrance',
 		entrance_visibility_label:
 			'Number of different visibility entrances for this app: {desktopSize} visible and {backendSize} invisible',
@@ -170,23 +168,23 @@ export default {
 		failed_get_user_role: 'Failed to get user role',
 		only_be_installed_by_the_admin: 'This app can only be installed by Admin',
 		not_admin_role_install_middleware:
-			'Middleware component. Contact your Terminus Admin to install.',
+			'Middleware component. Contact your Olares Admin to install.',
 		not_admin_role_install_cluster_app:
-			'Cluster app. Contact your Terminus Admin to install.',
-		failed_to_get_os_version: 'Failed to get Terminus version',
-		app_is_not_compatible_terminus_os: 'Incompatible with your Terminus',
+			'Cluster app. Contact your Olares Admin to install.',
+		failed_to_get_os_version: 'Failed to get Olares version',
+		app_is_not_compatible_terminus_os: 'Incompatible with your Olares',
 		failed_to_get_user_resource: 'Failed to get user resource',
 		user_not_enough_cpu: 'Insufficient CPU on your quota',
 		user_not_enough_memory: 'Insufficient memory on your quota',
 		failed_to_get_system_resource: 'Failed to get system resource',
 		need_to_install_dependent_app_first: 'Need to install dependent app first',
-		terminus_not_enough_cpu: 'Insufficient CPU on the Terminus cluster',
-		terminus_not_enough_memory: 'Insufficient memory on the Terminus cluster',
-		terminus_not_enough_disk: 'Insufficient disk on the Terminus cluster',
-		terminus_not_enough_gpu: 'Insufficient GPU on the Terminus cluster',
-		operation_preform_failure: 'Operation faied',
+		terminus_not_enough_cpu: 'Insufficient CPU on the Olares cluster',
+		terminus_not_enough_memory: 'Insufficient memory on the Olares cluster',
+		terminus_not_enough_disk: 'Insufficient disk on the Olares cluster',
+		terminus_not_enough_gpu: 'Insufficient GPU on the Olares cluster',
+		operation_preform_failure: 'Operation failed',
 		cluster_not_support_platform:
-			'This [app/recommend/model] does not support your Terminus platform'
+			'This [app/recommend/model] does not support your Olares platform'
 	},
 	my: {
 		market: 'Market',
@@ -215,7 +213,7 @@ export default {
 	get_started: 'GET STARTED',
 	booster_your_software_development_productivity:
 		'Boost your software development productivity.',
-	enjoy_coding_on_terminus: 'Enjoy coding on Terminus',
+	enjoy_coding_on_terminus: 'Enjoy coding on Olares',
 	diving_into_ai_image_generation: 'Dive into AI image generation.',
 	unleashing_your_creativity: 'Unleash your creativity!',
 	great_on_terminus: 'GREAT ON TERMINUS',
@@ -228,8 +226,8 @@ export default {
 	top_app_in: 'Top apps in {category}',
 	latest_app_in: 'Latest apps in {category}',
 	communitys_choices: 'Community choices',
-	top_app_on_terminus: 'Top apps on Terminus',
-	latest_app_on_terminus: 'Latest apps on Terminus',
+	top_app_on_terminus: 'Top apps on Olares',
+	latest_app_on_terminus: 'Latest apps on Olares',
 	featured_apps_in_discover: 'Featured apps in Discover',
 	featured_apps_in_productivity: 'Featured apps in Productivity',
 	featured_apps_in_utilities: 'Featured apps in Utilities',
