@@ -3,7 +3,7 @@
 		<div
 			class="text-body2 text-ink-2"
 			:class="showDescription ? 'multi-row' : 'break-all'"
-			:style="{ '--displayLine': displayLine }"
+			:style="{ '--displayLine': displayLine, '--expendAlign': align }"
 			ref="multiRow"
 			v-html="formattedDescription"
 		/>
@@ -31,6 +31,10 @@ const props = defineProps({
 	displayLine: {
 		type: Number,
 		default: 3
+	},
+	align: {
+		type: String,
+		default: 'left'
 	},
 	moreText: {
 		type: String,
@@ -79,9 +83,11 @@ watch(formattedDescription, () => {
 <style scoped lang="scss">
 .multi-row {
 	overflow: visible;
+	text-align: var(--expendAlign);
 }
 
 .break-all {
+	text-align: var(--expendAlign);
 	display: -webkit-box;
 	overflow: hidden;
 	white-space: normal !important;

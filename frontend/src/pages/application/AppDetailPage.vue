@@ -59,14 +59,22 @@
 							"
 							class="app-details-padding app-detail-warning bg-red-soft row justify-start"
 						>
-							<q-icon color="negative" size="16px" name="sym_r_error" />
+							<q-icon
+								style="margin-top: 2px"
+								color="negative"
+								size="16px"
+								name="sym_r_error"
+							/>
 							<div class="column justify-start">
 								<div class="text-body-3 text-negative q-ml-sm">
 									{{ t('my.unable_to_install_app') }}
 								</div>
 								<template v-for="message in item.preflightError" :key="message">
-									<div class="text-body-3 text-negative">
-										{{ `&nbsp;·&nbsp;${message}` }}
+									<div class="row justify-start items-center">
+										<div class="text-circle bg-negative" />
+										<div class="text-negative text-body-3">
+											{{ message }}
+										</div>
 									</div>
 								</template>
 							</div>
@@ -105,7 +113,7 @@
 								:name="t('base.language')"
 								:data="language.toUpperCase()"
 								:unit="
-									item && item.locale.length > 0
+									item && item.locale.length > 1
 										? `+ ${item.locale.length - 1} more`
 										: convertLanguageCodeToName(language)
 								"
@@ -1124,6 +1132,13 @@ const clickReturn = () => {
 		.app-details-padding {
 			padding-left: 44px;
 			padding-right: 44px;
+		}
+
+		.text-circle {
+			margin: 6px;
+			width: 4px;
+			height: 4px;
+			border-radius: 50%;
 		}
 
 		.app-detail-warning {

@@ -50,6 +50,18 @@ func checkHaveProgress(installOp, cfgType string) bool {
 	return false
 }
 
+func (w *ModelManager) GetProgress(uid string) string {
+
+	manager, exists := w.ModelManagerMap[uid]
+	if !exists || manager == nil {
+		glog.Info("GetProgress:", uid, "not found or nil")
+		return ""
+	}
+
+	glog.Info("GetProgress:", uid, manager.progress)
+	return manager.progress
+}
+
 func (w *ModelManager) NewWatchDog(installOp, appName, uid, token, from, cfgType string, info *models.ApplicationInfo) *CommonWatchDog {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -79,6 +91,7 @@ func (w *ModelManager) NewWatchDog(installOp, appName, uid, token, from, cfgType
 		clear:        w.DeleteWatchDog,
 	}
 	w.ModelManagerMap[uid] = wd
+	glog.Info("NewWatchDog:", uid)
 
 	return wd
 }

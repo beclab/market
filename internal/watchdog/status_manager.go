@@ -66,7 +66,7 @@ func (s *StatusManager) broadcastStatus(uid, status, progress, msg, t string, fr
 
 	glog.Infof("broadcast, uid:%s, status:%s, progress:%s, msg:%s, t:%s", uid, status, progress, msg, t)
 	//broadcast status
-	err := broadcastMessage(resp)
+	err := BroadcastMessage(resp)
 	if err != nil {
 		glog.Warning(err)
 	}

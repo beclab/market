@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/emicklei/go-restful/v3"
-	"github.com/golang/glog"
-	helmtime "helm.sh/helm/v3/pkg/time"
 	"market/internal/appmgr"
 	"market/internal/appservice"
 	"market/internal/boltdb"
@@ -16,6 +13,10 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/emicklei/go-restful/v3"
+	"github.com/golang/glog"
+	helmtime "helm.sh/helm/v3/pkg/time"
 )
 
 func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
@@ -90,6 +91,9 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 			if infoMarket, ok2 := infosMarket[name]; ok2 {
 				info.Version = infoMarket.Version
 			}
+
+			info.Progress = h.commonWatchDogManager.GetProgress(info.Name)
+			info.Progress = h.watchDogManager.GetProgress(info.Name)
 
 			if info.CfgType == constants.AppType {
 				//todo

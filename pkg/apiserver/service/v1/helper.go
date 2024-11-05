@@ -84,7 +84,7 @@ func getRunningModelList(token string) ([]*models.ModelStatusResponse, error) {
 	}
 
 	jsonStr, _, err := appservice.LlmStatusList(token)
-	glog.Infof("LlmStatusList:res:%s", jsonStr)
+	// glog.Infof("LlmStatusList:res:%s", jsonStr)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func parseAppTypes(res *models.ListResultD) []string {
 	return stringItems
 }
 
-func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) []*models.ApplicationInfo {
+func parseAppInfos(h *Handler, res *models.ListResultD, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) []*models.ApplicationInfo {
 
 	var appWithStatusList []*models.ApplicationInfo
 	for _, item := range res.Items {
@@ -183,6 +183,10 @@ func parseAppInfos(res *models.ListResultD, appsMap map[string]appservice.Applic
 			glog.Warningf("app:%s has pass label %v not installed, pass", info.Name, info.AppLabels)
 			continue
 		}
+
+		// merge app info
+		info.Progress = h.commonWatchDogManager.GetProgress(info.Name)
+		info.Progress = h.watchDogManager.GetProgress(info.Name)
 
 		appWithStatusList = append(appWithStatusList, info)
 	}
@@ -329,7 +333,7 @@ func upgradeByType(info *models.ApplicationInfo, token string) (string, error) {
 }
 
 func respJsonWithOriginBody(resp *restful.Response, body string) {
-	glog.Info("body:", body)
+	// glog.Info("body:", body)
 	info := make(map[string]interface{})
 	err := json.Unmarshal([]byte(body), &info)
 	if err != nil {
