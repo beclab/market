@@ -213,10 +213,9 @@ export default {
 	get_started: 'GET STARTED',
 	booster_your_software_development_productivity:
 		'Boost your software development productivity.',
-	enjoy_coding_on_terminus: 'Enjoy coding on Olares',
+	enjoy_coding_now: 'Enjoy coding now',
 	diving_into_ai_image_generation: 'Dive into AI image generation.',
 	unleashing_your_creativity: 'Unleash your creativity!',
-	great_on_terminus: 'GREAT ON TERMINUS',
 	mastering_your_photo_with_a_personal_library:
 		'Master your photos with a personal library.',
 	organize_your_memories: 'Organize your memories',
