@@ -9,10 +9,10 @@
 			'--width': larger ? '88px' : '72px',
 			'--statusWidth': larger
 				? showDropMenu
-					? 'calc(100% - 21px)'
+					? 'calc(100% - 25px)'
 					: '100%'
 				: showDropMenu
-					? 'calc(100% - 17px)'
+					? 'calc(100% - 21px)'
 					: '100%'
 		}"
 	>
@@ -65,22 +65,27 @@
 		<div
 			v-if="showDropMenu"
 			class="install_btn_separator_bg items-center"
-			:style="{ background: backgroundColor, height: larger ? '32px' : '24px' }"
+			:style="{
+				background: backgroundColor,
+				height: larger ? '32px' : '24px',
+				'--paddingY': larger ? '8px' : '6px'
+			}"
 		>
 			<div class="install_btn_separator" />
 		</div>
 		<q-btn-dropdown
 			v-if="showDropMenu"
 			dropdown-icon="img:/arrow.svg"
-			size="10"
+			:size="larger ? '12px' : '9px'"
 			:class="
 				larger ? 'application_install_larger_more' : 'application_install_more'
 			"
+			content-class="dropdown-menu"
 			flat
 			dense
 			:menu-offset="[0, 4]"
 		>
-			<div class="column dropdown-menu text-body3">
+			<div class="column text-body3">
 				<div
 					v-if="canLoad(item)"
 					class="dropdown-menu-item q-mt-xs"
@@ -96,6 +101,22 @@
 					@click="onUnload"
 				>
 					{{ t('app.unload') }}
+				</div>
+				<div
+					v-if="canResume(item)"
+					class="dropdown-menu-item q-mt-xs"
+					v-close-popup
+					@click="onResume"
+				>
+					{{ t('app.resume') }}
+				</div>
+				<div
+					v-if="canSuspend(item)"
+					class="dropdown-menu-item q-mt-xs"
+					v-close-popup
+					@click="onSuspend"
+				>
+					{{ t('app.suspend') }}
 				</div>
 				<div
 					v-if="isUpdate"
@@ -128,7 +149,9 @@ import {
 	canInstallingCancel,
 	canOpen,
 	canUnload,
-	canLoad
+	canLoad,
+	canResume,
+	canSuspend
 } from 'src/constants/config';
 import { bus, BUS_EVENT } from 'src/utils/bus';
 
@@ -160,7 +183,6 @@ const props = defineProps({
 
 const appStore = useAppStore();
 const userStore = useUserStore();
-const status = ref();
 const isDisabled = ref(false);
 const isLoading = ref<boolean>(false);
 const hoverRef = ref(false);
@@ -168,6 +190,7 @@ const textColor = ref<string>();
 const backgroundColor = ref<string>();
 const border = ref<string>();
 const { t } = useI18n();
+const status = ref();
 let hasCheck = false;
 
 const showDropMenu = computed(() => {
@@ -186,8 +209,8 @@ const { color: background1 } = useColor('background-1');
 const { color: blueAlpha } = useColor('blue-alpha');
 const { color: redAlpha } = useColor('red-alpha');
 const { color: negative } = useColor('negative');
-const { color: orangeDefault } = useColor('orange-default');
-const { color: orangeSoft } = useColor('orange-soft');
+// const { color: orangeDefault } = useColor('orange-default');
+// const { color: orangeSoft } = useColor('orange-soft');
 
 async function onClick() {
 	if (!props.item) {
@@ -212,9 +235,6 @@ async function onClick() {
 			if (canInstallingCancel(props.item?.cfgType)) {
 				appStore.cancelInstallingApp(props.item, props.development);
 			}
-			break;
-		case APP_STATUS.suspend:
-			appStore.resumeApp(props.item, props.development);
 			break;
 		case APP_STATUS.running: {
 			console.log(props.item);
@@ -247,23 +267,29 @@ const openApp = () => {
 			return;
 		}
 
-		if (window.top == window) {
-			const href = window.location.href;
-			console.log(href);
-			const host = href.split('//')[1];
-			console.log(host);
-			const isLocal = host.startsWith('market.local');
-			if (isLocal) {
-				const s = entrance.url.split('.');
-				s.splice(1, 0, 'local');
-				const url = s.join('.');
-				console.log(url);
-				window.open('//' + url, '_blank');
-			} else {
-				window.open('//' + entrance.url, '_blank');
-			}
+		if (entrance.state === 'crash') {
+			onSuspendTips(true);
+		} else if (entrance.state === 'suspend') {
+			onSuspendTips(false);
 		} else {
-			openApplication(entrance.id);
+			if (window.top == window) {
+				const href = window.location.href;
+				console.log(href);
+				const host = href.split('//')[1];
+				console.log(host);
+				const isLocal = host.startsWith('market.local');
+				if (isLocal) {
+					const s = entrance.url.split('.');
+					s.splice(1, 0, 'local');
+					const url = s.join('.');
+					console.log(url);
+					window.open('//' + url, '_blank');
+				} else {
+					window.open('//' + entrance.url, '_blank');
+				}
+			} else {
+				openApplication(entrance.id);
+			}
 		}
 	} else {
 		return;
@@ -278,6 +304,30 @@ async function onLoad() {
 	switch (props.item?.status) {
 		case APP_STATUS.installed:
 			appStore.resumeApp(props.item, props.development);
+			break;
+	}
+}
+
+async function onResume() {
+	if (!props.item) {
+		return;
+	}
+
+	switch (props.item?.status) {
+		case APP_STATUS.suspend:
+			appStore.resumeApp(props.item, props.development);
+			break;
+	}
+}
+
+async function onSuspend() {
+	if (!props.item) {
+		return;
+	}
+
+	switch (props.item?.status) {
+		case APP_STATUS.running:
+			appStore.suspendApp(props.item, props.development);
 			break;
 	}
 }
@@ -331,6 +381,38 @@ async function onUninstall() {
 					if (res) {
 						console.log('click ok');
 						appStore.uninstallApp(props.item, props.development);
+					} else {
+						console.log('click cancel');
+					}
+				})
+				.catch((err) => {
+					console.log('click error', err);
+				});
+			break;
+	}
+}
+
+async function onSuspendTips(isCrash: boolean) {
+	if (!props.item) {
+		return;
+	}
+	switch (props.item?.status) {
+		case APP_STATUS.suspend:
+			BtDialog.show({
+				title: isCrash ? t('app.crash') : t('app.suspend'),
+				message: isCrash
+					? t('my.application_has_crashed')
+					: t('my.application_has_been_suspended'),
+				okStyle: {
+					background: blueDefault.value,
+					color: white.value
+				},
+				okText: t('base.ok'),
+				cancel: false
+			})
+				.then((res) => {
+					if (res) {
+						console.log('click ok');
 					} else {
 						console.log('click cancel');
 					}
@@ -432,29 +514,40 @@ function updateUI() {
 				border.value = '1px solid transparent';
 			}
 			break;
+		case APP_STATUS.initializing:
+			if (hoverRef.value && canInstallingCancel(props.item?.cfgType)) {
+				isLoading.value = false;
+				status.value = t('app.cancel');
+				textColor.value = blueDefault.value;
+				backgroundColor.value = background1.value;
+				border.value = `1px solid ${blueDefault.value}`;
+			} else {
+				isLoading.value = true;
+				status.value = t('app.initializing');
+				textColor.value = white.value;
+				backgroundColor.value = blueDefault.value;
+				border.value = '1px solid transparent';
+			}
+			break;
 		case APP_STATUS.installed:
 			backgroundColor.value = blueAlpha.value;
 			textColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
 			status.value = t('app.installed');
 			break;
-		case APP_STATUS.suspend:
-			if (hoverRef.value) {
-				status.value = t('app.resume');
-			} else {
-				backgroundColor.value = orangeSoft.value;
-				textColor.value = orangeDefault.value;
-				border.value = '1px solid transparent';
-				status.value = t('app.suspend');
-			}
-			break;
-		case APP_STATUS.waiting:
 		case APP_STATUS.resuming:
+		case APP_STATUS.waiting:
 			isLoading.value = true;
 			status.value = '';
 			textColor.value = white.value;
 			backgroundColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
+			break;
+		case APP_STATUS.suspend:
+			backgroundColor.value = blueAlpha.value;
+			textColor.value = blueDefault.value;
+			border.value = '1px solid transparent';
+			status.value = t('app.suspend');
 			break;
 		case APP_STATUS.running:
 			backgroundColor.value = blueAlpha.value;
@@ -509,15 +602,14 @@ function updateUI() {
 	padding: 0;
 
 	.install_btn_separator_bg {
-		width: 1px;
+		width: 5px;
 		height: 100%;
-		padding-top: 4px;
-		padding-bottom: 4px;
+		padding: var(--paddingY) 2px;
 
 		.install_btn_separator {
 			width: 1px;
 			height: 100%;
-			background: $separator;
+			background: $btn-stroke;
 		}
 	}
 
@@ -584,26 +676,19 @@ function updateUI() {
 	}
 }
 
-.dropdown-menu {
-	overflow: hidden;
-	width: 88px;
-	border-radius: 8px;
-	padding: 8px;
+.dropdown-menu-item {
+	height: 32px;
+	color: $ink-2;
+	padding: 8px 12px;
 
-	.dropdown-menu-item {
-		height: 32px;
-		color: $ink-2;
-		padding: 8px 12px;
+	&:hover {
+		background: $background-hover;
+		border-radius: 4px;
+	}
 
-		&:hover {
-			background: $background-hover;
-			border-radius: 4px;
-		}
-
-		&:active {
-			background: $background-hover;
-			border-radius: 4px;
-		}
+	&:active {
+		background: $background-hover;
+		border-radius: 4px;
 	}
 }
 </style>

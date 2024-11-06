@@ -47,18 +47,18 @@ const (
 )
 
 type Client struct {
-	httpClient *resty.Client
+	HttpClient *resty.Client
 }
 
 func NewClient() *Client {
 	c := resty.New()
 
 	return &Client{
-		httpClient: c.SetTimeout(2 * time.Second),
+		HttpClient: c.SetTimeout(2 * time.Second),
 	}
 }
 
-func (c *Client) getAccessToken() (string, error) {
+func (c *Client) GetAccessToken() (string, error) {
 	url := fmt.Sprintf("http://%s/permission/v1alpha1/access", eventServer)
 	now := time.Now().UnixMilli() / 1000
 
@@ -86,7 +86,58 @@ func (c *Client) getAccessToken() (string, error) {
 		return "", err
 	}
 
-	resp, err := c.httpClient.R().
+	resp, err := c.HttpClient.R().
+		SetHeader(restful.HEADER_ContentType, restful.MIME_JSON).
+		SetBody(postData).
+		SetResult(&AccessTokenResp{}).
+		Post(url)
+
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return "", errors.New(string(resp.Body()))
+	}
+
+	token := resp.Result().(*AccessTokenResp)
+
+	if token.Code != 0 {
+		return "", errors.New(token.Message)
+	}
+
+	return token.Data.AccessToken, nil
+}
+
+func (c *Client) GetMyAppsAccessToken() (string, error) {
+	url := fmt.Sprintf("http://%s/permission/v1alpha1/access", eventServer)
+	now := time.Now().UnixMilli() / 1000
+
+	password := appKey + strconv.Itoa(int(now)) + appSecret
+	encode, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	perm := AccessTokenRequest{
+		AppKey:    appKey,
+		Timestamp: now,
+		Token:     string(encode),
+		Perm: PermissionRequire{
+			Group:    "service.bfl",
+			Version:  EventVersion,
+			DataType: "app",
+			Ops: []string{
+				"UserApps",
+			},
+		},
+	}
+
+	postData, err := json.Marshal(perm)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := c.HttpClient.R().
 		SetHeader(restful.HEADER_ContentType, restful.MIME_JSON).
 		SetBody(postData).
 		SetResult(&AccessTokenResp{}).

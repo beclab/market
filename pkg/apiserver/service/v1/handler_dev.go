@@ -223,11 +223,11 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 	}
 
 	if install {
-		err = checkDep(info, token)
-		if err != nil {
-			respDepErr(resp, err.Error())
-			return
-		}
+		// err = checkDep(info, token)
+		// if err != nil {
+		// 	respDepErr(resp, err.Error())
+		// 	return
+		// }
 
 		resBody, err := installByType(info, token)
 		if err != nil {

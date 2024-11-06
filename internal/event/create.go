@@ -26,7 +26,7 @@ import (
 
 func (c *Client) CreateEvent(eventType string, msg string, data interface{}) error {
 	url := fmt.Sprintf("http://%s/system-server/v1alpha1/event/message-disptahcer.system-server/v1", eventServer)
-	token, err := c.getAccessToken()
+	token, err := c.GetAccessToken()
 	if err != nil {
 		return err
 	}
@@ -45,7 +45,7 @@ func (c *Client) CreateEvent(eventType string, msg string, data interface{}) err
 		return err
 	}
 
-	resp, err := c.httpClient.R().
+	resp, err := c.HttpClient.R().
 		SetHeaders(map[string]string{
 			restful.HEADER_ContentType: restful.MIME_JSON,
 			AccessTokenHeader:          token,

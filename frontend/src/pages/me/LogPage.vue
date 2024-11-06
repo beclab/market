@@ -16,7 +16,7 @@
 							:loading="loading"
 							v-model:pagination="pagination"
 							hide-pagination
-							style="margin-top: 12px"
+							style="margin-top: 32px"
 						>
 							<template v-slot:header="props">
 								<q-tr :props="props" style="height: 32px">
@@ -31,7 +31,7 @@
 								</q-tr>
 							</template>
 							<template v-slot:body-cell-status="props">
-								<q-td :props="props">
+								<q-td :props="props" style="height: 56px">
 									<q-badge
 										rounded
 										:color="
@@ -57,7 +57,7 @@
 
 						<div
 							v-if="rows.length > 0 || loading"
-							class="row justify-center q-mt-md"
+							class="row justify-end q-mt-md"
 						>
 							<q-pagination
 								v-model="pagination.page"

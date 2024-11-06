@@ -47,15 +47,19 @@ export const useSocketStore = defineStore('websocket', {
 					try {
 						const body = JSON.parse(ev.data);
 						console.log('onmessage body=>', body);
-						if (body && body.data) {
-							appStore.updateAppStatusBySocket(
-								body.data.from,
-								body.data.uid,
-								body.data.type,
-								body.data.status,
-								body.data.progress,
-								body.data.message
-							);
+						if (body && body.code === 200) {
+							if (body.data) {
+								appStore.updateAppStatusBySocket(
+									body.data.from,
+									body.data.uid,
+									body.data.type,
+									body.data.status,
+									body.data.progress,
+									body.data.message
+								);
+							} else if (body.app && body.type === 'entrance-state-event') {
+								appStore.updateAppEntranceBySocket(body.app);
+							}
 						}
 					} catch (e) {
 						console.log('message error');

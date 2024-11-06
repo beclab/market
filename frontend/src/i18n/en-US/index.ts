@@ -48,11 +48,14 @@ export default {
 		install: 'Install',
 		installed: 'Installed',
 		suspend: 'Suspend',
+		crash: 'Crash',
 		cancel: 'Cancel',
 		load: 'Load',
 		unload: 'Unload',
 		resume: 'Resume',
 		installing: 'Installing',
+		initializing: 'Initializing',
+		resuming: 'Resuming',
 		update: 'Update',
 		running: 'Running',
 		open: 'Open',
@@ -196,6 +199,10 @@ export default {
 		no_installed_app_tips: 'You haven’t installed anything yet',
 		no_logs: 'No installation logs available',
 		sure_to_uninstall_the_app: "Are you sure to uninstall '{title}'？",
+		application_has_crashed:
+			'The application has crashed. Please wait while it restarts.',
+		application_has_been_suspended:
+			'This application has been suspended. You can resume it to open.',
 		upload_custom_chart: 'Upload custom chart',
 		logs: 'Logs'
 	},

@@ -56,7 +56,7 @@ func getConnections() (*ConnResponse, error) {
 	return &response, nil
 }
 
-func broadcastMessage(payload interface{}) error {
+func BroadcastMessage(payload interface{}) error {
 	connRes, err := getConnections()
 	if err != nil {
 		return err

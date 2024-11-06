@@ -155,7 +155,7 @@ type Dependency struct {
 	Name    string `yaml:"name" json:"name" vd:"len($)>0;msg:sprintf('invalid parameter: %v;name must satisfy the expr: len($)>0',$)"`
 	Version string `yaml:"version" json:"version" vd:"len($)>0;msg:sprintf('invalid parameter: %v;version must satisfy the expr: len($)>0',$)"`
 	// dependency type: system, application.
-	Type string `yaml:"type" json:"type" vd:"$=='system' || $=='application';msg:sprintf('invalid parameter: %v;type must satisfy the expr: $==system || $==application',$)"`
+	Type string `yaml:"type" json:"type" vd:"$=='system' || $=='application' || $=='middleware';msg:sprintf('invalid parameter: %v;type must satisfy the expr: $==system || $==application',$)"`
 }
 
 type Mappings struct {
