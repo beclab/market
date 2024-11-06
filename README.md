@@ -1,4 +1,4 @@
-# Market
+# Market terminus
 ![Market](https://docs.jointerminus.com/images/how-to/terminus/market/discover.jpg)
 
 The **Market** is a built-in application of **Terminus OS**. It's an implementation of the decentralized and permissionless [Open Application Distribution Protocol](https://docs.jointerminus.com/overview/protocol/market.html).
