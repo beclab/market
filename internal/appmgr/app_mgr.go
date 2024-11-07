@@ -24,10 +24,15 @@ func getAppStoreServiceHost() string {
 	value := os.Getenv(constants.MarketProvider)
 
 	if value == "" {
-		return os.Getenv(constants.AppStoreServiceHostEnv)
-	} else {
-		return value
+		value = os.Getenv(constants.AppStoreServiceHostEnv)
 	}
+
+	if strings.HasPrefix(value, "http") {
+		value = strings.TrimPrefix(value, "http://")
+		value = strings.TrimPrefix(value, "https://")
+	}
+
+	return strings.TrimSuffix(value, "/")
 }
 
 func getAppStoreServicePort() string {
