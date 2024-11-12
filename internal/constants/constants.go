@@ -11,7 +11,7 @@ const (
 	DataPath           = "./data"
 	ChartsLocalDir     = "./data/charts"
 	ChartsLocalTempDir = "./data/chartsTmp"
-	AppCfgFileName     = "TerminusManifest.yaml"
+	AppCfgFileName     = "OlaresManifest.yaml"
 )
 
 const (
