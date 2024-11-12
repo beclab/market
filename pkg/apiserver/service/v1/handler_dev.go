@@ -89,10 +89,10 @@ func validChart(chartDir string, info *models.ApplicationInfo) (err error) {
 	switch info.CfgType {
 	case constants.AppType:
 	case constants.RecommendType, constants.AgentType, constants.ModelType, constants.MiddlewareType: //todo
-		glog.Infof("terminusManifest.type:%s do not check chart", info.CfgType)
+		glog.Infof("olaresManifest.type:%s do not check chart", info.CfgType)
 		return
 	default:
-		err = fmt.Errorf("terminusManifest.type %s must in %v", info.CfgType, constants.ValidTypes)
+		err = fmt.Errorf("olaresManifest.type %s must in %v", info.CfgType, constants.ValidTypes)
 		return
 	}
 

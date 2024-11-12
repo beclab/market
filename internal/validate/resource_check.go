@@ -93,10 +93,10 @@ func checkResourceLimit(resources kube.ResourceList, cfg *AppConfiguration) erro
 		}
 	}
 	if limitCPU > appLimitedCPU {
-		errs = append(errs, fmt.Errorf("sum of all containers resources limits cpu should less than TerminusManifest.yaml spec.limitedCpu"))
+		errs = append(errs, fmt.Errorf("sum of all containers resources limits cpu should less than OlaresManifest.yaml spec.limitedCpu"))
 	}
 	if limitMemory > appLimitedMemory {
-		errs = append(errs, fmt.Errorf("sum of all containers resources limits memory should less than TerminusManifest.yaml spec.limitedMemory"))
+		errs = append(errs, fmt.Errorf("sum of all containers resources limits memory should less than OlaresManifest.yaml spec.limitedMemory"))
 	}
 	return AggregateErr(errs)
 }
