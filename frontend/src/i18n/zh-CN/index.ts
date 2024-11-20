@@ -15,6 +15,7 @@ export default {
 		result: '结果',
 		status: '状态',
 		name: '名称',
+		confirm: '确认',
 		message: '消息',
 		scope: '范围',
 		cluster_app: '集群应用',
