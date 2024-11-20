@@ -15,6 +15,7 @@ export default {
 		result: 'Result',
 		status: 'Status',
 		name: 'Name',
+		confirm: 'Confirm',
 		message: 'Message',
 		scope: 'Scope',
 		cluster_app: 'Cluster App',
