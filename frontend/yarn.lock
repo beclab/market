@@ -1039,10 +1039,10 @@
     uuid "9.0.1"
     yaup "^1.8.0"
 
-"@bytetrade/ui@^0.1.12":
-  version "0.1.12"
-  resolved "https://registry.npmjs.org/@bytetrade/ui/-/ui-0.1.12.tgz"
-  integrity sha512-nJPC58rRJpUN5ahTYm4UJw/h/QWp3w6pImV+F/YKRIFPn4K8EZOY1XmJFVpSeqU1+S/DLpF7m3Gadu7La9Vi8w==
+"@bytetrade/ui@^0.1.29":
+  version "0.1.29"
+  resolved "https://registry.npmjs.org/@bytetrade/ui/-/ui-0.1.29.tgz"
+  integrity sha512-Ktu24w0ATJTFXFX03tzpLDCVK+WRiy2p3pSiQcqy9NPmPTRNviDFu0+hiOEGg4HYAHxAV939LtOKHzq6HyDVzA==
   dependencies:
     "@quasar/extras" "^1.16.7"
     axios "^1.3.4"
@@ -1051,6 +1051,7 @@
     moment "^2.29.4"
     multiformats "9.6.4"
     quasar "^2.6.0"
+    terminus-sdk-es6 "^0.0.2"
     vue "^3.2.13"
     vue-cropper "^1.0.8"
     vue-router "^4.0.3"
@@ -4611,7 +4612,7 @@ html-minifier-terser@^7.2.0:
     relateurl "^0.2.7"
     terser "^5.15.1"
 
-html-webpack-plugin@5.6.0:
+html-webpack-plugin@>=3.0.0, html-webpack-plugin@5.6.0:
   version "5.6.0"
   resolved "https://registry.npmjs.org/html-webpack-plugin/-/html-webpack-plugin-5.6.0.tgz"
   integrity sha512-iwaY4wzbe48AfKLZ/Cc8k0L+FKG6oSNRaZ8x5A/T/IVDGyXcbHncM9TdDa93wn0FsSm82FhTKW7f3vS61thXAw==
@@ -6496,6 +6497,11 @@ postcss-value-parser@^4.1.0, postcss-value-parser@^4.2.0:
     picocolors "^1.0.1"
     source-map-js "^1.2.0"
 
+preload-webpack-plugin@^3.0.0-beta.4:
+  version "3.0.0-beta.4"
+  resolved "https://registry.npmjs.org/preload-webpack-plugin/-/preload-webpack-plugin-3.0.0-beta.4.tgz"
+  integrity sha512-6hhh0AswCbp/U4EPVN4fbK2wiDkXhmgjjgEYEmXa21UYwjYzCIgh3ZRMXM21ZPLfbQGpdFuSL3zFslU+edjpwg==
+
 prelude-ls@^1.2.1:
   version "1.2.1"
   resolved "https://registry.npmjs.org/prelude-ls/-/prelude-ls-1.2.1.tgz"
@@ -7517,6 +7523,11 @@ tempy@^0.6.0:
     type-fest "^0.16.0"
     unique-string "^2.0.0"
 
+terminus-sdk-es6@^0.0.2:
+  version "0.0.2"
+  resolved "https://registry.npmjs.org/terminus-sdk-es6/-/terminus-sdk-es6-0.0.2.tgz"
+  integrity sha512-ct0bwdoirj5tooXL4dSGYPNmBNJpLxhKcoowRCXw8bP6RfUgdgPbuCtzIE89UdaOAJmf02zC3wuFJ1s3dgsscg==
+
 terser-webpack-plugin@^5.3.10, terser-webpack-plugin@5.3.10:
   version "5.3.10"
   resolved "https://registry.npmjs.org/terser-webpack-plugin/-/terser-webpack-plugin-5.3.10.tgz"
@@ -8006,7 +8017,7 @@ webpack-sources@^3.2.3:
   resolved "https://registry.npmjs.org/webpack-sources/-/webpack-sources-3.2.3.tgz"
   integrity sha512-/DyMEOrDgLKKIG0fmvtz+4dUX/3Ghozwgm6iPp8KRhvn+eQf9+Q7GWxVNMk3+uCPWfdXYC4ExGBckIXdFEfH1w==
 
-"webpack@^4.0.0 || ^5.0.0", "webpack@^4.1.0 || ^5.0.0-0", "webpack@^4.37.0 || ^5.0.0", webpack@^5, webpack@^5.0.0, webpack@^5.1.0, webpack@^5.20.0, webpack@^5.91.0, "webpack@>= 4", webpack@>=5:
+"webpack@^4.0.0 || ^5.0.0", "webpack@^4.1.0 || ^5.0.0-0", "webpack@^4.37.0 || ^5.0.0", webpack@^5, webpack@^5.0.0, webpack@^5.1.0, webpack@^5.20.0, webpack@^5.91.0, "webpack@>= 4", webpack@>=4.0.0, webpack@>=5:
   version "5.92.1"
   resolved "https://registry.npmjs.org/webpack/-/webpack-5.92.1.tgz"
   integrity sha512-JECQ7IwJb+7fgUFBlrJzbyu3GEuNBcdqr1LD7IbSzwkSmIevTm8PF+wej3Oxuz/JFBUZ6O1o43zsPkwm1C4TmA==

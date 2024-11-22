@@ -12,12 +12,13 @@ const { configure } = require('quasar/wrappers');
 const dotenv = require('dotenv');
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
+const PreloadWebpackPlugin = require('preload-webpack-plugin');
 
 dotenv.config();
 
 const path = require('path');
 
-module.exports = configure(function (/* ctx */) {
+module.exports = configure(function (ctx) {
 	return {
 		// https://v2.quasar.dev/quasar-cli-webpack/supporting-ts
 		supportTS: {
@@ -91,8 +92,18 @@ module.exports = configure(function (/* ctx */) {
 			// polyfillModulePreload: true,
 			// distDir
 
-			// extendViteConf (viteConf) {},
-			// viteVuePluginOptions: {},
+			extendWebpack(cfg) {
+				!ctx.dev &&
+					cfg.plugins.push(
+						new PreloadWebpackPlugin({
+							rel: 'preload',
+							include: 'allAssets',
+							fileWhitelist: [/.+MaterialSymbolsRounded.+/],
+							as: 'font'
+						})
+					);
+			},
+
 			chainWebpack(chain, { isClient, isServer }) {
 				chain.resolve.alias
 					.set('assets', path.resolve('src/assets'))
@@ -163,7 +174,7 @@ module.exports = configure(function (/* ctx */) {
 					}
 				: {
 						'/app-store': {
-							target: `https://market.${process.env.ACCOUNT}.myterminus.com`,
+							target: `https://market.${process.env.ACCOUNT_DOMAIN}`,
 							changeOrigin: true
 						}
 					}

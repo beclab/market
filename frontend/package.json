@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@bytetrade/core": "^0.3.66",
-    "@bytetrade/ui": "^0.1.12",
+    "@bytetrade/ui": "^0.1.29",
     "@quasar/extras": "^1.16.9",
     "axios": "^0.21.1",
     "dompurify": "^3.1.7",
@@ -49,7 +49,8 @@
     "autoprefixer": "^10.4.2",
     "css-minimizer-webpack-plugin": "^7.0.0",
     "dotenv": "^16.3.1",
-    "eslint": "^8.10.0",
+		"preload-webpack-plugin": "^3.0.0-beta.4",
+		"eslint": "^8.10.0",
     "eslint-config-prettier": "^8.10.0",
     "eslint-plugin-prettier": "^5.0.0",
     "eslint-plugin-vue": "^9.0.0",

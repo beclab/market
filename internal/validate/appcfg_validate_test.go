@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const metaAndEntrance = `terminusManifest.version: v1
+const metaAndEntrance = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -27,13 +27,13 @@ entrances:
   title: nginx
  
 `
-const metaAndEntranceWithoutMeta = `terminusManifest.version: v1
+const metaAndEntranceWithoutMeta = `olaresManifest.version: v1
 entrances:
 - name: nginx-service
   port: 80
   title: nginx
 `
-const metaAndEntranceWithoutEntrance = `terminusManifest.version: v1
+const metaAndEntranceWithoutEntrance = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -45,7 +45,7 @@ metadata:
  - utils
 `
 
-const appSpec = `terminusManifest.version: v1
+const appSpec = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -68,7 +68,7 @@ spec:
   limitedCpu: 500m
 `
 
-const appCfgWithPermission = `terminusManifest.version: v1
+const appCfgWithPermission = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -98,7 +98,7 @@ Permission:
    ops:
    - get
 `
-const appCfgWithPermissionWithEmptyOps = `terminusManifest.version: v1
+const appCfgWithPermissionWithEmptyOps = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -126,7 +126,7 @@ Permission:
    dataType: sys
    version: v1
 `
-const appCfgWithMiddleware = `terminusManifest.version: v1
+const appCfgWithMiddleware = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -169,7 +169,7 @@ middleware:
    - name: index0
 `
 
-const appCfgWithMiddlewareWithMultiRedisDb = `terminusManifest.version: v1
+const appCfgWithMiddlewareWithMultiRedisDb = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -213,7 +213,7 @@ middleware:
    - name: index0
 `
 
-const appCfgWithOptionsWithPolicy = `terminusManifest.version: v1
+const appCfgWithOptionsWithPolicy = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -241,7 +241,7 @@ options:
    oneTime: false
    validDuration: "3600s"
 `
-const appCfgWithOptionsWithPolicyDuration1 = `terminusManifest.version: v1
+const appCfgWithOptionsWithPolicyDuration1 = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -269,7 +269,7 @@ options:
    oneTime: false
    validDuration: "1h1h"
 `
-const appCfgWithOptionsWithPolicyDuration2 = `terminusManifest.version: v1
+const appCfgWithOptionsWithPolicyDuration2 = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -298,7 +298,7 @@ options:
    validDuration: "-1h5ms5us8ns"
 `
 
-const appCfgWithOptionsWithPolicyDuration3 = `terminusManifest.version: v1
+const appCfgWithOptionsWithPolicyDuration3 = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -327,7 +327,7 @@ options:
    validDuration: "100"
 `
 
-const appCfgWithOptionsWithAnalytics = `terminusManifest.version: v1
+const appCfgWithOptionsWithAnalytics = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -353,7 +353,7 @@ options:
    enabled: true
 `
 
-const appCfgWithOptionsWithDependencies = `terminusManifest.version: v1
+const appCfgWithOptionsWithDependencies = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -384,7 +384,7 @@ options:
    type: application
 `
 
-const appCfgWithOptionsWithDependenciesErrorType = `terminusManifest.version: v1
+const appCfgWithOptionsWithDependenciesErrorType = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -415,7 +415,7 @@ options:
    type: applications
 `
 
-const appCfgWithAll = `terminusManifest.version: v1
+const appCfgWithAll = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -481,7 +481,7 @@ options:
    type: application
 `
 
-const appCfgWith11Entrances = `terminusManifest.version: v1
+const appCfgWith11Entrances = `olaresManifest.version: v1
 metadata:
  name: nginx
  description: "n8n is an extendable workflow automation tool."
@@ -635,7 +635,7 @@ func TestChartAppCfg(t *testing.T) {
 	err = vd.Validate(cfg, true)
 	err = checkAppCfg(cfg, "./testdata/nextcloud2")
 	if err != nil {
-		t.Error("TerminusManifest.yaml validate failed", err)
+		t.Error("olaresManifest.yaml validate failed", err)
 	}
 }
 
