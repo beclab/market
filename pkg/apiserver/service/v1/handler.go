@@ -22,10 +22,10 @@ import (
 	"market/internal/appmgr"
 	"market/internal/appservice"
 	"market/internal/bfl"
-	"market/internal/boltdb"
 	"market/internal/conf"
 	"market/internal/constants"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/internal/watchdog"
 	"market/pkg/api"
 	"market/pkg/utils"
@@ -421,7 +421,7 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infoLocal, _ := boltdb.GetLocalAppInfo(appName)
+	infoLocal, _ := redisdb.GetLocalAppInfo(appName)
 
 	infoMarket, err := appmgr.GetAppInfo(appName)
 	if err != nil && infoLocal == nil {
