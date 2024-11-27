@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/helm"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/pkg/utils"
 	"net/http"
 	"net/url"
@@ -80,7 +80,7 @@ func GetTopApps(category, ty, size string) (*models.ListResultD, error) {
 		params.Add("size", size)
 	}
 	excludedLabels := []string{"suspend", "remove"}
-	if boltdb.GetNsfwState() {
+	if redisdb.GetNsfwState() {
 		excludedLabels = append(excludedLabels, "nsfw")
 	}
 	params.Add("excludedLabels", strings.Join(excludedLabels, ","))

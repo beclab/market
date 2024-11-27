@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"market/internal/appmgr"
 	"market/internal/appservice"
-	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/pkg/api"
 	"reflect"
 	"sort"
@@ -73,7 +73,7 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infosLocal, err := boltdb.GetLocalAppInfoMap()
+	infosLocal, err := redisdb.GetLocalAppInfoMap()
 	if err != nil {
 		api.HandleError(resp, err)
 		return
@@ -319,7 +319,7 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 					}
 				Label1:
 					for i := range topic.Apps {
-						if topic.Apps[i].HasNsfwLabel() && boltdb.GetNsfwState() {
+						if topic.Apps[i].HasNsfwLabel() && redisdb.GetNsfwState() {
 							glog.Warningf("app:%s has nsfw label, pass", topic.Apps[i].Name)
 							topic.Apps = deleteElement(topic.Apps, i)
 							goto Label1
@@ -349,7 +349,7 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 						glog.Warning(err)
 					}
 
-					if app.HasNsfwLabel() && boltdb.GetNsfwState() {
+					if app.HasNsfwLabel() && redisdb.GetNsfwState() {
 						glog.Warningf("app:%s has nsfw label, pass", app.Name)
 						continue
 					}

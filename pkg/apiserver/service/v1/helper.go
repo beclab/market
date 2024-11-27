@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"market/internal/appservice"
-	"market/internal/boltdb"
 	"market/internal/conf"
 	"market/internal/constants"
 	"market/internal/models"
 	"market/internal/recommend"
+	"market/internal/redisdb"
 	"market/pkg/api"
 	"net/http"
 
@@ -172,7 +172,7 @@ func parseAppInfos(h *Handler, res *models.ListResultD, appsMap map[string]appse
 			continue
 		}
 
-		if info.HasNsfwLabel() && boltdb.GetNsfwState() {
+		if info.HasNsfwLabel() && redisdb.GetNsfwState() {
 			glog.Warningf("app:%s has nsfw label, pass", info.Name)
 			continue
 		}

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"market/internal/appmgr"
 	"market/internal/appservice"
-	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/internal/watchdog"
 	"market/pkg/api"
 	"market/pkg/utils"
@@ -78,7 +78,7 @@ func (h *Handler) upgrade(req *restful.Request, resp *restful.Response) {
 	}
 
 	latestInfo.Source = constants.AppFromMarket
-	err = boltdb.UpsertLocalAppInfo(latestInfo)
+	err = redisdb.UpsertLocalAppInfo(latestInfo)
 	if err != nil {
 		glog.Warningf("UpsertLocalAppInfo err:%s", err.Error())
 		api.HandleError(resp, err)

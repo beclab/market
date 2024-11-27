@@ -2,11 +2,12 @@ package v1
 
 import (
 	"errors"
-	"github.com/emicklei/go-restful/v3"
-	"market/internal/boltdb"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/pkg/api"
 	"net/http"
+
+	"github.com/emicklei/go-restful/v3"
 )
 
 func (h *Handler) setNsfw(req *restful.Request, resp *restful.Response) {
@@ -23,7 +24,7 @@ func (h *Handler) setNsfw(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	err = boltdb.SetNsfwState(nsfw.Nsfw)
+	err = redisdb.SetNsfwState(nsfw.Nsfw)
 	if err != nil {
 		api.HandleError(resp, err)
 		return
@@ -41,7 +42,7 @@ func (h *Handler) getNsfw(req *restful.Request, resp *restful.Response) {
 		api.HandleUnauthorized(resp, errors.New("access token not found"))
 		return
 	}
-	nsfw := boltdb.GetNsfwState()
+	nsfw := redisdb.GetNsfwState()
 	_ = resp.WriteEntity(
 		models.NsfwResp{
 			Response: models.Response{

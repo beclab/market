@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"market/internal/appmgr"
 	"market/internal/appservice"
-	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/internal/watchdog"
 	"market/pkg/api"
 
@@ -84,7 +84,7 @@ func installPre(appName, token string) (*models.ApplicationInfo, error) {
 	}
 
 	info.Source = constants.AppFromMarket
-	err = boltdb.UpsertLocalAppInfo(info)
+	err = redisdb.UpsertLocalAppInfo(info)
 	if err != nil {
 		return info, err
 	}
