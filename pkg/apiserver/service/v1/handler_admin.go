@@ -10,7 +10,6 @@ import (
 	"market/internal/models"
 	"market/internal/redisdb"
 	"market/pkg/api"
-	"reflect"
 	"sort"
 	"strings"
 
@@ -306,10 +305,6 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 						}
 
 						getAppAndRecommendStatus(&topic.Apps[i], appsMap, workflowMap, middlewareMap)
-						if reflect.TypeOf(topic.Apps[i].Categories).Kind() == reflect.String {
-							oldCate := topic.Apps[i].Categories.(string)
-							topic.Apps[i].Categories = strings.Split(oldCate, ",")
-						}
 
 						if (topic.Apps[i].HasRemoveLabel() || topic.Apps[i].HasSuspendLabel()) && topic.Apps[i].Status == string(models.AppUninstalled) {
 							glog.Warningf("app:%s has pass label %v not installed, pass", topic.Apps[i].Name, topic.Apps[i].AppLabels)
@@ -334,10 +329,7 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 						continue
 					}
 					getAppAndRecommendStatus(app, appsMap, workflowMap, middlewareMap)
-					if reflect.TypeOf(app.Categories).Kind() == reflect.String {
-						oldCate := app.Categories.(string)
-						app.Categories = strings.Split(oldCate, ",")
-					}
+
 					if (app.HasRemoveLabel() || app.HasSuspendLabel()) && app.Status == models.AppUninstalled {
 						glog.Warningf("app:%s has pass label %v not installed, pass", app.Name, app.AppLabels)
 						continue
