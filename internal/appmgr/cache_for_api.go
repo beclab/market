@@ -63,6 +63,8 @@ func updateCacheApplications() {
 
 // containsCategory checks if the given category exists in the Categories slice, ignoring case
 func containsCategory(categories interface{}, category string) bool {
+
+	glog.Infof("---------->on containsCategory, categories: %s, category: %s", categories, category)
 	// If category is an empty string, return true
 	if category == "" {
 		return true
@@ -72,10 +74,12 @@ func containsCategory(categories interface{}, category string) bool {
 	if categoryList, ok := categories.([]string); ok {
 		for _, cat := range categoryList {
 			if strings.EqualFold(cat, category) { // Use EqualFold to ignore case
+				glog.Infof("---------->on containsCategory true")
 				return true
 			}
 		}
 	}
+	glog.Infof("---------->on containsCategory false")
 	return false
 }
 
