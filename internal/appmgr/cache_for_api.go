@@ -61,7 +61,7 @@ func updateCacheApplications() {
 	glog.Infof("-------> Applications: %s", len(cacheApplications))
 }
 
-// containsCategory checks if the given category exists in the Categories slice
+// containsCategory checks if the given category exists in the Categories slice, ignoring case
 func containsCategory(categories interface{}, category string) bool {
 	// If category is an empty string, return true
 	if category == "" {
@@ -71,7 +71,7 @@ func containsCategory(categories interface{}, category string) bool {
 	// Attempt to assert categories as a slice of strings
 	if categoryList, ok := categories.([]string); ok {
 		for _, cat := range categoryList {
-			if cat == category {
+			if strings.EqualFold(cat, category) { // Use EqualFold to ignore case
 				return true
 			}
 		}
@@ -79,7 +79,7 @@ func containsCategory(categories interface{}, category string) bool {
 	return false
 }
 
-// matchesType checks if the app's CfgType matches any of the specified types
+// matchesType checks if the app's CfgType matches any of the specified types, ignoring case
 func matchesType(appType string, ty string) bool {
 	if ty == "" {
 		return true // If ty is empty, consider it a match
@@ -88,8 +88,8 @@ func matchesType(appType string, ty string) bool {
 	// Split the ty string into a slice of types
 	types := strings.Split(ty, ",")
 	for _, t := range types {
-		if appType == t {
-			return true // Return true if a match is found
+		if strings.EqualFold(appType, t) {
+			return true // Return true if a match is found, ignoring case
 		}
 	}
 	return false // Return false if no matches are found
