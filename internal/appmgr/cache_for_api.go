@@ -26,6 +26,8 @@ func updateCacheAppTypes() {
 		return
 	}
 	cacheAppTypes = res
+
+	glog.Infof("-------> AppTypes: %s", cacheAppTypes.TotalCount)
 }
 
 func ReadCacheAppTypes() *models.ListResultD {
@@ -55,6 +57,8 @@ func updateCacheApplications() {
 	}
 
 	cacheApplications = appWithStatusList
+
+	glog.Infof("-------> Applications: %s", len(cacheApplications))
 }
 
 // containsCategory checks if the given category exists in the Categories slice
@@ -136,6 +140,8 @@ func updateCacheTopApplications() {
 	}
 
 	cacheTopApplications = appWithStatusList
+
+	glog.Infof("-------> TopApplications: %s", len(cacheTopApplications))
 }
 
 func ReadCacheTopApps(category, ty string, size int) ([]*models.ApplicationInfo, int64) {
@@ -232,6 +238,8 @@ func updateCacheI18n() {
 
 		cacheI18n[app.ChartName] = i18nData
 	}
+
+	glog.Infof("-------> i18n: %s", len(cacheI18n))
 }
 
 func ReadCacheI18n(chartName string, locale []string) map[string]models.I18n {
