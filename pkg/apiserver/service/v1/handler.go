@@ -150,14 +150,14 @@ func (h *Handler) list(req *restful.Request, resp *restful.Response) {
 		ty = defaultAppType()
 	}
 
-	apps := appmgr.ReadCacheApplications(page, size, category, ty)
+	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
 	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totalCount)))
 }
 
 func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
@@ -288,14 +288,14 @@ func (h *Handler) listLatest(req *restful.Request, resp *restful.Response) {
 		ty = defaultAppType()
 	}
 
-	apps := appmgr.ReadCacheApplications(page, size, category, ty)
+	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
 	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totalCount)))
 }
 
 func (h *Handler) openApplication(req *restful.Request, resp *restful.Response) {
@@ -361,10 +361,20 @@ func (h *Handler) search(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	page := req.QueryParameter("page")
-	size := req.QueryParameter("size")
-	res, err := appmgr.Search(appName, page, size)
+	page, err := strconv.Atoi(req.QueryParameter("page"))
 	if err != nil {
+		glog.Infof("page error: %s", err.Error())
+		page = 0
+	}
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
+	if err != nil {
+		glog.Infof("size error: %s", err.Error())
+		size = 0
+	}
+
+	apps, totals := appmgr.SearchFromCache(page, size, appName)
+	if apps == nil {
 		api.HandleError(resp, err)
 		return
 	}
@@ -372,9 +382,9 @@ func (h *Handler) search(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	_ = resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	_ = resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totals)))
 }
 
 func (h *Handler) searchPost(req *restful.Request, resp *restful.Response) {
@@ -403,10 +413,20 @@ func (h *Handler) searchPost(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	page := req.QueryParameter("page")
-	size := req.QueryParameter("size")
-	res, err := appmgr.Search(appName, page, size)
+	page, err := strconv.Atoi(req.QueryParameter("page"))
 	if err != nil {
+		glog.Infof("page error: %s", err.Error())
+		page = 0
+	}
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
+	if err != nil {
+		glog.Infof("size error: %s", err.Error())
+		size = 0
+	}
+
+	apps, totals := appmgr.SearchFromCache(page, size, appName)
+	if apps == nil {
 		api.HandleError(resp, err)
 		return
 	}
@@ -414,9 +434,9 @@ func (h *Handler) searchPost(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totals)))
 }
 
 func (h *Handler) info(req *restful.Request, resp *restful.Response) {

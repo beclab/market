@@ -112,15 +112,15 @@ func GetReadMe(name string) (string, error) {
 	return sendHttpRequest(http.MethodGet, urlTmp, nil)
 }
 
-func Search(name, page, size string) (*models.ListResultD, error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppSearchURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name, page, size)
-	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
-	if err != nil {
-		return nil, err
-	}
+// func Search(name, page, size string) (*models.ListResultD, error) {
+// 	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppSearchURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name, page, size)
+// 	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	return decodeListResultD(bodyStr)
-}
+// 	return decodeListResultD(bodyStr)
+// }
 
 func ExistApp(name string) (bool, error) {
 	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppExistURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name)

@@ -166,7 +166,7 @@ func (h *Handler) workflowRecommendsDetail(req *restful.Request, resp *restful.R
 
 	category := req.QueryParameter("category")
 
-	apps := appmgr.ReadCacheApplications(0, 0, category, constants.RecommendType)
+	apps, totals := appmgr.ReadCacheApplications(0, 0, category, constants.RecommendType)
 
 	workflowMap, _ := getWorkflowsMap(token)
 
@@ -182,7 +182,7 @@ func (h *Handler) workflowRecommendsDetail(req *restful.Request, resp *restful.R
 		appWithStatusList = append(appWithStatusList, info)
 	}
 
-	resp.WriteAsJson(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteAsJson(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totals)))
 }
 
 func (h *Handler) modelList(req *restful.Request, resp *restful.Response) {
@@ -194,7 +194,7 @@ func (h *Handler) modelList(req *restful.Request, resp *restful.Response) {
 
 	category := req.QueryParameter("category")
 
-	apps := appmgr.ReadCacheApplications(0, 0, category, constants.ModelType)
+	apps, totals := appmgr.ReadCacheApplications(0, 0, category, constants.ModelType)
 
 	//todo get running models status
 	modelsMap, _ := getModelsMap(token)
@@ -211,7 +211,7 @@ func (h *Handler) modelList(req *restful.Request, resp *restful.Response) {
 		appWithStatusList = append(appWithStatusList, info)
 	}
 
-	resp.WriteAsJson(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteAsJson(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totals)))
 }
 
 func deleteElement(slice []models.ApplicationInfo, index int) []models.ApplicationInfo {

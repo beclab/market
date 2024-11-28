@@ -3,6 +3,8 @@ package appmgr
 import (
 	"encoding/json"
 	"market/internal/models"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,36 +82,38 @@ func deepCopyApplications(apps []*models.ApplicationInfo) []*models.ApplicationI
 }
 
 // ReadCacheApplications retrieves applications from cache based on category and type
-func ReadCacheApplications(page, size int, category, ty string) []*models.ApplicationInfo {
+func ReadCacheApplications(page, size int, category, ty string) ([]*models.ApplicationInfo, int64) {
 	mu.Lock() // Lock to ensure thread safety
 	defer mu.Unlock()
 
 	var filteredApps []*models.ApplicationInfo
+	var totalCount int64 // Counter for total matching applications
 
 	// Filter applications based on category and cfgType
 	for _, app := range cacheApplications {
 		// Check if the app's Categories contains the specified category
 		if containsCategory(app.Categories, category) && app.CfgType == ty {
 			filteredApps = append(filteredApps, app)
+			totalCount++ // Increment the count for each matching application
 		}
 	}
 
 	// If page and size are both 0, return all filtered applications
 	if page == 0 && size == 0 {
-		return deepCopyApplications(filteredApps)
+		return deepCopyApplications(filteredApps), totalCount
 	}
 
 	// Implement pagination
 	start := page * size
 	end := start + size
 	if start > len(filteredApps) {
-		return []*models.ApplicationInfo{} // Return empty slice if start index is out of range
+		return []*models.ApplicationInfo{}, totalCount // Return empty slice if start index is out of range
 	}
 	if end > len(filteredApps) {
 		end = len(filteredApps) // Adjust end index if it exceeds the length
 	}
 
-	return deepCopyApplications(filteredApps[start:end]) // Return the paginated result
+	return deepCopyApplications(filteredApps[start:end]), totalCount // Return the paginated result and total count
 }
 
 func updateCacheTopApplications() {
@@ -237,6 +241,60 @@ func ReadCacheI18n(chartName string, locale []string) map[string]models.I18n {
 	}
 
 	return nil
+}
+
+// SearchFromCache searches applications in cache based on a name condition
+func SearchFromCache(page, size int, name string) (infos []*models.ApplicationInfo, count int64) {
+	wildcardName := getWildcardName(name)
+	var matchedApps []*models.ApplicationInfo
+
+	// Iterate over cacheApplications to find matches
+	for _, app := range cacheApplications {
+		if matchesWildcard(app.Name, wildcardName) ||
+			matchesWildcard(app.Title, wildcardName) ||
+			matchesWildcard(app.Description, wildcardName) ||
+			matchesWildcard(app.FullDescription, wildcardName) ||
+			matchesWildcard(app.UpgradeDescription, wildcardName) ||
+			matchesWildcard(app.Submitter, wildcardName) ||
+			matchesWildcard(app.Developer, wildcardName) {
+			matchedApps = append(matchedApps, app)
+		}
+	}
+
+	// Calculate total count
+	count = int64(len(matchedApps))
+
+	// If page and size are both 0, return all matched applications
+	if page == 0 && size == 0 {
+		return deepCopyApplications(matchedApps), count
+	}
+
+	// Implement pagination
+	start := page * size
+	end := start + size
+	if start > len(matchedApps) {
+		return []*models.ApplicationInfo{}, count // Return empty slice if start index is out of range
+	}
+	if end > len(matchedApps) {
+		end = len(matchedApps) // Adjust end index if it exceeds the length
+	}
+
+	// Return the paginated result
+	return deepCopyApplications(matchedApps[start:end]), count
+}
+
+// matchesWildcard checks if the input string matches the wildcard pattern
+func matchesWildcard(input, pattern string) bool {
+	// Replace wildcard '*' with a regex pattern
+	pattern = strings.ReplaceAll(pattern, "*", ".*")
+	matched, _ := regexp.MatchString("^"+pattern+"$", input)
+	return matched
+}
+
+// getWildcardName converts the input name to a wildcard pattern
+func getWildcardName(name string) string {
+	// Convert the input name to a wildcard pattern
+	return strings.ReplaceAll(name, " ", "*") // Example: replace spaces with '*'
 }
 
 // Define a function to periodically call method a
