@@ -139,6 +139,9 @@ func updateCacheTopApplications() {
 }
 
 func ReadCacheTopApps(category, ty string, size int) ([]*models.ApplicationInfo, int64) {
+	mu.Lock() // Lock to ensure thread safety
+	defer mu.Unlock()
+
 	var filteredApps []*models.ApplicationInfo
 	var totalCount int64
 
@@ -193,6 +196,9 @@ func deepCopyApplication(app *models.ApplicationInfo) *models.ApplicationInfo {
 }
 
 func ReadCacheApplication(name string) *models.ApplicationInfo {
+	mu.Lock() // Lock to ensure thread safety
+	defer mu.Unlock()
+
 	for _, app := range cacheApplications {
 		if app.Name == name {
 			return deepCopyApplication(app)
@@ -202,6 +208,9 @@ func ReadCacheApplication(name string) *models.ApplicationInfo {
 }
 
 func ReadCacheApplicationsWithMap(names []string) map[string]*models.ApplicationInfo {
+	mu.Lock() // Lock to ensure thread safety
+	defer mu.Unlock()
+
 	result := make(map[string]*models.ApplicationInfo)
 
 	for _, name := range names {
@@ -226,6 +235,8 @@ func updateCacheI18n() {
 }
 
 func ReadCacheI18n(chartName string, locale []string) map[string]models.I18n {
+	mu.Lock() // Lock to ensure thread safety
+	defer mu.Unlock()
 
 	if i18nData, exists := cacheI18n[chartName]; exists {
 
@@ -245,6 +256,9 @@ func ReadCacheI18n(chartName string, locale []string) map[string]models.I18n {
 
 // SearchFromCache searches applications in cache based on a name condition
 func SearchFromCache(page, size int, name string) (infos []*models.ApplicationInfo, count int64) {
+	mu.Lock() // Lock to ensure thread safety
+	defer mu.Unlock()
+
 	wildcardName := getWildcardName(name)
 	var matchedApps []*models.ApplicationInfo
 
@@ -299,18 +313,9 @@ func getWildcardName(name string) string {
 
 // Define a function to periodically call method a
 func startCacheUpdater() {
+	time.Sleep(30 * time.Second)              // Delay the first execution by 30 seconds
 	ticker := time.NewTicker(5 * time.Minute) // Every 5 minutes
 	defer ticker.Stop()
-
-	// for {
-	// 	select {
-	// 	case <-ticker.C:
-	// 		mu.Lock() // Lock to ensure thread safety
-	// 		updateCacheAppTypes()
-	// 		updateCacheApplications()
-	// 		mu.Unlock()
-	// 	}
-	// }
 
 	for range ticker.C { // Use for range to receive from ticker.C
 		mu.Lock() // Lock to ensure thread safety
