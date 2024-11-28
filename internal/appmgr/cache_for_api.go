@@ -319,19 +319,23 @@ func getWildcardName(name string) string {
 	return strings.ReplaceAll(name, " ", "*") // Example: replace spaces with '*'
 }
 
+func update() {
+	mu.Lock() // Lock to ensure thread safety
+	updateCacheAppTypes()
+	updateCacheApplications()
+	updateCacheTopApplications()
+	updateCacheI18n()
+	mu.Unlock()
+}
+
 // Define a function to periodically call method a
 func startCacheUpdater() {
-	time.Sleep(30 * time.Second)              // Delay the first execution by 30 seconds
 	ticker := time.NewTicker(5 * time.Minute) // Every 5 minutes
 	defer ticker.Stop()
 
+	update()
 	for range ticker.C { // Use for range to receive from ticker.C
-		mu.Lock() // Lock to ensure thread safety
-		updateCacheAppTypes()
-		updateCacheApplications()
-		updateCacheTopApplications()
-		updateCacheI18n()
-		mu.Unlock()
+		update()
 	}
 }
 
