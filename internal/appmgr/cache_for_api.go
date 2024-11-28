@@ -79,6 +79,22 @@ func containsCategory(categories interface{}, category string) bool {
 	return false
 }
 
+// matchesType checks if the app's CfgType matches any of the specified types
+func matchesType(appType string, ty string) bool {
+	if ty == "" {
+		return true // If ty is empty, consider it a match
+	}
+
+	// Split the ty string into a slice of types
+	types := strings.Split(ty, ",")
+	for _, t := range types {
+		if appType == t {
+			return true // Return true if a match is found
+		}
+	}
+	return false // Return false if no matches are found
+}
+
 // deepCopyApplications performs a deep copy of the given applications slice
 func deepCopyApplications(apps []*models.ApplicationInfo) []*models.ApplicationInfo {
 	var copiedApps []*models.ApplicationInfo
@@ -102,7 +118,12 @@ func ReadCacheApplications(page, size int, category, ty string) ([]*models.Appli
 	// Filter applications based on category and cfgType
 	for _, app := range cacheApplications {
 		// Check if the app's Categories contains the specified category
-		if containsCategory(app.Categories, category) && (ty == "" || app.CfgType == ty) {
+		categoryMatch := containsCategory(app.Categories, category)
+
+		// Check if the app's CfgType matches any of the specified types
+		typeMatch := matchesType(app.CfgType, ty)
+
+		if categoryMatch && typeMatch {
 			filteredApps = append(filteredApps, app)
 			totalCount++ // Increment the count for each matching application
 		}
@@ -153,6 +174,7 @@ func updateCacheTopApplications() {
 	glog.Infof("-------> TopApplications: %s", len(cacheTopApplications))
 }
 
+// ReadCacheTopApps retrieves top applications from cache based on category and type
 func ReadCacheTopApps(category, ty string, size int) ([]*models.ApplicationInfo, int64) {
 	mu.Lock() // Lock to ensure thread safety
 	defer mu.Unlock()
@@ -162,8 +184,8 @@ func ReadCacheTopApps(category, ty string, size int) ([]*models.ApplicationInfo,
 
 	for _, app := range cacheTopApplications {
 
-		// Check if the configuration type matches
-		if ty != "" && app.CfgType != ty {
+		// Use matchesType to check if the app's CfgType matches any of the specified types
+		if !matchesType(app.CfgType, ty) {
 			continue
 		}
 
