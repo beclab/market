@@ -63,6 +63,12 @@ func updateCacheApplications() {
 
 // containsCategory checks if the given category exists in the Categories slice
 func containsCategory(categories interface{}, category string) bool {
+	// If category is an empty string, return true
+	if category == "" {
+		return true
+	}
+
+	// Attempt to assert categories as a slice of strings
 	if categoryList, ok := categories.([]string); ok {
 		for _, cat := range categoryList {
 			if cat == category {
@@ -96,7 +102,7 @@ func ReadCacheApplications(page, size int, category, ty string) ([]*models.Appli
 	// Filter applications based on category and cfgType
 	for _, app := range cacheApplications {
 		// Check if the app's Categories contains the specified category
-		if containsCategory(app.Categories, category) && app.CfgType == ty {
+		if containsCategory(app.Categories, category) && (ty == "" || app.CfgType == ty) {
 			filteredApps = append(filteredApps, app)
 			totalCount++ // Increment the count for each matching application
 		}
@@ -117,7 +123,10 @@ func ReadCacheApplications(page, size int, category, ty string) ([]*models.Appli
 		end = len(filteredApps) // Adjust end index if it exceeds the length
 	}
 
-	return deepCopyApplications(filteredApps[start:end]), totalCount // Return the paginated result and total count
+	resp := deepCopyApplications(filteredApps[start:end])
+
+	glog.Infof("---------->on ReadCacheApplications: %s", len(resp))
+	return resp, totalCount // Return the paginated result and total count
 }
 
 func updateCacheTopApplications() {
@@ -152,36 +161,32 @@ func ReadCacheTopApps(category, ty string, size int) ([]*models.ApplicationInfo,
 	var totalCount int64
 
 	for _, app := range cacheTopApplications {
-		if app.CfgType != ty {
+
+		// Check if the configuration type matches
+		if ty != "" && app.CfgType != ty {
 			continue
 		}
 
-		categories, ok := app.Categories.([]string)
-		if !ok {
+		// Use containsCategory to check if the app's categories contain the specified category
+		if !containsCategory(app.Categories, category) {
 			continue
 		}
 
-		categoryMatch := false
-		for _, cat := range categories {
-			if cat == category {
-				categoryMatch = true
-				break
-			}
-		}
-
-		if !categoryMatch {
-			continue
-		}
-
+		// Add the app to the filtered list
 		filteredApps = append(filteredApps, app)
 		totalCount++
 
+		// Check if we have reached the desired size
 		if size > 0 && len(filteredApps) >= size {
 			break
 		}
 	}
 
-	return deepCopyApplications(filteredApps), totalCount
+	resp := deepCopyApplications(filteredApps)
+
+	glog.Infof("---------->on ReadCacheTopApps: %s", len(resp))
+
+	return resp, totalCount
 }
 
 func deepCopyApplication(app *models.ApplicationInfo) *models.ApplicationInfo {
@@ -207,7 +212,12 @@ func ReadCacheApplication(name string) *models.ApplicationInfo {
 
 	for _, app := range cacheApplications {
 		if app.Name == name {
-			return deepCopyApplication(app)
+
+			resp := deepCopyApplication(app)
+
+			glog.Infof("---------->on ReadCacheApplication: %s", resp)
+
+			return resp
 		}
 	}
 	return nil
@@ -228,6 +238,8 @@ func ReadCacheApplicationsWithMap(names []string) map[string]*models.Application
 			}
 		}
 	}
+
+	glog.Infof("---------->on ReadCacheApplicationsWithMap: %s", len(result))
 
 	return result
 }
