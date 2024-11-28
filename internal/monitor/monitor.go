@@ -126,8 +126,8 @@ func checkState(jsonData string) {
 
 			// if state not same，print item
 			if currentState != "" && currentState != entrance.State {
-				itemJSON, _ := json.MarshalIndent(item, "", "  ")
-				glog.Infof("Item with ID %s has inconsistent state:\n%s\n", entrance.ID, itemJSON)
+				// itemJSON, _ := json.MarshalIndent(item, "", "  ")
+				// glog.Infof("Item with ID %s has inconsistent state:\n%s\n", entrance.ID, itemJSON)
 
 				eventClient.CreateEvent("entrance-state-event",
 					fmt.Sprintf("App %s entrance %s state is change to %s", item.Name, entrance.Name, entrance.State),
@@ -164,5 +164,5 @@ func checkState(jsonData string) {
 		}
 	}
 
-	glog.Info("States have been stored in Redis.")
+	// glog.Info("States have been stored in Redis.")
 }
