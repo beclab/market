@@ -31,6 +31,7 @@ import (
 	"market/pkg/utils"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/emicklei/go-restful/v3"
 	"github.com/golang/glog"
@@ -131,24 +132,30 @@ func (h *Handler) list(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	page := req.QueryParameter("page")
-	size := req.QueryParameter("size")
+	page, err := strconv.Atoi(req.QueryParameter("page"))
+	if err != nil {
+		glog.Infof("page error: %s", err.Error())
+		page = 0
+	}
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
+	if err != nil {
+		glog.Infof("size error: %s", err.Error())
+		size = 0
+	}
+
 	category := req.QueryParameter("category")
 	ty := req.QueryParameter("type")
 	if ty == "" {
 		ty = defaultAppType()
 	}
 
-	res, err := appmgr.GetApps(page, size, category, ty)
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	apps := appmgr.ReadCacheApplications(page, size, category, ty)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
 }
@@ -160,11 +167,7 @@ func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	res, err := appmgr.GetAppTypes()
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	res := appmgr.ReadCacheAppTypes()
 
 	types := parseAppTypes(res)
 
@@ -237,19 +240,21 @@ func (h *Handler) listTop(req *restful.Request, resp *restful.Response) {
 	if ty == "" {
 		ty = defaultAppType()
 	}
-	size := req.QueryParameter("size")
-	res, err := appmgr.GetTopApps(category, ty, size)
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
 	if err != nil {
-		api.HandleError(resp, err)
-		return
+		glog.Infof("size error: %s", err.Error())
+		size = 0
 	}
+
+	apps, totalCount := appmgr.ReadCacheTopApps(category, ty, size)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totalCount)))
 }
 
 func (h *Handler) listLatest(req *restful.Request, resp *restful.Response) {
@@ -265,24 +270,30 @@ func (h *Handler) listLatest(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	page := req.QueryParameter("page")
-	size := req.QueryParameter("size")
+	page, err := strconv.Atoi(req.QueryParameter("page"))
+	if err != nil {
+		glog.Infof("page error: %s", err.Error())
+		page = 0
+	}
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
+	if err != nil {
+		glog.Infof("size error: %s", err.Error())
+		size = 0
+	}
+
 	category := req.QueryParameter("category")
 	ty := req.QueryParameter("type")
 	if ty == "" {
 		ty = defaultAppType()
 	}
 
-	res, err := appmgr.GetApps(page, size, category, ty)
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	apps := appmgr.ReadCacheApplications(page, size, category, ty)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
 }
@@ -423,8 +434,8 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 
 	infoLocal, _ := redisdb.GetLocalAppInfo(appName)
 
-	infoMarket, err := appmgr.GetAppInfo(appName)
-	if err != nil && infoLocal == nil {
+	infoMarket := appmgr.ReadCacheApplication(appName)
+	if infoMarket == nil && infoLocal == nil {
 		api.HandleError(resp, errors.New("not found"))
 		return
 	}

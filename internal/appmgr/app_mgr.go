@@ -39,7 +39,7 @@ func getAppStoreServicePort() string {
 	return os.Getenv(constants.AppStoreServicePortEnv)
 }
 
-func GetAppTypes() (*models.ListResultD, error) {
+func getAppTypes() (*models.ListResultD, error) {
 	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppTypesURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
 
 	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
@@ -50,7 +50,7 @@ func GetAppTypes() (*models.ListResultD, error) {
 	return decodeListResultD(bodyStr)
 }
 
-func GetApps(page, size, category, ty string) (*models.ListResultD, error) {
+func getApps(page, size, category, ty string) (*models.ListResultD, error) {
 	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppListURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), page, size)
 	if category != "" {
 		urlTmp += fmt.Sprintf("&category=%s", category)
@@ -67,7 +67,7 @@ func GetApps(page, size, category, ty string) (*models.ListResultD, error) {
 	return decodeListResultD(bodyStr)
 }
 
-func GetTopApps(category, ty, size string) (*models.ListResultD, error) {
+func getTopApps(category, ty, size string) (*models.ListResultD, error) {
 	baseURL := fmt.Sprintf(constants.AppStoreServiceAppTopURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
 	params := make(url.Values)
 	if category != "" {
@@ -107,58 +107,9 @@ func CountAppInstalled(name string) (string, error) {
 	return bodyStr, nil
 }
 
-func GetAppInfo(name string) (*models.ApplicationInfo, error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppInfoURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name)
-	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	res := &models.ResponseD{}
-	err = json.Unmarshal([]byte(bodyStr), res)
-	if err != nil {
-		return nil, err
-	}
-
-	info := &models.ApplicationInfo{}
-	err = json.Unmarshal(res.Data, info)
-	if err != nil {
-		return nil, err
-	}
-
-	return info, nil
-}
-
 func GetReadMe(name string) (string, error) {
 	urlTmp := fmt.Sprintf(constants.AppStoreServiceReadMeURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name)
 	return sendHttpRequest(http.MethodGet, urlTmp, nil)
-}
-
-func GetAppInfos(names []string) (mapInfo map[string]*models.ApplicationInfo, err error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppInfosURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
-	glog.Infof("GetAppInfos --> urlTmp: %s", urlTmp)
-	var ms []byte
-	ms, err = json.Marshal(names)
-	if err != nil {
-		return nil, err
-	}
-	bodyStr, err := sendHttpRequest(http.MethodPost, urlTmp, strings.NewReader(string(ms)))
-	if err != nil {
-		return nil, err
-	}
-
-	res := &models.ResponseD{}
-	err = json.Unmarshal([]byte(bodyStr), res)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(res.Data, &mapInfo)
-	if err != nil {
-		return nil, err
-	}
-
-	return
 }
 
 func Search(name, page, size string) (*models.ListResultD, error) {
@@ -251,7 +202,7 @@ func GetVersionHistory(appName string) (string, error) {
 	return bodyStr, nil
 }
 
-func GetAppI18n(chartName string, locale []string) map[string]models.I18n {
+func getAppI18n(chartName string, locale []string) map[string]models.I18n {
 	i18nMap := make(map[string]models.I18n)
 	chartDirPath := path.Join(constants.ChartsLocalDir, chartName)
 	chartPath := utils.FindChartPath(chartDirPath)

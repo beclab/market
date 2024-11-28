@@ -15,6 +15,7 @@
 package apiserver
 
 import (
+	"market/internal/appmgr"
 	"market/internal/conf"
 	"market/internal/constants"
 	"market/internal/monitor"
@@ -75,6 +76,7 @@ func (s *APIServer) PrepareRun() error {
 
 	glog.Info("call monitor Start")
 	go monitor.Start()
+	appmgr.CacheCenterStart()
 
 	return nil
 }

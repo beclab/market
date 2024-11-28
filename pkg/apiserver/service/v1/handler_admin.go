@@ -79,9 +79,9 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infosMarket, err := appmgr.GetAppInfos(names)
-	if err != nil {
-		api.HandleError(resp, err)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	if infosMarket == nil {
+		api.HandleError(resp, errors.New("get apps failed"))
 		return
 	}
 
@@ -166,22 +166,12 @@ func (h *Handler) workflowRecommendsDetail(req *restful.Request, resp *restful.R
 
 	category := req.QueryParameter("category")
 
-	res, err := appmgr.GetApps("0", "0", category, constants.RecommendType)
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	apps := appmgr.ReadCacheApplications(0, 0, category, constants.RecommendType)
 
 	workflowMap, _ := getWorkflowsMap(token)
 
 	var appWithStatusList []*models.ApplicationInfo
-	for _, item := range res.Items {
-		info := &models.ApplicationInfo{}
-		err := json.Unmarshal(item, info)
-		if err != nil {
-			glog.Warningf("err:%s", err.Error())
-			continue
-		}
+	for _, info := range apps {
 
 		getCommonStatus(info, workflowMap)
 		if (info.HasRemoveLabel() || info.HasSuspendLabel()) && info.Status == models.AppUninstalled {
@@ -204,23 +194,13 @@ func (h *Handler) modelList(req *restful.Request, resp *restful.Response) {
 
 	category := req.QueryParameter("category")
 
-	res, err := appmgr.GetApps("0", "0", category, constants.ModelType)
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	apps := appmgr.ReadCacheApplications(0, 0, category, constants.ModelType)
 
 	//todo get running models status
 	modelsMap, _ := getModelsMap(token)
 
 	var appWithStatusList []*models.ApplicationInfo
-	for _, item := range res.Items {
-		info := &models.ApplicationInfo{}
-		err := json.Unmarshal(item, info)
-		if err != nil {
-			glog.Warningf("err:%s", err.Error())
-			continue
-		}
+	for _, info := range apps {
 
 		getModelStatus(info, modelsMap)
 		if (info.HasRemoveLabel() || info.HasSuspendLabel()) && info.Status == models.AppUninstalled {
