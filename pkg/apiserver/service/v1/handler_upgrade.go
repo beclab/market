@@ -31,8 +31,8 @@ func getVersionAndInfo(appName, token string) (curVersion string, latestInfo *mo
 	}
 	curVersion = curVersionRes.Data.Version
 
-	latestInfo, err = appmgr.GetAppInfo(appName)
-	if err != nil {
+	latestInfo = appmgr.ReadCacheApplication(appName)
+	if latestInfo == nil {
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *Handler) upgrade(req *restful.Request, resp *restful.Response) {
 		api.HandleError(resp, err)
 		return
 	}
-	i18n := appmgr.GetAppI18n(latestInfo.ChartName, latestInfo.Locale)
+	i18n := appmgr.ReadCacheI18n(latestInfo.ChartName, latestInfo.Locale)
 	if len(i18n) > 0 {
 		latestInfo.I18n = i18n
 	}

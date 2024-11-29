@@ -29,9 +29,9 @@ func (h *Handler) handleInfos(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infosMarket, err := appmgr.GetAppInfos(names)
-	if err != nil {
-		api.HandleError(resp, err)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	if infosMarket == nil {
+		api.HandleError(resp, errors.New("get apps failed"))
 		return
 	}
 
@@ -156,9 +156,9 @@ func (h *Handler) handleI18ns(req *restful.Request, resp *restful.Response) {
 	}
 	//names := []string{"astral", "market", "firefox"}
 	names := []string{}
-	infosMarket, err := appmgr.GetAppInfos(names)
-	if err != nil {
-		api.HandleError(resp, err)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	if infosMarket == nil {
+		api.HandleError(resp, errors.New("get apps failed"))
 		return
 	}
 	//klog.Infof("infosMarket: %#v", infosMarket)
@@ -204,9 +204,9 @@ func (h *Handler) handleI18n(req *restful.Request, resp *restful.Response) {
 	}
 	name := req.PathParameter(ParamAppName)
 	names := []string{name}
-	infosMarket, err := appmgr.GetAppInfos(names)
-	if err != nil {
-		api.HandleError(resp, err)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	if infosMarket == nil {
+		api.HandleError(resp, errors.New("get apps failed"))
 		return
 	}
 	klog.Infof("infosMarket: %#v", infosMarket)

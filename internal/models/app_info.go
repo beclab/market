@@ -83,15 +83,15 @@ type ApplicationInfo struct {
 	CfgType   string `yaml:"cfgType" json:"cfgType"`
 	ChartName string `yaml:"chartName" json:"chartName"`
 
-	Icon        string      `yaml:"icon" json:"icon"`
-	Description string      `yaml:"desc" json:"desc"`
-	AppID       string      `yaml:"appid" json:"appid"`
-	Title       string      `yaml:"title" json:"title"`
-	CurVersion  string      `yaml:"curVersion" json:"curVersion"`
-	Version     string      `yaml:"version" json:"version"`
-	NeedUpdate  bool        `yaml:"needUpdate" json:"needUpdate"`
-	Categories  interface{} `yaml:"categories" json:"categories"` //[]string
-	VersionName string      `yaml:"versionName" json:"versionName"`
+	Icon        string   `yaml:"icon" json:"icon"`
+	Description string   `yaml:"desc" json:"desc"`
+	AppID       string   `yaml:"appid" json:"appid"`
+	Title       string   `yaml:"title" json:"title"`
+	CurVersion  string   `yaml:"curVersion" json:"curVersion"`
+	Version     string   `yaml:"version" json:"version"`
+	NeedUpdate  bool     `yaml:"needUpdate" json:"needUpdate"`
+	Categories  []string `yaml:"categories" json:"categories"` //[]string
+	VersionName string   `yaml:"versionName" json:"versionName"`
 
 	FullDescription    string            `yaml:"fullDescription" json:"fullDescription"`
 	UpgradeDescription string            `yaml:"upgradeDescription" json:"upgradeDescription"`

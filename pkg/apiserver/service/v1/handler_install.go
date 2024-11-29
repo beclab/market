@@ -60,9 +60,10 @@ func respDepErr(resp *restful.Response, msg string) {
 }
 
 func installPre(appName, token string) (*models.ApplicationInfo, error) {
-	info, err := appmgr.GetAppInfo(appName)
-	if err != nil {
-		return info, err
+
+	info := appmgr.ReadCacheApplication(appName)
+	if info == nil {
+		return info, errors.New("get app failed")
 	}
 
 	if info.ChartName == "" {
@@ -74,11 +75,11 @@ func installPre(appName, token string) (*models.ApplicationInfo, error) {
 	// 	return info, err
 	// }
 
-	err = appmgr.DownloadAppTgz(info.ChartName)
+	err := appmgr.DownloadAppTgz(info.ChartName)
 	if err != nil {
 		return info, err
 	}
-	i18n := appmgr.GetAppI18n(info.ChartName, info.Locale)
+	i18n := appmgr.ReadCacheI18n(info.ChartName, info.Locale)
 	if len(i18n) > 0 {
 		info.I18n = i18n
 	}
