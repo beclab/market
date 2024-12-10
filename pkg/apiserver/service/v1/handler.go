@@ -78,7 +78,7 @@ func (h *Handler) handleTerminusVersion(req *restful.Request, resp *restful.Resp
 		return
 	}
 
-	resBody, err := appservice.TerminusVersion(token)
+	resBody, err := appservice.TerminusVersion()
 	if err != nil {
 		api.HandleError(resp, err)
 		return

@@ -28,7 +28,7 @@ func getPagesDetailLoop() {
 
 func callLoop(f func() error) {
 	_ = f()
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(time.Minute * 30)
 	defer ticker.Stop()
 
 	for range ticker.C {

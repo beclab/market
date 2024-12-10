@@ -3,11 +3,12 @@ package appservice
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/golang/glog"
 	"market/internal/constants"
 	"market/internal/models"
 	"market/pkg/utils"
 	"net/http"
+
+	"github.com/golang/glog"
 )
 
 func AppSuspend(name, token string) (string, error) {
@@ -99,11 +100,11 @@ func Apps(name, token string) (string, error) {
 	return utils.SendHttpRequestWithToken(http.MethodGet, url, token, nil)
 }
 
-func TerminusVersion(token string) (string, error) {
+func TerminusVersion() (string, error) {
 	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
 	url := fmt.Sprintf(constants.AppServiceTerminusVersionURLTempl, appServiceHost, appServicePort)
 
-	return utils.SendHttpRequestWithToken(http.MethodGet, url, token, nil)
+	return utils.SendHttpRequestWithToken(http.MethodGet, url, "", nil)
 }
 func TerminusNodes(token string) (string, error) {
 	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
