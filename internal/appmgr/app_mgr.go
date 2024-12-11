@@ -103,7 +103,7 @@ func getTopApps(category, ty, size string) (*models.ListResultD, error) {
 	p := params.Encode()
 	finalURL := baseURL
 	if p != "" {
-		finalURL = fmt.Sprintf("%s?%s", baseURL, p)
+		finalURL = fmt.Sprintf("%s&%s", baseURL, p)
 	}
 	bodyStr, err := sendHttpRequest(http.MethodGet, finalURL, nil)
 	if err != nil {
