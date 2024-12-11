@@ -106,6 +106,8 @@ func TerminusVersionValue() (string, error) {
 		return "", err
 	}
 
+	glog.Infof("version:%s", version)
+
 	type VersionInfo struct {
 		Version string `json:"version"`
 	}
