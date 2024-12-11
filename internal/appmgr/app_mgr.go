@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"market/internal/appservice"
 	"market/internal/constants"
 	"market/internal/helm"
 	"market/internal/models"
@@ -40,7 +41,12 @@ func getAppStoreServicePort() string {
 }
 
 func getAppTypes() (*models.ListResultD, error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppTypesURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return nil, err
+	}
+
+	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppTypesURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), version)
 
 	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
 	if err != nil {
@@ -51,7 +57,12 @@ func getAppTypes() (*models.ListResultD, error) {
 }
 
 func getApps(page, size, category, ty string) (*models.ListResultD, error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppListURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), page, size)
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return nil, err
+	}
+
+	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppListURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), page, size, version)
 	if category != "" {
 		urlTmp += fmt.Sprintf("&category=%s", category)
 	}
@@ -68,7 +79,12 @@ func getApps(page, size, category, ty string) (*models.ListResultD, error) {
 }
 
 func getTopApps(category, ty, size string) (*models.ListResultD, error) {
-	baseURL := fmt.Sprintf(constants.AppStoreServiceAppTopURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return nil, err
+	}
+
+	baseURL := fmt.Sprintf(constants.AppStoreServiceAppTopURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), version)
 	params := make(url.Values)
 	if category != "" {
 		params.Add("category", category)
@@ -87,7 +103,7 @@ func getTopApps(category, ty, size string) (*models.ListResultD, error) {
 	p := params.Encode()
 	finalURL := baseURL
 	if p != "" {
-		finalURL = fmt.Sprintf("%s?%s", baseURL, p)
+		finalURL = fmt.Sprintf("%s&%s", baseURL, p)
 	}
 	bodyStr, err := sendHttpRequest(http.MethodGet, finalURL, nil)
 	if err != nil {
@@ -174,10 +190,15 @@ func decodeListResultD(in string) (*models.ListResultD, error) {
 }
 
 func DownloadAppTgz(chartName string) error {
-	appPkgUrl := fmt.Sprintf(constants.AppStoreServiceAppURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), chartName)
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return err
+	}
+
+	appPkgUrl := fmt.Sprintf(constants.AppStoreServiceAppURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), chartName, version)
 
 	dstPath := path.Join(constants.ChartsLocalDir, chartName)
-	err := utils.Download(appPkgUrl, dstPath)
+	err = utils.Download(appPkgUrl, dstPath)
 	if err != nil {
 		glog.Warningf("Download %s to %s err:%s", appPkgUrl, dstPath, err)
 		return err
