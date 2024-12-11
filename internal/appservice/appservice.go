@@ -100,6 +100,27 @@ func Apps(name, token string) (string, error) {
 	return utils.SendHttpRequestWithToken(http.MethodGet, url, token, nil)
 }
 
+func TerminusVersionValue() (string, error) {
+	version, err := TerminusVersion()
+	if err != nil {
+		return "", err
+	}
+
+	type VersionInfo struct {
+		Version string `json:"version"`
+	}
+
+	var versionInfo VersionInfo
+
+	err = json.Unmarshal([]byte(version), &versionInfo)
+	if err != nil {
+		fmt.Println("Error parsing JSON:", err)
+		return "", err
+	}
+
+	return versionInfo.Version, nil
+}
+
 func TerminusVersion() (string, error) {
 	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
 	url := fmt.Sprintf(constants.AppServiceTerminusVersionURLTempl, appServiceHost, appServicePort)

@@ -41,7 +41,7 @@ func getAppStoreServicePort() string {
 }
 
 func getAppTypes() (*models.ListResultD, error) {
-	version, err := appservice.TerminusVersion()
+	version, err := appservice.TerminusVersionValue()
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func getAppTypes() (*models.ListResultD, error) {
 }
 
 func getApps(page, size, category, ty string) (*models.ListResultD, error) {
-	version, err := appservice.TerminusVersion()
+	version, err := appservice.TerminusVersionValue()
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func getApps(page, size, category, ty string) (*models.ListResultD, error) {
 }
 
 func getTopApps(category, ty, size string) (*models.ListResultD, error) {
-	version, err := appservice.TerminusVersion()
+	version, err := appservice.TerminusVersionValue()
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +190,7 @@ func decodeListResultD(in string) (*models.ListResultD, error) {
 }
 
 func DownloadAppTgz(chartName string) error {
-	version, err := appservice.TerminusVersion()
+	version, err := appservice.TerminusVersionValue()
 	if err != nil {
 		return err
 	}
