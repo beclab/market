@@ -26,7 +26,6 @@
 			@mouseover="updateHover(true)"
 			@mouseleave="updateHover(false)"
 			dense
-			:percentage="item.progress ? Number(item.progress) : 0"
 			flat
 			no-caps
 		>
@@ -40,14 +39,14 @@
 				>
 					{{ status }}
 				</div>
-				<div
-					style="width: 100%; height: 100%"
-					class="row justify-center items-center"
+				<progress-button
+					ref="progressBar"
 					v-if="showDownloadProgress(item)"
-				>
-					<!--          <q-spinner-hourglass size="12px" style="margin-right: 4px"/>-->
-					{{ item.progress ? Number(item.progress) + '%' : '0%' }}
-				</div>
+					:progress="item.progress"
+					:covered-text-color="white"
+					:default-text-color="blueDefault"
+					:progress-bar-color="blueDefault"
+				/>
 				<div
 					v-if="
 						item.status === APP_STATUS.pending ||
@@ -154,6 +153,7 @@ import {
 	canSuspend
 } from 'src/constants/config';
 import { bus, BUS_EVENT } from 'src/utils/bus';
+import ProgressButton from 'src/components/base/ProgressButton.vue';
 
 const props = defineProps({
 	item: {
@@ -499,7 +499,6 @@ function updateUI() {
 			}
 			break;
 		case APP_STATUS.installing:
-		case APP_STATUS.downloading:
 			if (hoverRef.value && canInstallingCancel(props.item?.cfgType)) {
 				isLoading.value = false;
 				status.value = t('app.cancel');
@@ -511,6 +510,21 @@ function updateUI() {
 				status.value = t('app.installing');
 				textColor.value = white.value;
 				backgroundColor.value = blueDefault.value;
+				border.value = '1px solid transparent';
+			}
+			break;
+		case APP_STATUS.downloading:
+			if (hoverRef.value && canInstallingCancel(props.item?.cfgType)) {
+				isLoading.value = false;
+				status.value = t('app.cancel');
+				textColor.value = blueDefault.value;
+				backgroundColor.value = background1.value;
+				border.value = `1px solid ${blueDefault.value}`;
+			} else {
+				isLoading.value = true;
+				status.value = t('app.installing');
+				textColor.value = white.value;
+				backgroundColor.value = blueAlpha.value;
 				border.value = '1px solid transparent';
 			}
 			break;

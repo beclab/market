@@ -4,7 +4,7 @@
 		:style="{ '--NavigationOffsite': `${navigationOffsite}px` }"
 		class="row justify-center items-center"
 	>
-		<!-- 自定义后退按钮 -->
+		<!-- custom back button -->
 		<div
 			class="button-left"
 			@click="customPrev"
@@ -43,7 +43,7 @@
 			</swiper-slide>
 		</swiper>
 
-		<!-- 自定义前进按钮 -->
+		<!--  custom forward button  -->
 		<div
 			class="button-right"
 			@click="customNext"

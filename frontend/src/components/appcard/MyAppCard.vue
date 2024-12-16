@@ -247,6 +247,8 @@ function goAppDetails() {
 
 			.my-application-title {
 				max-width: 70%;
+				overflow: hidden;
+				text-overflow: ellipsis;
 			}
 
 			.my-application-version {
