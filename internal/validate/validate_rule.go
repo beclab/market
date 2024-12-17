@@ -268,6 +268,7 @@ func getResourceListFromChart(chartPath string) (resources kube.ResourceList, er
 		"subjects": map[string]interface{}{},
 		"refs":     map[string]interface{}{},
 	}
+	values["GPU"] = map[string]interface{}{}
 	values["bfl"] = map[string]interface{}{
 		"username": "bfl-username",
 	}
