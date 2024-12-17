@@ -252,6 +252,17 @@ func ReadCacheApplicationsWithMap(names []string) map[string]*models.Application
 
 	result := make(map[string]*models.ApplicationInfo)
 
+	// If names is an empty array, return all data
+	if len(names) == 0 {
+		for _, app := range cacheApplications {
+			copyApp := deepCopyApplication(app)
+			result[app.Name] = copyApp
+		}
+		glog.Infof("---------->on ReadCacheApplicationsWithMap: Returning all applications, count: %s", len(result))
+		return result
+	}
+
+	// Otherwise, return the specified applications by name
 	for _, name := range names {
 		for _, app := range cacheApplications {
 			if app.Name == name {
@@ -266,6 +277,27 @@ func ReadCacheApplicationsWithMap(names []string) map[string]*models.Application
 
 	return result
 }
+
+// func ReadCacheApplicationsWithMap(names []string) map[string]*models.ApplicationInfo {
+// 	mu.Lock() // Lock to ensure thread safety
+// 	defer mu.Unlock()
+
+// 	result := make(map[string]*models.ApplicationInfo)
+
+// 	for _, name := range names {
+// 		for _, app := range cacheApplications {
+// 			if app.Name == name {
+// 				copyApp := deepCopyApplication(app)
+// 				result[name] = copyApp
+// 				break
+// 			}
+// 		}
+// 	}
+
+// 	glog.Infof("---------->on ReadCacheApplicationsWithMap: %s", len(result))
+
+// 	return result
+// }
 
 func updateCacheI18n() {
 	for _, app := range cacheApplications {
