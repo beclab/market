@@ -26,14 +26,12 @@
 				v-if="size > 1"
 				class="cursor-pointer banner-navigation row justify-start items-center"
 			>
-				<template v-for="item in size" :key="item">
+				<template v-for="(item, index) in size" :key="item">
 					<div
 						:class="
-							item - 1 === currentSlide
-								? 'navigation-active'
-								: 'navigation-normal'
+							index === currentSlide ? 'navigation-active' : 'navigation-normal'
 						"
-						@click="changeActive(item)"
+						@click="changeActive(index)"
 					/>
 				</template>
 			</div>
