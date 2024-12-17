@@ -117,16 +117,16 @@ export default boot(({ app }) => {
 				return retryOriginalRequest;
 			}
 
-			if (data.code != 200) {
-				// if( data.message ) {
-				//   Notify.create({
-				//       type: 'negative',
-				//       message: '' + data.code +' ' + data.message
-				//     })
-				// }
-				//return response;
-				// throw Error(data?.message);
-			}
+			// if (data.code != 200) {
+			// if( data.message ) {
+			//   Notify.create({
+			//       type: 'negative',
+			//       message: '' + data.code +' ' + data.message
+			//     })
+			// }
+			//return response;
+			// throw Error(data?.message);
+			// }
 
 			return data;
 		}

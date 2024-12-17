@@ -32,6 +32,7 @@ import { i18n } from 'src/boot/i18n';
 import { decodeUnicode } from 'src/utils/utils';
 import { CFG_TYPE } from 'src/constants/config';
 import { getAppMultiLanguage } from 'src/api/language';
+import cloneDeep from 'lodash/cloneDeep';
 
 export type AppState = {
 	tempAppMap: Record<string, AppStoreInfo>;
@@ -169,7 +170,12 @@ export const useAppStore = defineStore('app', {
 				case CATEGORIES_TYPE.SERVER.LifeStyle:
 				case CATEGORIES_TYPE.SERVER.News:
 				case CATEGORIES_TYPE.SERVER.Sports:
-					return this.pageData.find((item: any) => item.category === category);
+					// eslint-disable-next-line no-case-declarations
+					const result = this.pageData.find(
+						(item: any) => item.category === category
+					);
+					return result ? cloneDeep(result) : null;
+				// return this.pageData.find((item: any) => item.category === category);
 				default:
 					return null;
 			}
@@ -808,6 +814,11 @@ export const useAppStore = defineStore('app', {
 					app.status = newApp.status;
 					app.preflightError = [];
 					bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, newApp);
+					this._updateLocalAppsData(app);
+				} else {
+					app.status = APP_STATUS.preflightFailed;
+					app.preflightError = [i18n.global.t('error.app_info_get_failure')];
+					bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, app);
 					this._updateLocalAppsData(app);
 				}
 			});
