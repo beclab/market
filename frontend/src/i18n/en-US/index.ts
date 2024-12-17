@@ -184,6 +184,7 @@ export default {
 		terminus_not_enough_disk: 'Insufficient disk on the Olares cluster',
 		terminus_not_enough_gpu: 'Insufficient GPU on the Olares cluster',
 		operation_preform_failure: 'Operation failed',
+		app_info_get_failure: 'Failed to retrieve app information',
 		cluster_not_support_platform:
 			'This [app/recommend/model] does not support your Olares platform'
 	},

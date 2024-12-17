@@ -2,7 +2,6 @@
 	<div class="banner-root">
 		<!--		@autoplayTimeLeft="onAutoplayTimeLeft"-->
 		<swiper
-			:spaceBetween="30"
 			:centeredSlides="true"
 			:autoplay="{
 				delay: 2500,
@@ -110,7 +109,7 @@ const updateSwiper = () => {
 	} else if ($q.screen.width < 1024) {
 		swiperSize.value = $q.screen.width - 88;
 	} else {
-		swiperSize.value = $q.screen.width - 208 - 88;
+		swiperSize.value = $q.screen.width - 240 - 88;
 	}
 };
 
@@ -132,7 +131,7 @@ onBeforeUnmount(() => {
 
 	.banner-swiper {
 		position: relative;
-		max-width: 100%;
+		max-width: calc(100% - 88px);
 		height: 100%;
 
 		.banner-swiper-slide {

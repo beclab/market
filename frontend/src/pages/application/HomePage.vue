@@ -11,7 +11,6 @@
 				<bt-banner
 					v-else
 					:size="3"
-					class="home-padding"
 					style="padding-top: 20px; padding-bottom: 20px"
 				>
 					<template v-slot:swiper="{ index }">

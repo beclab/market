@@ -1,8 +1,7 @@
 <template>
 	<div
-		style="width: 100%; max-width: 100%; height: auto; position: relative"
 		:style="{ '--NavigationOffsite': `${navigationOffsite}px` }"
-		class="row justify-center items-center"
+		class="swiper-root row justify-center items-center"
 	>
 		<!-- custom back button -->
 		<div
@@ -29,7 +28,7 @@
 			:navigation="false"
 			:style="{ width: swiperSize + 'px' }"
 			:set-wrapper-size="true"
-			class="test-swiper"
+			class="swiper"
 			@slideChange="slideChange"
 			@swiper="setSwiperRef"
 		>
@@ -151,7 +150,7 @@ const updateSwiper = () => {
 	} else if ($q.screen.width < 1024) {
 		swiperSize.value = $q.screen.width - 88;
 	} else {
-		swiperSize.value = $q.screen.width - 208 - 88;
+		swiperSize.value = $q.screen.width - 240 - 88;
 	}
 	// console.log(swiperSize.value);
 	if (props.maxHeight && props.ratio) {
@@ -212,20 +211,27 @@ defineExpose({ slideTo });
 </script>
 
 <style scoped lang="scss">
-.button-left {
-	position: absolute;
-	top: calc(50% - var(--NavigationOffsite));
-	left: 25px;
-}
-
-.button-right {
-	position: absolute;
-	top: calc(50% - var(--NavigationOffsite));
-	right: 25px;
-}
-
-.test-swiper {
-	max-width: calc(100% - 88px);
+.swiper-root {
+	width: 100% !important;
+	max-width: 100% !important;
 	height: auto;
+	position: relative;
+
+	.button-left {
+		position: absolute;
+		top: calc(50% - var(--NavigationOffsite));
+		left: 25px;
+	}
+
+	.button-right {
+		position: absolute;
+		top: calc(50% - var(--NavigationOffsite));
+		right: 25px;
+	}
+
+	.swiper {
+		max-width: calc(100% - 88px);
+		height: auto;
+	}
 }
 </style>

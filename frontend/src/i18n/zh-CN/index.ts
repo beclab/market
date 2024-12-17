@@ -165,6 +165,7 @@ export default {
 		terminus_not_enough_memory: 'Olares 集群内存不足',
 		terminus_not_enough_disk: 'Olares 集群磁盘空间不足',
 		terminus_not_enough_gpu: 'Olares 集群 GPU 不足',
+		app_info_get_failure: '应用信息获取失败',
 		operation_preform_failure: '操作失败',
 		cluster_not_support_platform: '此应用/推荐/大模型不支持当前 Olares 平台'
 	},
