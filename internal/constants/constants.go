@@ -59,7 +59,7 @@ const (
 	AppStoreAppVersionURLTempl        = "https://%s:%s/app-store-server/v1/applications/version-history/%s"
 	AppStoreServiceReadMeURLTempl     = "https://%s:%s/app-store-server/v1/applications/%s/README.md"
 
-	AppStoreServicePagesDetailURLTempl = "https://%s:%s/app-store-server/v1/pages/detail"
+	AppStoreServicePagesDetailURLTempl = "https://%s:%s/app-store-server/v1/pages/detail?version=%s"
 
 	AppServiceHostEnv      = "APP_SERVICE_SERVICE_HOST"
 	AppServicePortEnv      = "APP_SERVICE_SERVICE_PORT"
