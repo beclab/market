@@ -88,12 +88,15 @@ export const useSettingStore = defineStore('setting', {
 					});
 				}
 
-				app?.options.appScope.appRef.forEach((appName) => {
-					if (!nameList.includes(appName)) {
+				console.log(nameList);
+
+				for (let i = 0; i < app.options.appScope.appRef.length; i++) {
+					if (!nameList.includes(app.options.appScope.appRef[i])) {
 						return true;
 					}
-				});
+				}
 			}
+
 			return false;
 		}
 	}

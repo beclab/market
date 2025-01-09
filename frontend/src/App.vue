@@ -13,7 +13,14 @@ import { i18n } from 'src/boot/i18n';
 import { supportLanguages } from 'src/i18n';
 import { useMenuStore } from 'src/stores/menu';
 // import { testSatisfies } from 'src/utils/version';
-
+//don't delete follow
+//sym_r_radar
+//sym_r_business_center
+//sym_r_extension
+//sym_r_interests
+//sym_r_group
+//sym_r_featured_play_list
+//sym_r_stack
 const appStore = useAppStore();
 const websocketStore = useSocketStore();
 const userStore = useUserStore();
