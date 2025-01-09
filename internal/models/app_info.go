@@ -270,7 +270,8 @@ type Dependency struct {
 	Name    string `yaml:"name" json:"name" bson:"name"`
 	Version string `yaml:"version" json:"version" bson:"version"`
 	// dependency type: system, application.
-	Type string `yaml:"type" json:"type" bson:"type"`
+	Type      string `yaml:"type" json:"type" bson:"type"`
+	Mandatory bool   `yaml:"mandatory" json:"mandatory" bson:"mandatory"`
 }
 
 type Options struct {

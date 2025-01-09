@@ -154,6 +154,10 @@ import {
 } from 'src/constants/config';
 import { bus, BUS_EVENT } from 'src/utils/bus';
 import ProgressButton from 'src/components/base/ProgressButton.vue';
+import DependencyDialog from 'src/components/appintro/DependencyDialog.vue';
+import ReferenceDialog from 'src/components/appintro/ReferenceDialog.vue';
+import { useSettingStore } from 'src/stores/setting';
+import { useQuasar } from 'quasar';
 
 const props = defineProps({
 	item: {
@@ -190,6 +194,7 @@ const textColor = ref<string>();
 const backgroundColor = ref<string>();
 const border = ref<string>();
 const { t } = useI18n();
+const $q = useQuasar();
 const status = ref();
 let hasCheck = false;
 
@@ -211,6 +216,7 @@ const { color: redAlpha } = useColor('red-alpha');
 const { color: negative } = useColor('negative');
 // const { color: orangeDefault } = useColor('orange-default');
 // const { color: orangeSoft } = useColor('orange-soft');
+const settingStore = useSettingStore();
 
 async function onClick() {
 	if (!props.item) {
@@ -226,10 +232,46 @@ async function onClick() {
 			break;
 		case APP_STATUS.installable:
 			appStore.installApp(props.item, props.development);
+			if (settingStore.hasDependency(props.item)) {
+				console.log(1);
+				settingStore.dependencyShow = true;
+				$q.dialog({
+					component: DependencyDialog,
+					componentProps: {
+						app: props.item
+					}
+				})
+					.onOk(() => {
+						//Do Something
+					})
+					.onDismiss(() => {
+						settingStore.dependencyShow = false;
+					});
+			}
+			console.log(2);
+
+			if (settingStore.hasReference(props.item)) {
+				console.log(3);
+				settingStore.referenceShow = true;
+				$q.dialog({
+					component: ReferenceDialog,
+					componentProps: {
+						app: props.item
+					}
+				})
+					.onOk(() => {
+						//Do Something
+					})
+					.onDismiss(() => {
+						settingStore.referenceShow = false;
+					});
+			}
+			console.log(4);
 			break;
 		case APP_STATUS.pending:
 		case APP_STATUS.downloading:
 		case APP_STATUS.installing:
+		case APP_STATUS.initializing:
 			console.log(props.item?.name);
 			console.log('cancel installing');
 			if (canInstallingCancel(props.item?.cfgType)) {

@@ -1,7 +1,5 @@
 import { defineStore } from 'pinia';
-
 import { getApp, getAppsByNames, getPage } from 'src/api/storeApi';
-
 import {
 	cancelInstalling,
 	installApp,
@@ -10,12 +8,10 @@ import {
 	uninstallApp,
 	upgradeApp
 } from 'src/api/private/operations';
-
 import {
 	getAppsBriefInfoByStatus,
 	getInstalledApps
 } from 'src/api/private/user';
-
 import {
 	APP_STATUS,
 	AppStoreInfo,
@@ -33,6 +29,7 @@ import { decodeUnicode } from 'src/utils/utils';
 import { CFG_TYPE } from 'src/constants/config';
 import { getAppMultiLanguage } from 'src/api/language';
 import cloneDeep from 'lodash/cloneDeep';
+import { appPushError, ErrorCode } from 'src/constants/errorCode';
 
 export type AppState = {
 	tempAppMap: Record<string, AppStoreInfo>;
@@ -817,7 +814,8 @@ export const useAppStore = defineStore('app', {
 					this._updateLocalAppsData(app);
 				} else {
 					app.status = APP_STATUS.preflightFailed;
-					app.preflightError = [i18n.global.t('error.app_info_get_failure')];
+					app.preflightError = [];
+					appPushError(app, ErrorCode.G002);
 					bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, app);
 					this._updateLocalAppsData(app);
 				}

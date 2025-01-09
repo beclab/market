@@ -185,6 +185,7 @@ onMounted(async () => {
 	padding: 0 44px;
 
 	.log-message {
+		padding-left: 4px;
 		max-width: 500px !important;
 		white-space: pre-line;
 		overflow: hidden;
@@ -198,5 +199,9 @@ onMounted(async () => {
 		width: 100%;
 		height: 600px;
 	}
+}
+
+::v-deep(.q-btn.text-grey-8:before) {
+	border: unset !important;
 }
 </style>

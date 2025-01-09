@@ -1,5 +1,6 @@
 import { CFG_TYPE } from 'src/constants/config';
 import { i18n } from 'src/boot/i18n';
+import { ErrorGroup } from 'src/constants/errorCode';
 
 export interface AppStoreInfo {
 	id: string;
@@ -88,7 +89,7 @@ export interface AppStoreInfo {
 
 	//local
 	progress: string;
-	preflightError: string[];
+	preflightError: ErrorGroup[];
 }
 
 export interface Entrance {
@@ -118,6 +119,7 @@ export interface Dependency {
 	name: string;
 	type: DEPENDENCIES_TYPE;
 	version: string;
+	mandatory: boolean;
 }
 
 export interface Policy {

@@ -47,7 +47,7 @@ const routes = [
 				component: () => import('pages/agent/AgentPage.vue')
 			},
 			{
-				path: '/terminus',
+				path: '/myapps',
 				name: MENU_TYPE.MyTerminus,
 				component: () => import('pages/me/MyTerminusPage.vue')
 			},
