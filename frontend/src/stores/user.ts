@@ -17,11 +17,11 @@ import {
 	getUserInfo,
 	getUserResource
 } from 'src/api/private/user';
-import { i18n } from 'src/boot/i18n';
 import { TerminusApp } from '@bytetrade/core';
 import { CFG_TYPE } from 'src/constants/config';
 import { bus, BUS_EVENT } from 'src/utils/bus';
 import { Range, Version } from 'src/utils/version';
+import { appPushError, ErrorCode } from 'src/constants/errorCode';
 
 export type UserState = {
 	userResource: UserResource | null;
@@ -91,7 +91,7 @@ export const useUserStore = defineStore('userStore', {
 			} else {
 				app.status = APP_STATUS.preflightFailed;
 				if (app.preflightError.length == 0) {
-					app.preflightError.push(i18n.global.t('error.unknown_error'));
+					appPushError(app, ErrorCode.G001);
 				}
 			}
 		},
@@ -112,23 +112,19 @@ export const useUserStore = defineStore('userStore', {
 		},
 		_userRolePreflight(app: AppStoreInfo): boolean {
 			if (!this.user || !this.user.role) {
-				app.preflightError.push(i18n.global.t('error.failed_get_user_role'));
+				appPushError(app, ErrorCode.G003);
 				return false;
 			}
 
 			if (app.onlyAdmin && this.user.role !== ROLE_TYPE.Admin) {
-				app.preflightError.push(
-					i18n.global.t('error.only_be_installed_by_the_admin')
-				);
+				appPushError(app, ErrorCode.G004);
 				return false;
 			}
 			if (
 				app.cfgType === CFG_TYPE.MIDDLEWARE &&
 				this.user.role !== ROLE_TYPE.Admin
 			) {
-				app.preflightError.push(
-					i18n.global.t('error.not_admin_role_install_middleware')
-				);
+				appPushError(app, ErrorCode.G005);
 				return false;
 			}
 			if (
@@ -137,9 +133,7 @@ export const useUserStore = defineStore('userStore', {
 				app.options.appScope.clusterScoped &&
 				this.user.role !== ROLE_TYPE.Admin
 			) {
-				app.preflightError.push(
-					i18n.global.t('error.not_admin_role_install_cluster_app')
-				);
+				appPushError(app, ErrorCode.G006);
 				return false;
 			}
 			return true;
@@ -147,9 +141,7 @@ export const useUserStore = defineStore('userStore', {
 
 		_terminusOSVersionPreflight(app: AppStoreInfo): boolean {
 			if (!this.osVersion) {
-				app.preflightError.push(
-					i18n.global.t('error.failed_to_get_os_version')
-				);
+				appPushError(app, ErrorCode.G007);
 				return false;
 			}
 			if (
@@ -163,9 +155,7 @@ export const useUserStore = defineStore('userStore', {
 						//temp
 						if (appInfo.version == '>=0.5.0-0') {
 							// console.log('intercept by temporary version : >=0.5.0-0');
-							app.preflightError.push(
-								i18n.global.t('error.app_is_not_compatible_terminus_os')
-							);
+							appPushError(app, ErrorCode.G008);
 							return false;
 						}
 
@@ -187,17 +177,13 @@ export const useUserStore = defineStore('userStore', {
 							}
 						} catch (e) {
 							console.log(e);
-							app.preflightError.push(
-								i18n.global.t('error.app_is_not_compatible_terminus_os')
-							);
+							appPushError(app, ErrorCode.G008);
 							return false;
 						}
 					}
 				}
 			}
-			app.preflightError.push(
-				i18n.global.t('error.app_is_not_compatible_terminus_os')
-			);
+			appPushError(app, ErrorCode.G008);
 			return false;
 		},
 
@@ -211,9 +197,7 @@ export const useUserStore = defineStore('userStore', {
 				!this.userResource.cpu ||
 				!this.userResource.memory
 			) {
-				app.preflightError.push(
-					i18n.global.t('error.failed_to_get_user_resource')
-				);
+				appPushError(app, ErrorCode.G009);
 				return false;
 			}
 
@@ -226,7 +210,7 @@ export const useUserStore = defineStore('userStore', {
 				this.userResource.cpu.total &&
 				Number(app.requiredCpu) > availableCpu
 			) {
-				app.preflightError.push(i18n.global.t('error.user_not_enough_cpu'));
+				appPushError(app, ErrorCode.G014);
 				isOK = false;
 			}
 
@@ -237,13 +221,14 @@ export const useUserStore = defineStore('userStore', {
 				this.userResource.memory.total &&
 				Number(app.requiredMemory) > availableMemory
 			) {
-				app.preflightError.push(i18n.global.t('error.user_not_enough_memory'));
+				appPushError(app, ErrorCode.G015);
 				isOK = false;
 			}
 			return isOK;
 		},
 
 		_appDependenciesPreflight(app: AppStoreInfo): boolean {
+			let isOK = true;
 			if (
 				app.options &&
 				app.options.dependencies &&
@@ -266,15 +251,31 @@ export const useUserStore = defineStore('userStore', {
 						this._saveDependencies(app, dependency);
 
 						if (!nameList.includes(dependency.name)) {
-							app.preflightError.push(
-								i18n.global.t('error.need_to_install_dependent_app_first')
-							);
-							return false;
+							appPushError(app, ErrorCode.G012_SG001, {
+								name: dependency.name,
+								version: dependency.version
+							});
+							isOK = false;
+						}
+					}
+
+					if (
+						dependency.type === DEPENDENCIES_TYPE.application &&
+						dependency.mandatory
+					) {
+						this._saveDependencies(app, dependency);
+
+						if (!nameList.includes(dependency.name)) {
+							appPushError(app, ErrorCode.G012_SG002, {
+								name: dependency.name,
+								version: dependency.version
+							});
+							isOK = false;
 						}
 					}
 				}
 			}
-			return true;
+			return isOK;
 		},
 
 		_saveDependencies(app: AppStoreInfo, dependency: Dependency) {
@@ -304,9 +305,7 @@ export const useUserStore = defineStore('userStore', {
 				!this.systemResource.metrics ||
 				!this.systemResource.nodes
 			) {
-				app.preflightError.push(
-					i18n.global.t('error.failed_to_get_system_resource')
-				);
+				appPushError(app, ErrorCode.G013);
 				return false;
 			}
 
@@ -320,7 +319,7 @@ export const useUserStore = defineStore('userStore', {
 				this.systemResource.metrics.cpu.total &&
 				Number(app.requiredCpu) > availableCpu
 			) {
-				app.preflightError.push(i18n.global.t('error.terminus_not_enough_cpu'));
+				appPushError(app, ErrorCode.G014);
 				isOK = false;
 			}
 
@@ -332,9 +331,7 @@ export const useUserStore = defineStore('userStore', {
 				this.systemResource.metrics.memory.total &&
 				Number(app.requiredMemory) > availableMemory
 			) {
-				app.preflightError.push(
-					i18n.global.t('error.terminus_not_enough_memory')
-				);
+				appPushError(app, ErrorCode.G015);
 				isOK = false;
 			}
 
@@ -346,15 +343,13 @@ export const useUserStore = defineStore('userStore', {
 				this.systemResource.metrics.disk.total &&
 				Number(app.requiredDisk) > availableDisk
 			) {
-				app.preflightError.push(
-					i18n.global.t('error.terminus_not_enough_disk')
-				);
+				appPushError(app, ErrorCode.G016);
 				isOK = false;
 			}
 
 			const availableGpu = this.systemResource.metrics.gpu.total > 0;
 			if (app.requiredGpu && Number(app.requiredGpu) && !availableGpu) {
-				app.preflightError.push(i18n.global.t('error.terminus_not_enough_gpu'));
+				appPushError(app, ErrorCode.G017);
 				isOK = false;
 			}
 
@@ -364,7 +359,7 @@ export const useUserStore = defineStore('userStore', {
 				!this.systemResource.nodes ||
 				this.systemResource.nodes.length === 0
 			) {
-				app.preflightError.push(i18n.global.t('error.terminus_not_enough_gpu'));
+				appPushError(app, ErrorCode.G017);
 				isOK = false;
 			} else {
 				const intersectedArray = intersection(
@@ -372,9 +367,7 @@ export const useUserStore = defineStore('userStore', {
 					app.supportArch
 				);
 				if (intersectedArray.length === 0) {
-					app.preflightError.push(
-						i18n.global.t('error.cluster_not_support_platform')
-					);
+					appPushError(app, ErrorCode.G018);
 					isOK = false;
 				}
 			}

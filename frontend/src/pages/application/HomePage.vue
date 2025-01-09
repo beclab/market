@@ -15,7 +15,6 @@
 				>
 					<template v-slot:swiper="{ index }">
 						<q-img
-							style="border-radius: 12px"
 							width="100%"
 							ratio="4.42"
 							:src="getRequireImage(`banner/home_banner${index + 1}.png`)"

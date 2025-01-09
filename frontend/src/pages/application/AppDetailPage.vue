@@ -69,13 +69,27 @@
 								<div class="text-body-3 text-negative q-ml-sm">
 									{{ t('my.unable_to_install_app') }}
 								</div>
-								<template v-for="message in item.preflightError" :key="message">
+								<template
+									v-for="error in sortErrorGroups(item.preflightError)"
+									:key="error.code"
+								>
 									<div class="row justify-start items-center">
-										<div class="text-circle bg-negative" />
+										<div class="text-circle bg-negative"></div>
 										<div class="text-negative text-body-3">
-											{{ message }}
+											{{ t(error.title, error.variables || {}) }}
 										</div>
 									</div>
+									<template
+										v-for="(sub, index) in error.subGroups"
+										:key="index"
+									>
+										<div class="q-ml-lg row justify-start items-center">
+											<div class="text-circle bg-negative"></div>
+											<div class="text-negative text-body-3">
+												{{ t(sub.title, sub.variables || {}) }}
+											</div>
+										</div>
+									</template>
 								</template>
 							</div>
 						</div>
@@ -671,6 +685,7 @@ import { useI18n } from 'vue-i18n';
 import TitleBar from 'src/components/base/TitleBar.vue';
 import { useQuasar } from 'quasar';
 import { requiredPermissions, showIcon } from 'src/constants/config';
+import { sortErrorGroups } from 'src/constants/errorCode';
 
 const route = useRoute();
 const router = useRouter();

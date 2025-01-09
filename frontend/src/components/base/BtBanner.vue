@@ -7,7 +7,7 @@
 				delay: 2500,
 				disableOnInteraction: false
 			}"
-			:style="{ width: swiperSize + 'px' }"
+			:style="{ width: swiperSize + 'px', borderRadius: '12px' }"
 			:navigation="false"
 			:modules="modules"
 			class="banner-swiper"

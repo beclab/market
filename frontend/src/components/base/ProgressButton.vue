@@ -1,5 +1,5 @@
 <template>
-	<div class="progress-button">
+	<div class="progress-button" :style="{ background: backgroundColor }">
 		<span
 			class="progress-text"
 			:class="textClass"
@@ -119,6 +119,7 @@ defineExpose({ startProgress });
 		-webkit-background-clip: text;
 		color: transparent;
 		width: 100%;
+		text-align: center;
 	}
 }
 </style>

@@ -26,7 +26,9 @@ export default {
 		submitter: '提交者',
 		documents: '文档',
 		see_all: '查看全部',
-		more: '更多'
+		more: '更多',
+		ok: 'OK',
+		close: '关闭'
 	},
 	main: {
 		discover: '发现',
@@ -90,7 +92,13 @@ export default {
 		reference_app: '授权应用',
 		see_all_version: '查看所有版本',
 		download: '下载',
-		no_version_history_desc: '该应用没有版本历史记录'
+		no_version_history_desc: '该应用没有版本历史记录',
+		dependency_not_installed: '依赖应用未安装',
+		require_dependencies_for_full:
+			'本应用程序可能需要以下依赖项才能实现全部功能。',
+		reference_app_not_installed: '授权应用未安装',
+		need_reference_app_to_use:
+			'该应用为集群应用，您需要安装对应的授权应用来使用它。'
 	},
 	permission: {
 		files: '文件',
@@ -167,7 +175,9 @@ export default {
 		terminus_not_enough_gpu: 'Olares 集群 GPU 不足',
 		app_info_get_failure: '应用信息获取失败',
 		operation_preform_failure: '操作失败',
-		cluster_not_support_platform: '此应用/推荐/大模型不支持当前 Olares 平台'
+		cluster_not_support_platform: '此应用/推荐/大模型不支持当前 Olares 平台',
+		app_not_install_details: '应用名称：{name}，版本：{version}',
+		middleware_not_install_details: '中间件：{name}，版本：{version}'
 	},
 	my: {
 		market: '市场',
