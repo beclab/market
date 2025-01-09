@@ -25,6 +25,7 @@ type Entrance struct {
 	State      string `json:"state"`
 	Title      string `json:"title"`
 	URL        string `json:"url"`
+	Invisible  bool   `json:"invisible"`
 }
 
 type Item struct {
