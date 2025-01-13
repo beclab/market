@@ -82,7 +82,7 @@ export async function getSystemResource(): Promise<TerminusResource | null> {
 export async function getOperateHistory(source: string): Promise<any> {
 	try {
 		const { result }: any = await axios.get(
-			'/app-store/v1/operate_history?resourceType=app|model|recommend&source=' +
+			'/app-store/v1/operate_history?resourceType=app|model|recommend|middleware&source=' +
 				source
 		);
 		console.log(result);
