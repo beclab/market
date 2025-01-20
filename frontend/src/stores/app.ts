@@ -784,7 +784,12 @@ export const useAppStore = defineStore('app', {
 		},
 
 		async _getUpdateApps() {
-			this.updateApps = this.installApps.filter((app) => app.needUpdate);
+			this.updateApps = this.installApps.filter(
+				(app) =>
+					app.needUpdate &&
+					(app.status === APP_STATUS.running ||
+						app.status === APP_STATUS.suspend)
+			);
 
 			const queryState = [APP_STATUS.upgrading];
 			const workingNameList = await getAppsBriefInfoByStatus(queryState);

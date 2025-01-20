@@ -40,7 +40,6 @@ const appStore = useAppStore();
 
 <style lang="scss">
 ::-webkit-scrollbar {
-	/*隐藏滚轮*/
 	display: none;
 }
 
