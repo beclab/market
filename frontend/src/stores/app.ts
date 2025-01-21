@@ -1,7 +1,5 @@
 import { defineStore } from 'pinia';
-
 import { getApp, getAppsByNames, getPage } from 'src/api/storeApi';
-
 import {
 	cancelInstalling,
 	installApp,
@@ -10,12 +8,10 @@ import {
 	uninstallApp,
 	upgradeApp
 } from 'src/api/private/operations';
-
 import {
 	getAppsBriefInfoByStatus,
 	getInstalledApps
 } from 'src/api/private/user';
-
 import {
 	APP_STATUS,
 	AppStoreInfo,
@@ -32,6 +28,8 @@ import { i18n } from 'src/boot/i18n';
 import { decodeUnicode } from 'src/utils/utils';
 import { CFG_TYPE } from 'src/constants/config';
 import { getAppMultiLanguage } from 'src/api/language';
+import cloneDeep from 'lodash/cloneDeep';
+import { appPushError, ErrorCode } from 'src/constants/errorCode';
 
 export type AppState = {
 	tempAppMap: Record<string, AppStoreInfo>;
@@ -169,7 +167,12 @@ export const useAppStore = defineStore('app', {
 				case CATEGORIES_TYPE.SERVER.LifeStyle:
 				case CATEGORIES_TYPE.SERVER.News:
 				case CATEGORIES_TYPE.SERVER.Sports:
-					return this.pageData.find((item: any) => item.category === category);
+					// eslint-disable-next-line no-case-declarations
+					const result = this.pageData.find(
+						(item: any) => item.category === category
+					);
+					return result ? cloneDeep(result) : null;
+				// return this.pageData.find((item: any) => item.category === category);
 				default:
 					return null;
 			}
@@ -781,7 +784,12 @@ export const useAppStore = defineStore('app', {
 		},
 
 		async _getUpdateApps() {
-			this.updateApps = this.installApps.filter((app) => app.needUpdate);
+			this.updateApps = this.installApps.filter(
+				(app) =>
+					app.needUpdate &&
+					(app.status === APP_STATUS.running ||
+						app.status === APP_STATUS.suspend)
+			);
 
 			const queryState = [APP_STATUS.upgrading];
 			const workingNameList = await getAppsBriefInfoByStatus(queryState);
@@ -808,6 +816,12 @@ export const useAppStore = defineStore('app', {
 					app.status = newApp.status;
 					app.preflightError = [];
 					bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, newApp);
+					this._updateLocalAppsData(app);
+				} else {
+					app.status = APP_STATUS.preflightFailed;
+					app.preflightError = [];
+					appPushError(app, ErrorCode.G002);
+					bus.emit(BUS_EVENT.UPDATE_APP_STORE_INFO, app);
 					this._updateLocalAppsData(app);
 				}
 			});

@@ -22,15 +22,16 @@ import (
 	"market/internal/appmgr"
 	"market/internal/appservice"
 	"market/internal/bfl"
-	"market/internal/boltdb"
 	"market/internal/conf"
 	"market/internal/constants"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/internal/watchdog"
 	"market/pkg/api"
 	"market/pkg/utils"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/emicklei/go-restful/v3"
 	"github.com/golang/glog"
@@ -77,7 +78,7 @@ func (h *Handler) handleTerminusVersion(req *restful.Request, resp *restful.Resp
 		return
 	}
 
-	resBody, err := appservice.TerminusVersion(token)
+	resBody, err := appservice.TerminusVersion()
 	if err != nil {
 		api.HandleError(resp, err)
 		return
@@ -131,26 +132,32 @@ func (h *Handler) list(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	page := req.QueryParameter("page")
-	size := req.QueryParameter("size")
+	page, err := strconv.Atoi(req.QueryParameter("page"))
+	if err != nil {
+		glog.Infof("page error: %s", err.Error())
+		page = 0
+	}
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
+	if err != nil {
+		glog.Infof("size error: %s", err.Error())
+		size = 0
+	}
+
 	category := req.QueryParameter("category")
 	ty := req.QueryParameter("type")
 	if ty == "" {
 		ty = defaultAppType()
 	}
 
-	res, err := appmgr.GetApps(page, size, category, ty)
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totalCount)))
 }
 
 func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
@@ -160,11 +167,7 @@ func (h *Handler) menuTypes(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	res, err := appmgr.GetAppTypes()
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	res := appmgr.ReadCacheAppTypes()
 
 	types := parseAppTypes(res)
 
@@ -237,19 +240,21 @@ func (h *Handler) listTop(req *restful.Request, resp *restful.Response) {
 	if ty == "" {
 		ty = defaultAppType()
 	}
-	size := req.QueryParameter("size")
-	res, err := appmgr.GetTopApps(category, ty, size)
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
 	if err != nil {
-		api.HandleError(resp, err)
-		return
+		glog.Infof("size error: %s", err.Error())
+		size = 0
 	}
+
+	apps, totalCount := appmgr.ReadCacheTopApps(category, ty, size)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totalCount)))
 }
 
 func (h *Handler) listLatest(req *restful.Request, resp *restful.Response) {
@@ -265,26 +270,32 @@ func (h *Handler) listLatest(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	page := req.QueryParameter("page")
-	size := req.QueryParameter("size")
+	page, err := strconv.Atoi(req.QueryParameter("page"))
+	if err != nil {
+		glog.Infof("page error: %s", err.Error())
+		page = 0
+	}
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
+	if err != nil {
+		glog.Infof("size error: %s", err.Error())
+		size = 0
+	}
+
 	category := req.QueryParameter("category")
 	ty := req.QueryParameter("type")
 	if ty == "" {
 		ty = defaultAppType()
 	}
 
-	res, err := appmgr.GetApps(page, size, category, ty)
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totalCount)))
 }
 
 func (h *Handler) openApplication(req *restful.Request, resp *restful.Response) {
@@ -350,10 +361,20 @@ func (h *Handler) search(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	page := req.QueryParameter("page")
-	size := req.QueryParameter("size")
-	res, err := appmgr.Search(appName, page, size)
+	page, err := strconv.Atoi(req.QueryParameter("page"))
 	if err != nil {
+		glog.Infof("page error: %s", err.Error())
+		page = 0
+	}
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
+	if err != nil {
+		glog.Infof("size error: %s", err.Error())
+		size = 0
+	}
+
+	apps, totals := appmgr.SearchFromCache(page, size, appName)
+	if apps == nil {
 		api.HandleError(resp, err)
 		return
 	}
@@ -361,9 +382,9 @@ func (h *Handler) search(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	_ = resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	_ = resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totals)))
 }
 
 func (h *Handler) searchPost(req *restful.Request, resp *restful.Response) {
@@ -392,10 +413,20 @@ func (h *Handler) searchPost(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	page := req.QueryParameter("page")
-	size := req.QueryParameter("size")
-	res, err := appmgr.Search(appName, page, size)
+	page, err := strconv.Atoi(req.QueryParameter("page"))
 	if err != nil {
+		glog.Infof("page error: %s", err.Error())
+		page = 0
+	}
+
+	size, err := strconv.Atoi(req.QueryParameter("size"))
+	if err != nil {
+		glog.Infof("size error: %s", err.Error())
+		size = 0
+	}
+
+	apps, totals := appmgr.SearchFromCache(page, size, appName)
+	if apps == nil {
 		api.HandleError(resp, err)
 		return
 	}
@@ -403,9 +434,9 @@ func (h *Handler) searchPost(req *restful.Request, resp *restful.Response) {
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
 
-	appWithStatusList := parseAppInfos(h, res, appsMap, workflowMap, middlewareMap)
+	appWithStatusList := parseAppInfos(h, apps, appsMap, workflowMap, middlewareMap)
 
-	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteEntity(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totals)))
 }
 
 func (h *Handler) info(req *restful.Request, resp *restful.Response) {
@@ -421,10 +452,10 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infoLocal, _ := boltdb.GetLocalAppInfo(appName)
+	infoLocal, _ := redisdb.GetLocalAppInfo(appName)
 
-	infoMarket, err := appmgr.GetAppInfo(appName)
-	if err != nil && infoLocal == nil {
+	infoMarket := appmgr.ReadCacheApplication(appName)
+	if infoMarket == nil && infoLocal == nil {
 		api.HandleError(resp, errors.New("not found"))
 		return
 	}

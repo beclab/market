@@ -25,7 +25,7 @@
 					outline
 					no-caps
 					label="Install"
-					@click="appStore.installApp(item.name, false)"
+					@click="appStore.installApp(item, false)"
 				/>
 			</div>
 			<div

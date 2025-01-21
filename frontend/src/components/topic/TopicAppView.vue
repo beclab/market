@@ -26,10 +26,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, PropType, ref, watch } from 'vue';
+import { onBeforeUnmount, onMounted, PropType, ref, watch } from 'vue';
 import { AppStoreInfo, TopicInfo } from 'src/constants/constants';
 import AppSmallCard from 'src/components/appcard/AppSmallCard.vue';
-import { updateAppStoreList } from 'src/utils/bus';
+import { bus, BUS_EVENT, updateAppStoreList } from 'src/utils/bus';
 
 const props = defineProps({
 	item: {
@@ -44,7 +44,16 @@ const props = defineProps({
 const app = ref<AppStoreInfo | null>(null);
 const cardRef = ref();
 
+const updateApp = (update: AppStoreInfo) => {
+	console.log(`get status ${update.name}`);
+	if (update && app.value) {
+		updateAppStoreList([app.value], update);
+	}
+};
+
 onMounted(() => {
+	bus.on(BUS_EVENT.UPDATE_APP_STORE_INFO, updateApp);
+
 	if (props.item && props.item.apps.length > 0) {
 		app.value = props.item.apps[0];
 	}
@@ -53,6 +62,10 @@ onMounted(() => {
 const handleImgClick = () => {
 	cardRef.value.goAppDetails();
 };
+
+onBeforeUnmount(() => {
+	bus.off(BUS_EVENT.UPDATE_APP_STORE_INFO, updateApp);
+});
 
 watch(
 	() => props.item,

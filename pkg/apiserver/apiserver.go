@@ -15,10 +15,11 @@
 package apiserver
 
 import (
-	"market/internal/boltdb"
+	"market/internal/appmgr"
 	"market/internal/conf"
 	"market/internal/constants"
 	"market/internal/monitor"
+	"market/internal/redisdb"
 	servicev1 "market/pkg/apiserver/service/v1"
 	"net/http"
 
@@ -68,13 +69,14 @@ func (s *APIServer) PrepareRun() error {
 	if conf.GetIsPublic() {
 		return nil
 	}
-	err := boltdb.Init()
+	err := redisdb.Init()
 	if err != nil {
-		glog.Fatalf("boltdb init err%s", err.Error())
+		glog.Fatalf("redisdb init err%s", err.Error())
 	}
 
 	glog.Info("call monitor Start")
 	go monitor.Start()
+	appmgr.CacheCenterStart()
 
 	return nil
 }

@@ -1,16 +1,19 @@
 package monitor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"market/internal/bfl"
 	"market/internal/event"
+	"os"
+	"strconv"
 	"time"
 
 	"market/internal/watchdog"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/golang/glog"
-	"go.etcd.io/bbolt"
 )
 
 type Entrance struct {
@@ -22,6 +25,7 @@ type Entrance struct {
 	State      string `json:"state"`
 	Title      string `json:"title"`
 	URL        string `json:"url"`
+	Invisible  bool   `json:"invisible"`
 }
 
 type Item struct {
@@ -58,8 +62,23 @@ type EventForSocket struct {
 }
 
 var eventClient *event.Client = nil
+var redisClient *redis.Client
 
 func Start() {
+	// Initialize Redis client
+	redisDbNumberStr := os.Getenv("REDIS_DB_NUMBER")
+
+	redisDbNumber, errAtoi := strconv.Atoi(redisDbNumberStr)
+	if errAtoi != nil {
+		glog.Errorf("Error converting REDIS_DB_NUMBER to int:", errAtoi)
+		return
+	}
+
+	redisClient = redis.NewClient(&redis.Options{
+		Addr:     os.Getenv("REDIS_ADDRESS"),  // Redis server address
+		Password: os.Getenv("REDIS_PASSWORD"), // No password set
+		DB:       redisDbNumber,               // Use default DB
+	})
 
 	interval := 5 * time.Second
 	ticker := time.NewTicker(interval)
@@ -92,73 +111,59 @@ func checkState(jsonData string) {
 		return
 	}
 
-	// open or create BoltDB
-	db, err := bbolt.Open("./data/states.db", 0600, nil)
-	if err != nil {
-		glog.Fatalf("Error opening database: %v", err)
-		return
-	}
-	defer db.Close()
+	ctx := context.Background()
 
 	// save entrance state
-	err = db.Update(func(tx *bbolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte("EntranceStates"))
-		if err != nil {
-			return err
-		}
+	for _, item := range response.Data.Data.Items {
+		for _, entrance := range item.Entrances {
+			// get state from Redis
+			currentState, err := redisClient.Get(ctx, entrance.ID).Result()
+			if err == redis.Nil {
+				currentState = "" // Key does not exist
+			} else if err != nil {
+				glog.Fatalf("Error getting state from Redis: %v", err)
+				return
+			}
 
-		for _, item := range response.Data.Data.Items {
-			for _, entrance := range item.Entrances {
-				// get state from db
-				currentState := bucket.Get([]byte(entrance.ID))
+			// if state not same，print item
+			if currentState != "" && currentState != entrance.State {
+				// itemJSON, _ := json.MarshalIndent(item, "", "  ")
+				// glog.Infof("Item with ID %s has inconsistent state:\n%s\n", entrance.ID, itemJSON)
 
-				// if state not same，print item
-				if currentState != nil && string(currentState) != entrance.State {
-					itemJSON, _ := json.MarshalIndent(item, "", "  ")
-					glog.Infof("Item with ID %s has inconsistent state:\n%s\n", entrance.ID, itemJSON)
+				eventClient.CreateEvent("entrance-state-event",
+					fmt.Sprintf("App %s entrance %s state is change to %s", item.Name, entrance.Name, entrance.State),
+					item)
 
-					eventClient.CreateEvent("entrance-state-event",
-						fmt.Sprintf("App %s entrance %s state is change to %s", item.Name, entrance.Name, entrance.State),
-						item)
+				watchdog.BroadcastMessage(EventForSocket{
+					Code: 200,
+					Type: "entrance-state-event",
+					App:  item,
+				})
 
-					watchdog.BroadcastMessage(EventForSocket{
+				if item.State == "initializing" {
+					resp := watchdog.InstallOrUpgradeResp{
 						Code: 200,
-						Type: "entrance-state-event",
-						App:  item,
-					})
-
-					if item.State == "initializing" {
-
-						resp := watchdog.InstallOrUpgradeResp{
-							Code: 200,
-							Data: watchdog.InstallOrUpgradeStatus{
-								Uid:      item.Name,
-								Type:     "install",
-								Status:   "initializing",
-								Progress: "100",
-								Msg:      "",
-								From:     "",
-							},
-						}
-
-						watchdog.BroadcastMessage(resp)
+						Data: watchdog.InstallOrUpgradeStatus{
+							Uid:      item.Name,
+							Type:     "install",
+							Status:   "initializing",
+							Progress: "100",
+							Msg:      "",
+							From:     "",
+						},
 					}
 
-				}
-
-				// save state to db
-				err := bucket.Put([]byte(entrance.ID), []byte(entrance.State))
-				if err != nil {
-					return err
+					watchdog.BroadcastMessage(resp)
 				}
 			}
+
+			// save state to Redis
+			err = redisClient.Set(ctx, entrance.ID, entrance.State, 0).Err()
+			if err != nil {
+				glog.Fatalf("Error saving state to Redis: %v", err)
+			}
 		}
-		return nil
-	})
-	if err != nil {
-		glog.Fatalf("Error updating database: %v", err)
 	}
 
-	glog.Info("States have been stored in BoltDB.")
-
+	// glog.Info("States have been stored in Redis.")
 }

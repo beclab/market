@@ -2,6 +2,7 @@ package appmgr
 
 import (
 	"fmt"
+	"market/internal/appservice"
 	"market/internal/constants"
 	"net/http"
 	"sync"
@@ -28,7 +29,7 @@ func getPagesDetailLoop() {
 
 func callLoop(f func() error) {
 	_ = f()
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(time.Minute * 30)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -40,7 +41,12 @@ func callLoop(f func() error) {
 }
 
 func getPagesDetailFromAdmin() error {
-	url := fmt.Sprintf(constants.AppStoreServicePagesDetailURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf(constants.AppStoreServicePagesDetailURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), version)
 	bodyStr, err := sendHttpRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err

@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"market/internal/appmgr"
 	"market/internal/appservice"
-	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/pkg/api"
-	"reflect"
 	"sort"
 	"strings"
 
@@ -73,15 +72,15 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infosLocal, err := boltdb.GetLocalAppInfoMap()
+	infosLocal, err := redisdb.GetLocalAppInfoMap()
 	if err != nil {
 		api.HandleError(resp, err)
 		return
 	}
 
-	infosMarket, err := appmgr.GetAppInfos(names)
-	if err != nil {
-		api.HandleError(resp, err)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	if infosMarket == nil {
+		api.HandleError(resp, errors.New("get apps failed"))
 		return
 	}
 
@@ -166,22 +165,12 @@ func (h *Handler) workflowRecommendsDetail(req *restful.Request, resp *restful.R
 
 	category := req.QueryParameter("category")
 
-	res, err := appmgr.GetApps("0", "0", category, constants.RecommendType)
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	apps, totals := appmgr.ReadCacheApplications(0, 0, category, constants.RecommendType)
 
 	workflowMap, _ := getWorkflowsMap(token)
 
 	var appWithStatusList []*models.ApplicationInfo
-	for _, item := range res.Items {
-		info := &models.ApplicationInfo{}
-		err := json.Unmarshal(item, info)
-		if err != nil {
-			glog.Warningf("err:%s", err.Error())
-			continue
-		}
+	for _, info := range apps {
 
 		getCommonStatus(info, workflowMap)
 		if (info.HasRemoveLabel() || info.HasSuspendLabel()) && info.Status == models.AppUninstalled {
@@ -192,7 +181,7 @@ func (h *Handler) workflowRecommendsDetail(req *restful.Request, resp *restful.R
 		appWithStatusList = append(appWithStatusList, info)
 	}
 
-	resp.WriteAsJson(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteAsJson(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totals)))
 }
 
 func (h *Handler) modelList(req *restful.Request, resp *restful.Response) {
@@ -204,23 +193,13 @@ func (h *Handler) modelList(req *restful.Request, resp *restful.Response) {
 
 	category := req.QueryParameter("category")
 
-	res, err := appmgr.GetApps("0", "0", category, constants.ModelType)
-	if err != nil {
-		api.HandleError(resp, err)
-		return
-	}
+	apps, totals := appmgr.ReadCacheApplications(0, 0, category, constants.ModelType)
 
 	//todo get running models status
 	modelsMap, _ := getModelsMap(token)
 
 	var appWithStatusList []*models.ApplicationInfo
-	for _, item := range res.Items {
-		info := &models.ApplicationInfo{}
-		err := json.Unmarshal(item, info)
-		if err != nil {
-			glog.Warningf("err:%s", err.Error())
-			continue
-		}
+	for _, info := range apps {
 
 		getModelStatus(info, modelsMap)
 		if (info.HasRemoveLabel() || info.HasSuspendLabel()) && info.Status == models.AppUninstalled {
@@ -231,7 +210,7 @@ func (h *Handler) modelList(req *restful.Request, resp *restful.Response) {
 		appWithStatusList = append(appWithStatusList, info)
 	}
 
-	resp.WriteAsJson(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, res.TotalCount)))
+	resp.WriteAsJson(models.NewResponse(api.OK, api.Success, models.NewListResultWithCount(appWithStatusList, totals)))
 }
 
 func deleteElement(slice []models.ApplicationInfo, index int) []models.ApplicationInfo {
@@ -319,17 +298,13 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 					}
 				Label1:
 					for i := range topic.Apps {
-						if topic.Apps[i].HasNsfwLabel() && boltdb.GetNsfwState() {
+						if topic.Apps[i].HasNsfwLabel() && redisdb.GetNsfwState() {
 							glog.Warningf("app:%s has nsfw label, pass", topic.Apps[i].Name)
 							topic.Apps = deleteElement(topic.Apps, i)
 							goto Label1
 						}
 
 						getAppAndRecommendStatus(&topic.Apps[i], appsMap, workflowMap, middlewareMap)
-						if reflect.TypeOf(topic.Apps[i].Categories).Kind() == reflect.String {
-							oldCate := topic.Apps[i].Categories.(string)
-							topic.Apps[i].Categories = strings.Split(oldCate, ",")
-						}
 
 						if (topic.Apps[i].HasRemoveLabel() || topic.Apps[i].HasSuspendLabel()) && topic.Apps[i].Status == string(models.AppUninstalled) {
 							glog.Warningf("app:%s has pass label %v not installed, pass", topic.Apps[i].Name, topic.Apps[i].AppLabels)
@@ -349,15 +324,12 @@ func (h *Handler) pagesDetail(req *restful.Request, resp *restful.Response) {
 						glog.Warning(err)
 					}
 
-					if app.HasNsfwLabel() && boltdb.GetNsfwState() {
+					if app.HasNsfwLabel() && redisdb.GetNsfwState() {
 						glog.Warningf("app:%s has nsfw label, pass", app.Name)
 						continue
 					}
 					getAppAndRecommendStatus(app, appsMap, workflowMap, middlewareMap)
-					if reflect.TypeOf(app.Categories).Kind() == reflect.String {
-						oldCate := app.Categories.(string)
-						app.Categories = strings.Split(oldCate, ",")
-					}
+
 					if (app.HasRemoveLabel() || app.HasSuspendLabel()) && app.Status == models.AppUninstalled {
 						glog.Warningf("app:%s has pass label %v not installed, pass", app.Name, app.AppLabels)
 						continue

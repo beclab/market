@@ -36,11 +36,11 @@ type MyAppsRequest struct {
 
 func GetMyAppsInternal(eventClient *event.Client) (string, error) {
 
-	glog.Info("call GetMyAppsInternal")
+	// glog.Info("call GetMyAppsInternal")
 	bflMyAppsUrlInternal := fmt.Sprintf("http://%s/system-server/v1alpha1/app/service.bfl/v1/UserApps", os.Getenv("OS_SYSTEM_SERVER"))
 
 	if accessToken == nil {
-		glog.Info("accessToken is nil, call GetMyAppsInternal")
+		// glog.Info("accessToken is nil, call GetMyAppsInternal")
 		token, err := eventClient.GetMyAppsAccessToken()
 		if err != nil {
 			eventClient = nil
@@ -49,7 +49,7 @@ func GetMyAppsInternal(eventClient *event.Client) (string, error) {
 		}
 		accessToken = &token
 	}
-	glog.Infof("accessToken:", *accessToken)
+	// glog.Infof("accessToken:", *accessToken)
 
 	var responseBody map[string]interface{}
 
@@ -90,7 +90,7 @@ func GetMyAppsInternal(eventClient *event.Client) (string, error) {
 		glog.Warningf("Error marshaling response:", err)
 		return "", err
 	}
-	glog.Infof("Response Body:", string(responseJSON))
+	// glog.Infof("Response Body:", string(responseJSON))
 
 	// responseData := resp.Result().(*event.Response)
 

@@ -26,7 +26,9 @@ export default {
 		submitter: 'Submitter',
 		documents: 'Documents',
 		see_all: 'See all',
-		more: 'More'
+		more: 'More',
+		ok: 'OK',
+		close: 'Close'
 	},
 	main: {
 		discover: 'Discover',
@@ -90,7 +92,13 @@ export default {
 		reference_app: 'Reference apps',
 		see_all_version: 'See all versions',
 		download: 'Download',
-		no_version_history_desc: 'The application has no version history'
+		no_version_history_desc: 'The application has no version history',
+		dependency_not_installed: 'Dependency not installed',
+		require_dependencies_for_full:
+			'This application may require the following dependencies for full functionality.',
+		reference_app_not_installed: 'Reference app not installed',
+		need_reference_app_to_use:
+			'This is a cluster-scoped app, you will need the corresponding Reference app to use it.'
 	},
 	permission: {
 		files: 'Files',
@@ -184,8 +192,11 @@ export default {
 		terminus_not_enough_disk: 'Insufficient disk on the Olares cluster',
 		terminus_not_enough_gpu: 'Insufficient GPU on the Olares cluster',
 		operation_preform_failure: 'Operation failed',
+		app_info_get_failure: 'Failed to retrieve app information',
 		cluster_not_support_platform:
-			'This [app/recommend/model] does not support your Olares platform'
+			'This [app/recommend/model] does not support your Olares platform',
+		app_not_install_details: 'App Name: {name}, Version: {version}',
+		middleware_not_install_details: 'Middleware: {name}, Version: {version}'
 	},
 	my: {
 		market: 'Market',

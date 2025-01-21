@@ -7,10 +7,10 @@ import (
 	"io"
 	"market/internal/appmgr"
 	"market/internal/appservice"
-	"market/internal/boltdb"
 	"market/internal/constants"
 	"market/internal/helm"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/internal/validate"
 	"market/internal/watchdog"
 	"market/pkg/api"
@@ -178,7 +178,7 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 	}
 
 	//remove old package if exists
-	if exist := boltdb.ExistLocalAppInfo(info.Name); exist {
+	if exist := redisdb.ExistLocalAppInfo(info.Name); exist {
 		_ = deleteLocalCharts(info.Name)
 	}
 
@@ -204,12 +204,12 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 		info.Source = constants.AppFromDev
 	}
 
-	i18n := appmgr.GetAppI18n(info.ChartName, info.Locale)
+	i18n := appmgr.ReadCacheI18n(info.ChartName, info.Locale)
 	if len(i18n) > 0 {
 		info.I18n = i18n
 	}
 
-	err = boltdb.UpsertLocalAppInfo(info)
+	err = redisdb.UpsertLocalAppInfo(info)
 	if err != nil {
 		glog.Warningf("UpsertLocalAppInfo err:%s", err.Error())
 		api.HandleError(resp, err)
@@ -322,7 +322,7 @@ func findChartPath(chartDirPath string) string {
 }
 
 func deleteLocalCharts(name string) error {
-	info, err := boltdb.GetLocalAppInfo(name)
+	info, err := redisdb.GetLocalAppInfo(name)
 	if err != nil {
 		glog.Warningf("GetLocalAppInfo err:%s", err.Error())
 		return err
@@ -340,9 +340,9 @@ func deleteLocalCharts(name string) error {
 		//return err
 	}
 
-	err = boltdb.DelLocalAppInfo(name)
+	err = redisdb.DelLocalAppInfo(name)
 	if err != nil {
-		glog.Warningf("boltdb.DelLocalAppInfo %s err:%s", name, err.Error())
+		glog.Warningf("redisdb.DelLocalAppInfo %s err:%s", name, err.Error())
 		//return err
 	}
 

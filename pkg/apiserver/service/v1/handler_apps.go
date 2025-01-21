@@ -3,15 +3,16 @@ package v1
 import (
 	"errors"
 	"fmt"
+	"market/internal/appmgr"
+	"market/internal/appservice"
+	"market/internal/constants"
+	"market/internal/models"
+	"market/internal/redisdb"
+	"market/pkg/api"
+
 	"github.com/emicklei/go-restful/v3"
 	"github.com/golang/glog"
 	"k8s.io/klog/v2"
-	"market/internal/appmgr"
-	"market/internal/appservice"
-	"market/internal/boltdb"
-	"market/internal/constants"
-	"market/internal/models"
-	"market/pkg/api"
 )
 
 func (h *Handler) handleInfos(req *restful.Request, resp *restful.Response) {
@@ -28,13 +29,13 @@ func (h *Handler) handleInfos(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infosMarket, err := appmgr.GetAppInfos(names)
-	if err != nil {
-		api.HandleError(resp, err)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	if infosMarket == nil {
+		api.HandleError(resp, errors.New("get apps failed"))
 		return
 	}
 
-	infosLocal, err := boltdb.GetLocalAppInfoMap()
+	infosLocal, err := redisdb.GetLocalAppInfoMap()
 	if err != nil {
 		api.HandleError(resp, err)
 		return
@@ -51,7 +52,7 @@ func (h *Handler) handleInfos(req *restful.Request, resp *restful.Response) {
 		//namesNotFoundInMarket = append(namesNotFoundInMarket, name)
 	}
 
-	//localInfos := boltdb.GetDevAppInfos(namesNotFoundInMarket)
+	//localInfos := redisdb.GetDevAppInfos(namesNotFoundInMarket)
 	//infoList = append(infoList, localInfos...)
 
 	appsMap, err := getAppsMap(token)
@@ -155,14 +156,14 @@ func (h *Handler) handleI18ns(req *restful.Request, resp *restful.Response) {
 	}
 	//names := []string{"astral", "market", "firefox"}
 	names := []string{}
-	infosMarket, err := appmgr.GetAppInfos(names)
-	if err != nil {
-		api.HandleError(resp, err)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	if infosMarket == nil {
+		api.HandleError(resp, errors.New("get apps failed"))
 		return
 	}
 	//klog.Infof("infosMarket: %#v", infosMarket)
 
-	infosLocal, err := boltdb.GetLocalAppInfoMap()
+	infosLocal, err := redisdb.GetLocalAppInfoMap()
 	if err != nil {
 		api.HandleError(resp, err)
 		return
@@ -192,7 +193,6 @@ func (h *Handler) handleI18ns(req *restful.Request, resp *restful.Response) {
 	}
 	klog.Infof("i18nList: %#v", i18nList)
 
-
 	resp.WriteEntity(models.NewResponse(api.OK, api.Success, i18nList))
 }
 
@@ -204,14 +204,14 @@ func (h *Handler) handleI18n(req *restful.Request, resp *restful.Response) {
 	}
 	name := req.PathParameter(ParamAppName)
 	names := []string{name}
-	infosMarket, err := appmgr.GetAppInfos(names)
-	if err != nil {
-		api.HandleError(resp, err)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	if infosMarket == nil {
+		api.HandleError(resp, errors.New("get apps failed"))
 		return
 	}
 	klog.Infof("infosMarket: %#v", infosMarket)
 
-	infosLocal, err := boltdb.GetLocalAppInfoMap()
+	infosLocal, err := redisdb.GetLocalAppInfoMap()
 	if err != nil {
 		api.HandleError(resp, err)
 		return

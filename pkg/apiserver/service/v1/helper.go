@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"market/internal/appservice"
-	"market/internal/boltdb"
 	"market/internal/conf"
 	"market/internal/constants"
 	"market/internal/models"
 	"market/internal/recommend"
+	"market/internal/redisdb"
 	"market/pkg/api"
 	"net/http"
 
@@ -161,18 +161,12 @@ func parseAppTypes(res *models.ListResultD) []string {
 	return stringItems
 }
 
-func parseAppInfos(h *Handler, res *models.ListResultD, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) []*models.ApplicationInfo {
+func parseAppInfos(h *Handler, apps []*models.ApplicationInfo, appsMap map[string]appservice.Application, workflowMap map[string]*models.StatusData, middlewareMap map[string]*models.StatusData) []*models.ApplicationInfo {
 
 	var appWithStatusList []*models.ApplicationInfo
-	for _, item := range res.Items {
-		info := &models.ApplicationInfo{}
-		err := json.Unmarshal(item, info)
-		if err != nil {
-			glog.Warningf("err:%s", err.Error())
-			continue
-		}
+	for _, info := range apps {
 
-		if info.HasNsfwLabel() && boltdb.GetNsfwState() {
+		if info.HasNsfwLabel() && redisdb.GetNsfwState() {
 			glog.Warningf("app:%s has nsfw label, pass", info.Name)
 			continue
 		}

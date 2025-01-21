@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"market/internal/boltdb"
+	"market/internal/appservice"
 	"market/internal/constants"
 	"market/internal/helm"
 	"market/internal/models"
+	"market/internal/redisdb"
 	"market/pkg/utils"
 	"net/http"
 	"net/url"
@@ -39,8 +40,13 @@ func getAppStoreServicePort() string {
 	return os.Getenv(constants.AppStoreServicePortEnv)
 }
 
-func GetAppTypes() (*models.ListResultD, error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppTypesURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
+func getAppTypes() (*models.ListResultD, error) {
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return nil, err
+	}
+
+	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppTypesURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), version)
 
 	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
 	if err != nil {
@@ -50,8 +56,13 @@ func GetAppTypes() (*models.ListResultD, error) {
 	return decodeListResultD(bodyStr)
 }
 
-func GetApps(page, size, category, ty string) (*models.ListResultD, error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppListURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), page, size)
+func getApps(page, size, category, ty string) (*models.ListResultD, error) {
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return nil, err
+	}
+
+	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppListURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), page, size, version)
 	if category != "" {
 		urlTmp += fmt.Sprintf("&category=%s", category)
 	}
@@ -67,8 +78,13 @@ func GetApps(page, size, category, ty string) (*models.ListResultD, error) {
 	return decodeListResultD(bodyStr)
 }
 
-func GetTopApps(category, ty, size string) (*models.ListResultD, error) {
-	baseURL := fmt.Sprintf(constants.AppStoreServiceAppTopURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
+func getTopApps(category, ty, size string) (*models.ListResultD, error) {
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return nil, err
+	}
+
+	baseURL := fmt.Sprintf(constants.AppStoreServiceAppTopURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), version)
 	params := make(url.Values)
 	if category != "" {
 		params.Add("category", category)
@@ -80,14 +96,14 @@ func GetTopApps(category, ty, size string) (*models.ListResultD, error) {
 		params.Add("size", size)
 	}
 	excludedLabels := []string{"suspend", "remove"}
-	if boltdb.GetNsfwState() {
+	if redisdb.GetNsfwState() {
 		excludedLabels = append(excludedLabels, "nsfw")
 	}
 	params.Add("excludedLabels", strings.Join(excludedLabels, ","))
 	p := params.Encode()
 	finalURL := baseURL
 	if p != "" {
-		finalURL = fmt.Sprintf("%s?%s", baseURL, p)
+		finalURL = fmt.Sprintf("%s&%s", baseURL, p)
 	}
 	bodyStr, err := sendHttpRequest(http.MethodGet, finalURL, nil)
 	if err != nil {
@@ -107,69 +123,20 @@ func CountAppInstalled(name string) (string, error) {
 	return bodyStr, nil
 }
 
-func GetAppInfo(name string) (*models.ApplicationInfo, error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppInfoURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name)
-	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	res := &models.ResponseD{}
-	err = json.Unmarshal([]byte(bodyStr), res)
-	if err != nil {
-		return nil, err
-	}
-
-	info := &models.ApplicationInfo{}
-	err = json.Unmarshal(res.Data, info)
-	if err != nil {
-		return nil, err
-	}
-
-	return info, nil
-}
-
 func GetReadMe(name string) (string, error) {
 	urlTmp := fmt.Sprintf(constants.AppStoreServiceReadMeURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name)
 	return sendHttpRequest(http.MethodGet, urlTmp, nil)
 }
 
-func GetAppInfos(names []string) (mapInfo map[string]*models.ApplicationInfo, err error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppInfosURLTempl, getAppStoreServiceHost(), getAppStoreServicePort())
-	glog.Infof("GetAppInfos --> urlTmp: %s", urlTmp)
-	var ms []byte
-	ms, err = json.Marshal(names)
-	if err != nil {
-		return nil, err
-	}
-	bodyStr, err := sendHttpRequest(http.MethodPost, urlTmp, strings.NewReader(string(ms)))
-	if err != nil {
-		return nil, err
-	}
+// func Search(name, page, size string) (*models.ListResultD, error) {
+// 	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppSearchURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name, page, size)
+// 	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	res := &models.ResponseD{}
-	err = json.Unmarshal([]byte(bodyStr), res)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(res.Data, &mapInfo)
-	if err != nil {
-		return nil, err
-	}
-
-	return
-}
-
-func Search(name, page, size string) (*models.ListResultD, error) {
-	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppSearchURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name, page, size)
-	bodyStr, err := sendHttpRequest(http.MethodGet, urlTmp, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeListResultD(bodyStr)
-}
+// 	return decodeListResultD(bodyStr)
+// }
 
 func ExistApp(name string) (bool, error) {
 	urlTmp := fmt.Sprintf(constants.AppStoreServiceAppExistURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), name)
@@ -223,10 +190,15 @@ func decodeListResultD(in string) (*models.ListResultD, error) {
 }
 
 func DownloadAppTgz(chartName string) error {
-	appPkgUrl := fmt.Sprintf(constants.AppStoreServiceAppURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), chartName)
+	version, err := appservice.TerminusVersionValue()
+	if err != nil {
+		return err
+	}
+
+	appPkgUrl := fmt.Sprintf(constants.AppStoreServiceAppURLTempl, getAppStoreServiceHost(), getAppStoreServicePort(), chartName, version)
 
 	dstPath := path.Join(constants.ChartsLocalDir, chartName)
-	err := utils.Download(appPkgUrl, dstPath)
+	err = utils.Download(appPkgUrl, dstPath)
 	if err != nil {
 		glog.Warningf("Download %s to %s err:%s", appPkgUrl, dstPath, err)
 		return err
@@ -251,7 +223,7 @@ func GetVersionHistory(appName string) (string, error) {
 	return bodyStr, nil
 }
 
-func GetAppI18n(chartName string, locale []string) map[string]models.I18n {
+func getAppI18n(chartName string, locale []string) map[string]models.I18n {
 	i18nMap := make(map[string]models.I18n)
 	chartDirPath := path.Join(constants.ChartsLocalDir, chartName)
 	chartPath := utils.FindChartPath(chartDirPath)
