@@ -19,6 +19,7 @@
     "@bytetrade/core": "^0.3.66",
     "@bytetrade/ui": "^0.1.41",
     "@quasar/extras": "^1.16.9",
+    "@vercel/analytics": "^1.4.1",
     "axios": "^0.21.1",
     "dompurify": "^3.1.7",
     "fetch": "1.1.0",
