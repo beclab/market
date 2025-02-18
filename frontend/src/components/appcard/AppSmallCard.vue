@@ -42,7 +42,7 @@
 			</div>
 			<install-button v-if="!appStore.isPublic" :item="item" />
 			<div
-				v-if="clusterScopedApp"
+				v-if="clusterScopedApp && !hideCSText"
 				class="app-small-card__right__cluster_scoped text-overline text-ink-3"
 			>
 				Cluster-Scoped
@@ -81,6 +81,10 @@ const props = defineProps({
 		default: false
 	},
 	skeleton: {
+		type: Boolean,
+		default: false
+	},
+	hideCSText: {
 		type: Boolean,
 		default: false
 	}

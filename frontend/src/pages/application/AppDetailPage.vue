@@ -618,7 +618,11 @@
 								>
 									<template v-slot:content>
 										<template :key="app.name" v-for="app in dependencies">
-											<app-small-card :item="app" :is-last-line="true" />
+											<app-small-card
+												:item="app"
+												:is-last-line="true"
+												:hide-c-s-text="appStore.isPublic"
+											/>
 										</template>
 									</template>
 								</app-intro-card>
@@ -630,7 +634,11 @@
 								>
 									<template v-slot:content>
 										<template :key="app.name" v-for="app in references">
-											<app-small-card :item="app" :is-last-line="true" />
+											<app-small-card
+												:item="app"
+												:is-last-line="true"
+												:hide-c-s-text="appStore.isPublic"
+											/>
 										</template>
 									</template>
 								</app-intro-card>
