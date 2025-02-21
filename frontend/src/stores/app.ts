@@ -335,7 +335,7 @@ export const useAppStore = defineStore('app', {
 
 		/**
 		 *
-		 * App Status
+		 *   App Status
 		 * +-----------+  install   +---------+        +-------------+        +------------+        +------------+       +--------------+    suspend     +---------+
 		 * | uninstall | --------->| pending | ------> | downloading |------> | installing | ------ |initializing| ----> |              | -------------> | suspend |
 		 * +-----------+           +---------+         +------------+        +------------+         +------------+       |              |               +---------+

@@ -143,14 +143,14 @@ import { useI18n } from 'vue-i18n';
 import { useUserStore } from 'src/stores/user';
 import { BtDialog, useColor } from '@bytetrade/ui';
 import {
-	showAppStatus,
-	showDownloadProgress,
 	canInstallingCancel,
-	canOpen,
-	canUnload,
 	canLoad,
+	canOpen,
 	canResume,
-	canSuspend
+	canSuspend,
+	canUnload,
+	showAppStatus,
+	showDownloadProgress
 } from 'src/constants/config';
 import { bus, BUS_EVENT } from 'src/utils/bus';
 import ProgressButton from 'src/components/base/ProgressButton.vue';
@@ -276,6 +276,11 @@ async function onClick() {
 			console.log('cancel installing');
 			if (canInstallingCancel(props.item?.cfgType)) {
 				appStore.cancelInstallingApp(props.item, props.development);
+			}
+			break;
+		case APP_STATUS.suspend:
+			if (props.isUpdate) {
+				appStore.upgradeApp(props.item);
 			}
 			break;
 		case APP_STATUS.running: {
@@ -603,7 +608,11 @@ function updateUI() {
 			backgroundColor.value = blueAlpha.value;
 			textColor.value = blueDefault.value;
 			border.value = '1px solid transparent';
-			status.value = t('app.suspend');
+			if (props.isUpdate) {
+				status.value = t('app.update');
+			} else {
+				status.value = t('app.suspend');
+			}
 			break;
 		case APP_STATUS.running:
 			backgroundColor.value = blueAlpha.value;
