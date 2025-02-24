@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"market/internal/models"
-	"github.com/market/market/internal/conf"
+	"market/internal/conf"
 )
 
 func UpsertLocalAppInfo(info *models.ApplicationInfo) error {
