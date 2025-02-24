@@ -90,6 +90,10 @@ func GetLocalAppInfoMap() (map[string]*models.ApplicationInfo, error) {
 	appMap := make(map[string]*models.ApplicationInfo)
 	log.Println("Initializing GetLocalAppInfoMap")
 
+	if conf.GetIsPublic() {
+		return appMap, nil
+	}
+
 	keys, err := redisClient.rdb.Keys(ctx, "*").Result()
 	if err != nil {
 		log.Printf("Error getting keys: %v", err)
