@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import { WebSocketStatusEnum, WebSocketBean } from '@bytetrade/core';
 import { useAppStore } from 'src/stores/app';
+import { useMenuStore } from 'src/stores/menu';
+import { useUserStore } from 'src/stores/user';
 
 export interface WebSocketState {
 	websocket: WebSocketBean | null;
@@ -15,6 +17,13 @@ export const useSocketStore = defineStore('websocket', {
 
 	actions: {
 		start() {
+			if (this.isConnecting() || this.isConnected()) {
+				console.log(
+					'socket Starting..., socket status' + this.websocket?.status
+				);
+				return;
+			}
+
 			let ws_url = process.env.WS_URL || window.location.origin + '/ws';
 			console.log(process.env.WS_URL);
 
@@ -69,8 +78,17 @@ export const useSocketStore = defineStore('websocket', {
 				onerror: () => {
 					console.log('socket error');
 				},
-				onreconnect: () => {
-					console.log('socket start reconnect');
+				onreconnect: async () => {
+					console.log('socket reconnecting');
+					const appStore = useAppStore();
+					const menuStore = useMenuStore();
+					const userStore = useUserStore();
+					await appStore.prefetch();
+					await menuStore.init();
+					if (!appStore.isPublic) {
+						userStore.init();
+						appStore.init();
+					}
 				},
 				onFailReconnect: () => {
 					console.log('socket fail reconnect');
@@ -94,6 +112,13 @@ export const useSocketStore = defineStore('websocket', {
 			return this.websocket.status == WebSocketStatusEnum.load;
 		},
 
+		isClosed() {
+			if (!this.websocket) {
+				return true;
+			}
+			return this.websocket.status == WebSocketStatusEnum.close;
+		},
+
 		send(data: any, resend = false) {
 			if (!this.websocket) {
 				return;
@@ -103,13 +128,6 @@ export const useSocketStore = defineStore('websocket', {
 			console.log(data);
 			console.log('<=====');
 			return sendResult;
-		},
-		restart() {
-			console.log('restart websocket');
-			if (this.websocket) {
-				this.websocket!.dispose();
-			}
-			this.start();
 		},
 		dispose() {
 			console.log('dispose');
