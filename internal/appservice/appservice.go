@@ -7,8 +7,10 @@ import (
 	"market/internal/models"
 	"market/pkg/utils"
 	"net/http"
+	"os"
 
 	"github.com/golang/glog"
+	"market/internal/conf"
 )
 
 func AppSuspend(name, token string) (string, error) {
@@ -101,6 +103,10 @@ func Apps(name, token string) (string, error) {
 }
 
 func TerminusVersionValue() (string, error) {
+	if conf.GetIsPublic() {
+		return os.Getenv("PUBLIC_VERSION"), nil
+	}
+
 	version, err := TerminusVersion()
 	if err != nil {
 		return "", err
@@ -129,6 +135,7 @@ func TerminusVersion() (string, error) {
 
 	return utils.SendHttpRequestWithToken(http.MethodGet, url, "", nil)
 }
+
 func TerminusNodes(token string) (string, error) {
 	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
 	url := fmt.Sprintf(constants.AppServiceTerminusNodesURLTempl, appServiceHost, appServicePort)

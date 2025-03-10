@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"market/internal/models"
+	"market/internal/conf"
 )
 
 func UpsertLocalAppInfo(info *models.ApplicationInfo) error {
@@ -89,6 +90,10 @@ func GetLocalAppInfos(keys []string) []*models.ApplicationInfo {
 func GetLocalAppInfoMap() (map[string]*models.ApplicationInfo, error) {
 	appMap := make(map[string]*models.ApplicationInfo)
 	log.Println("Initializing GetLocalAppInfoMap")
+
+	if conf.GetIsPublic() {
+		return appMap, nil
+	}
 
 	keys, err := redisClient.rdb.Keys(ctx, "*").Result()
 	if err != nil {
