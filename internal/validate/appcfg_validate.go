@@ -15,6 +15,7 @@ import (
 	vd "github.com/bytedance/go-tagexpr/v2/validator"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"github.com/golang/glog"
 )
 
 func init() {
@@ -198,8 +199,8 @@ func getAppConfigFromCfg(f io.ReadCloser) (*AppConfiguration, error) {
 	defer f.Close()
 	var cfg AppConfiguration
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		log.Printf("YAML parsing failed, error message: %v", err) // Print error log
-		return nil, fmt.Errorf("configuration file parsing error: %w", err) // Return a more descriptive error message
+		glog.Warningf("YAML parsing failed, error message: %v", err)
+		return nil, fmt.Errorf("configuration file parsing error: %w", err)
 	}
 	return &cfg, nil
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/golang/glog"
 	"github.com/thoas/go-funk"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
@@ -174,8 +175,8 @@ func getRulesFromFile(f io.ReadCloser) (*PolicyRules, error) {
 	defer f.Close()
 	var rules PolicyRules
 	if err := yaml.Unmarshal(data, &rules); err != nil {
-		log.Printf("YAML unmarshal failed: %v", err) // Print error log
-		return nil, fmt.Errorf("failed to unmarshal YAML data: %w", err) // Return a more descriptive error message
+		glog.Warningf("YAML unmarshal failed: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal YAML data: %w", err)
 	}
 	return &rules, nil
 }
