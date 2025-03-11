@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"github.com/golang/glog"
+	"github.com/your-project/appservice"
 )
 
 func init() {
@@ -191,21 +192,29 @@ func checkZincSearchMappings(f io.Reader) error {
 	return nil
 }
 
-func getAppConfigFromCfg(f io.ReadCloser) (*AppConfiguration, error) {
+func getAppConfigFromCfg(f io.ReadCloser, token string) (*AppConfiguration, error) {
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	
+	// 添加渲染逻辑
+	renderedContent, err := appservice.RenderManifest(string(data), token)
+	if err != nil {
+		glog.Warningf("render manifest failed: %s", err.Error())
+		return nil, err
+	}
+	
 	var cfg AppConfiguration
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Unmarshal([]byte(renderedContent), &cfg); err != nil {
 		glog.Warningf("YAML parsing failed, error message: %v", err)
 		return nil, fmt.Errorf("configuration file parsing error: %w", err)
 	}
 	return &cfg, nil
 }
 
-func getAppConfigFromCfgFile(chartPath string) (*AppConfiguration, error) {
+func getAppConfigFromCfgFile(chartPath string, token string) (*AppConfiguration, error) {
 	if !strings.HasSuffix(chartPath, "/") {
 		chartPath += "/"
 	}
@@ -213,11 +222,11 @@ func getAppConfigFromCfgFile(chartPath string) (*AppConfiguration, error) {
 	if err != nil {
 		return nil, err
 	}
-	return getAppConfigFromCfg(f)
+	return getAppConfigFromCfg(f, token)
 }
 
-func CheckAppCfg(chartPath string) error {
-	cfg, err := getAppConfigFromCfgFile(chartPath)
+func CheckAppCfg(chartPath string, token string) error {
+	cfg, err := getAppConfigFromCfgFile(chartPath, token)
 	if err != nil {
 		return err
 	}

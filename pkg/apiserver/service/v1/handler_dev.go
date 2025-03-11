@@ -100,7 +100,7 @@ func validChart(chartDir string, info *models.ApplicationInfo, token string) (er
 	if err != nil {
 		return
 	}
-	err = validate.CheckAppCfg(chartDir)
+	err = validate.CheckAppCfg(chartDir, token)
 	if err != nil {
 		return
 	}
