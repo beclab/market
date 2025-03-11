@@ -35,6 +35,7 @@ const (
 	AppServiceOperateHistoryListWithRawURLTempl = "http://%s:%s/app-service/v1/apps/operate_history?%s"
 	AppServiceAppsURLTempl                      = "http://%s:%s/app-service/v1/apps/%s"
 	AppServiceAppsListURLTempl                  = "http://%s:%s/app-service/v1/apps?issysapp=%s&state=%s"
+	AppServiceRenderManifestURLTempl			= "http://%s:%s/app-service/v1/apps/manifest/render"
 
 	AppServiceCheckDependencies = "http://%s:%s/app-service/v1/application/deps"
 

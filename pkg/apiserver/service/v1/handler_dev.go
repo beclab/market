@@ -44,12 +44,12 @@ func getChartsTempPath(filename string) (string, error) {
 	return chartTmpPath, nil
 }
 
-func readInfoFromCfg(chartDirPath string) (info *models.ApplicationInfo, cfgFile string, err error) {
+func readInfoFromCfg(chartDirPath string, token string) (info *models.ApplicationInfo, cfgFile string, err error) {
 	cfgFile = findAppCfgFile(chartDirPath)
 	if cfgFile == "" {
 		return nil, "", fmt.Errorf("%s not found", constants.AppCfgFileName)
 	}
-	info, err = appmgr.ReadAppInfo(cfgFile)
+	info, err = appmgr.ReadAppInfo(cfgFile, token)
 	glog.Infof("chartDirPath:%s, cfgFile:%s, info:%#v", chartDirPath, cfgFile, info)
 
 	return
@@ -152,7 +152,7 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 	}
 
 	//read info from cfg
-	info, cfgFile, err := readInfoFromCfg(chartDirTmpPath)
+	info, cfgFile, err := readInfoFromCfg(chartDirTmpPath, token)
 	if err != nil {
 		respErr(resp, err)
 		return

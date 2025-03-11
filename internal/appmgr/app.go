@@ -3,6 +3,7 @@ package appmgr
 import (
 	"io"
 	"io/ioutil"
+	"market/internal/appservice"
 	"market/internal/constants"
 	"market/internal/models"
 	"os"
@@ -12,7 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func ReadAppInfo(cfgFileName string) (*models.ApplicationInfo, error) {
+func ReadAppInfo(cfgFileName string, token string) (*models.ApplicationInfo, error) {
 	f, err := os.Open(cfgFileName)
 	if err != nil {
 		glog.Warningf("%s", err.Error())
@@ -24,12 +25,19 @@ func ReadAppInfo(cfgFileName string) (*models.ApplicationInfo, error) {
 		glog.Warningf("%s", err.Error())
 		return nil, err
 	}
+	
+	renderedContent, err := appservice.RenderManifest(string(info), token)
+	if err != nil {
+		glog.Warningf("render manifest failed: %s", err.Error())
+		return nil, err
+	}
 
 	var appCfg models.AppConfiguration
-	if err = yaml.Unmarshal(info, &appCfg); err != nil {
+	if err = yaml.Unmarshal([]byte(renderedContent), &appCfg); err != nil {
 		glog.Warningf("cfg:%s %s", cfgFileName, err.Error())
 		return nil, err
 	}
+	
 	appInfo := appCfg.ToAppInfo()
 	dir := path.Dir(cfgFileName)
 	i18nMap := make(map[string]models.I18n)

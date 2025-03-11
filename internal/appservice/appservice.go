@@ -223,3 +223,14 @@ func ConvertModelsListToMap(llms []*models.ModelStatusResponse) (llmMap map[stri
 
 	return
 }
+
+func RenderManifest(content, token string) (string, error) {
+	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
+	url := fmt.Sprintf(constants.AppServiceRenderManifestURLTempl, appServiceHost, appServicePort)
+	
+	requestBody := map[string]string{
+		"content": content,
+	}
+	
+	return utils.SendHttpRequestWithToken(http.MethodPost, url, token, requestBody)
+}
