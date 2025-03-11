@@ -1027,10 +1027,10 @@
     "@babel/helper-validator-identifier" "^7.24.7"
     to-fast-properties "^2.0.0"
 
-"@bytetrade/core@^0.3.66":
-  version "0.3.66"
-  resolved "https://registry.npmjs.org/@bytetrade/core/-/core-0.3.66.tgz"
-  integrity sha512-EEQouQFvT3q/Jo/m1hMbcWeze0VH9S5LmQ4BrXiKuqMGKBWktZQgV2XZQagl2CyJ4b8GGWSXi7aoWmsVCjyDEQ==
+"@bytetrade/core@^0.3.77":
+  version "0.3.77"
+  resolved "https://registry.npmjs.org/@bytetrade/core/-/core-0.3.77.tgz"
+  integrity sha512-qUjB/Y6NONMs+ERp9WO9iFEc2G0l09Hf96rg9YQPqV5Nm2D35TEyT4hf5A+rK90zTAxKVcTkE2pZOJTa37g62A==
   dependencies:
     axios "0.21.4"
     chai "^4.3.7"
