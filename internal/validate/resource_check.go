@@ -101,8 +101,8 @@ func checkResourceLimit(resources kube.ResourceList, cfg *AppConfiguration) erro
 	return AggregateErr(errs)
 }
 
-func CheckResourceLimit(chartPath string, cfg *AppConfiguration) error {
-	resources, err := getResourceListFromChart(chartPath)
+func CheckResourceLimit(chartPath string, cfg *AppConfiguration, token string) error {
+	resources, err := getResourceListFromChart(chartPath, token)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}

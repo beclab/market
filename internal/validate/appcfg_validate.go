@@ -230,10 +230,10 @@ func CheckAppCfg(chartPath string, token string) error {
 	if err != nil {
 		return err
 	}
-	return checkAppCfg(cfg, chartPath)
+	return checkAppCfg(cfg, chartPath, token)
 }
 
-func checkAppCfg(cfg *AppConfiguration, chartPath string) error {
+func checkAppCfg(cfg *AppConfiguration, chartPath string, token string) error {
 	err := vd.Validate(cfg)
 	if err != nil {
 		return err
@@ -254,7 +254,7 @@ func checkAppCfg(cfg *AppConfiguration, chartPath string) error {
 	if err != nil {
 		return err
 	}
-	return CheckResourceLimit(chartPath, cfg)
+	return CheckResourceLimit(chartPath, cfg, token)
 }
 
 func CheckSupportedArch(cfg *AppConfiguration) error {
