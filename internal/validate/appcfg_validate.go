@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"github.com/golang/glog"
-	"github.com/your-project/appservice"
+	"market/internal/appservice"
 )
 
 func init() {
