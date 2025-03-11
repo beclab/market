@@ -1,6 +1,7 @@
 package appservice
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"market/internal/constants"
@@ -231,6 +232,13 @@ func RenderManifest(content, token string) (string, error) {
 	requestBody := map[string]string{
 		"content": content,
 	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", err
+	}
 	
-	return utils.SendHttpRequestWithToken(http.MethodPost, url, token, requestBody)
+	bodyReader := bytes.NewBuffer(jsonData)
+	
+	return utils.SendHttpRequestWithToken(http.MethodPost, url, token, bodyReader)
 }
