@@ -85,7 +85,7 @@ func installOrUpgrade(name, version, token string) (bool, error) {
 	return false, nil
 }
 
-func validChart(chartDir string, info *models.ApplicationInfo) (err error) {
+func validChart(chartDir string, info *models.ApplicationInfo, token string) (err error) {
 	switch info.CfgType {
 	case constants.AppType:
 	case constants.RecommendType, constants.AgentType, constants.ModelType, constants.MiddlewareType: //todo
@@ -96,7 +96,7 @@ func validChart(chartDir string, info *models.ApplicationInfo) (err error) {
 		return
 	}
 
-	err = validate.CheckChartFolder(chartDir)
+	err = validate.CheckChartFolder(chartDir, token)
 	if err != nil {
 		return
 	}
@@ -160,7 +160,7 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 
 	//check chart
 	realChartPath := findChartPath(chartDirTmpPath)
-	err = validChart(realChartPath, info)
+	err = validChart(realChartPath, info, token)
 	if err != nil {
 		respErr(resp, err)
 		return

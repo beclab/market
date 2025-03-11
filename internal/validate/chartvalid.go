@@ -14,7 +14,7 @@ import (
 	"market/internal/appservice"
 )
 
-func CheckChartFolder(folder string) error {
+func CheckChartFolder(folder string, token string) error {
 	folderName := path.Base(folder)
 	if !isValidFolderName(folderName) {
 		return fmt.Errorf("invalid folder name: '%s' must '^[a-z0-9]{1,30}$'", folder)
