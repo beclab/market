@@ -174,7 +174,8 @@ func getRulesFromFile(f io.ReadCloser) (*PolicyRules, error) {
 	defer f.Close()
 	var rules PolicyRules
 	if err := yaml.Unmarshal(data, &rules); err != nil {
-		return nil, err
+		log.Printf("YAML unmarshal failed: %v", err) // Print error log
+		return nil, fmt.Errorf("failed to unmarshal YAML data: %w", err) // Return a more descriptive error message
 	}
 	return &rules, nil
 }

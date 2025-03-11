@@ -198,7 +198,8 @@ func getAppConfigFromCfg(f io.ReadCloser) (*AppConfiguration, error) {
 	defer f.Close()
 	var cfg AppConfiguration
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		log.Printf("YAML parsing failed, error message: %v", err) // Print error log
+		return nil, fmt.Errorf("configuration file parsing error: %w", err) // Return a more descriptive error message
 	}
 	return &cfg, nil
 }
