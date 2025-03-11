@@ -225,6 +225,13 @@ func ConvertModelsListToMap(llms []*models.ModelStatusResponse) (llmMap map[stri
 	return
 }
 
+type RenderResponse struct {
+	Code int `json:"code"`
+	Data struct {
+		Content string `json:"content"`
+	} `json:"data"`
+}
+
 func RenderManifest(content, token string) (string, error) {
 	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
 	url := fmt.Sprintf(constants.AppServiceRenderManifestURLTempl, appServiceHost, appServicePort)
@@ -240,5 +247,16 @@ func RenderManifest(content, token string) (string, error) {
 	
 	bodyReader := bytes.NewBuffer(jsonData)
 	
-	return utils.SendHttpRequestWithToken(http.MethodPost, url, token, bodyReader)
+	responseStr, err := utils.SendHttpRequestWithToken(http.MethodPost, url, token, bodyReader)
+	if err != nil {
+		return "", err
+	}
+	
+	var response RenderResponse
+	if err := json.Unmarshal([]byte(responseStr), &response); err != nil {
+		glog.Warningf("failed to unmarshal render response: %s, error: %v", responseStr, err)
+		return "", err
+	}
+	
+	return response.Data.Content, nil
 }
