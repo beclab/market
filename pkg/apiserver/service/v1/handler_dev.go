@@ -104,7 +104,7 @@ func validChart(chartDir string, info *models.ApplicationInfo, token string) (er
 	if err != nil {
 		return
 	}
-	err = validate.CheckServiceAccountRole(chartDir)
+	err = validate.CheckServiceAccountRole(chartDir, token)
 	return
 }
 

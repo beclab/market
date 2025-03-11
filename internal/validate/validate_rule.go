@@ -252,7 +252,7 @@ func getChart(instAction *action.Install, filepath string) (*chart.Chart, error)
 	return chartRequested, nil
 }
 
-func getResourceListFromChart(chartPath string) (resources kube.ResourceList, err error) {
+func getResourceListFromChart(chartPath string, token string) (resources kube.ResourceList, err error) {
 	instAction, err := InitAction()
 	if err != nil {
 		return nil, err
@@ -288,7 +288,7 @@ func getResourceListFromChart(chartPath string) (resources kube.ResourceList, er
 		"appKey":    "appKey",
 		"appSecret": "appSecret",
 	}
-	cfg, err := getAppConfigFromCfgFile(chartPath)
+	cfg, err := getAppConfigFromCfgFile(chartPath, token)
 	if err != nil {
 		return nil, err
 	}
@@ -412,8 +412,8 @@ func checkServiceAccountRule(resources kube.ResourceList, rules []rbacv1.PolicyR
 	return checkRule(requestedRules, rules)
 }
 
-func CheckServiceAccountRole(chartPath string) error {
-	resources, err := getResourceListFromChart(chartPath)
+func CheckServiceAccountRole(chartPath string, token string) error {
+	resources, err := getResourceListFromChart(chartPath, token)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
