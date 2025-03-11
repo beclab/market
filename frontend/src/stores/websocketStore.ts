@@ -45,8 +45,6 @@ export const useSocketStore = defineStore('websocket', {
 				this.websocket = new WebSocketBean({
 					url: ws_url,
 					needReconnect: true,
-					reconnectMaxNum: 5,
-					reconnectGapTime: 3000,
 					heartSend: JSON.stringify({
 						event: 'ping'
 					}),
@@ -84,6 +82,9 @@ export const useSocketStore = defineStore('websocket', {
 					},
 					onreconnect: async () => {
 						console.log('socket reconnecting');
+					},
+					onReconnectSuccess: async () => {
+						console.log('socket success reconnect');
 						const appStore = useAppStore();
 						const menuStore = useMenuStore();
 						const userStore = useUserStore();
@@ -94,7 +95,7 @@ export const useSocketStore = defineStore('websocket', {
 							appStore.init();
 						}
 					},
-					onFailReconnect: () => {
+					onReconnectFailure: () => {
 						console.log('socket fail reconnect');
 					}
 				});
