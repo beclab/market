@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/golang/glog"
 	"helm.sh/helm/v3/pkg/kube"
 	v1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -56,11 +57,13 @@ func checkResourceLimit(resources kube.ResourceList, cfg *AppConfiguration) erro
 					errs = append(errs, fmt.Errorf("deployment: %s, container: %s must set memory limit", deployment.Name, c.Name))
 				} else {
 					limitMemory += limits.Memory().AsApproximateFloat64()
+					glog.Infof("Deployment: %s, Container: %s, Memory Limit: %f", deployment.Name, c.Name, limits.Memory().AsApproximateFloat64())
 				}
 				if limits.Cpu().IsZero() {
 					errs = append(errs, fmt.Errorf("deployment: %s, container: %s must set cpu limit", deployment.Name, c.Name))
 				} else {
 					limitCPU += limits.Cpu().AsApproximateFloat64()
+					glog.Infof("Deployment: %s, Container: %s, CPU Limit: %f", deployment.Name, c.Name, limits.Cpu().AsApproximateFloat64())
 				}
 			}
 		}
@@ -83,15 +86,19 @@ func checkResourceLimit(resources kube.ResourceList, cfg *AppConfiguration) erro
 					errs = append(errs, fmt.Errorf("statefulset: %s, container: %s must set memory limit", sts.Name, c.Name))
 				} else {
 					limitMemory += limits.Memory().AsApproximateFloat64()
+					glog.Infof("StatefulSet: %s, Container: %s, Memory Limit: %f", sts.Name, c.Name, limits.Memory().AsApproximateFloat64())
 				}
 				if limits.Cpu().IsZero() {
 					errs = append(errs, fmt.Errorf("statefulset: %s, container: %s must set cpu limit", sts.Name, c.Name))
 				} else {
 					limitCPU += limits.Cpu().AsApproximateFloat64()
+					glog.Infof("StatefulSet: %s, Container: %s, CPU Limit: %f", sts.Name, c.Name, limits.Cpu().AsApproximateFloat64())
 				}
 			}
 		}
 	}
+	
+	glog.Infof("limitCPU: %f, appLimitedCPU: %f, limitMemory: %f, appLimitedMemory: %f", limitCPU, appLimitedCPU, limitMemory, appLimitedMemory)
 	if limitCPU > appLimitedCPU {
 		errs = append(errs, fmt.Errorf("sum of all containers resources limits cpu should less than OlaresManifest.yaml spec.limitedCpu"))
 	}

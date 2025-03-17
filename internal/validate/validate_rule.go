@@ -324,6 +324,8 @@ func getResourceListFromChart(chartPath string, token string) (resources kube.Re
 	values["svcs"] = map[string]interface{}{}
 	values["cluster"] = map[string]interface{}{}
 
+	glog.Infof("Values: %+v", values)
+
 	ret, err := instAction.RunWithContext(context.Background(), chartRequested, values)
 	if err != nil {
 		return nil, err
