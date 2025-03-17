@@ -31,7 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes/scheme"
-	"github.com/your-project/appservice"
+	"market/internal/appservice"
 )
 
 const (
