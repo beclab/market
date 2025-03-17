@@ -131,7 +131,7 @@ func NonResourceURLMatches(rule *rbacv1.PolicyRule, requestedURLs []string) bool
 		return false
 	}
 	for _, ruleURL := range rule.NonResourceURLs {
-		if ruleURL == rbac1.NonResourceAll {
+		if ruleURL == rbacv1.NonResourceAll {
 			return true
 		}
 		for _, requestedURL := range requestedURLs {
