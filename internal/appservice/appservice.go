@@ -260,3 +260,28 @@ func RenderManifest(content, token string) (string, error) {
 	
 	return response.Data.Content, nil
 }
+
+type AdminUsernameResponse struct {
+	Code int `json:"code"`
+	Data struct {
+		Username string `json:"username"`
+	} `json:"data"`
+}
+
+func GetAdminUsername(token string) (string, error) {
+	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
+	url := fmt.Sprintf(constants.AppServiceAdminUsernameURLTempl, appServiceHost, appServicePort)
+
+	responseStr, err := utils.SendHttpRequestWithToken(http.MethodGet, url, token, nil)
+	if err != nil {
+		return "", err
+	}
+
+	var response AdminUsernameResponse
+	if err := json.Unmarshal([]byte(responseStr), &response); err != nil {
+		glog.Warningf("failed to unmarshal admin username response: %s, error: %v", responseStr, err)
+		return "", err
+	}
+
+	return response.Data.Username, nil
+}

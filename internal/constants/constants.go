@@ -43,6 +43,7 @@ const (
 
 	AppServiceTerminusVersionURLTempl = "http://%s:%s/app-service/v1/terminus/version"
 	AppServiceTerminusNodesURLTempl   = "http://%s:%s/app-service/v1/terminus/nodes"
+	AppServiceAdminUsernameURLTempl   = "http://%s:%s/app-service/v1/users/admin/username"
 
 	AppServiceCurUserResourceTempl = "http://%s:%s/app-service/v1/user/resource"
 	AppServiceClusterResourceTempl = "http://%s:%s/app-service/v1/cluster/resource"

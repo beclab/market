@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes/scheme"
+	"github.com/your-project/appservice"
 )
 
 const (
@@ -130,7 +131,7 @@ func NonResourceURLMatches(rule *rbacv1.PolicyRule, requestedURLs []string) bool
 		return false
 	}
 	for _, ruleURL := range rule.NonResourceURLs {
-		if ruleURL == rbacv1.NonResourceAll {
+		if ruleURL == rbac1.NonResourceAll {
 			return true
 		}
 		for _, requestedURL := range requestedURLs {
@@ -288,6 +289,17 @@ func getResourceListFromChart(chartPath string, token string) (resources kube.Re
 		"appKey":    "appKey",
 		"appSecret": "appSecret",
 	}
+	
+	// Get admin username
+	adminUsername, adminErr := appservice.GetAdminUsername(token)
+	if adminErr != nil {
+		glog.Warningf("Failed to get admin username: %v", adminErr)
+		// Return error if admin username retrieval fails
+		return nil, fmt.Errorf("failed to get admin username: %w", adminErr)
+	}
+	// Set admin username to values
+	values["admin"] = adminUsername
+	
 	cfg, err := getAppConfigFromCfgFile(chartPath, token)
 	if err != nil {
 		return nil, err
