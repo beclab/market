@@ -3,6 +3,7 @@ package validate
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -272,9 +273,28 @@ func getResourceListFromChart(chartPath string, token string) (resources kube.Re
 		"refs":     map[string]interface{}{},
 	}
 	values["GPU"] = map[string]interface{}{}
-	values["bfl"] = map[string]interface{}{
-		"username": "bfl-username",
+	
+	// Get user info and set username
+	userInfoStr, userInfoErr := appservice.GetUserInfo(token)
+	if userInfoErr != nil {
+		glog.Warningf("Failed to get user info: %v", userInfoErr)
+		return nil, fmt.Errorf("failed to get user info: %w", userInfoErr)
 	}
+	
+	var userInfo struct {
+		Role     string `json:"role"`
+		Username string `json:"username"`
+	}
+	
+	if err := json.Unmarshal([]byte(userInfoStr), &userInfo); err != nil {
+		glog.Warningf("Failed to unmarshal user info: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal user info: %w", err)
+	}
+	
+	values["bfl"] = map[string]interface{}{
+		"username": userInfo.Username,
+	}
+	
 	values["user"] = map[string]interface{}{
 		"zone": "user-zone",
 	}
