@@ -275,6 +275,12 @@ type Dependency struct {
 	SelfRely  bool   `yaml:"selfRely json:"selfRely"`
 }
 
+type Conflict struct {
+	Name string `yaml:"name" json:"name"`
+	// conflict type: application
+	Type string `yaml:"type" json:"type"`
+}
+
 type Options struct {
 	Policies        []Policy     `yaml:"policies" json:"policies" bson:"policies"`
 	Analytics       *Analytics   `yaml:"analytics" json:"analytics" bson:"analytics"`
@@ -282,6 +288,7 @@ type Options struct {
 	AppScope        *AppScope    `yaml:"appScope" json:"appScope"`
 	WsConfig        *WsConfig    `yaml:"websocket" json:"websocket"`
 	MobileSupported bool         `yaml:"mobileSupported" json:"mobileSupported,omitempty"`
+	Conflicts       []Conflict   `yaml:"conflicts" json:"conflicts"`
 }
 
 type AppScope struct {
