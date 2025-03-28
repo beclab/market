@@ -35,6 +35,7 @@ const (
 	AppServiceOperateHistoryListWithRawURLTempl = "http://%s:%s/app-service/v1/apps/operate_history?%s"
 	AppServiceAppsURLTempl                      = "http://%s:%s/app-service/v1/apps/%s"
 	AppServiceAppsListURLTempl                  = "http://%s:%s/app-service/v1/apps?issysapp=%s&state=%s"
+	AppServiceRenderManifestURLTempl			= "http://%s:%s/app-service/v1/apps/manifest/render"
 
 	AppServiceCheckDependencies = "http://%s:%s/app-service/v1/application/deps"
 
@@ -42,6 +43,7 @@ const (
 
 	AppServiceTerminusVersionURLTempl = "http://%s:%s/app-service/v1/terminus/version"
 	AppServiceTerminusNodesURLTempl   = "http://%s:%s/app-service/v1/terminus/nodes"
+	AppServiceAdminUsernameURLTempl   = "http://%s:%s/app-service/v1/users/admin/username"
 
 	AppServiceCurUserResourceTempl = "http://%s:%s/app-service/v1/user/resource"
 	AppServiceClusterResourceTempl = "http://%s:%s/app-service/v1/cluster/resource"

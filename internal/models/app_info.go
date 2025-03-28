@@ -272,6 +272,13 @@ type Dependency struct {
 	// dependency type: system, application.
 	Type      string `yaml:"type" json:"type" bson:"type"`
 	Mandatory bool   `yaml:"mandatory" json:"mandatory" bson:"mandatory"`
+	SelfRely  bool   `yaml:"selfRely json:"selfRely"`
+}
+
+type Conflict struct {
+	Name string `yaml:"name" json:"name"`
+	// conflict type: application
+	Type string `yaml:"type" json:"type"`
 }
 
 type Options struct {
@@ -281,6 +288,7 @@ type Options struct {
 	AppScope        *AppScope    `yaml:"appScope" json:"appScope"`
 	WsConfig        *WsConfig    `yaml:"websocket" json:"websocket"`
 	MobileSupported bool         `yaml:"mobileSupported" json:"mobileSupported,omitempty"`
+	Conflicts       []Conflict   `yaml:"conflicts" json:"conflicts"`
 }
 
 type AppScope struct {

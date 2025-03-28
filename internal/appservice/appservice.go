@@ -1,6 +1,7 @@
 package appservice
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"market/internal/constants"
@@ -222,4 +223,65 @@ func ConvertModelsListToMap(llms []*models.ModelStatusResponse) (llmMap map[stri
 	}
 
 	return
+}
+
+type RenderResponse struct {
+	Code int `json:"code"`
+	Data struct {
+		Content string `json:"content"`
+	} `json:"data"`
+}
+
+func RenderManifest(content, token string) (string, error) {
+	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
+	url := fmt.Sprintf(constants.AppServiceRenderManifestURLTempl, appServiceHost, appServicePort)
+	
+	requestBody := map[string]string{
+		"content": content,
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", err
+	}
+	
+	bodyReader := bytes.NewBuffer(jsonData)
+	
+	responseStr, err := utils.SendHttpRequestWithToken(http.MethodPost, url, token, bodyReader)
+	if err != nil {
+		return "", err
+	}
+	
+	var response RenderResponse
+	if err := json.Unmarshal([]byte(responseStr), &response); err != nil {
+		glog.Warningf("failed to unmarshal render response: %s, error: %v", responseStr, err)
+		return "", err
+	}
+	
+	return response.Data.Content, nil
+}
+
+type AdminUsernameResponse struct {
+	Code int `json:"code"`
+	Data struct {
+		Username string `json:"username"`
+	} `json:"data"`
+}
+
+func GetAdminUsername(token string) (string, error) {
+	appServiceHost, appServicePort := constants.GetAppServiceHostAndPort()
+	url := fmt.Sprintf(constants.AppServiceAdminUsernameURLTempl, appServiceHost, appServicePort)
+
+	responseStr, err := utils.SendHttpRequestWithToken(http.MethodGet, url, token, nil)
+	if err != nil {
+		return "", err
+	}
+
+	var response AdminUsernameResponse
+	if err := json.Unmarshal([]byte(responseStr), &response); err != nil {
+		glog.Warningf("failed to unmarshal admin username response: %s, error: %v", responseStr, err)
+		return "", err
+	}
+
+	return response.Data.Username, nil
 }
