@@ -80,12 +80,14 @@ export const useUserStore = defineStore('userStore', {
 			const userResource = this._userResourcePreflight(app);
 			const systemResource = this._systemResourcePreflight(app);
 			const appDependencies = this._appDependenciesPreflight(app);
+			const appConflicts = this._appConflictsPreflight(app);
 			if (
 				role &&
 				terminus &&
 				userResource &&
 				systemResource &&
-				appDependencies
+				appDependencies &&
+				appConflicts
 			) {
 				app.status = status;
 			} else {
@@ -234,14 +236,16 @@ export const useUserStore = defineStore('userStore', {
 				app.options.dependencies &&
 				app.options.dependencies.length > 0
 			) {
-				const nameList = this.myApps.map((item) => item.name);
+				const allAppList = this.myApps.map((item) => item.name);
+				const clusterAppAndMiddlewareList: string[] = [];
 				if (
 					this.systemResource &&
 					this.systemResource.apps &&
 					this.systemResource.apps.length > 0
 				) {
 					this.systemResource.apps.forEach((app: Dependency) => {
-						nameList.push(app.name);
+						allAppList.push(app.name);
+						clusterAppAndMiddlewareList.push(app.name);
 					});
 				}
 
@@ -250,7 +254,7 @@ export const useUserStore = defineStore('userStore', {
 					if (dependency.type === DEPENDENCIES_TYPE.middleware) {
 						this._saveDependencies(app, dependency);
 
-						if (!nameList.includes(dependency.name)) {
+						if (!clusterAppAndMiddlewareList.includes(dependency.name)) {
 							appPushError(app, ErrorCode.G012_SG001, {
 								name: dependency.name,
 								version: dependency.version
@@ -265,12 +269,18 @@ export const useUserStore = defineStore('userStore', {
 					) {
 						this._saveDependencies(app, dependency);
 
-						if (!nameList.includes(dependency.name)) {
-							appPushError(app, ErrorCode.G012_SG002, {
-								name: dependency.name,
-								version: dependency.version
-							});
-							isOK = false;
+						if (!allAppList.includes(dependency.name)) {
+							// temp dify dependency dify(for cluster in this.systemResource.apps)
+							if (dependency.name === app.name) {
+								appPushError(app, ErrorCode.G006);
+								isOK = false;
+							} else {
+								appPushError(app, ErrorCode.G012_SG002, {
+									name: dependency.name,
+									version: dependency.version
+								});
+								isOK = false;
+							}
 						}
 					}
 				}
@@ -369,6 +379,31 @@ export const useUserStore = defineStore('userStore', {
 				if (intersectedArray.length === 0) {
 					appPushError(app, ErrorCode.G018);
 					isOK = false;
+				}
+			}
+			return isOK;
+		},
+
+		_appConflictsPreflight(app: AppStoreInfo): boolean {
+			let isOK = true;
+			if (
+				app.options &&
+				app.options.conflicts &&
+				app.options.conflicts.length > 0
+			) {
+				const nameList2 = this.myApps.map((item) => item.name);
+
+				for (let i = 0; i < app.options.conflicts.length; i++) {
+					const conflict = app.options.conflicts[i];
+
+					if (conflict.type === DEPENDENCIES_TYPE.application) {
+						if (!nameList2.includes(conflict.name)) {
+							appPushError(app, ErrorCode.G012_SG001, {
+								name: conflict.name
+							});
+							isOK = false;
+						}
+					}
 				}
 			}
 			return isOK;

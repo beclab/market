@@ -155,7 +155,6 @@ import {
 import { bus, BUS_EVENT } from 'src/utils/bus';
 import ProgressButton from 'src/components/base/ProgressButton.vue';
 import DependencyDialog from 'src/components/appintro/DependencyDialog.vue';
-import ReferenceDialog from 'src/components/appintro/ReferenceDialog.vue';
 import { useSettingStore } from 'src/stores/setting';
 import { useQuasar } from 'quasar';
 
@@ -249,24 +248,6 @@ async function onClick() {
 					});
 			}
 			console.log(2);
-
-			if (settingStore.hasReference(props.item)) {
-				console.log(3);
-				settingStore.referenceShow = true;
-				$q.dialog({
-					component: ReferenceDialog,
-					componentProps: {
-						app: props.item
-					}
-				})
-					.onOk(() => {
-						//Do Something
-					})
-					.onDismiss(() => {
-						settingStore.referenceShow = false;
-					});
-			}
-			console.log(4);
 			break;
 		case APP_STATUS.pending:
 		case APP_STATUS.downloading:

@@ -28,12 +28,14 @@
 		<q-img
 			v-if="csApp"
 			class="application_cs_icon"
-			src="../../assets/cluster_scoped_icon.svg"
+			:src="getRequireImage('share_app.svg')"
 		/>
 	</div>
 </template>
 
 <script lang="ts" setup>
+import { getRequireImage } from 'src/utils/imageUtils';
+
 defineProps({
 	src: {
 		type: String,
@@ -53,7 +55,7 @@ defineProps({
 	},
 	csSize: {
 		type: Number,
-		default: 16
+		default: 20
 	}
 });
 </script>
@@ -79,8 +81,9 @@ defineProps({
 		width: var(--csSize);
 		height: var(--csSize);
 		position: absolute;
-		right: 4px;
-		bottom: 4px;
+		filter: drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.2));
+		right: 0;
+		bottom: 0;
 	}
 }
 </style>

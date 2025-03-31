@@ -59,6 +59,7 @@ export interface AppStoreInfo {
 			enable: boolean;
 		};
 		dependencies: Dependency[];
+		conflicts: Conflict[];
 		policies: Policy[];
 		appScope: {
 			clusterScoped: boolean;
@@ -90,6 +91,11 @@ export interface AppStoreInfo {
 	//local
 	progress: string;
 	preflightError: ErrorGroup[];
+}
+
+export interface Conflict {
+	name: string;
+	type: string;
 }
 
 export interface Entrance {
