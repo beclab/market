@@ -18,7 +18,7 @@ export default {
 		confirm: 'Confirm',
 		message: 'Message',
 		scope: 'Scope',
-		cluster_app: 'Cluster App',
+		cluster_app: 'Shared App',
 		developer: 'Developer',
 		language: 'Language',
 		search: 'Search',
@@ -98,7 +98,7 @@ export default {
 			'This application may require the following dependencies for full functionality.',
 		reference_app_not_installed: 'Reference app not installed',
 		need_reference_app_to_use:
-			'This is a cluster-scoped app, you will need the corresponding Reference app to use it.'
+			'This is a shared app, you will need the corresponding Reference app to use it.'
 	},
 	permission: {
 		files: 'Files',
@@ -156,7 +156,7 @@ export default {
 		key_value_database_label: 'This app uses Redis as its Key-value database',
 		key_value_database_desc: 'Redis is provided by Olares Middleware Service.',
 		cluster_app_label:
-			'This app will be installed at the cluster level, and shared by all users in the same Olares cluster',
+			'This app is shared by all users in the same Olares cluster.',
 		entrance: 'Entrance',
 		entrance_visibility_label:
 			'Number of different visibility entrances for this app: {desktopSize} visible and {backendSize} invisible',
@@ -177,9 +177,9 @@ export default {
 		failed_get_user_role: 'Failed to get user role',
 		only_be_installed_by_the_admin: 'This app can only be installed by Admin',
 		not_admin_role_install_middleware:
-			'Middleware component. Contact your Olares Admin to install.',
+			'This is a middleware component. Contact your Olares Admin to install.',
 		not_admin_role_install_cluster_app:
-			'Cluster app. Contact your Olares Admin to install.',
+			'This is a shared app. It must be installed by your Olares Admin before you can use it.',
 		failed_to_get_os_version: 'Failed to get Olares version',
 		app_is_not_compatible_terminus_os: 'Incompatible with your Olares',
 		failed_to_get_user_resource: 'Failed to get user resource',
@@ -195,8 +195,12 @@ export default {
 		app_info_get_failure: 'Failed to retrieve app information',
 		cluster_not_support_platform:
 			'This [app/recommend/model] does not support your Olares platform',
+		app_install_conflict:
+			'This app conflicts with your installed apps. Please uninstall the following apps before proceeding with this installation.',
+
 		app_not_install_details: 'App Name: {name}, Version: {version}',
-		middleware_not_install_details: 'Middleware: {name}, Version: {version}'
+		middleware_not_install_details: 'Middleware: {name}, Version: {version}',
+		app_install_conflict_details: '{name}'
 	},
 	my: {
 		market: 'Market',

@@ -39,6 +39,7 @@
 			v-if="showIcon(type)"
 			:skeleton="true"
 			:size="larger ? 100 : 64"
+			:cs-size="larger ? 28 : 20"
 		/>
 
 		<app-featured-image v-else :width="larger ? 224 : 128" :skeleton="true" />
@@ -117,6 +118,7 @@
 			v-if="showIcon(type)"
 			:src="item.icon"
 			:size="larger ? 100 : 64"
+			:cs-size="larger ? 28 : 20"
 			:cs-app="clusterScopedApp"
 		/>
 
@@ -158,12 +160,12 @@
 					:is-update="isUpdate"
 					:manager="manager"
 				/>
-				<div
-					v-if="clusterScopedApp"
-					class="application_cluster_scoped text-ink-3"
-				>
-					Cluster-Scoped
-				</div>
+				<!--				<div-->
+				<!--					v-if="clusterScopedApp"-->
+				<!--					class="application_cluster_scoped text-ink-3"-->
+				<!--				>-->
+				<!--					Cluster-Scoped-->
+				<!--				</div>-->
 			</span>
 
 			<span
@@ -186,7 +188,7 @@ import {
 import InstallButton from 'components/appcard/InstallButton.vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from 'src/stores/app';
-import AppIcon from 'components/appcard/AppIcon.vue';
+import AppIcon from 'src/components/appcard/AppIcon.vue';
 import AppFeaturedImage from 'components/appcard/AppFeaturedImage.vue';
 import { useI18n } from 'vue-i18n';
 import { useColor } from '@bytetrade/ui';
