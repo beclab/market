@@ -137,6 +137,8 @@ type ApplicationInfo struct {
 	ModelSize string `yaml:"modelSize" json:"modelSize,omitempty"`
 	Namespace string `yaml:"namespace" json:"namespace,omitempty"`
 	OnlyAdmin bool   `yaml:"onlyAdmin" json:"onlyAdmin,omitempty"`
+
+	Variants map[string]ApplicationInfo `yaml:"variants" json:"variants,omitempty" bson:"variants"`
 }
 
 type ByInstallTime []*ApplicationInfo

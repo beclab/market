@@ -29,7 +29,7 @@ func (h *Handler) handleInfos(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names, token)
 	if infosMarket == nil {
 		api.HandleError(resp, errors.New("get apps failed"))
 		return
@@ -156,7 +156,7 @@ func (h *Handler) handleI18ns(req *restful.Request, resp *restful.Response) {
 	}
 	//names := []string{"astral", "market", "firefox"}
 	names := []string{}
-	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names, token)
 	if infosMarket == nil {
 		api.HandleError(resp, errors.New("get apps failed"))
 		return
@@ -204,7 +204,7 @@ func (h *Handler) handleI18n(req *restful.Request, resp *restful.Response) {
 	}
 	name := req.PathParameter(ParamAppName)
 	names := []string{name}
-	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names, token)
 	if infosMarket == nil {
 		api.HandleError(resp, errors.New("get apps failed"))
 		return

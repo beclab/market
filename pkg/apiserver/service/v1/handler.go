@@ -150,7 +150,7 @@ func (h *Handler) list(req *restful.Request, resp *restful.Response) {
 		ty = defaultAppType()
 	}
 
-	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty)
+	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty, token)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
@@ -288,7 +288,7 @@ func (h *Handler) listLatest(req *restful.Request, resp *restful.Response) {
 		ty = defaultAppType()
 	}
 
-	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty)
+	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty, token)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)

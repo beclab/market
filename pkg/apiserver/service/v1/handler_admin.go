@@ -78,7 +78,7 @@ func (h *Handler) myterminus(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	infosMarket := appmgr.ReadCacheApplicationsWithMap(names)
+	infosMarket := appmgr.ReadCacheApplicationsWithMap(names, token)
 	if infosMarket == nil {
 		api.HandleError(resp, errors.New("get apps failed"))
 		return
@@ -165,7 +165,7 @@ func (h *Handler) workflowRecommendsDetail(req *restful.Request, resp *restful.R
 
 	category := req.QueryParameter("category")
 
-	apps, totals := appmgr.ReadCacheApplications(0, 0, category, constants.RecommendType)
+	apps, totals := appmgr.ReadCacheApplications(0, 0, category, constants.RecommendType, token)
 
 	workflowMap, _ := getWorkflowsMap(token)
 
@@ -193,7 +193,7 @@ func (h *Handler) modelList(req *restful.Request, resp *restful.Response) {
 
 	category := req.QueryParameter("category")
 
-	apps, totals := appmgr.ReadCacheApplications(0, 0, category, constants.ModelType)
+	apps, totals := appmgr.ReadCacheApplications(0, 0, category, constants.ModelType, token)
 
 	//todo get running models status
 	modelsMap, _ := getModelsMap(token)

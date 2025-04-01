@@ -3,6 +3,7 @@ package appmgr
 import (
 	"encoding/json"
 	"market/internal/models"
+	"market/internal/appservice"
 	"regexp"
 	"strings"
 	"sync"
@@ -37,7 +38,6 @@ func ReadCacheAppTypes() *models.ListResultD {
 }
 
 func updateCacheApplications() {
-
 	res, err := getApps("0", "0", "", "")
 	if err != nil {
 		glog.Warningf("update cache Applications failed: %s", err.Error())
@@ -108,10 +108,125 @@ func deepCopyApplications(apps []*models.ApplicationInfo) []*models.ApplicationI
 	return copiedApps
 }
 
-// ReadCacheApplications retrieves applications from cache based on category and type
-func ReadCacheApplications(page, size int, category, ty string) ([]*models.ApplicationInfo, int64) {
+// Helper function to process application variants based on admin status
+func processAppVariants(app *models.ApplicationInfo, isAdmin bool) *models.ApplicationInfo {
+	// Create a deep copy to avoid modifying the cache
+	appCopy := deepCopyApplication(app)
+	
+	// For non-admin users, if app has user variant, optimize app info
+	if !isAdmin && appCopy.Variants != nil {
+		if userVariant, exists := appCopy.Variants["user"]; exists {
+			// Keep original important information
+			originalID := appCopy.Id
+			originalStatus := appCopy.Status
+			originalProgress := appCopy.Progress
+			originalI18n := appCopy.I18n
+			originalChartName := appCopy.ChartName
+			originalCreateTime := appCopy.CreateTime
+			originalUpdateTime := appCopy.UpdateTime
+			originalInstallTime := appCopy.InstallTime
+			originalUid := appCopy.Uid
+			originalNamespace := appCopy.Namespace
+			
+			// Use fields from the variant
+			appCopy.Title = userVariant.Title
+			appCopy.Description = userVariant.Description
+			appCopy.FullDescription = userVariant.FullDescription
+			appCopy.UpgradeDescription = userVariant.UpgradeDescription
+			appCopy.PromoteImage = userVariant.PromoteImage
+			appCopy.PromoteVideo = userVariant.PromoteVideo
+			appCopy.Categories = userVariant.Categories
+			appCopy.SubCategory = userVariant.SubCategory
+			appCopy.Icon = userVariant.Icon
+			appCopy.FeatureImage = userVariant.FeatureImage
+			appCopy.Rating = userVariant.Rating
+			appCopy.Developer = userVariant.Developer
+			appCopy.Submitter = userVariant.Submitter
+			appCopy.Doc = userVariant.Doc
+			appCopy.Website = userVariant.Website
+			appCopy.SourceCode = userVariant.SourceCode
+			appCopy.License = userVariant.License
+			appCopy.Legal = userVariant.Legal
+			appCopy.Permission = userVariant.Permission
+			appCopy.Middleware = userVariant.Middleware
+			appCopy.Options = userVariant.Options
+			
+			// If variant has i18n, merge i18n information
+			if userVariant.I18n != nil && len(userVariant.I18n) > 0 {
+				// If original i18n is empty, use variant's i18n directly
+				if appCopy.I18n == nil || len(appCopy.I18n) == 0 {
+					appCopy.I18n = userVariant.I18n
+				} else {
+					// Otherwise merge i18n info, prioritizing variant
+					for locale, i18nInfo := range userVariant.I18n {
+						appCopy.I18n[locale] = i18nInfo
+					}
+				}
+			} else {
+				// Restore original i18n
+				appCopy.I18n = originalI18n
+			}
+			
+			// If variant has entrances, use variant's entrances
+			if userVariant.Entrances != nil && len(userVariant.Entrances) > 0 {
+				appCopy.Entrances = userVariant.Entrances
+			}
+			
+			// Restore original fixed information
+			appCopy.Id = originalID
+			appCopy.Status = originalStatus
+			appCopy.Progress = originalProgress
+			appCopy.ChartName = originalChartName
+			appCopy.CreateTime = originalCreateTime
+			appCopy.UpdateTime = originalUpdateTime
+			appCopy.InstallTime = originalInstallTime
+			appCopy.Uid = originalUid
+			appCopy.Namespace = originalNamespace
+			
+			glog.Infof("Application %s's information optimized for normal users", appCopy.Name)
+		}
+	}
+	
+	return appCopy
+}
+
+// Helper function to determine if the user is an admin
+func isUserAdmin(token string) bool {
+	// Get admin username
+	adminUsername, adminErr := appservice.GetAdminUsername(token)
+	if adminErr != nil {
+		glog.Warningf("Failed to get admin username: %s", adminErr.Error())
+		return false
+	}
+	
+	// Get current user info
+	userInfoStr, userInfoErr := appservice.GetUserInfo(token)
+	if userInfoErr != nil {
+		glog.Warningf("Failed to get user info: %s", userInfoErr.Error())
+		return false
+	}
+	
+	var userInfo struct {
+		Role     string `json:"role"`
+		Username string `json:"username"`
+	}
+	
+	if err := json.Unmarshal([]byte(userInfoStr), &userInfo); err != nil {
+		glog.Warningf("Failed to parse user info: %s", err.Error())
+		return false
+	}
+	
+	// Check if user is admin
+	return userInfo.Username == adminUsername
+}
+
+// Update ReadCacheApplications to process variants with token
+func ReadCacheApplications(page, size int, category, ty, token string) ([]*models.ApplicationInfo, int64) {
 	mu.Lock() // Lock to ensure thread safety
 	defer mu.Unlock()
+
+	// Check admin status once per request
+	isAdmin := isUserAdmin(token)
 
 	var filteredApps []*models.ApplicationInfo
 	var totalCount int64 // Counter for total matching applications
@@ -132,7 +247,12 @@ func ReadCacheApplications(page, size int, category, ty string) ([]*models.Appli
 
 	// If page and size are both 0, return all filtered applications
 	if page == 0 && size == 0 {
-		return deepCopyApplications(filteredApps), totalCount
+		// Process each app for variants
+		var processedApps []*models.ApplicationInfo
+		for _, app := range filteredApps {
+			processedApps = append(processedApps, processAppVariants(app, isAdmin))
+		}
+		return processedApps, totalCount
 	}
 
 	// Implement pagination
@@ -145,10 +265,14 @@ func ReadCacheApplications(page, size int, category, ty string) ([]*models.Appli
 		end = len(filteredApps) // Adjust end index if it exceeds the length
 	}
 
-	resp := deepCopyApplications(filteredApps[start:end])
+	// Process paginated apps for variants
+	var processedApps []*models.ApplicationInfo
+	for _, app := range filteredApps[start:end] {
+		processedApps = append(processedApps, processAppVariants(app, isAdmin))
+	}
 
-	glog.Infof("---------->on ReadCacheApplications: %s", len(resp))
-	return resp, totalCount // Return the paginated result and total count
+	glog.Infof("---------->on ReadCacheApplications: %d", len(processedApps))
+	return processedApps, totalCount // Return the paginated result and total count
 }
 
 func updateCacheTopApplications() {
@@ -175,16 +299,18 @@ func updateCacheTopApplications() {
 	glog.Infof("-------> TopApplications: %s", len(cacheTopApplications))
 }
 
-// ReadCacheTopApps retrieves top applications from cache based on category and type
-func ReadCacheTopApps(category, ty string, size int) ([]*models.ApplicationInfo, int64) {
+// Update ReadCacheTopApps to process variants with token
+func ReadCacheTopApps(category, ty string, size int, token string) ([]*models.ApplicationInfo, int64) {
 	mu.Lock() // Lock to ensure thread safety
 	defer mu.Unlock()
+
+	// Check admin status once per request
+	isAdmin := isUserAdmin(token)
 
 	var filteredApps []*models.ApplicationInfo
 	var totalCount int64
 
 	for _, app := range cacheTopApplications {
-
 		// Use matchesType to check if the app's CfgType matches any of the specified types
 		if !matchesType(app.CfgType, ty) {
 			continue
@@ -205,11 +331,15 @@ func ReadCacheTopApps(category, ty string, size int) ([]*models.ApplicationInfo,
 		}
 	}
 
-	resp := deepCopyApplications(filteredApps)
+	// Process each app for variants
+	var processedApps []*models.ApplicationInfo
+	for _, app := range filteredApps {
+		processedApps = append(processedApps, processAppVariants(app, isAdmin))
+	}
 
-	glog.Infof("---------->on ReadCacheTopApps: %s", len(resp))
+	glog.Infof("---------->on ReadCacheTopApps: %d", len(processedApps))
 
-	return resp, totalCount
+	return processedApps, totalCount
 }
 
 func deepCopyApplication(app *models.ApplicationInfo) *models.ApplicationInfo {
@@ -229,36 +359,45 @@ func deepCopyApplication(app *models.ApplicationInfo) *models.ApplicationInfo {
 	return &copyApp
 }
 
-func ReadCacheApplication(name string) *models.ApplicationInfo {
+// Update ReadCacheApplication to process variants with token
+func ReadCacheApplication(name, token string) *models.ApplicationInfo {
 	mu.Lock() // Lock to ensure thread safety
 	defer mu.Unlock()
 
+	// Check admin status once per request
+	isAdmin := isUserAdmin(token)
+
 	for _, app := range cacheApplications {
 		if app.Name == name {
+			// Process the app for variants
+			processedApp := processAppVariants(app, isAdmin)
+			
+			glog.Infof("---------->on ReadCacheApplication: %s", processedApp.Name)
 
-			resp := deepCopyApplication(app)
-
-			glog.Infof("---------->on ReadCacheApplication: %s", resp)
-
-			return resp
+			return processedApp
 		}
 	}
 	return nil
 }
 
-func ReadCacheApplicationsWithMap(names []string) map[string]*models.ApplicationInfo {
+// Update ReadCacheApplicationsWithMap to process variants with token
+func ReadCacheApplicationsWithMap(names []string, token string) map[string]*models.ApplicationInfo {
 	mu.Lock() // Lock to ensure thread safety
 	defer mu.Unlock()
+
+	// Check admin status once per request
+	isAdmin := isUserAdmin(token)
 
 	result := make(map[string]*models.ApplicationInfo)
 
 	// If names is an empty array, return all data
 	if len(names) == 0 {
 		for _, app := range cacheApplications {
-			copyApp := deepCopyApplication(app)
-			result[app.Name] = copyApp
+			// Process the app for variants
+			processedApp := processAppVariants(app, isAdmin)
+			result[app.Name] = processedApp
 		}
-		glog.Infof("---------->on ReadCacheApplicationsWithMap: Returning all applications, count: %s", len(result))
+		glog.Infof("---------->on ReadCacheApplicationsWithMap: Returning all applications, count: %d", len(result))
 		return result
 	}
 
@@ -266,38 +405,18 @@ func ReadCacheApplicationsWithMap(names []string) map[string]*models.Application
 	for _, name := range names {
 		for _, app := range cacheApplications {
 			if app.Name == name {
-				copyApp := deepCopyApplication(app)
-				result[name] = copyApp
+				// Process the app for variants
+				processedApp := processAppVariants(app, isAdmin)
+				result[name] = processedApp
 				break
 			}
 		}
 	}
 
-	glog.Infof("---------->on ReadCacheApplicationsWithMap: %s", len(result))
+	glog.Infof("---------->on ReadCacheApplicationsWithMap: %d", len(result))
 
 	return result
 }
-
-// func ReadCacheApplicationsWithMap(names []string) map[string]*models.ApplicationInfo {
-// 	mu.Lock() // Lock to ensure thread safety
-// 	defer mu.Unlock()
-
-// 	result := make(map[string]*models.ApplicationInfo)
-
-// 	for _, name := range names {
-// 		for _, app := range cacheApplications {
-// 			if app.Name == name {
-// 				copyApp := deepCopyApplication(app)
-// 				result[name] = copyApp
-// 				break
-// 			}
-// 		}
-// 	}
-
-// 	glog.Infof("---------->on ReadCacheApplicationsWithMap: %s", len(result))
-
-// 	return result
-// }
 
 func updateCacheI18n() {
 	for _, app := range cacheApplications {
@@ -329,10 +448,13 @@ func ReadCacheI18n(chartName string, locale []string) map[string]models.I18n {
 	return nil
 }
 
-// SearchFromCache searches applications in cache based on a name condition
-func SearchFromCache(page, size int, name string) (infos []*models.ApplicationInfo, count int64) {
+// Update SearchFromCache to process variants with token
+func SearchFromCache(page, size int, name, token string) (infos []*models.ApplicationInfo, count int64) {
 	mu.Lock() // Lock to ensure thread safety
 	defer mu.Unlock()
+
+	// Check admin status once per request
+	isAdmin := isUserAdmin(token)
 
 	wildcardName := getWildcardName(name)
 	var matchedApps []*models.ApplicationInfo
@@ -355,7 +477,12 @@ func SearchFromCache(page, size int, name string) (infos []*models.ApplicationIn
 
 	// If page and size are both 0, return all matched applications
 	if page == 0 && size == 0 {
-		return deepCopyApplications(matchedApps), count
+		// Process each app for variants
+		var processedApps []*models.ApplicationInfo
+		for _, app := range matchedApps {
+			processedApps = append(processedApps, processAppVariants(app, isAdmin))
+		}
+		return processedApps, count
 	}
 
 	// Implement pagination
@@ -368,8 +495,13 @@ func SearchFromCache(page, size int, name string) (infos []*models.ApplicationIn
 		end = len(matchedApps) // Adjust end index if it exceeds the length
 	}
 
-	// Return the paginated result
-	return deepCopyApplications(matchedApps[start:end]), count
+	// Process paginated apps for variants
+	var processedApps []*models.ApplicationInfo
+	for _, app := range matchedApps[start:end] {
+		processedApps = append(processedApps, processAppVariants(app, isAdmin))
+	}
+
+	return processedApps, count
 }
 
 // matchesWildcard checks if the input string matches the wildcard pattern
