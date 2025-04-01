@@ -397,8 +397,8 @@ export const useUserStore = defineStore('userStore', {
 					const conflict = app.options.conflicts[i];
 
 					if (conflict.type === DEPENDENCIES_TYPE.application) {
-						if (!nameList2.includes(conflict.name)) {
-							appPushError(app, ErrorCode.G012_SG001, {
+						if (nameList2.includes(conflict.name)) {
+							appPushError(app, ErrorCode.G019_SG001, {
 								name: conflict.name
 							});
 							isOK = false;
