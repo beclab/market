@@ -124,10 +124,7 @@ export function appPushError(
 			}
 		}
 
-		if (
-			parentError &&
-			!parentError.subGroups.find((sub) => sub.code === level2Error.code)
-		) {
+		if (parentError) {
 			parentError.subGroups.push(level2Error);
 		}
 	}

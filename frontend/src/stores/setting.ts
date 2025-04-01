@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { getNsfw, setNsfw } from 'src/api/private/setting';
 import {
 	AppStoreInfo,
+	ClusterApp,
 	DEPENDENCIES_TYPE,
 	Dependency
 } from 'src/constants/constants';
@@ -48,7 +49,7 @@ export const useSettingStore = defineStore('setting', {
 				const userStore = useUserStore();
 				const nameList = userStore.myApps.map((item) => item.name);
 				if (userStore.systemResource) {
-					userStore.systemResource.apps.forEach((app: Dependency) => {
+					userStore.systemResource.apps.forEach((app: ClusterApp) => {
 						nameList.push(app.name);
 					});
 				}
@@ -83,7 +84,7 @@ export const useSettingStore = defineStore('setting', {
 				const userStore = useUserStore();
 				const nameList = userStore.myApps.map((item) => item.name);
 				if (userStore.systemResource) {
-					userStore.systemResource.apps.forEach((app: Dependency) => {
+					userStore.systemResource.apps.forEach((app: ClusterApp) => {
 						nameList.push(app.name);
 					});
 				}

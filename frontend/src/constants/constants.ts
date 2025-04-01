@@ -128,6 +128,13 @@ export interface Dependency {
 	mandatory: boolean;
 }
 
+export interface ClusterApp {
+	name: string;
+	type: CLUSTER_TYPE;
+	version: string;
+	state: APP_STATUS;
+}
+
 export interface Policy {
 	entranceName: string;
 	description: string;
@@ -184,7 +191,7 @@ export interface UserResource {
 }
 
 export interface TerminusResource {
-	apps: Dependency[];
+	apps: ClusterApp[];
 	metrics: {
 		cpu: Resource;
 		memory: Resource;
@@ -273,6 +280,11 @@ export const CATEGORIES_TYPE = {
 export enum DEPENDENCIES_TYPE {
 	application = 'application',
 	system = 'system',
+	middleware = 'middleware'
+}
+
+export enum CLUSTER_TYPE {
+	app = 'app',
 	middleware = 'middleware'
 }
 

@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import {
 	APP_STATUS,
 	AppStoreInfo,
+	CLUSTER_TYPE,
+	ClusterApp,
 	DEPENDENCIES_TYPE,
 	Dependency,
 	ROLE_TYPE,
@@ -236,16 +238,27 @@ export const useUserStore = defineStore('userStore', {
 				app.options.dependencies &&
 				app.options.dependencies.length > 0
 			) {
-				const allAppList = this.myApps.map((item) => item.name);
-				const clusterAppAndMiddlewareList: string[] = [];
+				const allApps = this.myApps.map((item) => {
+					return {
+						name: item.name,
+						state: item.state,
+						type: 'application',
+						version: ''
+					};
+				});
+				const middlewares: ClusterApp[] = [];
 				if (
 					this.systemResource &&
 					this.systemResource.apps &&
 					this.systemResource.apps.length > 0
 				) {
-					this.systemResource.apps.forEach((app: Dependency) => {
-						allAppList.push(app.name);
-						clusterAppAndMiddlewareList.push(app.name);
+					this.systemResource.apps.forEach((app: ClusterApp) => {
+						if (app.type === CLUSTER_TYPE.app) {
+							//cluster app
+							allApps.push(app);
+						} else if (app.type === CLUSTER_TYPE.middleware) {
+							middlewares.push(app);
+						}
 					});
 				}
 
@@ -254,7 +267,13 @@ export const useUserStore = defineStore('userStore', {
 					if (dependency.type === DEPENDENCIES_TYPE.middleware) {
 						this._saveDependencies(app, dependency);
 
-						if (!clusterAppAndMiddlewareList.includes(dependency.name)) {
+						if (
+							!middlewares.find(
+								(item) =>
+									item.name === dependency.name &&
+									item.state === APP_STATUS.running
+							)
+						) {
 							appPushError(app, ErrorCode.G012_SG001, {
 								name: dependency.name,
 								version: dependency.version
@@ -269,7 +288,13 @@ export const useUserStore = defineStore('userStore', {
 					) {
 						this._saveDependencies(app, dependency);
 
-						if (!allAppList.includes(dependency.name)) {
+						if (
+							!allApps.find(
+								(item) =>
+									item.name === dependency.name &&
+									item.state === APP_STATUS.running
+							)
+						) {
 							// temp dify dependency dify(for cluster in this.systemResource.apps)
 							if (dependency.name === app.name) {
 								appPushError(app, ErrorCode.G006);
@@ -391,13 +416,26 @@ export const useUserStore = defineStore('userStore', {
 				app.options.conflicts &&
 				app.options.conflicts.length > 0
 			) {
-				const nameList2 = this.myApps.map((item) => item.name);
+				const appApps = this.myApps.map((item) => item.name);
+
+				if (
+					this.systemResource &&
+					this.systemResource.apps &&
+					this.systemResource.apps.length > 0
+				) {
+					this.systemResource.apps.forEach((app: ClusterApp) => {
+						if (app.type === CLUSTER_TYPE.app) {
+							//cluster app
+							appApps.push(app.name);
+						}
+					});
+				}
 
 				for (let i = 0; i < app.options.conflicts.length; i++) {
 					const conflict = app.options.conflicts[i];
 
 					if (conflict.type === DEPENDENCIES_TYPE.application) {
-						if (nameList2.includes(conflict.name)) {
+						if (appApps.includes(conflict.name)) {
 							appPushError(app, ErrorCode.G019_SG001, {
 								name: conflict.name
 							});
