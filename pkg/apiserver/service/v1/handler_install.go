@@ -61,7 +61,7 @@ func respDepErr(resp *restful.Response, msg string) {
 
 func installPre(appName, token string) (*models.ApplicationInfo, error) {
 
-	info := appmgr.ReadCacheApplication(appName)
+	info := appmgr.ReadCacheApplication(appName, token)
 	if info == nil {
 		return info, errors.New("get app failed")
 	}
