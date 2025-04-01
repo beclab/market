@@ -127,6 +127,10 @@ func processAppVariants(app *models.ApplicationInfo, isAdmin bool) *models.Appli
 			originalInstallTime := appCopy.InstallTime
 			originalUid := appCopy.Uid
 			originalNamespace := appCopy.Namespace
+			originalCurVersion := appCopy.CurVersion
+			originalVersion := appCopy.Version
+			originalNeedUpdate := appCopy.NeedUpdate
+			originalAppID := appCopy.AppID
 			
 			// Use fields from the variant
 			appCopy.Title = userVariant.Title
@@ -150,6 +154,20 @@ func processAppVariants(app *models.ApplicationInfo, isAdmin bool) *models.Appli
 			appCopy.Permission = userVariant.Permission
 			appCopy.Middleware = userVariant.Middleware
 			appCopy.Options = userVariant.Options
+			
+			// 添加资源相关字段
+			appCopy.RequiredMemory = userVariant.RequiredMemory
+			appCopy.RequiredDisk = userVariant.RequiredDisk
+			appCopy.RequiredGPU = userVariant.RequiredGPU
+			appCopy.RequiredCPU = userVariant.RequiredCPU
+			appCopy.SupportClient = userVariant.SupportClient
+			appCopy.SupportArch = userVariant.SupportArch
+			appCopy.ModelSize = userVariant.ModelSize
+			appCopy.OnlyAdmin = userVariant.OnlyAdmin
+			appCopy.AppLabels = userVariant.AppLabels
+			appCopy.Source = userVariant.Source
+			appCopy.Target = userVariant.Target
+			appCopy.VersionName = userVariant.VersionName
 			
 			// If variant has i18n, merge i18n information
 			if userVariant.I18n != nil && len(userVariant.I18n) > 0 {
@@ -182,6 +200,10 @@ func processAppVariants(app *models.ApplicationInfo, isAdmin bool) *models.Appli
 			appCopy.InstallTime = originalInstallTime
 			appCopy.Uid = originalUid
 			appCopy.Namespace = originalNamespace
+			appCopy.CurVersion = originalCurVersion
+			appCopy.Version = originalVersion
+			appCopy.NeedUpdate = originalNeedUpdate
+			appCopy.AppID = originalAppID
 			
 			glog.Infof("Application %s's information optimized for normal users", appCopy.Name)
 		}
