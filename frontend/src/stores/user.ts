@@ -214,7 +214,7 @@ export const useUserStore = defineStore('userStore', {
 				this.userResource.cpu.total &&
 				Number(app.requiredCpu) > availableCpu
 			) {
-				appPushError(app, ErrorCode.G014);
+				appPushError(app, ErrorCode.G010);
 				isOK = false;
 			}
 
@@ -225,7 +225,7 @@ export const useUserStore = defineStore('userStore', {
 				this.userResource.memory.total &&
 				Number(app.requiredMemory) > availableMemory
 			) {
-				appPushError(app, ErrorCode.G015);
+				appPushError(app, ErrorCode.G011);
 				isOK = false;
 			}
 			return isOK;
