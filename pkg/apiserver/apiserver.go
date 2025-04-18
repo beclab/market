@@ -66,17 +66,19 @@ func (s *APIServer) PrepareRun() error {
 
 	s.Server.Handler = s.container
 
-	if conf.GetIsPublic() {
-		return nil
-	}
 	err := redisdb.Init()
 	if err != nil {
 		glog.Fatalf("redisdb init err%s", err.Error())
 	}
 
+	glog.Info("call cache Start")
+	appmgr.CacheCenterStart()
+
+	if conf.GetIsPublic() {
+		return nil
+	}
 	glog.Info("call monitor Start")
 	go monitor.Start()
-	appmgr.CacheCenterStart()
 
 	return nil
 }

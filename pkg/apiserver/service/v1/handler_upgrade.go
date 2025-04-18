@@ -31,7 +31,7 @@ func getVersionAndInfo(appName, token string) (curVersion string, latestInfo *mo
 	}
 	curVersion = curVersionRes.Data.Version
 
-	latestInfo = appmgr.ReadCacheApplication(appName)
+	latestInfo = appmgr.ReadCacheApplication(appName, token)
 	if latestInfo == nil {
 		return
 	}

@@ -44,7 +44,7 @@ if (terminusLanguage) {
 	}
 }
 
-onBeforeMount(async () => {
+const initializeApp = async () => {
 	await appStore.prefetch();
 	await menuStore.init();
 	if (!appStore.isPublic) {
@@ -53,9 +53,7 @@ onBeforeMount(async () => {
 		userStore.init();
 		appStore.init();
 	}
-
-	bus.on(BUS_EVENT.APP_BACKEND_ERROR, onErrorMessage);
-});
+};
 
 const onErrorMessage = (failureMessage: string) => {
 	BtNotify.show({
@@ -64,7 +62,27 @@ const onErrorMessage = (failureMessage: string) => {
 	});
 };
 
+const onVisibilityChange = () => {
+	if (document.visibilityState === 'visible') {
+		console.log('Page is active');
+		if (websocketStore.isClosed()) {
+			initializeApp().catch((err) => {
+				console.error('Error during app re-initialization:', err);
+			});
+		}
+	} else {
+		console.log('Page is in background');
+	}
+};
+
+onBeforeMount(async () => {
+	await initializeApp();
+	bus.on(BUS_EVENT.APP_BACKEND_ERROR, onErrorMessage);
+	document.addEventListener('visibilitychange', onVisibilityChange);
+});
+
 onBeforeUnmount(() => {
 	bus.off(BUS_EVENT.APP_BACKEND_ERROR, onErrorMessage);
+	document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 </script>

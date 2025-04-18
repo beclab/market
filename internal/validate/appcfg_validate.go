@@ -12,7 +12,10 @@ import (
 	"regexp"
 	"strings"
 
+	"market/internal/appservice"
+
 	vd "github.com/bytedance/go-tagexpr/v2/validator"
+	"github.com/golang/glog"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -141,10 +144,17 @@ type Policy struct {
 	Duration    string `yaml:"validDuration" json:"validDuration" vd:"len($)==0 ||regexp('^((?:[-+]?\\d+(?:\\.\\d+)?([smhdwy]|us|ns|ms))+)$');msg:sprintf('invalid parameter: %v;validDuration must satisfy the expr: regexp(^((?:[-+]?\\d+(?:\\.\\d+)?([smhdwy]|us|ns|ms))+)$)',$)"`
 }
 
+type Conflict struct {
+	Name string `yaml:"name" json:"name" vd:"len($)>0;msg:sprintf('invalid parameter: %v;name must satisfy the expr: len($)>0',$)"`
+	// conflict type: application
+	Type string `yaml:"type" json:"type" vd:"$=='application';msg:sprintf('invalid parameter: %v;type must satisfy the expr: $==application',$)"`
+}
+
 type Options struct {
 	Policies     *[]Policy     `yaml:"policies" json:"policies" vd:"?"`
 	Analytics    *Analytics    `yaml:"analytics" json:"analytics" vd:"?"`
 	Dependencies *[]Dependency `yaml:"dependencies" json:"dependencies" vd:"?"`
+	Conflicts    *[]Conflict   `yaml:"conflicts" json:"conflicts" vd:"?"`
 }
 
 type Analytics struct {
@@ -190,20 +200,29 @@ func checkZincSearchMappings(f io.Reader) error {
 	return nil
 }
 
-func getAppConfigFromCfg(f io.ReadCloser) (*AppConfiguration, error) {
+func getAppConfigFromCfg(f io.ReadCloser, token string) (*AppConfiguration, error) {
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	var cfg AppConfiguration
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+
+	// 添加渲染逻辑
+	renderedContent, err := appservice.RenderManifest(string(data), token)
+	if err != nil {
+		glog.Warningf("render manifest failed: %s", err.Error())
 		return nil, err
+	}
+
+	var cfg AppConfiguration
+	if err := yaml.Unmarshal([]byte(renderedContent), &cfg); err != nil {
+		glog.Warningf("YAML parsing failed, error message: %v", err)
+		return nil, fmt.Errorf("configuration file parsing error: %w", err)
 	}
 	return &cfg, nil
 }
 
-func getAppConfigFromCfgFile(chartPath string) (*AppConfiguration, error) {
+func getAppConfigFromCfgFile(chartPath string, token string) (*AppConfiguration, error) {
 	if !strings.HasSuffix(chartPath, "/") {
 		chartPath += "/"
 	}
@@ -211,18 +230,18 @@ func getAppConfigFromCfgFile(chartPath string) (*AppConfiguration, error) {
 	if err != nil {
 		return nil, err
 	}
-	return getAppConfigFromCfg(f)
+	return getAppConfigFromCfg(f, token)
 }
 
-func CheckAppCfg(chartPath string) error {
-	cfg, err := getAppConfigFromCfgFile(chartPath)
+func CheckAppCfg(chartPath string, token string) error {
+	cfg, err := getAppConfigFromCfgFile(chartPath, token)
 	if err != nil {
 		return err
 	}
-	return checkAppCfg(cfg, chartPath)
+	return checkAppCfg(cfg, chartPath, token)
 }
 
-func checkAppCfg(cfg *AppConfiguration, chartPath string) error {
+func checkAppCfg(cfg *AppConfiguration, chartPath string, token string) error {
 	err := vd.Validate(cfg)
 	if err != nil {
 		return err
@@ -243,7 +262,7 @@ func checkAppCfg(cfg *AppConfiguration, chartPath string) error {
 	if err != nil {
 		return err
 	}
-	return CheckResourceLimit(chartPath, cfg)
+	return CheckResourceLimit(chartPath, cfg, token)
 }
 
 func CheckSupportedArch(cfg *AppConfiguration) error {

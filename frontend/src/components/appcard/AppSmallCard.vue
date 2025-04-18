@@ -41,12 +41,12 @@
 				</div>
 			</div>
 			<install-button v-if="!appStore.isPublic" :item="item" />
-			<div
-				v-if="clusterScopedApp"
-				class="app-small-card__right__cluster_scoped text-overline text-ink-3"
-			>
-				Cluster-Scoped
-			</div>
+			<!--			<div-->
+			<!--				v-if="clusterScopedApp"-->
+			<!--				class="app-small-card__right__cluster_scoped text-overline text-ink-3"-->
+			<!--			>-->
+			<!--				Cluster-Scoped-->
+			<!--		</div>-->
 		</div>
 	</div>
 </template>

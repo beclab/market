@@ -210,6 +210,7 @@ watch(
 			// console.log(transitionName.value)
 			position.value = Number(Router.options.history.state.position);
 		}
+		updateMenu();
 	}
 );
 

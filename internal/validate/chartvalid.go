@@ -11,9 +11,10 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"market/internal/appservice"
 )
 
-func CheckChartFolder(folder string) error {
+func CheckChartFolder(folder string, token string) error {
 	folderName := path.Base(folder)
 	if !isValidFolderName(folderName) {
 		return fmt.Errorf("invalid folder name: '%s' must '^[a-z0-9]{1,30}$'", folder)
@@ -60,8 +61,14 @@ func CheckChartFolder(folder string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read %s in folder '%s': %v", constants.AppCfgFileName, folder, err)
 	}
+	
+	renderedContent, err := appservice.RenderManifest(string(appCfgContent), token)
+	if err != nil {
+		return fmt.Errorf("failed to render %s in folder '%s': %v", constants.AppCfgFileName, folder, err)
+	}
+	
 	var appConf models.AppConfiguration
-	if err := yaml.Unmarshal(appCfgContent, &appConf); err != nil {
+	if err := yaml.Unmarshal([]byte(renderedContent), &appConf); err != nil {
 		return fmt.Errorf("failed to parse %s in folder '%s': %v", constants.AppCfgFileName, folder, err)
 	}
 

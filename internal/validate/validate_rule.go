@@ -3,6 +3,7 @@ package validate
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/golang/glog"
 	"github.com/thoas/go-funk"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
@@ -30,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/kubernetes/scheme"
+	"market/internal/appservice"
 )
 
 const (
@@ -174,7 +177,8 @@ func getRulesFromFile(f io.ReadCloser) (*PolicyRules, error) {
 	defer f.Close()
 	var rules PolicyRules
 	if err := yaml.Unmarshal(data, &rules); err != nil {
-		return nil, err
+		glog.Warningf("YAML unmarshal failed: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal YAML data: %w", err)
 	}
 	return &rules, nil
 }
@@ -250,7 +254,7 @@ func getChart(instAction *action.Install, filepath string) (*chart.Chart, error)
 	return chartRequested, nil
 }
 
-func getResourceListFromChart(chartPath string) (resources kube.ResourceList, err error) {
+func getResourceListFromChart(chartPath string, token string) (resources kube.ResourceList, err error) {
 	instAction, err := InitAction()
 	if err != nil {
 		return nil, err
@@ -269,9 +273,28 @@ func getResourceListFromChart(chartPath string) (resources kube.ResourceList, er
 		"refs":     map[string]interface{}{},
 	}
 	values["GPU"] = map[string]interface{}{}
-	values["bfl"] = map[string]interface{}{
-		"username": "bfl-username",
+	
+	// Get user info and set username
+	userInfoStr, userInfoErr := appservice.GetUserInfo(token)
+	if userInfoErr != nil {
+		glog.Warningf("Failed to get user info: %v", userInfoErr)
+		return nil, fmt.Errorf("failed to get user info: %w", userInfoErr)
 	}
+	
+	var userInfo struct {
+		Role     string `json:"role"`
+		Username string `json:"username"`
+	}
+	
+	if err := json.Unmarshal([]byte(userInfoStr), &userInfo); err != nil {
+		glog.Warningf("Failed to unmarshal user info: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal user info: %w", err)
+	}
+	
+	values["bfl"] = map[string]interface{}{
+		"username": userInfo.Username,
+	}
+	
 	values["user"] = map[string]interface{}{
 		"zone": "user-zone",
 	}
@@ -286,7 +309,18 @@ func getResourceListFromChart(chartPath string) (resources kube.ResourceList, er
 		"appKey":    "appKey",
 		"appSecret": "appSecret",
 	}
-	cfg, err := getAppConfigFromCfgFile(chartPath)
+	
+	// Get admin username
+	adminUsername, adminErr := appservice.GetAdminUsername(token)
+	if adminErr != nil {
+		glog.Warningf("Failed to get admin username: %v", adminErr)
+		// Return error if admin username retrieval fails
+		return nil, fmt.Errorf("failed to get admin username: %w", adminErr)
+	}
+	// Set admin username to values
+	values["admin"] = adminUsername
+	
+	cfg, err := getAppConfigFromCfgFile(chartPath, token)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +343,8 @@ func getResourceListFromChart(chartPath string) (resources kube.ResourceList, er
 	}
 	values["svcs"] = map[string]interface{}{}
 	values["cluster"] = map[string]interface{}{}
+
+	glog.Infof("Values: %+v", values)
 
 	ret, err := instAction.RunWithContext(context.Background(), chartRequested, values)
 	if err != nil {
@@ -410,8 +446,8 @@ func checkServiceAccountRule(resources kube.ResourceList, rules []rbacv1.PolicyR
 	return checkRule(requestedRules, rules)
 }
 
-func CheckServiceAccountRole(chartPath string) error {
-	resources, err := getResourceListFromChart(chartPath)
+func CheckServiceAccountRole(chartPath string, token string) error {
+	resources, err := getResourceListFromChart(chartPath, token)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}

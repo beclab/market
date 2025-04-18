@@ -150,7 +150,7 @@ func (h *Handler) list(req *restful.Request, resp *restful.Response) {
 		ty = defaultAppType()
 	}
 
-	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty)
+	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty, token)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
@@ -247,7 +247,7 @@ func (h *Handler) listTop(req *restful.Request, resp *restful.Response) {
 		size = 0
 	}
 
-	apps, totalCount := appmgr.ReadCacheTopApps(category, ty, size)
+	apps, totalCount := appmgr.ReadCacheTopApps(category, ty, size, token)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
@@ -288,7 +288,7 @@ func (h *Handler) listLatest(req *restful.Request, resp *restful.Response) {
 		ty = defaultAppType()
 	}
 
-	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty)
+	apps, totalCount := appmgr.ReadCacheApplications(page, size, category, ty, token)
 
 	workflowMap, _ := getWorkflowsMap(token)
 	middlewareMap, _ := getMiddlewaresMap(token)
@@ -373,7 +373,7 @@ func (h *Handler) search(req *restful.Request, resp *restful.Response) {
 		size = 0
 	}
 
-	apps, totals := appmgr.SearchFromCache(page, size, appName)
+	apps, totals := appmgr.SearchFromCache(page, size, appName, token)
 	if apps == nil {
 		api.HandleError(resp, err)
 		return
@@ -425,7 +425,7 @@ func (h *Handler) searchPost(req *restful.Request, resp *restful.Response) {
 		size = 0
 	}
 
-	apps, totals := appmgr.SearchFromCache(page, size, appName)
+	apps, totals := appmgr.SearchFromCache(page, size, appName, token)
 	if apps == nil {
 		api.HandleError(resp, err)
 		return
@@ -454,7 +454,7 @@ func (h *Handler) info(req *restful.Request, resp *restful.Response) {
 
 	infoLocal, _ := redisdb.GetLocalAppInfo(appName)
 
-	infoMarket := appmgr.ReadCacheApplication(appName)
+	infoMarket := appmgr.ReadCacheApplication(appName, token)
 	if infoMarket == nil && infoLocal == nil {
 		api.HandleError(resp, errors.New("not found"))
 		return

@@ -44,12 +44,12 @@ func getChartsTempPath(filename string) (string, error) {
 	return chartTmpPath, nil
 }
 
-func readInfoFromCfg(chartDirPath string) (info *models.ApplicationInfo, cfgFile string, err error) {
+func readInfoFromCfg(chartDirPath string, token string) (info *models.ApplicationInfo, cfgFile string, err error) {
 	cfgFile = findAppCfgFile(chartDirPath)
 	if cfgFile == "" {
 		return nil, "", fmt.Errorf("%s not found", constants.AppCfgFileName)
 	}
-	info, err = appmgr.ReadAppInfo(cfgFile)
+	info, err = appmgr.ReadAppInfo(cfgFile, token)
 	glog.Infof("chartDirPath:%s, cfgFile:%s, info:%#v", chartDirPath, cfgFile, info)
 
 	return
@@ -85,7 +85,7 @@ func installOrUpgrade(name, version, token string) (bool, error) {
 	return false, nil
 }
 
-func validChart(chartDir string, info *models.ApplicationInfo) (err error) {
+func validChart(chartDir string, info *models.ApplicationInfo, token string) (err error) {
 	switch info.CfgType {
 	case constants.AppType:
 	case constants.RecommendType, constants.AgentType, constants.ModelType, constants.MiddlewareType: //todo
@@ -96,15 +96,15 @@ func validChart(chartDir string, info *models.ApplicationInfo) (err error) {
 		return
 	}
 
-	err = validate.CheckChartFolder(chartDir)
+	err = validate.CheckChartFolder(chartDir, token)
 	if err != nil {
 		return
 	}
-	err = validate.CheckAppCfg(chartDir)
+	err = validate.CheckAppCfg(chartDir, token)
 	if err != nil {
 		return
 	}
-	err = validate.CheckServiceAccountRole(chartDir)
+	err = validate.CheckServiceAccountRole(chartDir, token)
 	return
 }
 
@@ -152,7 +152,7 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 	}
 
 	//read info from cfg
-	info, cfgFile, err := readInfoFromCfg(chartDirTmpPath)
+	info, cfgFile, err := readInfoFromCfg(chartDirTmpPath, token)
 	if err != nil {
 		respErr(resp, err)
 		return
@@ -160,7 +160,7 @@ func (h *Handler) devUpload(req *restful.Request, resp *restful.Response) {
 
 	//check chart
 	realChartPath := findChartPath(chartDirTmpPath)
-	err = validChart(realChartPath, info)
+	err = validChart(realChartPath, info, token)
 	if err != nil {
 		respErr(resp, err)
 		return

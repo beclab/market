@@ -18,7 +18,7 @@ export default {
 		confirm: '确认',
 		message: '消息',
 		scope: '范围',
-		cluster_app: '集群应用',
+		cluster_app: '共享应用',
 		developer: '开发者',
 		language: '语言',
 		search: '搜索',
@@ -98,7 +98,7 @@ export default {
 			'本应用程序可能需要以下依赖项才能实现全部功能。',
 		reference_app_not_installed: '授权应用未安装',
 		need_reference_app_to_use:
-			'该应用为集群应用，您需要安装对应的授权应用来使用它。'
+			'该应用为共享应用，您需要安装对应的授权应用来使用它。'
 	},
 	permission: {
 		files: '文件',
@@ -140,7 +140,7 @@ export default {
 		key_value_database: '键值数据库',
 		key_value_database_label: '此应用使用 Redis 作为其键值数据库。',
 		key_value_database_desc: 'Redis 由 Olares 中间件服务提供。',
-		cluster_app_label: '集群级别应用，由同一 Olares 集群中的所有用户共享',
+		cluster_app_label: '同一 Olares 集群中的所有用户可以共享该应用',
 		entrance: '入口',
 		entrance_visibility_label:
 			'此应用不同可见性入口的数量：{desktopSize} 个可见，{backendSize} 个不可见',
@@ -159,9 +159,9 @@ export default {
 		failed_get_user_role: '获取用户角色失败',
 		only_be_installed_by_the_admin: '此应用程序只能由管理员安装',
 		not_admin_role_install_middleware:
-			'中间件组件。请联系您的 Olares 管理员安装。',
+			'此应用为中间件组件。请联系您的 Olares 管理员安装。',
 		not_admin_role_install_cluster_app:
-			'集群应用。请联系您的 Olares 管理员安装。',
+			'此应用为共享应用。请联系您的 Olares 管理员安装后才能使用。',
 		failed_to_get_os_version: '获取 Olares 版本失败',
 		app_is_not_compatible_terminus_os: '与您的 Olares 不兼容',
 		failed_to_get_user_resource: '获取用户资源失败',
@@ -176,8 +176,12 @@ export default {
 		app_info_get_failure: '应用信息获取失败',
 		operation_preform_failure: '操作失败',
 		cluster_not_support_platform: '此应用/推荐/大模型不支持当前 Olares 平台',
+		app_install_conflict:
+			'此应用与您已安装的应用冲突。请先卸载以下应用，然后再继续安装。',
+
 		app_not_install_details: '应用名称：{name}，版本：{version}',
-		middleware_not_install_details: '中间件：{name}，版本：{version}'
+		middleware_not_install_details: '中间件：{name}，版本：{version}',
+		app_install_conflict_details: '{name}'
 	},
 	my: {
 		market: '市场',

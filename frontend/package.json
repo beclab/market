@@ -16,8 +16,8 @@
     "build:pwa": "quasar build -m pwa"
   },
   "dependencies": {
-    "@bytetrade/core": "^0.3.66",
-    "@bytetrade/ui": "^0.1.41",
+    "@bytetrade/core": "^0.3.77",
+    "@bytetrade/ui": "^0.1.58",
     "@quasar/extras": "^1.16.9",
     "@vercel/analytics": "^1.4.1",
     "axios": "^0.21.1",

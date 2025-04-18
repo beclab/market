@@ -33,8 +33,10 @@ export enum ErrorCode {
 	G016 = 'G016',
 	G017 = 'G017',
 	G018 = 'G018',
+	G019 = 'G019',
 	G012_SG001 = 'G012-SG001',
-	G012_SG002 = 'G012-SG002'
+	G012_SG002 = 'G012-SG002',
+	G019_SG001 = 'G019-SG001'
 }
 
 const level1Map = new Map<ErrorCode, string>([
@@ -55,12 +57,14 @@ const level1Map = new Map<ErrorCode, string>([
 	[ErrorCode.G015, 'error.terminus_not_enough_memory'],
 	[ErrorCode.G016, 'error.terminus_not_enough_disk'],
 	[ErrorCode.G017, 'error.terminus_not_enough_gpu'],
-	[ErrorCode.G018, 'error.cluster_not_support_platform']
+	[ErrorCode.G018, 'error.cluster_not_support_platform'],
+	[ErrorCode.G019, 'error.app_install_conflict']
 ]);
 
 const level2Map = new Map<ErrorCode, string>([
 	[ErrorCode.G012_SG001, 'error.middleware_not_install_details'],
-	[ErrorCode.G012_SG002, 'error.app_not_install_details']
+	[ErrorCode.G012_SG002, 'error.app_not_install_details'],
+	[ErrorCode.G019_SG001, 'error.app_install_conflict_details']
 ]);
 
 function findLevel1Error(
@@ -120,10 +124,7 @@ export function appPushError(
 			}
 		}
 
-		if (
-			parentError &&
-			!parentError.subGroups.find((sub) => sub.code === level2Error.code)
-		) {
+		if (parentError) {
 			parentError.subGroups.push(level2Error);
 		}
 	}

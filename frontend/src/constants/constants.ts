@@ -59,6 +59,7 @@ export interface AppStoreInfo {
 			enable: boolean;
 		};
 		dependencies: Dependency[];
+		conflicts: Conflict[];
 		policies: Policy[];
 		appScope: {
 			clusterScoped: boolean;
@@ -92,6 +93,11 @@ export interface AppStoreInfo {
 	preflightError: ErrorGroup[];
 }
 
+export interface Conflict {
+	name: string;
+	type: string;
+}
+
 export interface Entrance {
 	authLevel: string;
 	host: string;
@@ -120,6 +126,13 @@ export interface Dependency {
 	type: DEPENDENCIES_TYPE;
 	version: string;
 	mandatory: boolean;
+}
+
+export interface ClusterApp {
+	name: string;
+	type: CLUSTER_TYPE;
+	version: string;
+	state: APP_STATUS;
 }
 
 export interface Policy {
@@ -178,7 +191,7 @@ export interface UserResource {
 }
 
 export interface TerminusResource {
-	apps: Dependency[];
+	apps: ClusterApp[];
 	metrics: {
 		cpu: Resource;
 		memory: Resource;
@@ -267,6 +280,11 @@ export const CATEGORIES_TYPE = {
 export enum DEPENDENCIES_TYPE {
 	application = 'application',
 	system = 'system',
+	middleware = 'middleware'
+}
+
+export enum CLUSTER_TYPE {
+	app = 'app',
 	middleware = 'middleware'
 }
 
