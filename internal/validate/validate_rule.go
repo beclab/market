@@ -261,6 +261,9 @@ func getResourceListFromChart(chartPath string, token string) (resources kube.Re
 	}
 	instAction.Namespace = "app-namespace"
 	chartRequested, err := getChart(instAction, chartPath)
+	if err != nil {
+		return nil, err
+	}
 
 	// fake values for helm dry run
 	values := make(map[string]interface{})
@@ -273,28 +276,28 @@ func getResourceListFromChart(chartPath string, token string) (resources kube.Re
 		"refs":     map[string]interface{}{},
 	}
 	values["GPU"] = map[string]interface{}{}
-	
+
 	// Get user info and set username
 	userInfoStr, userInfoErr := appservice.GetUserInfo(token)
 	if userInfoErr != nil {
 		glog.Warningf("Failed to get user info: %v", userInfoErr)
 		return nil, fmt.Errorf("failed to get user info: %w", userInfoErr)
 	}
-	
+
 	var userInfo struct {
 		Role     string `json:"role"`
 		Username string `json:"username"`
 	}
-	
+
 	if err := json.Unmarshal([]byte(userInfoStr), &userInfo); err != nil {
 		glog.Warningf("Failed to unmarshal user info: %v", err)
 		return nil, fmt.Errorf("failed to unmarshal user info: %w", err)
 	}
-	
+
 	values["bfl"] = map[string]interface{}{
 		"username": userInfo.Username,
 	}
-	
+
 	values["user"] = map[string]interface{}{
 		"zone": "user-zone",
 	}
@@ -309,7 +312,7 @@ func getResourceListFromChart(chartPath string, token string) (resources kube.Re
 		"appKey":    "appKey",
 		"appSecret": "appSecret",
 	}
-	
+
 	// Get admin username
 	adminUsername, adminErr := appservice.GetAdminUsername(token)
 	if adminErr != nil {
@@ -319,7 +322,7 @@ func getResourceListFromChart(chartPath string, token string) (resources kube.Re
 	}
 	// Set admin username to values
 	values["admin"] = adminUsername
-	
+
 	cfg, err := getAppConfigFromCfgFile(chartPath, token)
 	if err != nil {
 		return nil, err
