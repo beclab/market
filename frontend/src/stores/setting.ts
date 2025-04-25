@@ -3,8 +3,7 @@ import { getNsfw, setNsfw } from 'src/api/private/setting';
 import {
 	AppStoreInfo,
 	ClusterApp,
-	DEPENDENCIES_TYPE,
-	Dependency
+	DEPENDENCIES_TYPE
 } from 'src/constants/constants';
 import { useUserStore } from 'src/stores/user';
 
