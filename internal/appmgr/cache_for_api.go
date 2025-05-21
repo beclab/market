@@ -32,7 +32,7 @@ func updateCacheAppTypes() {
 }
 
 func ReadCacheAppTypes() *models.ListResultD {
-	mu.RLock() // 使用读锁替代互斥锁
+	mu.RLock() // Use read lock instead of mutex lock
 	defer mu.RUnlock()
 	return cacheAppTypes
 }
@@ -244,7 +244,7 @@ func isUserAdmin(token string) bool {
 
 // Update ReadCacheApplications to process variants with token
 func ReadCacheApplications(page, size int, category, ty, token string) ([]*models.ApplicationInfo, int64) {
-	mu.RLock() // 使用读锁替代互斥锁
+	mu.RLock() // Use read lock instead of mutex lock
 	defer mu.RUnlock()
 
 	// Check admin status once per request
@@ -323,7 +323,7 @@ func updateCacheTopApplications() {
 
 // Update ReadCacheTopApps to process variants with token
 func ReadCacheTopApps(category, ty string, size int, token string) ([]*models.ApplicationInfo, int64) {
-	mu.RLock() // 使用读锁替代互斥锁
+	mu.RLock() // Use read lock instead of mutex lock
 	defer mu.RUnlock()
 
 	// Check admin status once per request
@@ -383,7 +383,7 @@ func deepCopyApplication(app *models.ApplicationInfo) *models.ApplicationInfo {
 
 // Update ReadCacheApplication to process variants with token
 func ReadCacheApplication(name, token string) *models.ApplicationInfo {
-	mu.RLock() // 使用读锁替代互斥锁
+	mu.RLock() // Use read lock instead of mutex lock
 	defer mu.RUnlock()
 
 	// Check admin status once per request
@@ -404,7 +404,7 @@ func ReadCacheApplication(name, token string) *models.ApplicationInfo {
 
 // Update ReadCacheApplicationsWithMap to process variants with token
 func ReadCacheApplicationsWithMap(names []string, token string) map[string]*models.ApplicationInfo {
-	mu.RLock() // 使用读锁替代互斥锁
+	mu.RLock() // Use read lock instead of mutex lock
 	defer mu.RUnlock()
 
 	// Check admin status once per request
@@ -451,7 +451,7 @@ func updateCacheI18n() {
 }
 
 func ReadCacheI18n(chartName string, locale []string) map[string]models.I18n {
-	mu.RLock() // 使用读锁替代互斥锁
+	mu.RLock() // Use read lock instead of mutex lock
 	defer mu.RUnlock()
 
 	if i18nData, exists := cacheI18n[chartName]; exists {
@@ -472,7 +472,7 @@ func ReadCacheI18n(chartName string, locale []string) map[string]models.I18n {
 
 // Update SearchFromCache to process variants with token
 func SearchFromCache(page, size int, name, token string) (infos []*models.ApplicationInfo, count int64) {
-	mu.RLock() // 使用读锁替代互斥锁
+	mu.RLock() // Use read lock instead of mutex lock
 	defer mu.RUnlock()
 
 	// Check admin status once per request
