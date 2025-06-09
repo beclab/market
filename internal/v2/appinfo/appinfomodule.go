@@ -20,6 +20,7 @@ type AppInfoModule struct {
 	cacheManager *CacheManager
 	redisClient  *RedisClient
 	syncer       *Syncer
+	hydrator     *Hydrator
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mutex        sync.RWMutex
@@ -29,13 +30,15 @@ type AppInfoModule struct {
 // ModuleConfig holds configuration for the AppInfo module
 // ModuleConfig 保存 AppInfo 模块的配置
 type ModuleConfig struct {
-	Redis        *RedisConfig  `json:"redis"`
-	Syncer       *SyncerConfig `json:"syncer"`
-	Cache        *CacheConfig  `json:"cache"`
-	User         *UserConfig   `json:"user"`
-	EnableSync   bool          `json:"enable_sync"`
-	EnableCache  bool          `json:"enable_cache"`
-	StartTimeout time.Duration `json:"start_timeout"`
+	Redis          *RedisConfig    `json:"redis"`
+	Syncer         *SyncerConfig   `json:"syncer"`
+	Cache          *CacheConfig    `json:"cache"`
+	User           *UserConfig     `json:"user"`
+	Hydrator       *HydratorConfig `json:"hydrator"`
+	EnableSync     bool            `json:"enable_sync"`
+	EnableCache    bool            `json:"enable_cache"`
+	EnableHydrator bool            `json:"enable_hydrator"`
+	StartTimeout   time.Duration   `json:"start_timeout"`
 }
 
 // CacheConfig holds cache-specific configuration
@@ -148,6 +151,19 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
+	// Initialize hydrator if enabled
+	if m.config.EnableHydrator {
+		if err := m.initHydrator(); err != nil {
+			return fmt.Errorf("failed to initialize hydrator: %w", err)
+		}
+	}
+
+	// Set up hydration notifier connection if both cache and hydrator are enabled
+	if m.config.EnableCache && m.config.EnableHydrator && m.cacheManager != nil && m.hydrator != nil {
+		m.cacheManager.SetHydrationNotifier(m.hydrator)
+		glog.Infof("Hydration notifier connection established between cache manager and hydrator")
+	}
+
 	m.isStarted = true
 	glog.Infof("AppInfo module started successfully")
 	return nil
@@ -169,6 +185,12 @@ func (m *AppInfoModule) Stop() error {
 	if m.syncer != nil {
 		m.syncer.Stop()
 		glog.Infof("Syncer stopped")
+	}
+
+	// Stop hydrator
+	if m.hydrator != nil {
+		m.hydrator.Stop()
+		glog.Infof("Hydrator stopped")
 	}
 
 	// Stop cache manager
@@ -210,6 +232,14 @@ func (m *AppInfoModule) GetSyncer() *Syncer {
 	return m.syncer
 }
 
+// GetHydrator returns the hydrator instance
+// GetHydrator 返回水合器实例
+func (m *AppInfoModule) GetHydrator() *Hydrator {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.hydrator
+}
+
 // GetRedisClient returns the Redis client instance
 // GetRedisClient 返回 Redis 客户端实例
 func (m *AppInfoModule) GetRedisClient() *RedisClient {
@@ -226,25 +256,40 @@ func (m *AppInfoModule) IsStarted() bool {
 	return m.isStarted
 }
 
-// GetModuleStatus returns the current status of the module
-// GetModuleStatus 返回模块的当前状态
+// GetModuleStatus returns the current status of the module and all components
+// GetModuleStatus 返回模块和所有组件的当前状态
 func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
 	status := map[string]interface{}{
-		"started":       m.isStarted,
-		"cache_enabled": m.config.EnableCache,
-		"sync_enabled":  m.config.EnableSync,
+		"is_started":      m.isStarted,
+		"enable_sync":     m.config.EnableSync,
+		"enable_cache":    m.config.EnableCache,
+		"enable_hydrator": m.config.EnableHydrator,
+		"components": map[string]interface{}{
+			"redis_client":  m.redisClient != nil,
+			"cache_manager": m.cacheManager != nil,
+			"syncer":        m.syncer != nil,
+			"hydrator":      m.hydrator != nil,
+		},
 	}
 
+	// Add cache manager status
 	if m.cacheManager != nil {
 		status["cache_stats"] = m.cacheManager.GetCacheStats()
 	}
 
+	// Add syncer status
 	if m.syncer != nil {
 		status["syncer_running"] = m.syncer.IsRunning()
-		status["syncer_steps"] = len(m.syncer.GetSteps())
+	}
+
+	// Add hydrator status
+	// 添加水合器状态
+	if m.hydrator != nil {
+		status["hydrator_running"] = m.hydrator.IsRunning()
+		status["hydrator_metrics"] = m.hydrator.GetMetrics()
 	}
 
 	return status
@@ -308,12 +353,59 @@ func (m *AppInfoModule) initSyncer() error {
 
 	m.syncer = CreateDefaultSyncer(cacheData, *m.config.Syncer, settingsManager)
 
+	// Set cache manager reference for hydration notifications
+	// 设置缓存管理器引用以进行水合通知
+	if m.cacheManager != nil {
+		m.syncer.SetCacheManager(m.cacheManager)
+		glog.Infof("Cache manager reference set in syncer for hydration notifications")
+	}
+
 	// Start syncer
 	if err := m.syncer.Start(m.ctx); err != nil {
 		return fmt.Errorf("failed to start syncer: %w", err)
 	}
 
 	glog.Infof("Syncer initialized successfully")
+	return nil
+}
+
+// initHydrator initializes the hydrator
+// initHydrator 初始化水合器
+func (m *AppInfoModule) initHydrator() error {
+	glog.Infof("Initializing hydrator...")
+
+	if m.cacheManager == nil {
+		return fmt.Errorf("cache manager is required for hydrator")
+	}
+
+	// Get the actual cache data from cache manager
+	// 从缓存管理器获取实际的缓存数据
+	cacheData := m.cacheManager.cache
+
+	// Create settings manager for hydrator
+	// 为水合器创建设置管理器
+	redisAdapter := &RedisClientAdapter{client: m.redisClient}
+	settingsManager := settings.NewSettingsManager(redisAdapter)
+	if err := settingsManager.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize settings manager: %w", err)
+	}
+
+	// Use hydrator config from module config, or default if not specified
+	// 使用模块配置中的水合器配置，如果未指定则使用默认配置
+	hydratorConfig := DefaultHydratorConfig()
+	if m.config.Hydrator != nil {
+		hydratorConfig = *m.config.Hydrator
+	}
+
+	m.hydrator = NewHydrator(cacheData, settingsManager, hydratorConfig)
+
+	// Start hydrator with context
+	// 使用上下文启动水合器
+	if err := m.hydrator.Start(m.ctx); err != nil {
+		return fmt.Errorf("failed to start hydrator: %w", err)
+	}
+
+	glog.Infof("Hydrator initialized successfully")
 	return nil
 }
 
@@ -440,9 +532,26 @@ func DefaultModuleConfig() *ModuleConfig {
 		enableCache = true
 	}
 
+	enableHydrator, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_HYDRATOR"))
+	if err != nil {
+		enableHydrator = true
+	}
+
 	startTimeout, err := time.ParseDuration(os.Getenv("MODULE_START_TIMEOUT"))
 	if err != nil || startTimeout <= 0 {
 		startTimeout = 30 * time.Second
+	}
+
+	// Parse Hydrator configuration from environment variables
+	// 从环境变量解析水合器配置
+	hydratorQueueSize, err := strconv.Atoi(os.Getenv("HYDRATOR_QUEUE_SIZE"))
+	if err != nil || hydratorQueueSize <= 0 {
+		hydratorQueueSize = 1000
+	}
+
+	hydratorWorkerCount, err := strconv.Atoi(os.Getenv("HYDRATOR_WORKER_COUNT"))
+	if err != nil || hydratorWorkerCount <= 0 {
+		hydratorWorkerCount = 5
 	}
 
 	// Parse User configuration from environment variables
@@ -544,6 +653,10 @@ func DefaultModuleConfig() *ModuleConfig {
 			ForceSync:      forceSync,
 			SyncTimeout:    syncTimeout,
 		},
+		Hydrator: &HydratorConfig{
+			QueueSize:   hydratorQueueSize,
+			WorkerCount: hydratorWorkerCount,
+		},
 		User: &UserConfig{
 			UserList:              userList,
 			AdminList:             adminList,
@@ -558,9 +671,10 @@ func DefaultModuleConfig() *ModuleConfig {
 			AuthTimeout:           authTimeout,
 			DefaultPermissions:    defaultPermissions,
 		},
-		EnableSync:   enableSync,
-		EnableCache:  enableCache,
-		StartTimeout: startTimeout,
+		EnableSync:     enableSync,
+		EnableCache:    enableCache,
+		EnableHydrator: enableHydrator,
+		StartTimeout:   startTimeout,
 	}
 }
 

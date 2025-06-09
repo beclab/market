@@ -8,16 +8,23 @@ import (
 	"github.com/golang/glog"
 )
 
+// HydrationNotifier interface for notifying hydrator about pending data updates
+// HydrationNotifier 接口用于通知水合器关于待处理数据更新
+type HydrationNotifier interface {
+	NotifyPendingDataUpdate(userID, sourceID string, pendingData map[string]interface{})
+}
+
 // CacheManager manages the in-memory cache and Redis synchronization
 // CacheManager 管理内存缓存和 Redis 同步
 type CacheManager struct {
-	cache       *CacheData
-	redisClient *RedisClient
-	userConfig  *UserConfig
-	mutex       sync.RWMutex
-	syncChannel chan SyncRequest
-	stopChannel chan bool
-	isRunning   bool
+	cache             *CacheData
+	redisClient       *RedisClient
+	userConfig        *UserConfig
+	hydrationNotifier HydrationNotifier // Notifier for hydration updates
+	mutex             sync.RWMutex
+	syncChannel       chan SyncRequest
+	stopChannel       chan bool
+	isRunning         bool
 }
 
 // SyncRequest represents a request to sync data to Redis
@@ -170,6 +177,15 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 	return nil
 }
 
+// SetHydrationNotifier sets the hydration notifier for real-time updates
+// SetHydrationNotifier 设置水合通知器以进行实时更新
+func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+	cm.hydrationNotifier = notifier
+	glog.Infof("Hydration notifier set successfully")
+}
+
 // SetAppData sets app data in cache and triggers sync to Redis
 func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 	cm.mutex.Lock()
@@ -242,6 +258,12 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		sourceData.AppInfoLatest = appData
 	case AppInfoLatestPending:
 		sourceData.AppInfoLatestPending = appData
+		// Notify hydrator about pending data update for immediate task creation
+		// 通知水合器关于待处理数据更新以立即创建任务
+		if cm.hydrationNotifier != nil {
+			glog.Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
+			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
+		}
 	case Other:
 		// For "other" type, we need to specify a sub-type
 		if subType, ok := data["sub_type"].(string); ok {

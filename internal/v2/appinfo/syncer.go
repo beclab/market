@@ -15,6 +15,7 @@ import (
 type Syncer struct {
 	steps           []syncerfn.SyncStep
 	cache           *CacheData
+	cacheManager    *CacheManager // 添加CacheManager引用用于通知
 	syncInterval    time.Duration
 	stopChan        chan struct{}
 	isRunning       bool
@@ -27,6 +28,7 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 	return &Syncer{
 		steps:           make([]syncerfn.SyncStep, 0),
 		cache:           cache,
+		cacheManager:    nil, // 将在模块初始化时设置
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
 		isRunning:       false,
@@ -243,62 +245,57 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		// 将LatestData转换为缓存期望的格式
 		completeData := map[string]interface{}{
 			"version": syncContext.LatestData.Version,
-			"data":    syncContext.LatestData.Data,
+			"data": map[string]interface{}{
+				"apps":        syncContext.LatestData.Data.Apps,
+				"recommends":  syncContext.LatestData.Data.Recommends,
+				"pages":       syncContext.LatestData.Data.Pages,
+				"topics":      syncContext.LatestData.Data.Topics,
+				"topic_lists": syncContext.LatestData.Data.TopicLists,
+			},
 		}
 
 		sourceID := source.Name // Use market source name as source ID
 		log.Printf("Using source ID: %s for data storage", sourceID)
 
-		// Store to cache for all users
-		// 为所有用户存储到缓存
-		s.cache.Mutex.Lock()
-		defer s.cache.Mutex.Unlock()
-
-		// Get all existing user IDs
-		// 获取所有现有的用户ID
+		// Get all existing user IDs with minimal locking
+		// 用最小锁定获取所有现有的用户ID
+		s.cache.Mutex.RLock()
 		var userIDs []string
 		for userID := range s.cache.Users {
 			userIDs = append(userIDs, userID)
 		}
+		s.cache.Mutex.RUnlock()
 
 		// If no users exist, create a system user as fallback
 		// 如果没有用户存在，创建系统用户作为回退
 		if len(userIDs) == 0 {
-			systemUserID := "system"
-			s.cache.Users[systemUserID] = NewUserData()
-			userIDs = append(userIDs, systemUserID)
-			log.Printf("No existing users found, created system user as fallback")
+			s.cache.Mutex.Lock()
+			// Double-check after acquiring write lock
+			if len(s.cache.Users) == 0 {
+				systemUserID := "system"
+				s.cache.Users[systemUserID] = NewUserData()
+				userIDs = append(userIDs, systemUserID)
+				log.Printf("No existing users found, created system user as fallback")
+			} else {
+				// Users were added by another goroutine
+				for userID := range s.cache.Users {
+					userIDs = append(userIDs, userID)
+				}
+			}
+			s.cache.Mutex.Unlock()
 		}
 
 		log.Printf("Storing data for %d users: %v", len(userIDs), userIDs)
 
-		// Store data for each user
-		// 为每个用户存储数据
-		for _, userID := range userIDs {
-			userData := s.cache.Users[userID]
-			userData.Mutex.Lock()
-
-			// Ensure source data exists for this user
-			// 确保此用户的源数据存在
-			if _, exists := userData.Sources[sourceID]; !exists {
-				userData.Sources[sourceID] = NewSourceData()
-				log.Printf("Created new source data for user: %s, source: %s", userID, sourceID)
-			}
-
-			sourceData := userData.Sources[sourceID]
-			sourceData.Mutex.Lock()
-
-			// Create AppData for app-info-latest-pending
-			appData := NewAppData(AppInfoLatestPending, completeData)
-			sourceData.AppInfoLatestPending = appData
-
-			sourceData.Mutex.Unlock()
-			userData.Mutex.Unlock()
-
-			log.Printf("Successfully stored data to app-info-latest-pending for user: %s, source: %s", userID, sourceID)
+		// Determine storage method based on CacheManager availability
+		// 根据CacheManager的可用性确定存储方法
+		if s.cacheManager != nil {
+			log.Printf("Using CacheManager for data storage with hydration notifications")
+			s.storeDataViaCacheManager(userIDs, sourceID, completeData)
+		} else {
+			log.Printf("CacheManager not available, using direct cache storage")
+			s.storeDataDirectlyBatch(userIDs, sourceID, completeData)
 		}
-
-		log.Printf("Data synchronization completed for all %d users", len(userIDs))
 	} else {
 		log.Printf("WARNING: No LatestData available in sync context, skipping data storage")
 		log.Printf("Sync context status - HashMatches: %t, RemoteHash: %s, LocalHash: %s",
@@ -306,6 +303,62 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 	}
 
 	return nil
+}
+
+// storeDataDirectly stores data directly to cache without going through CacheManager
+// storeDataDirectly 直接存储数据到缓存，不通过CacheManager
+func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
+	userData := s.cache.Users[userID]
+	userData.Mutex.Lock()
+	defer userData.Mutex.Unlock()
+
+	// Ensure source data exists for this user
+	// 确保此用户的源数据存在
+	if _, exists := userData.Sources[sourceID]; !exists {
+		userData.Sources[sourceID] = NewSourceData()
+		log.Printf("Created new source data for user: %s, source: %s", userID, sourceID)
+	}
+
+	sourceData := userData.Sources[sourceID]
+	sourceData.Mutex.Lock()
+	defer sourceData.Mutex.Unlock()
+
+	// Create AppData for app-info-latest-pending
+	appData := NewAppData(AppInfoLatestPending, completeData)
+	sourceData.AppInfoLatestPending = appData
+
+	log.Printf("Successfully stored data directly to app-info-latest-pending for user: %s, source: %s", userID, sourceID)
+}
+
+// storeDataDirectlyBatch stores data directly to cache without going through CacheManager
+// storeDataDirectlyBatch 直接存储数据到缓存，不通过CacheManager
+func (s *Syncer) storeDataDirectlyBatch(userIDs []string, sourceID string, completeData map[string]interface{}) {
+	for _, userID := range userIDs {
+		s.storeDataDirectly(userID, sourceID, completeData)
+	}
+}
+
+// storeDataViaCacheManager stores data via CacheManager
+// storeDataViaCacheManager 通过CacheManager存储数据
+func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, completeData map[string]interface{}) {
+	for _, userID := range userIDs {
+		// Use CacheManager.SetAppData to trigger hydration notifications if available
+		// 使用CacheManager.SetAppData来触发水合通知（如果可用）
+		if s.cacheManager != nil {
+			log.Printf("Using CacheManager to store data for user: %s, source: %s", userID, sourceID)
+			err := s.cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData)
+			if err != nil {
+				log.Printf("Failed to store data via CacheManager for user: %s, source: %s, error: %v", userID, sourceID, err)
+				// Fall back to direct cache access
+				s.storeDataDirectly(userID, sourceID, completeData)
+			} else {
+				log.Printf("Successfully stored data via CacheManager for user: %s, source: %s", userID, sourceID)
+			}
+		} else {
+			log.Printf("CacheManager not available, storing data directly for user: %s, source: %s", userID, sourceID)
+			s.storeDataDirectly(userID, sourceID, completeData)
+		}
+	}
 }
 
 // CreateDefaultSyncer creates a syncer with default steps configured
@@ -351,4 +404,12 @@ func DefaultSyncerConfig() SyncerConfig {
 	return SyncerConfig{
 		SyncInterval: 5 * time.Minute,
 	}
+}
+
+// SetCacheManager sets the cache manager for hydration notifications
+// SetCacheManager 设置缓存管理器以进行水合通知
+func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.cacheManager = cacheManager
 }

@@ -53,10 +53,10 @@ func (sm *SettingsManager) initializeMarketSources() error {
 		// Save default config to Redis
 		// 将默认配置保存到Redis
 		if err := sm.saveMarketSourcesToRedis(config); err != nil {
-			log.Printf("Failed to save default market sources to Redis: %v", err)
+			log.Printf("Failed to save Official Market Sources to Redis: %v", err)
 		}
 
-		log.Printf("Loaded default market sources from environment")
+		log.Printf("Loaded Official Market Sources from environment")
 	} else {
 		log.Printf("Loaded market sources from Redis: %d sources", len(config.Sources))
 	}
@@ -103,7 +103,7 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 	return nil
 }
 
-// createDefaultMarketSources creates default market sources from environment
+// createDefaultMarketSources creates Official Market Sources from environment
 // 从环境变量创建默认市场源
 func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	baseURL := os.Getenv("SYNCER_REMOTE")
@@ -117,12 +117,12 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
 	defaultSource := &MarketSource{
 		ID:          "default",
-		Name:        "Official Market Sources",
+		Name:        "Official-Market-Sources",
 		BaseURL:     baseURL,
 		Priority:    100,
 		IsActive:    true,
 		UpdatedAt:   time.Now(),
-		Description: "Default market source loaded from environment",
+		Description: "Official Market Sources loaded from environment",
 	}
 
 	return &MarketSourcesConfig{
@@ -218,7 +218,7 @@ func (sm *SettingsManager) GetActiveMarketSources() []*MarketSource {
 	return activeSources
 }
 
-// GetDefaultMarketSource gets the default market source
+// GetDefaultMarketSource gets the Official Market Sources
 // 获取默认市场源
 func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 	config := sm.GetMarketSources()
@@ -267,7 +267,7 @@ func (sm *SettingsManager) GetMarketSource() *MarketSource {
 	return sm.GetDefaultMarketSource()
 }
 
-// SetMarketSource sets the default market source URL (for API compatibility)
+// SetMarketSource sets the Official Market Sources URL (for API compatibility)
 // 设置默认市场源URL（为了API兼容性）
 func (sm *SettingsManager) SetMarketSource(url string) error {
 	sm.mu.Lock()
@@ -298,12 +298,12 @@ func (sm *SettingsManager) SetMarketSource(url string) error {
 		// 创建新的默认源
 		newSource := &MarketSource{
 			ID:          "default",
-			Name:        "Default Market Source",
+			Name:        "Official-Market-Sources",
 			BaseURL:     strings.TrimSuffix(url, "/"),
 			Priority:    100,
 			IsActive:    true,
 			UpdatedAt:   time.Now(),
-			Description: "Default market source set via API",
+			Description: "Official Market Sources set via API",
 		}
 		sm.marketSources.Sources = append(sm.marketSources.Sources, newSource)
 	}

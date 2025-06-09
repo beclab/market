@@ -700,3 +700,196 @@ func ExampleUserConfiguration() {
 
 	glog.Infof("====== User Configuration Example Completed ======")
 }
+
+// ExampleWithHydrationNotification demonstrates real-time hydration task creation
+// ExampleWithHydrationNotification 演示实时水合任务创建
+func ExampleWithHydrationNotification() {
+	log.Println("Starting example with hydration notification")
+
+	// Create module configuration with hydration enabled
+	// 创建启用水合功能的模块配置
+	config := DefaultModuleConfig()
+	config.EnableSync = true
+	config.EnableCache = true
+	config.EnableHydrator = true
+
+	// Create and start module
+	// 创建并启动模块
+	module, err := NewAppInfoModule(config)
+	if err != nil {
+		log.Printf("Failed to create module: %v", err)
+		return
+	}
+
+	if err := module.Start(); err != nil {
+		log.Printf("Failed to start module: %v", err)
+		return
+	}
+	defer module.Stop()
+
+	// Wait for initialization
+	// 等待初始化
+	time.Sleep(2 * time.Second)
+
+	// Check that hydration notifier is connected
+	// 检查水合通知器是否已连接
+	status := module.GetModuleStatus()
+	log.Printf("Module status: %+v", status)
+
+	// Simulate setting AppInfoLatestPending data which should trigger hydration
+	// 模拟设置AppInfoLatestPending数据，这应该触发水合
+	testData := map[string]interface{}{
+		"version": "1.0.0",
+		"data": map[string]interface{}{
+			"apps": map[string]interface{}{
+				"test-app-1": map[string]interface{}{
+					"name":        "Test Application 1",
+					"version":     "1.0.0",
+					"description": "A test application for hydration",
+					"icon":        "test-icon.png",
+				},
+				"test-app-2": map[string]interface{}{
+					"name":        "Test Application 2",
+					"version":     "2.0.0",
+					"description": "Another test application for hydration",
+					"icon":        "test-icon-2.png",
+				},
+			},
+		},
+	}
+
+	log.Println("Setting AppInfoLatestPending data to trigger hydration...")
+
+	// Set the data which should immediately trigger hydration task creation
+	// 设置数据，这应该立即触发水合任务创建
+	err = module.SetAppData("test-user", "test-source", AppInfoLatestPending, testData)
+	if err != nil {
+		log.Printf("Failed to set app data: %v", err)
+		return
+	}
+
+	log.Println("AppInfoLatestPending data set successfully")
+
+	// Wait for hydration tasks to be processed
+	// 等待水合任务被处理
+	time.Sleep(5 * time.Second)
+
+	// Check hydrator metrics to see if tasks were created and processed
+	// 检查水合器指标以查看是否创建和处理了任务
+	if hydrator := module.GetHydrator(); hydrator != nil {
+		metrics := hydrator.GetMetrics()
+		log.Printf("Hydrator metrics after data update:")
+		log.Printf("  Total tasks processed: %d", metrics.TotalTasksProcessed)
+		log.Printf("  Total tasks succeeded: %d", metrics.TotalTasksSucceeded)
+		log.Printf("  Total tasks failed: %d", metrics.TotalTasksFailed)
+		log.Printf("  Active tasks count: %d", metrics.ActiveTasksCount)
+		log.Printf("  Queue length: %d", metrics.QueueLength)
+	}
+
+	log.Println("Hydration notification example completed")
+}
+
+// TestHydrationNotification tests the hydration notification mechanism
+// TestHydrationNotification 测试水合通知机制
+func TestHydrationNotification() {
+	log.Println("=== Testing Hydration Notification Mechanism ===")
+
+	// Create module configuration
+	config := DefaultModuleConfig()
+	config.EnableSync = true
+	config.EnableCache = true
+	config.EnableHydrator = true
+
+	log.Printf("Config - EnableSync: %t, EnableCache: %t, EnableHydrator: %t",
+		config.EnableSync, config.EnableCache, config.EnableHydrator)
+
+	// Create and start module
+	module, err := NewAppInfoModule(config)
+	if err != nil {
+		log.Printf("Failed to create module: %v", err)
+		return
+	}
+
+	if err := module.Start(); err != nil {
+		log.Printf("Failed to start module: %v", err)
+		return
+	}
+	defer module.Stop()
+
+	// Wait for initialization
+	time.Sleep(2 * time.Second)
+
+	// Get components
+	cacheManager := module.GetCacheManager()
+	hydrator := module.GetHydrator()
+	syncer := module.GetSyncer()
+
+	log.Printf("Components - CacheManager: %t, Hydrator: %t, Syncer: %t",
+		cacheManager != nil, hydrator != nil, syncer != nil)
+
+	// Check module status to verify connections
+	status := module.GetModuleStatus()
+	log.Printf("Module status: %+v", status)
+
+	if hydrator != nil {
+		log.Printf("Hydrator running: %t", hydrator.IsRunning())
+		initialMetrics := hydrator.GetMetrics()
+		log.Printf("Initial hydrator metrics:")
+		log.Printf("  Active tasks: %d", initialMetrics.ActiveTasksCount)
+		log.Printf("  Queue length: %d", initialMetrics.QueueLength)
+		log.Printf("  Total processed: %d", initialMetrics.TotalTasksProcessed)
+	}
+
+	// Test direct cache manager notification
+	if cacheManager != nil {
+		log.Println("\n--- Testing Direct CacheManager.SetAppData Call ---")
+
+		testData := map[string]interface{}{
+			"version": "1.0.0",
+			"data": map[string]interface{}{
+				"apps": map[string]interface{}{
+					"direct-test-app-1": map[string]interface{}{
+						"name":        "Direct Test App 1",
+						"version":     "1.0.0",
+						"description": "App for testing direct notification",
+					},
+					"direct-test-app-2": map[string]interface{}{
+						"name":        "Direct Test App 2",
+						"version":     "2.0.0",
+						"description": "Another app for testing direct notification",
+					},
+				},
+			},
+		}
+
+		log.Println("Calling CacheManager.SetAppData...")
+		err := cacheManager.SetAppData("test-user", "direct-test-source", AppInfoLatestPending, testData)
+		if err != nil {
+			log.Printf("❌ Failed to set app data directly: %v", err)
+		} else {
+			log.Println("✅ Successfully set app data directly via CacheManager")
+		}
+
+		// Wait and check if tasks were created
+		log.Println("Waiting 3 seconds for hydration tasks to be processed...")
+		time.Sleep(3 * time.Second)
+
+		if hydrator != nil {
+			metrics := hydrator.GetMetrics()
+			log.Printf("Hydrator metrics after direct call:")
+			log.Printf("  Active tasks: %d", metrics.ActiveTasksCount)
+			log.Printf("  Queue length: %d", metrics.QueueLength)
+			log.Printf("  Total processed: %d", metrics.TotalTasksProcessed)
+			log.Printf("  Total succeeded: %d", metrics.TotalTasksSucceeded)
+			log.Printf("  Total failed: %d", metrics.TotalTasksFailed)
+
+			if metrics.TotalTasksProcessed > 0 {
+				log.Println("✅ Hydration notification mechanism is working!")
+			} else {
+				log.Println("❌ No tasks were processed, notification might not be working")
+			}
+		}
+	}
+
+	log.Println("=== Test Completed ===")
+}
