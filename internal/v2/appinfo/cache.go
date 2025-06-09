@@ -1,0 +1,493 @@
+package appinfo
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/golang/glog"
+)
+
+// HydrationNotifier interface for notifying hydrator about pending data updates
+// HydrationNotifier 接口用于通知水合器关于待处理数据更新
+type HydrationNotifier interface {
+	NotifyPendingDataUpdate(userID, sourceID string, pendingData map[string]interface{})
+}
+
+// CacheManager manages the in-memory cache and Redis synchronization
+// CacheManager 管理内存缓存和 Redis 同步
+type CacheManager struct {
+	cache             *CacheData
+	redisClient       *RedisClient
+	userConfig        *UserConfig
+	hydrationNotifier HydrationNotifier // Notifier for hydration updates
+	mutex             sync.RWMutex
+	syncChannel       chan SyncRequest
+	stopChannel       chan bool
+	isRunning         bool
+}
+
+// SyncRequest represents a request to sync data to Redis
+type SyncRequest struct {
+	UserID   string
+	SourceID string
+	Type     SyncType
+}
+
+// SyncType represents the type of sync operation
+type SyncType int
+
+const (
+	SyncUser   SyncType = iota // Sync entire user data
+	SyncSource                 // Sync specific source data
+	DeleteUser                 // Delete user data
+)
+
+// NewCacheManager creates a new cache manager
+func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheManager {
+	return &CacheManager{
+		cache:       NewCacheData(),
+		redisClient: redisClient,
+		userConfig:  userConfig,
+		syncChannel: make(chan SyncRequest, 1000), // Buffer for async sync requests
+		stopChannel: make(chan bool, 1),
+		isRunning:   false,
+	}
+}
+
+// Start initializes the cache by loading data from Redis and starts the sync worker
+func (cm *CacheManager) Start() error {
+	glog.Infof("Starting cache manager")
+
+	// Load cache data from Redis
+	cache, err := cm.redisClient.LoadCacheFromRedis()
+	if err != nil {
+		glog.Errorf("Failed to load cache from Redis: %v", err)
+		return err
+	}
+
+	cm.mutex.Lock()
+	cm.cache = cache
+
+	// Ensure all users from userConfig.UserList have their data structures initialized
+	// 确保userConfig.UserList中的所有用户都有其数据结构初始化
+	if cm.userConfig != nil && len(cm.userConfig.UserList) > 0 {
+		glog.Infof("Initializing data structures for configured users")
+
+		for _, userID := range cm.userConfig.UserList {
+			if _, exists := cm.cache.Users[userID]; !exists {
+				glog.Infof("Creating data structure for new user: %s", userID)
+				cm.cache.Users[userID] = NewUserData()
+			}
+		}
+
+		glog.Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
+	}
+
+	cm.isRunning = true
+	cm.mutex.Unlock()
+
+	// Start sync worker goroutine
+	go cm.syncWorker()
+
+	glog.Infof("Cache manager started successfully")
+	return nil
+}
+
+// Stop stops the cache manager and sync worker
+func (cm *CacheManager) Stop() {
+	glog.Infof("Stopping cache manager")
+
+	cm.mutex.Lock()
+	if cm.isRunning {
+		cm.isRunning = false
+		cm.stopChannel <- true
+	}
+	cm.mutex.Unlock()
+
+	glog.Infof("Cache manager stopped")
+}
+
+// syncWorker processes sync requests in the background
+func (cm *CacheManager) syncWorker() {
+	glog.Infof("Sync worker started")
+
+	for {
+		select {
+		case syncReq := <-cm.syncChannel:
+			cm.processSyncRequest(syncReq)
+		case <-cm.stopChannel:
+			glog.Infof("Sync worker stopped")
+			return
+		}
+	}
+}
+
+// processSyncRequest handles individual sync requests
+func (cm *CacheManager) processSyncRequest(req SyncRequest) {
+	switch req.Type {
+	case SyncUser:
+		if userData := cm.getUserData(req.UserID); userData != nil {
+			if err := cm.redisClient.SaveUserDataToRedis(req.UserID, userData); err != nil {
+				glog.Errorf("Failed to sync user data to Redis: %v", err)
+			}
+		}
+	case SyncSource:
+		if sourceData := cm.getSourceData(req.UserID, req.SourceID); sourceData != nil {
+			if err := cm.redisClient.SaveSourceDataToRedis(req.UserID, req.SourceID, sourceData); err != nil {
+				glog.Errorf("Failed to sync source data to Redis: %v", err)
+			}
+		}
+	case DeleteUser:
+		if err := cm.redisClient.DeleteUserDataFromRedis(req.UserID); err != nil {
+			glog.Errorf("Failed to delete user data from Redis: %v", err)
+		}
+	}
+}
+
+// GetUserData retrieves user data from cache
+func (cm *CacheManager) GetUserData(userID string) *UserData {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	return cm.cache.Users[userID]
+}
+
+// getUserData internal method to get user data without external locking
+func (cm *CacheManager) getUserData(userID string) *UserData {
+	return cm.cache.Users[userID]
+}
+
+// GetSourceData retrieves source data from cache
+func (cm *CacheManager) GetSourceData(userID, sourceID string) *SourceData {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	if userData, exists := cm.cache.Users[userID]; exists {
+		return userData.Sources[sourceID]
+	}
+	return nil
+}
+
+// getSourceData internal method to get source data without external locking
+func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
+	if userData, exists := cm.cache.Users[userID]; exists {
+		return userData.Sources[sourceID]
+	}
+	return nil
+}
+
+// SetHydrationNotifier sets the hydration notifier for real-time updates
+// SetHydrationNotifier 设置水合通知器以进行实时更新
+func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+	cm.hydrationNotifier = notifier
+	glog.Infof("Hydration notifier set successfully")
+}
+
+// SetAppData sets app data in cache and triggers sync to Redis
+func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	// Validate user configuration if available
+	if cm.userConfig != nil {
+		// Check if user is valid
+		isValidUser := false
+		for _, validUser := range cm.userConfig.UserList {
+			if validUser == userID {
+				isValidUser = true
+				break
+			}
+		}
+
+		// Allow guest users if enabled, otherwise reject invalid users
+		if !isValidUser && !cm.userConfig.GuestEnabled {
+			glog.Warningf("User '%s' is not authorized to set app data", userID)
+			return fmt.Errorf("user '%s' is not authorized", userID)
+		}
+	}
+
+	// Ensure user exists
+	if _, exists := cm.cache.Users[userID]; !exists {
+		cm.cache.Users[userID] = NewUserData()
+	}
+
+	// Check source limit for user
+	userData := cm.cache.Users[userID]
+	userData.Mutex.Lock()
+
+	// Check if we're adding a new source and if it exceeds the limit
+	if _, exists := userData.Sources[sourceID]; !exists {
+		if cm.userConfig != nil {
+			maxSources := cm.userConfig.MaxSourcesPerUser
+
+			// Give admin users double the limit
+			for _, admin := range cm.userConfig.AdminList {
+				if admin == userID {
+					maxSources *= 2
+					break
+				}
+			}
+
+			if len(userData.Sources) >= maxSources {
+				userData.Mutex.Unlock()
+				glog.Warningf("User '%s' has reached maximum sources limit (%d)", userID, maxSources)
+				return fmt.Errorf("user '%s' has reached maximum sources limit (%d)", userID, maxSources)
+			}
+		}
+
+		userData.Sources[sourceID] = NewSourceData()
+	}
+	userData.Mutex.Unlock()
+
+	// Set the data
+	sourceData := userData.Sources[sourceID]
+	sourceData.Mutex.Lock()
+
+	appData := NewAppData(dataType, data)
+	appData.Timestamp = time.Now().Unix()
+
+	switch dataType {
+	case AppInfoHistory:
+		sourceData.AppInfoHistory = append(sourceData.AppInfoHistory, appData)
+	case AppStateLatest:
+		sourceData.AppStateLatest = appData
+	case AppInfoLatest:
+		sourceData.AppInfoLatest = appData
+	case AppInfoLatestPending:
+		sourceData.AppInfoLatestPending = appData
+		// Notify hydrator about pending data update for immediate task creation
+		// 通知水合器关于待处理数据更新以立即创建任务
+		if cm.hydrationNotifier != nil {
+			glog.Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
+			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
+		}
+	case Other:
+		// For "other" type, we need to specify a sub-type
+		if subType, ok := data["sub_type"].(string); ok {
+			sourceData.Other[subType] = appData
+		} else {
+			sourceData.Other["default"] = appData
+		}
+	}
+
+	sourceData.Mutex.Unlock()
+
+	// Trigger async sync to Redis
+	cm.requestSync(SyncRequest{
+		UserID:   userID,
+		SourceID: sourceID,
+		Type:     SyncSource,
+	})
+
+	glog.Infof("Set app data for user=%s, source=%s, type=%s", userID, sourceID, dataType)
+	return nil
+}
+
+// GetAppData retrieves specific app data from cache
+func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	if userData, exists := cm.cache.Users[userID]; exists {
+		if sourceData, exists := userData.Sources[sourceID]; exists {
+			sourceData.Mutex.RLock()
+			defer sourceData.Mutex.RUnlock()
+
+			switch dataType {
+			case AppInfoHistory:
+				return sourceData.AppInfoHistory
+			case AppStateLatest:
+				return sourceData.AppStateLatest
+			case AppInfoLatest:
+				return sourceData.AppInfoLatest
+			case AppInfoLatestPending:
+				return sourceData.AppInfoLatestPending
+			case Other:
+				return sourceData.Other
+			}
+		}
+	}
+	return nil
+}
+
+// RemoveUserData removes user data from cache and Redis
+func (cm *CacheManager) RemoveUserData(userID string) error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	// Remove from cache
+	delete(cm.cache.Users, userID)
+
+	// Trigger async deletion from Redis
+	cm.requestSync(SyncRequest{
+		UserID: userID,
+		Type:   DeleteUser,
+	})
+
+	glog.Infof("Removed user data for user=%s", userID)
+	return nil
+}
+
+// GetCacheStats returns cache statistics
+func (cm *CacheManager) GetCacheStats() map[string]interface{} {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	stats := make(map[string]interface{})
+	stats["total_users"] = len(cm.cache.Users)
+	stats["is_running"] = cm.isRunning
+
+	totalSources := 0
+	for _, userData := range cm.cache.Users {
+		userData.Mutex.RLock()
+		totalSources += len(userData.Sources)
+		userData.Mutex.RUnlock()
+	}
+	stats["total_sources"] = totalSources
+
+	return stats
+}
+
+// requestSync sends a sync request to the sync worker
+func (cm *CacheManager) requestSync(req SyncRequest) {
+	if cm.isRunning {
+		select {
+		case cm.syncChannel <- req:
+			// Request queued successfully
+		default:
+			glog.Warningf("Sync channel is full, dropping sync request")
+		}
+	}
+}
+
+// ForceSync forces immediate synchronization of all data to Redis
+func (cm *CacheManager) ForceSync() error {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	glog.Infof("Force syncing all cache data to Redis")
+
+	for userID, userData := range cm.cache.Users {
+		if err := cm.redisClient.SaveUserDataToRedis(userID, userData); err != nil {
+			glog.Errorf("Failed to force sync user data: %v", err)
+			return err
+		}
+	}
+
+	glog.Infof("Force sync completed successfully")
+	return nil
+}
+
+// GetAllUsersData returns all users data from cache for inspection/debugging
+func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	result := make(map[string]*UserData)
+	for userID, userData := range cm.cache.Users {
+		userData.Mutex.RLock()
+		result[userID] = userData
+		userData.Mutex.RUnlock()
+	}
+	return result
+}
+
+// UpdateUserConfig updates the user configuration and ensures all users have data structures
+// UpdateUserConfig 更新用户配置并确保所有用户都有数据结构
+func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if newUserConfig == nil {
+		return fmt.Errorf("user config cannot be nil")
+	}
+
+	glog.Infof("Updating user configuration")
+
+	// oldUserConfig := cm.userConfig // Commented out as it's only used in optional removal logic
+	cm.userConfig = newUserConfig
+
+	// Initialize data structures for new users in the updated configuration
+	// 为更新配置中的新用户初始化数据结构
+	if len(newUserConfig.UserList) > 0 {
+		for _, userID := range newUserConfig.UserList {
+			if _, exists := cm.cache.Users[userID]; !exists {
+				glog.Infof("Creating data structure for newly configured user: %s", userID)
+				cm.cache.Users[userID] = NewUserData()
+
+				// Trigger sync to Redis for the new user
+				// 为新用户触发Redis同步
+				if cm.isRunning {
+					cm.requestSync(SyncRequest{
+						UserID: userID,
+						Type:   SyncUser,
+					})
+				}
+			}
+		}
+	}
+
+	// Optionally remove users that are no longer in the configuration
+	// (This is commented out by default to preserve data)
+	// 可选择移除不再在配置中的用户（默认注释以保留数据）
+	/*
+		oldUserConfig := cm.userConfig // Uncomment this line if enabling user removal logic
+		if oldUserConfig != nil {
+			for _, oldUserID := range oldUserConfig.UserList {
+				found := false
+				for _, newUserID := range newUserConfig.UserList {
+					if oldUserID == newUserID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					glog.Infof("User %s is no longer in configuration, but data is preserved", oldUserID)
+					// Uncomment the line below if you want to remove data for users not in the new configuration
+					// delete(cm.cache.Users, oldUserID)
+				}
+			}
+		}
+	*/
+
+	glog.Infof("User configuration updated successfully")
+	return nil
+}
+
+// SyncUserListToCache ensures all users from current userConfig have initialized data structures
+// SyncUserListToCache 确保当前userConfig中的所有用户都有初始化的数据结构
+func (cm *CacheManager) SyncUserListToCache() error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if cm.userConfig == nil || len(cm.userConfig.UserList) == 0 {
+		glog.Warningf("No user configuration available for syncing")
+		return nil
+	}
+
+	glog.Infof("Syncing user list to cache")
+
+	newUsersCount := 0
+	for _, userID := range cm.userConfig.UserList {
+		if _, exists := cm.cache.Users[userID]; !exists {
+			glog.Infof("Adding missing user to cache: %s", userID)
+			cm.cache.Users[userID] = NewUserData()
+			newUsersCount++
+
+			// Trigger sync to Redis for the new user
+			// 为新用户触发Redis同步
+			if cm.isRunning {
+				cm.requestSync(SyncRequest{
+					UserID: userID,
+					Type:   SyncUser,
+				})
+			}
+		}
+	}
+
+	glog.Infof("User list sync completed, added %d new users", newUsersCount)
+	return nil
+}
