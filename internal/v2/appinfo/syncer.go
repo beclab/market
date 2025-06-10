@@ -9,6 +9,8 @@ import (
 
 	"market/internal/v2/appinfo/syncerfn"
 	"market/internal/v2/settings"
+	"market/internal/v2/types"
+	"market/internal/v2/utils"
 )
 
 // Syncer manages the synchronization process with multiple steps
@@ -142,7 +144,7 @@ func (s *Syncer) syncLoop(ctx context.Context) {
 // getVersionForSync returns the version to use for sync operations with fallback
 // 返回用于同步操作的版本号，包含回退逻辑
 func getVersionForSync() string {
-	if version, err := GetTerminusVersionValue(); err == nil {
+	if version, err := utils.GetTerminusVersionValue(); err == nil {
 		return version
 	} else {
 		log.Printf("Failed to get version, using fallback: %v", err)
@@ -152,6 +154,7 @@ func getVersionForSync() string {
 
 // executeSyncCycle executes one complete synchronization cycle
 func (s *Syncer) executeSyncCycle(ctx context.Context) error {
+	log.Println("==================== SYNC CYCLE STARTED ====================")
 	log.Println("Starting sync cycle")
 	startTime := time.Now()
 
@@ -159,6 +162,7 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	// 获取可用的数据源
 	activeSources := s.settingsManager.GetActiveMarketSources()
 	if len(activeSources) == 0 {
+		log.Println("==================== SYNC CYCLE FAILED ====================")
 		return fmt.Errorf("no active market sources available")
 	}
 
@@ -180,17 +184,21 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		// 使用此源成功
 		duration := time.Since(startTime)
 		log.Printf("Sync cycle completed successfully with source %s in %v", source.Name, duration)
+		log.Println("==================== SYNC CYCLE COMPLETED ====================")
 		return nil
 	}
 
 	// All sources failed
 	// 所有源都失败了
+	log.Println("==================== SYNC CYCLE FAILED ====================")
 	return fmt.Errorf("all market sources failed, last error: %w", lastError)
 }
 
 // executeSyncCycleWithSource executes sync cycle with a specific market source
 // 使用特定市场源执行同步周期
 func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *settings.MarketSource) error {
+	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.Name)
+
 	syncContext := syncerfn.NewSyncContext(s.cache)
 
 	// Set version for API requests using utils function
@@ -205,22 +213,27 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 	steps := s.GetSteps()
 	for i, step := range steps {
+		log.Printf("======== SYNC STEP %d/%d STARTED: %s ========", i+1, len(steps), step.GetStepName())
 		stepStartTime := time.Now()
 
 		// Check if step can be skipped
 		if step.CanSkip(ctx, syncContext) {
 			log.Printf("Skipping step %d: %s", i+1, step.GetStepName())
+			log.Printf("======== SYNC STEP %d/%d SKIPPED: %s ========", i+1, len(steps), step.GetStepName())
 			continue
 		}
 
 		// Execute step
 		if err := step.Execute(ctx, syncContext); err != nil {
 			log.Printf("Step %d (%s) failed: %v", i+1, step.GetStepName(), err)
+			log.Printf("======== SYNC STEP %d/%d FAILED: %s ========", i+1, len(steps), step.GetStepName())
+			log.Printf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.Name)
 			return fmt.Errorf("step %d failed: %w", i+1, err)
 		}
 
 		stepDuration := time.Since(stepStartTime)
 		log.Printf("Step %d (%s) completed in %v", i+1, step.GetStepName(), stepDuration)
+		log.Printf("======== SYNC STEP %d/%d COMPLETED: %s ========", i+1, len(steps), step.GetStepName())
 	}
 
 	// Report any errors collected during the process
@@ -302,6 +315,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			syncContext.HashMatches, syncContext.RemoteHash, syncContext.LocalHash)
 	}
 
+	log.Printf("-------------------- SOURCE SYNC COMPLETED: %s --------------------", source.Name)
 	return nil
 }
 
@@ -323,11 +337,160 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 	sourceData.Mutex.Lock()
 	defer sourceData.Mutex.Unlock()
 
-	// Create AppData for app-info-latest-pending
-	appData := NewAppData(AppInfoLatestPending, completeData)
-	sourceData.AppInfoLatestPending = appData
+	// Extract Others data from complete data
+	// 从完整数据中提取Others数据
+	others := &types.Others{}
 
-	log.Printf("Successfully stored data directly to app-info-latest-pending for user: %s, source: %s", userID, sourceID)
+	// Extract version and hash
+	if version, ok := completeData["version"].(string); ok {
+		others.Version = version
+	}
+
+	if dataSection, ok := completeData["data"].(map[string]interface{}); ok {
+		// Convert recommends data
+		if recommendsData, hasRecommends := dataSection["recommends"]; hasRecommends {
+			if recommendsList, ok := recommendsData.([]interface{}); ok {
+				others.Recommends = make([]*types.Recommend, len(recommendsList))
+				for i, rec := range recommendsList {
+					if recMap, ok := rec.(map[string]interface{}); ok {
+						recommend := &types.Recommend{}
+						if name, ok := recMap["name"].(string); ok {
+							recommend.Name = name
+						}
+						if desc, ok := recMap["description"].(string); ok {
+							recommend.Description = desc
+						}
+						if content, ok := recMap["content"].(string); ok {
+							recommend.Content = content
+						}
+						others.Recommends[i] = recommend
+					}
+				}
+			}
+		}
+
+		// Convert pages data
+		if pagesData, hasPages := dataSection["pages"]; hasPages {
+			if pagesList, ok := pagesData.([]interface{}); ok {
+				others.Pages = make([]*types.Page, len(pagesList))
+				for i, page := range pagesList {
+					if pageMap, ok := page.(map[string]interface{}); ok {
+						pageObj := &types.Page{}
+						if category, ok := pageMap["category"].(string); ok {
+							pageObj.Category = category
+						}
+						if content, ok := pageMap["content"].(string); ok {
+							pageObj.Content = content
+						}
+						others.Pages[i] = pageObj
+					}
+				}
+			}
+		}
+
+		// Convert topics data
+		if topicsData, hasTopics := dataSection["topics"]; hasTopics {
+			if topicsList, ok := topicsData.([]interface{}); ok {
+				others.Topics = make([]*types.Topic, len(topicsList))
+				for i, topic := range topicsList {
+					if topicMap, ok := topic.(map[string]interface{}); ok {
+						topicObj := &types.Topic{}
+						if name, ok := topicMap["name"].(string); ok {
+							topicObj.Name = name
+						}
+						if intro, ok := topicMap["introduction"].(string); ok {
+							topicObj.Introduction = intro
+						}
+						if desc, ok := topicMap["des"].(string); ok {
+							topicObj.Des = desc
+						}
+						if iconImg, ok := topicMap["iconimg"].(string); ok {
+							topicObj.IconImg = iconImg
+						}
+						if detailImg, ok := topicMap["detailimg"].(string); ok {
+							topicObj.DetailImg = detailImg
+						}
+						if richText, ok := topicMap["richtext"].(string); ok {
+							topicObj.RichText = richText
+						}
+						if apps, ok := topicMap["apps"].(string); ok {
+							topicObj.Apps = apps
+						}
+						if isDelete, ok := topicMap["isdelete"].(bool); ok {
+							topicObj.IsDelete = isDelete
+						}
+						others.Topics[i] = topicObj
+					}
+				}
+			}
+		}
+
+		// Convert topic_lists data
+		if topicListsData, hasTopicLists := dataSection["topic_lists"]; hasTopicLists {
+			if topicListsList, ok := topicListsData.([]interface{}); ok {
+				others.TopicLists = make([]*types.TopicList, len(topicListsList))
+				for i, topicList := range topicListsList {
+					if topicListMap, ok := topicList.(map[string]interface{}); ok {
+						topicListObj := &types.TopicList{}
+						if name, ok := topicListMap["name"].(string); ok {
+							topicListObj.Name = name
+						}
+						if listType, ok := topicListMap["type"].(string); ok {
+							topicListObj.Type = listType
+						}
+						if desc, ok := topicListMap["description"].(string); ok {
+							topicListObj.Description = desc
+						}
+						if content, ok := topicListMap["content"].(string); ok {
+							topicListObj.Content = content
+						}
+						others.TopicLists[i] = topicListObj
+					}
+				}
+			}
+		}
+
+		// Store Others data in source
+		// 在源数据中存储Others数据
+		sourceData.Others = others
+
+		// Process each app individually
+		// 单独处理每个应用
+		if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+			for appID, appDataInterface := range appsData {
+				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
+					// Create AppInfoLatestPendingData for this specific app using the basic function
+					// 使用基础函数为这个特定应用创建AppInfoLatestPendingData
+					log.Printf("DEBUG: CALL POINT 3 - Processing app %s for user %s, source %s", appID, userID, sourceID)
+					log.Printf("DEBUG: CALL POINT 3 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
+					appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
+					// Check if app data creation was successful
+					// 检查应用数据创建是否成功
+					if appData == nil {
+						log.Printf("Warning: Skipping app %s for user %s, source %s - not recognized as valid app data", appID, userID, sourceID)
+						// Log available keys for debugging
+						// 记录可用键以供调试
+						if appDataMap != nil {
+							keys := make([]string, 0, len(appDataMap))
+							for k := range appDataMap {
+								keys = append(keys, k)
+							}
+							log.Printf("Available app data keys for %s: %v", appID, keys)
+						}
+						continue // Skip this app and continue with next one
+					}
+					appData.Version = others.Version
+
+					sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+					log.Printf("Successfully stored app data for app: %s, user: %s, source: %s", appID, userID, sourceID)
+				}
+			}
+		} else {
+			log.Printf("No apps data found in complete data for user: %s, source: %s", userID, sourceID)
+		}
+	} else {
+		log.Printf("No data section found in complete data for user: %s, source: %s", userID, sourceID)
+	}
 }
 
 // storeDataDirectlyBatch stores data directly to cache without going through CacheManager

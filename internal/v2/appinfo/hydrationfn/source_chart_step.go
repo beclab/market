@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"market/internal/v2/settings"
+	"market/internal/v2/types"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -156,6 +157,13 @@ func (s *SourceChartStep) Execute(ctx context.Context, task *HydrationTask) erro
 		log.Printf("Chart file already exists locally: %s", localChartPath)
 		task.SourceChartURL = "file://" + localChartPath
 		task.ChartData["local_path"] = localChartPath
+
+		// Update AppInfoLatestPendingData with source chart path
+		// 使用源chart路径更新AppInfoLatestPendingData
+		if err := s.updatePendingDataRawPackage(task, localChartPath); err != nil {
+			log.Printf("Warning: failed to update pending data raw package: %v", err)
+		}
+
 		return nil
 	}
 
@@ -181,6 +189,12 @@ func (s *SourceChartStep) Execute(ctx context.Context, task *HydrationTask) erro
 	task.SourceChartURL = "file://" + localChartPath
 	task.ChartData["local_path"] = localChartPath
 	task.ChartData["download_url"] = downloadURL
+
+	// Update AppInfoLatestPendingData with source chart path
+	// 使用源chart路径更新AppInfoLatestPendingData
+	if err := s.updatePendingDataRawPackage(task, localChartPath); err != nil {
+		log.Printf("Warning: failed to update pending data raw package: %v", err)
+	}
 
 	log.Printf("Chart file downloaded successfully: %s", localChartPath)
 	return nil
@@ -381,4 +395,135 @@ func (s *SourceChartStep) isValidChartURL(chartURL string) bool {
 	// Check if it looks like a chart package
 	return strings.HasSuffix(strings.ToLower(parsedURL.Path), ".tgz") ||
 		strings.HasSuffix(strings.ToLower(parsedURL.Path), ".tar.gz")
+}
+
+// updatePendingDataRawPackage updates the RawPackage field in AppInfoLatestPendingData
+// updatePendingDataRawPackage 更新AppInfoLatestPendingData中的RawPackage字段
+func (s *SourceChartStep) updatePendingDataRawPackage(task *HydrationTask, chartPath string) error {
+	if task.Cache == nil {
+		return fmt.Errorf("cache reference is nil")
+	}
+
+	// Lock cache for thread-safe access
+	// 锁定缓存以进行线程安全访问
+	task.Cache.Mutex.Lock()
+	defer task.Cache.Mutex.Unlock()
+
+	// Check if user exists in cache
+	// 检查用户是否在缓存中存在
+	userData, exists := task.Cache.Users[task.UserID]
+	if !exists {
+		log.Printf("User %s not found in cache, skipping RawPackage update", task.UserID)
+		return nil
+	}
+
+	userData.Mutex.Lock()
+	defer userData.Mutex.Unlock()
+
+	// Check if source exists for user
+	// 检查用户的源是否存在
+	sourceData, exists := userData.Sources[task.SourceID]
+	if !exists {
+		log.Printf("Source %s not found for user %s, skipping RawPackage update", task.SourceID, task.UserID)
+		return nil
+	}
+
+	sourceData.Mutex.Lock()
+	defer sourceData.Mutex.Unlock()
+
+	// Find the corresponding pending data and update RawPackage
+	// 查找对应的待处理数据并更新RawPackage
+	for i, pendingData := range sourceData.AppInfoLatestPending {
+		if s.isTaskForPendingData(task, pendingData) {
+			log.Printf("Updating RawPackage for pending data at index %d: %s", i, chartPath)
+			sourceData.AppInfoLatestPending[i].RawPackage = chartPath
+			log.Printf("Successfully updated RawPackage for app: %s", task.AppID)
+			return nil
+		}
+	}
+
+	log.Printf("No matching pending data found for task %s, skipping RawPackage update", task.ID)
+	return nil
+}
+
+// isTaskForPendingData checks if the current task corresponds to the pending data
+// isTaskForPendingData 检查当前任务是否对应待处理数据
+func (s *SourceChartStep) isTaskForPendingData(task *HydrationTask, pendingData *types.AppInfoLatestPendingData) bool {
+	if pendingData == nil {
+		return false
+	}
+
+	taskAppID := task.AppID
+
+	// Check if the task AppID matches the pending data's RawData
+	// 检查任务AppID是否匹配待处理数据的RawData
+	if pendingData.RawData != nil {
+		// Check if this is legacy data by looking at metadata
+		// 通过查看元数据检查这是否是传统数据
+		if pendingData.RawData.Metadata != nil {
+			// Check for legacy_data in metadata - this contains multiple apps
+			// 检查元数据中的legacy_data - 这包含多个应用
+			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
+				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
+					// Check if task app ID exists in the legacy data apps
+					// 检查任务应用ID是否存在于传统数据应用中
+					if dataSection, hasDataSection := legacyDataMap["data"].(map[string]interface{}); hasDataSection {
+						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+							if _, appExists := appsData[taskAppID]; appExists {
+								return true
+							}
+						}
+					}
+				}
+			}
+
+			// Check for legacy_raw_data in metadata
+			// 检查元数据中的legacy_raw_data
+			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
+				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
+					// Similar check for legacy raw data format
+					// 对传统原始数据格式进行类似检查
+					if dataSection, hasDataSection := legacyRawDataMap["data"].(map[string]interface{}); hasDataSection {
+						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+							if _, appExists := appsData[taskAppID]; appExists {
+								return true
+							}
+						}
+					}
+				}
+			}
+
+			// Check representative_app_id for legacy summary data
+			// 检查传统汇总数据的representative_app_id
+			if repAppID, hasRepAppID := pendingData.RawData.Metadata["representative_app_id"].(string); hasRepAppID {
+				if repAppID == taskAppID {
+					return true
+				}
+			}
+		}
+
+		// Standard checks for non-legacy data
+		// 对非传统数据进行标准检查
+		// Match by ID, AppID or Name
+		// 通过ID、AppID或Name匹配
+		if pendingData.RawData.ID == taskAppID ||
+			pendingData.RawData.AppID == taskAppID ||
+			pendingData.RawData.Name == taskAppID {
+			return true
+		}
+	}
+
+	// Check AppInfo if available
+	// 如果可用，检查AppInfo
+	if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
+		// Match by ID, AppID or Name in AppInfo
+		// 通过AppInfo中的ID、AppID或Name匹配
+		if pendingData.AppInfo.AppEntry.ID == taskAppID ||
+			pendingData.AppInfo.AppEntry.AppID == taskAppID ||
+			pendingData.AppInfo.AppEntry.Name == taskAppID {
+			return true
+		}
+	}
+
+	return false
 }

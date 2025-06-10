@@ -1,4 +1,4 @@
-package appinfo
+package utils
 
 import (
 	"encoding/json"

@@ -1,21 +1,34 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/history"
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
 	"market/pkg/v2/api"
+
+	"github.com/golang/glog"
 )
 
 func main() {
+	// Initialize glog for debug logging
+	// 初始化glog用于调试日志
+	flag.Set("logtostderr", "true")
+	flag.Set("v", "2")
+	flag.Parse()
+	defer glog.Flush()
+
 	log.Println("Starting Market API Server on port 8080...")
+	glog.Info("glog initialized for debug logging")
 
 	// Initialize core modules
 	// 初始化核心模块
@@ -99,6 +112,8 @@ func main() {
 		}
 	}()
 
+	log.Println("Starting server on port 8080")
+
 	// Setup graceful shutdown
 	// 设置优雅关闭
 	c := make(chan os.Signal, 1)
@@ -109,27 +124,51 @@ func main() {
 	<-c
 	log.Println("Shutting down gracefully...")
 
-	// Stop all modules in reverse order
-	// 按相反顺序停止所有模块
-	log.Println("Stopping Task module...")
-	taskModule.Stop()
+	// Set a timeout for graceful shutdown
+	// 为优雅关闭设置超时
+	shutdownTimeout := 30 * time.Second
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
 
-	log.Println("Stopping History module...")
-	if err := historyModule.Close(); err != nil {
-		log.Printf("Error stopping History module: %v", err)
+	// Channel to signal completion of shutdown
+	// 用于标记关闭完成的通道
+	shutdownComplete := make(chan struct{})
+
+	// Run shutdown in a goroutine
+	// 在协程中运行关闭过程
+	go func() {
+		defer close(shutdownComplete)
+
+		// Stop all modules in reverse order
+		// 按相反顺序停止所有模块
+		log.Println("Stopping Task module...")
+		taskModule.Stop()
+
+		log.Println("Stopping History module...")
+		if err := historyModule.Close(); err != nil {
+			log.Printf("Error stopping History module: %v", err)
+		}
+
+		log.Println("Stopping AppInfo module...")
+		if err := appInfoModule.Stop(); err != nil {
+			log.Printf("Error stopping AppInfo module: %v", err)
+		}
+
+		log.Println("Stopping Settings module...")
+		if err := redisClient.Close(); err != nil {
+			log.Printf("Error stopping Redis client: %v", err)
+		}
+	}()
+
+	// Wait for shutdown completion or timeout
+	// 等待关闭完成或超时
+	select {
+	case <-shutdownCtx.Done():
+		log.Printf("Shutdown timeout (%v) exceeded, forcing exit", shutdownTimeout)
+		os.Exit(1)
+	case <-shutdownComplete:
+		log.Println("All modules stopped. Goodbye!")
 	}
-
-	log.Println("Stopping AppInfo module...")
-	if err := appInfoModule.Stop(); err != nil {
-		log.Printf("Error stopping AppInfo module: %v", err)
-	}
-
-	log.Println("Stopping Settings module...")
-	if err := redisClient.Close(); err != nil {
-		log.Printf("Error stopping Redis client: %v", err)
-	}
-
-	log.Println("All modules stopped. Goodbye!")
 }
 
 // getEnvOrDefault gets environment variable or returns default value

@@ -10,7 +10,8 @@ import (
 	"io"
 	"log"
 	"market/internal/v2/settings"
-	"net/http"
+	"market/internal/v2/types"
+	"market/internal/v2/utils"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -113,6 +114,14 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 		log.Printf("Warning: failed to build rendered chart URL: %v", err)
 	} else {
 		task.RenderedChartURL = renderedChartURL
+	}
+
+	// Update AppInfoLatestPendingData with rendered chart directory path
+	// 使用渲染chart目录路径更新AppInfoLatestPendingData
+	if renderedChartDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
+		if err := s.updatePendingDataRenderedPackage(task, renderedChartDir); err != nil {
+			log.Printf("Warning: failed to update pending data rendered package: %v", err)
+		}
 	}
 
 	log.Printf("Chart rendering completed for app: %s", task.AppID)
@@ -465,9 +474,9 @@ func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateD
 	// 初始化Values map
 	templateData.Values = make(map[string]interface{})
 
-	// Get admin username
-	// 获取管理员用户名
-	adminUsername, err := s.getAdminUsername("")
+	// Get admin username using utils function
+	// 使用 utils 函数获取管理员用户名
+	adminUsername, err := utils.GetAdminUsername("")
 	if err != nil {
 		log.Printf("Warning: failed to get admin username, using default: %v", err)
 		adminUsername = "admin" // fallback to default
@@ -579,73 +588,6 @@ func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateD
 	}
 
 	return templateData, nil
-}
-
-// getAdminUsername retrieves the admin username from the app service
-// getAdminUsername 从应用服务获取管理员用户名
-func (s *RenderedChartStep) getAdminUsername(token string) (string, error) {
-	// Get app service host and port from environment
-	// 从环境变量获取应用服务主机和端口
-	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	if appServiceHost == "" || appServicePort == "" {
-		return "", fmt.Errorf("app service host or port not configured")
-	}
-
-	// Build admin username endpoint URL
-	// 构建管理员用户名端点 URL
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/admin/username", appServiceHost, appServicePort)
-
-	// Create HTTP request
-	// 创建 HTTP 请求
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create admin username request: %w", err)
-	}
-
-	// Add authorization token if provided
-	// 如果提供了令牌，添加授权头
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	// Create HTTP client with timeout
-	// 创建带超时的 HTTP 客户端
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	// Execute request
-	// 执行请求
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch admin username from service: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	// 检查响应状态
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("admin username service returned status %d", resp.StatusCode)
-	}
-
-	// Read response body
-	// 读取响应体
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read admin username response: %w", err)
-	}
-
-	log.Printf("Admin username response: %s", string(body))
-
-	// Parse response JSON
-	// 解析响应 JSON
-	var response AdminUsernameResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		log.Printf("Warning: Failed to unmarshal admin username response: %s, error: %v", string(body), err)
-		return "", fmt.Errorf("failed to parse admin username response: %w", err)
-	}
-
-	return response.Data.Username, nil
 }
 
 // renderOlaresManifest finds and renders the OlaresManifest.yaml file
@@ -777,11 +719,11 @@ func (s *RenderedChartStep) renderTemplate(templateContent string, data *Templat
 
 	// Show a preview of template content for debugging
 	// 显示模板内容的预览用于调试
-	preview := templateContent
-	if len(preview) > 200 {
-		preview = preview[:200] + "..."
-	}
-	log.Printf("Template content preview: %s", preview)
+	// preview := templateContent
+	// if len(preview) > 200 {
+	// 	preview = preview[:200] + "..."
+	// }
+	// log.Printf("Template content preview: %s", preview)
 
 	// Create template with custom functions (similar to Helm)
 	// 创建带有自定义函数的模板（类似于Helm）
@@ -1151,4 +1093,135 @@ func (s *RenderedChartStep) cleanPathComponent(component, fallback string) strin
 	}
 
 	return cleaned
+}
+
+// updatePendingDataRenderedPackage updates the RenderedPackage field in AppInfoLatestPendingData
+// updatePendingDataRenderedPackage 更新AppInfoLatestPendingData中的RenderedPackage字段
+func (s *RenderedChartStep) updatePendingDataRenderedPackage(task *HydrationTask, chartDir string) error {
+	if task.Cache == nil {
+		return fmt.Errorf("cache reference is nil")
+	}
+
+	// Lock cache for thread-safe access
+	// 锁定缓存以进行线程安全访问
+	task.Cache.Mutex.Lock()
+	defer task.Cache.Mutex.Unlock()
+
+	// Check if user exists in cache
+	// 检查用户是否在缓存中存在
+	userData, exists := task.Cache.Users[task.UserID]
+	if !exists {
+		log.Printf("User %s not found in cache, skipping RenderedPackage update", task.UserID)
+		return nil
+	}
+
+	userData.Mutex.Lock()
+	defer userData.Mutex.Unlock()
+
+	// Check if source exists for user
+	// 检查用户的源是否存在
+	sourceData, exists := userData.Sources[task.SourceID]
+	if !exists {
+		log.Printf("Source %s not found for user %s, skipping RenderedPackage update", task.SourceID, task.UserID)
+		return nil
+	}
+
+	sourceData.Mutex.Lock()
+	defer sourceData.Mutex.Unlock()
+
+	// Find the corresponding pending data and update RenderedPackage
+	// 查找对应的待处理数据并更新RenderedPackage
+	for i, pendingData := range sourceData.AppInfoLatestPending {
+		if s.isTaskForPendingDataRendered(task, pendingData) {
+			log.Printf("Updating RenderedPackage for pending data at index %d: %s", i, chartDir)
+			sourceData.AppInfoLatestPending[i].RenderedPackage = chartDir
+			log.Printf("Successfully updated RenderedPackage for app: %s", task.AppID)
+			return nil
+		}
+	}
+
+	log.Printf("No matching pending data found for task %s, skipping RenderedPackage update", task.ID)
+	return nil
+}
+
+// isTaskForPendingDataRendered checks if the current task corresponds to the pending data
+// isTaskForPendingDataRendered 检查当前任务是否对应待处理数据
+func (s *RenderedChartStep) isTaskForPendingDataRendered(task *HydrationTask, pendingData *types.AppInfoLatestPendingData) bool {
+	if pendingData == nil {
+		return false
+	}
+
+	taskAppID := task.AppID
+
+	// Check if the task AppID matches the pending data's RawData
+	// 检查任务AppID是否匹配待处理数据的RawData
+	if pendingData.RawData != nil {
+		// Check if this is legacy data by looking at metadata
+		// 通过查看元数据检查这是否是传统数据
+		if pendingData.RawData.Metadata != nil {
+			// Check for legacy_data in metadata - this contains multiple apps
+			// 检查元数据中的legacy_data - 这包含多个应用
+			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
+				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
+					// Check if task app ID exists in the legacy data apps
+					// 检查任务应用ID是否存在于传统数据应用中
+					if dataSection, hasDataSection := legacyDataMap["data"].(map[string]interface{}); hasDataSection {
+						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+							if _, appExists := appsData[taskAppID]; appExists {
+								return true
+							}
+						}
+					}
+				}
+			}
+
+			// Check for legacy_raw_data in metadata
+			// 检查元数据中的legacy_raw_data
+			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
+				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
+					// Similar check for legacy raw data format
+					// 对传统原始数据格式进行类似检查
+					if dataSection, hasDataSection := legacyRawDataMap["data"].(map[string]interface{}); hasDataSection {
+						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+							if _, appExists := appsData[taskAppID]; appExists {
+								return true
+							}
+						}
+					}
+				}
+			}
+
+			// Check representative_app_id for legacy summary data
+			// 检查传统汇总数据的representative_app_id
+			if repAppID, hasRepAppID := pendingData.RawData.Metadata["representative_app_id"].(string); hasRepAppID {
+				if repAppID == taskAppID {
+					return true
+				}
+			}
+		}
+
+		// Standard checks for non-legacy data
+		// 对非传统数据进行标准检查
+		// Match by ID, AppID or Name
+		// 通过ID、AppID或Name匹配
+		if pendingData.RawData.ID == taskAppID ||
+			pendingData.RawData.AppID == taskAppID ||
+			pendingData.RawData.Name == taskAppID {
+			return true
+		}
+	}
+
+	// Check AppInfo if available
+	// 如果可用，检查AppInfo
+	if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
+		// Match by ID, AppID or Name in AppInfo
+		// 通过AppInfo中的ID、AppID或Name匹配
+		if pendingData.AppInfo.AppEntry.ID == taskAppID ||
+			pendingData.AppInfo.AppEntry.AppID == taskAppID ||
+			pendingData.AppInfo.AppEntry.Name == taskAppID {
+			return true
+		}
+	}
+
+	return false
 }

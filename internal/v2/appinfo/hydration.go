@@ -18,6 +18,7 @@ type Hydrator struct {
 	steps           []hydrationfn.HydrationStep
 	cache           *types.CacheData
 	settingsManager *settings.SettingsManager
+	cacheManager    *CacheManager // Added cache manager for database sync
 	taskQueue       chan *hydrationfn.HydrationTask
 	workerCount     int
 	stopChan        chan struct{}
@@ -31,6 +32,13 @@ type Hydrator struct {
 	failedTasks    map[string]*hydrationfn.HydrationTask
 	taskMutex      sync.RWMutex
 
+	// Batch completion tracking
+	// 批量完成跟踪
+	batchCompletionQueue chan string   // Queue for completed tasks
+	completedTaskCount   int64         // Total completed tasks counter
+	lastSyncTime         time.Time     // Last database sync time
+	syncInterval         time.Duration // Interval for database sync
+
 	// Metrics
 	// 指标
 	totalTasksProcessed int64
@@ -43,22 +51,26 @@ type Hydrator struct {
 // NewHydrator 使用给定配置创建新的水合器
 func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManager, config HydratorConfig) *Hydrator {
 	hydrator := &Hydrator{
-		steps:           make([]hydrationfn.HydrationStep, 0),
-		cache:           cache,
-		settingsManager: settingsManager,
-		taskQueue:       make(chan *hydrationfn.HydrationTask, config.QueueSize),
-		workerCount:     config.WorkerCount,
-		stopChan:        make(chan struct{}),
-		isRunning:       false,
-		activeTasks:     make(map[string]*hydrationfn.HydrationTask),
-		completedTasks:  make(map[string]*hydrationfn.HydrationTask),
-		failedTasks:     make(map[string]*hydrationfn.HydrationTask),
+		steps:                make([]hydrationfn.HydrationStep, 0),
+		cache:                cache,
+		settingsManager:      settingsManager,
+		cacheManager:         nil, // Will be set later via SetCacheManager
+		taskQueue:            make(chan *hydrationfn.HydrationTask, config.QueueSize),
+		workerCount:          config.WorkerCount,
+		stopChan:             make(chan struct{}),
+		isRunning:            false,
+		activeTasks:          make(map[string]*hydrationfn.HydrationTask),
+		completedTasks:       make(map[string]*hydrationfn.HydrationTask),
+		failedTasks:          make(map[string]*hydrationfn.HydrationTask),
+		batchCompletionQueue: make(chan string, 100), // Buffer for completed task IDs
+		syncInterval:         30 * time.Second,       // Default sync interval
 	}
 
 	// Add default steps
 	// 添加默认步骤
 	hydrator.AddStep(hydrationfn.NewSourceChartStep())
 	hydrator.AddStep(hydrationfn.NewRenderedChartStep())
+	hydrator.AddStep(hydrationfn.NewImageAnalysisStep())
 	hydrator.AddStep(hydrationfn.NewDatabaseUpdateStep())
 
 	return hydrator
@@ -110,6 +122,16 @@ func (h *Hydrator) Start(ctx context.Context) error {
 	// Start pending data monitor
 	// 启动待处理数据监控器
 	go h.pendingDataMonitor(ctx)
+
+	// Start batch completion processor
+	// 启动批量完成处理器
+	go h.batchCompletionProcessor(ctx)
+
+	// Start database sync monitor if cache manager is available
+	// 如果缓存管理器可用，启动数据库同步监控器
+	if h.cacheManager != nil {
+		go h.databaseSyncMonitor(ctx)
+	}
 
 	return nil
 }
@@ -178,6 +200,7 @@ func (h *Hydrator) worker(ctx context.Context, workerID int) {
 // processTask processes a single hydration task
 // processTask 处理单个水合任务
 func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationTask, workerID int) {
+	log.Printf("==================== HYDRATION TASK STARTED ====================")
 	log.Printf("Worker %d processing task: %s for app: %s", workerID, task.ID, task.AppID)
 
 	task.SetStatus(hydrationfn.TaskStatusRunning)
@@ -193,16 +216,19 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 		// 检查步骤是否可以跳过
 		if step.CanSkip(ctx, task) {
 			log.Printf("Skipping step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
+			log.Printf("-------- HYDRATION STEP %d/%d SKIPPED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.IncrementStep()
 			continue
 		}
 
+		log.Printf("-------- HYDRATION STEP %d/%d STARTED: %s --------", i+1, len(h.steps), step.GetStepName())
 		log.Printf("Executing step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
 
 		// Execute step
 		// 执行步骤
 		if err := step.Execute(ctx, task); err != nil {
 			log.Printf("Step %d (%s) failed for task: %s, error: %v", i+1, step.GetStepName(), task.ID, err)
+			log.Printf("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.SetError(err)
 
 			// Check if task can be retried
@@ -220,18 +246,21 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 						h.markTaskFailed(task)
 					}
 				}()
+				log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY ====================")
 				return
 			} else {
 				// Max retries exceeded
 				// 超过最大重试次数
 				log.Printf("Task failed after max retries: %s", task.ID)
 				h.markTaskFailed(task)
+				log.Printf("==================== HYDRATION TASK FAILED ====================")
 				return
 			}
 		}
 
 		task.IncrementStep()
 		log.Printf("Step %d (%s) completed for task: %s", i+1, step.GetStepName(), task.ID)
+		log.Printf("-------- HYDRATION STEP %d/%d COMPLETED: %s --------", i+1, len(h.steps), step.GetStepName())
 	}
 
 	// All steps completed successfully
@@ -240,6 +269,7 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 	h.markTaskCompleted(task)
 
 	log.Printf("Task completed successfully: %s for app: %s", task.ID, task.AppID)
+	log.Printf("==================== HYDRATION TASK COMPLETED ====================")
 }
 
 // pendingDataMonitor monitors for new pending data and creates tasks
@@ -276,8 +306,10 @@ func (h *Hydrator) checkForPendingData() {
 
 			// Check if there's pending data
 			// 检查是否有待处理数据
-			if sourceData.AppInfoLatestPending != nil {
-				h.createTasksFromPendingData(userID, sourceID, sourceData.AppInfoLatestPending)
+			if len(sourceData.AppInfoLatestPending) > 0 {
+				for _, pendingData := range sourceData.AppInfoLatestPending {
+					h.createTasksFromPendingData(userID, sourceID, pendingData)
+				}
 			}
 
 			sourceData.Mutex.RUnlock()
@@ -288,39 +320,224 @@ func (h *Hydrator) checkForPendingData() {
 
 // createTasksFromPendingData creates hydration tasks from pending app data
 // createTasksFromPendingData 从待处理应用数据创建水合任务
-func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingData *types.AppData) {
-	if pendingData == nil || pendingData.Data == nil {
+func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingData *types.AppInfoLatestPendingData) {
+	if pendingData == nil {
 		return
 	}
 
-	// Extract apps from pending data
-	// 从待处理数据中提取应用
-	if dataSection, ok := pendingData.Data["data"]; ok {
-		if dataMap, ok := dataSection.(map[string]interface{}); ok {
-			if apps, ok := dataMap["apps"]; ok {
-				if appsMap, ok := apps.(map[string]interface{}); ok {
-					// Create task for each app
-					// 为每个应用创建任务
-					for appID, appData := range appsMap {
-						if appDataMap, ok := appData.(map[string]interface{}); ok {
-							// Check if task already exists for this app
-							// 检查此应用是否已存在任务
-							if !h.hasActiveTaskForApp(userID, sourceID, appID) {
-								task := hydrationfn.NewHydrationTask(
-									userID, sourceID, appID,
-									appDataMap, h.cache, h.settingsManager,
-								)
+	// For the new structure, we can work with RawData if it exists
+	// 对于新结构，如果存在RawData，我们可以使用它
+	if pendingData.RawData != nil {
+		// Check if this is legacy data with metadata containing the real app data
+		// 检查这是否是包含真实应用数据元数据的传统数据
+		if pendingData.RawData.Metadata != nil {
+			// Handle legacy data stored in metadata
+			// 处理存储在元数据中的传统数据
+			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
+				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
+					log.Printf("Processing legacy data from metadata for user: %s, source: %s", userID, sourceID)
+					h.createTasksFromPendingDataLegacy(userID, sourceID, legacyDataMap)
+					return
+				}
+			}
 
-								if err := h.EnqueueTask(task); err != nil {
-									log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
-										appID, userID, sourceID, err)
-								}
-							}
-						}
-					}
+			// Handle legacy raw data stored in metadata
+			// 处理存储在元数据中的传统原始数据
+			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
+				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
+					log.Printf("Processing legacy raw data from metadata for user: %s, source: %s", userID, sourceID)
+					h.createTasksFromPendingDataLegacy(userID, sourceID, legacyRawDataMap)
+					return
 				}
 			}
 		}
+
+		// Handle regular structured RawData (not legacy)
+		// 处理常规结构化的RawData（非传统格式）
+		appID := pendingData.RawData.AppID
+		if appID == "" {
+			appID = pendingData.RawData.ID
+		}
+
+		if appID != "" {
+			// Check if app hydration is already complete before creating new task
+			// 在创建新任务前检查应用水合是否已完成
+			if h.isAppHydrationComplete(pendingData) {
+				// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+				// 	appID, userID, sourceID)
+				return
+			}
+
+			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				// Convert ApplicationInfoEntry to map for task creation
+				// 将ApplicationInfoEntry转换为map以创建任务
+				appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
+
+				task := hydrationfn.NewHydrationTask(
+					userID, sourceID, appID,
+					appDataMap, h.cache, h.settingsManager,
+				)
+
+				if err := h.EnqueueTask(task); err != nil {
+					log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
+						appID, userID, sourceID, err)
+				} else {
+					log.Printf("Created hydration task for structured app: %s (user: %s, source: %s)",
+						appID, userID, sourceID)
+				}
+			}
+		}
+		return
+	}
+
+	// Legacy handling: This should be deprecated but kept for backward compatibility
+	// 传统处理：这应该被弃用，但为了向后兼容而保留
+	log.Printf("Warning: createTasksFromPendingData called with legacy data structure")
+}
+
+// isAppHydrationComplete checks if an app has completed all hydration steps
+// isAppHydrationComplete 检查应用是否已完成所有水合步骤
+func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendingData) bool {
+	if pendingData == nil {
+		return false
+	}
+
+	// Check condition 1: raw_package has value
+	// 检查条件1：raw_package有值
+	if pendingData.RawPackage == "" {
+		log.Printf("App hydration incomplete: missing raw_package")
+		return false
+	}
+
+	// Check condition 2: rendered_package has value
+	// 检查条件2：rendered_package有值
+	if pendingData.RenderedPackage == "" {
+		log.Printf("App hydration incomplete: missing rendered_package")
+		return false
+	}
+
+	// Check condition 3: image_analysis has images with count > 0
+	// 检查条件3：image_analysis中images数量大于0
+	if pendingData.AppInfo == nil || pendingData.AppInfo.ImageAnalysis == nil {
+		log.Printf("App hydration incomplete: missing image analysis")
+		return false
+	}
+
+	if pendingData.AppInfo.ImageAnalysis.TotalImages <= 0 || len(pendingData.AppInfo.ImageAnalysis.Images) <= 0 {
+		log.Printf("App hydration incomplete: no images found in image analysis (total: %d, images count: %d)",
+			pendingData.AppInfo.ImageAnalysis.TotalImages, len(pendingData.AppInfo.ImageAnalysis.Images))
+		return false
+	}
+
+	// log.Printf("App hydration complete: raw_package=%s, rendered_package=%s, images_count=%d",
+	// 	pendingData.RawPackage, pendingData.RenderedPackage, len(pendingData.AppInfo.ImageAnalysis.Images))
+	return true
+}
+
+// isAppDataHydrationComplete checks if an app's hydration is complete by looking up pending data in cache
+// isAppDataHydrationComplete 通过在缓存中查找待处理数据来检查应用的水合是否完成
+func (h *Hydrator) isAppDataHydrationComplete(userID, sourceID, appID string) bool {
+	// Get the source data from cache
+	// 从缓存获取源数据
+	h.cache.Mutex.RLock()
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		h.cache.Mutex.RUnlock()
+		return false
+	}
+	h.cache.Mutex.RUnlock()
+
+	userData.Mutex.RLock()
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		userData.Mutex.RUnlock()
+		return false
+	}
+	userData.Mutex.RUnlock()
+
+	sourceData.Mutex.RLock()
+	defer sourceData.Mutex.RUnlock()
+
+	// Find the pending data for the specific app
+	// 查找特定应用的待处理数据
+	for _, pendingData := range sourceData.AppInfoLatestPending {
+		if pendingData.RawData != nil &&
+			(pendingData.RawData.ID == appID || pendingData.RawData.AppID == appID || pendingData.RawData.Name == appID) {
+			// Found the pending data for this app, check if hydration is complete
+			// 找到此应用的待处理数据，检查水合是否完成
+			return h.isAppHydrationComplete(pendingData)
+		}
+	}
+
+	// If no pending data found for this app, consider it not hydrated
+	// 如果未找到此应用的待处理数据，认为它未被水合
+	return false
+}
+
+// convertApplicationInfoEntryToMap converts ApplicationInfoEntry to map for task creation
+// convertApplicationInfoEntryToMap 将ApplicationInfoEntry转换为map以创建任务
+func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[string]interface{} {
+	if entry == nil {
+		return make(map[string]interface{})
+	}
+
+	return map[string]interface{}{
+		"id":          entry.ID,
+		"name":        entry.Name,
+		"cfgType":     entry.CfgType,
+		"chartName":   entry.ChartName,
+		"icon":        entry.Icon,
+		"description": entry.Description,
+		"appID":       entry.AppID,
+		"title":       entry.Title,
+		"version":     entry.Version,
+		"categories":  entry.Categories,
+		"versionName": entry.VersionName,
+
+		"fullDescription":    entry.FullDescription,
+		"upgradeDescription": entry.UpgradeDescription,
+		"promoteImage":       entry.PromoteImage,
+		"promoteVideo":       entry.PromoteVideo,
+		"subCategory":        entry.SubCategory,
+		"locale":             entry.Locale,
+		"developer":          entry.Developer,
+		"requiredMemory":     entry.RequiredMemory,
+		"requiredDisk":       entry.RequiredDisk,
+		"supportClient":      entry.SupportClient,
+		"supportArch":        entry.SupportArch,
+		"requiredGPU":        entry.RequiredGPU,
+		"requiredCPU":        entry.RequiredCPU,
+		"rating":             entry.Rating,
+		"target":             entry.Target,
+		"permission":         entry.Permission,
+		"entrances":          entry.Entrances,
+		"middleware":         entry.Middleware,
+		"options":            entry.Options,
+
+		"submitter":     entry.Submitter,
+		"doc":           entry.Doc,
+		"website":       entry.Website,
+		"featuredImage": entry.FeaturedImage,
+		"sourceCode":    entry.SourceCode,
+		"license":       entry.License,
+		"legal":         entry.Legal,
+		"i18n":          entry.I18n,
+
+		"modelSize": entry.ModelSize,
+		"namespace": entry.Namespace,
+		"onlyAdmin": entry.OnlyAdmin,
+
+		"lastCommitHash": entry.LastCommitHash,
+		"createTime":     entry.CreateTime,
+		"updateTime":     entry.UpdateTime,
+		"appLabels":      entry.AppLabels,
+		"count":          entry.Count,
+		"variants":       entry.Variants,
+
+		"screenshots": entry.Screenshots,
+		"tags":        entry.Tags,
+		"metadata":    entry.Metadata,
+		"updated_at":  entry.UpdatedAt,
 	}
 }
 
@@ -359,6 +576,18 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
 	h.totalTasksProcessed++
 	h.totalTasksSucceeded++
 	h.metricsMutex.Unlock()
+
+	// Add to batch completion queue for processing
+	// 添加到批量完成队列进行处理
+	select {
+	case h.batchCompletionQueue <- task.ID:
+		// Successfully queued for batch processing
+		// 成功加入批量处理队列
+	default:
+		// Queue is full, log warning but don't block
+		// 队列已满，记录警告但不阻塞
+		log.Printf("Warning: batch completion queue is full, task %s not queued for processing", task.ID)
+	}
 }
 
 // markTaskFailed moves task from active to failed
@@ -511,6 +740,14 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 			// Check if task already exists for this app to avoid duplicates
 			// 检查此应用是否已存在任务以避免重复
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				// Check if app hydration is already complete before creating new task
+				// 在创建新任务前检查应用水合是否已完成
+				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
+					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+					// 	appID, userID, sourceID)
+					continue
+				}
+
 				// Create and submit task using correct NewHydrationTask signature
 				// 使用正确的NewHydrationTask签名创建并提交任务
 				task := hydrationfn.NewHydrationTask(
@@ -652,4 +889,290 @@ func (h *Hydrator) convertStructToMap(data interface{}) map[string]interface{} {
 	}
 
 	return nil
+}
+
+// SetCacheManager sets the cache manager for database synchronization
+// SetCacheManager 设置缓存管理器以进行数据库同步
+func (h *Hydrator) SetCacheManager(cacheManager *CacheManager) {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	h.cacheManager = cacheManager
+	h.lastSyncTime = time.Now()
+	log.Printf("Cache manager set for hydrator with sync interval: %v", h.syncInterval)
+}
+
+// batchCompletionProcessor processes completed tasks in batches
+// batchCompletionProcessor 批量处理已完成的任务
+func (h *Hydrator) batchCompletionProcessor(ctx context.Context) {
+	log.Println("Batch completion processor started")
+	defer log.Println("Batch completion processor stopped")
+
+	ticker := time.NewTicker(time.Second * 10) // Process every 10 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.stopChan:
+			return
+		case taskID := <-h.batchCompletionQueue:
+			h.processCompletedTask(taskID)
+		case <-ticker.C:
+			h.processBatchCompletions()
+		}
+	}
+}
+
+// databaseSyncMonitor monitors for database synchronization needs
+// databaseSyncMonitor 监控数据库同步需求
+func (h *Hydrator) databaseSyncMonitor(ctx context.Context) {
+	log.Println("Database sync monitor started")
+	defer log.Println("Database sync monitor stopped")
+
+	ticker := time.NewTicker(h.syncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.stopChan:
+			return
+		case <-ticker.C:
+			h.checkAndSyncToDatabase()
+		}
+	}
+}
+
+// processCompletedTask processes a single completed task
+// processCompletedTask 处理单个已完成的任务
+func (h *Hydrator) processCompletedTask(taskID string) {
+	h.taskMutex.RLock()
+	task, exists := h.completedTasks[taskID]
+	h.taskMutex.RUnlock()
+
+	if !exists {
+		log.Printf("Warning: completed task %s not found in completed tasks map", taskID)
+		return
+	}
+
+	log.Printf("Processing completed task: %s for app: %s", taskID, task.AppID)
+	// Additional processing can be added here if needed
+	// 如果需要，可以在这里添加额外的处理
+}
+
+// processBatchCompletions processes completed tasks in batches
+// processBatchCompletions 批量处理已完成的任务
+func (h *Hydrator) processBatchCompletions() {
+	h.metricsMutex.RLock()
+	currentCompleted := h.totalTasksSucceeded
+	h.metricsMutex.RUnlock()
+
+	// Check if significant number of tasks completed since last sync
+	// 检查自上次同步以来是否有大量任务完成
+	if currentCompleted > h.completedTaskCount+10 { // Trigger sync after 10 more completions
+		log.Printf("Batch completion detected: %d tasks completed since last check",
+			currentCompleted-h.completedTaskCount)
+		h.completedTaskCount = currentCompleted
+		h.triggerDatabaseSync()
+	}
+}
+
+// checkAndSyncToDatabase checks if database sync is needed and performs it
+// checkAndSyncToDatabase 检查是否需要数据库同步并执行
+func (h *Hydrator) checkAndSyncToDatabase() {
+	if h.cacheManager == nil {
+		log.Printf("Warning: Cache manager not set, skipping database sync")
+		return
+	}
+
+	// Check if there are completed tasks that need syncing
+	// 检查是否有需要同步的已完成任务
+	h.taskMutex.RLock()
+	completedCount := len(h.completedTasks)
+	h.taskMutex.RUnlock()
+
+	if completedCount == 0 {
+		return // No completed tasks to sync
+	}
+
+	// Check if enough time has passed since last sync
+	// 检查自上次同步以来是否已经过了足够的时间
+	if time.Since(h.lastSyncTime) >= h.syncInterval {
+		log.Printf("Periodic database sync triggered - %d completed tasks to sync", completedCount)
+		h.triggerDatabaseSync()
+	}
+}
+
+// triggerDatabaseSync triggers synchronization of cache data to database
+// triggerDatabaseSync 触发缓存数据到数据库的同步
+func (h *Hydrator) triggerDatabaseSync() {
+	if h.cacheManager == nil {
+		log.Printf("Warning: Cache manager not set, cannot sync to database")
+		return
+	}
+
+	log.Printf("Triggering database synchronization")
+
+	// Force sync all cache data to Redis/database
+	// 强制同步所有缓存数据到Redis/数据库
+	if err := h.cacheManager.ForceSync(); err != nil {
+		log.Printf("Error during database sync: %v", err)
+	} else {
+		log.Printf("Database sync completed successfully")
+		h.lastSyncTime = time.Now()
+
+		// Optionally clean up old completed tasks to prevent memory growth
+		// 可选择清理旧的已完成任务以防止内存增长
+		h.cleanupOldCompletedTasks()
+	}
+}
+
+// cleanupOldCompletedTasks removes old completed tasks from memory
+// cleanupOldCompletedTasks 从内存中删除旧的已完成任务
+func (h *Hydrator) cleanupOldCompletedTasks() {
+	h.taskMutex.Lock()
+	defer h.taskMutex.Unlock()
+
+	// Keep only the most recent 100 completed tasks
+	// 只保留最近的100个已完成任务
+	maxCompletedTasks := 100
+	if len(h.completedTasks) > maxCompletedTasks {
+		// Convert to slice to sort by completion time
+		// 转换为切片以按完成时间排序
+		tasks := make([]*hydrationfn.HydrationTask, 0, len(h.completedTasks))
+		for _, task := range h.completedTasks {
+			tasks = append(tasks, task)
+		}
+
+		// Sort by UpdatedAt time (most recent first)
+		// 按UpdatedAt时间排序（最新的在前）
+		// Simple implementation: remove half of the tasks
+		// 简单实现：删除一半的任务
+		toRemove := len(h.completedTasks) - maxCompletedTasks/2
+		removed := 0
+
+		for taskID := range h.completedTasks {
+			if removed >= toRemove {
+				break
+			}
+			delete(h.completedTasks, taskID)
+			removed++
+		}
+
+		log.Printf("Cleaned up %d old completed tasks from memory", removed)
+	}
+}
+
+// createTasksFromPendingDataLegacy creates hydration tasks from legacy pending data format
+// createTasksFromPendingDataLegacy 从传统的待处理数据格式创建水合任务
+func (h *Hydrator) createTasksFromPendingDataLegacy(userID, sourceID string, pendingData map[string]interface{}) {
+	log.Printf("Creating tasks from pending data for user: %s, source: %s", userID, sourceID)
+
+	// Extract data section from pendingData
+	// 从pendingData中提取数据部分
+	dataSection, ok := pendingData["data"]
+	if !ok {
+		log.Printf("No data section found in pending data for user: %s, source: %s", userID, sourceID)
+		return
+	}
+
+	// Handle different data section formats
+	// 处理不同的数据部分格式
+	var appsMap map[string]interface{}
+
+	// First, try to handle the case where dataSection is an AppStoreDataSection struct
+	// 首先，尝试处理dataSection是AppStoreDataSection结构体的情况
+	log.Printf("Data section type: %T for user: %s, source: %s", dataSection, userID, sourceID)
+
+	// Check if it's an AppStoreDataSection by checking if it has Apps field
+	// 通过检查是否有Apps字段来判断是否为AppStoreDataSection
+	if dataStruct := dataSection; dataStruct != nil {
+		// Use reflection or type assertion to access the Apps field
+		// 使用反射或类型断言来访问Apps字段
+
+		// Try to access as map first (for backwards compatibility)
+		// 首先尝试作为map访问（向后兼容）
+		if dataMap, ok := dataSection.(map[string]interface{}); ok {
+			// Check if it's in the expected format with "apps" key
+			// 检查是否为预期格式（包含"apps"键）
+			if apps, hasApps := dataMap["apps"]; hasApps {
+				if appsMapValue, ok := apps.(map[string]interface{}); ok {
+					appsMap = appsMapValue
+					log.Printf("Found apps data in standard map format for user: %s, source: %s", userID, sourceID)
+				}
+			} else {
+				// Check if the dataMap itself contains app entries
+				// 检查dataMap本身是否包含应用条目
+				if h.looksLikeAppsMap(dataMap) {
+					appsMap = dataMap
+					log.Printf("Data section appears to contain apps directly for user: %s, source: %s", userID, sourceID)
+				}
+			}
+		} else {
+			// Try to handle AppStoreDataSection struct using interface conversion
+			// 尝试使用接口转换处理AppStoreDataSection结构体
+			log.Printf("Attempting to handle AppStoreDataSection struct for user: %s, source: %s", userID, sourceID)
+
+			// Convert struct to map using interface{} conversion
+			// 使用interface{}转换将结构体转换为map
+			if appsData := h.extractAppsFromStruct(dataSection); appsData != nil {
+				appsMap = appsData
+				log.Printf("Successfully extracted apps from AppStoreDataSection struct for user: %s, source: %s", userID, sourceID)
+			} else {
+				log.Printf("Failed to extract apps from data structure for user: %s, source: %s", userID, sourceID)
+				return
+			}
+		}
+	}
+
+	if appsMap == nil || len(appsMap) == 0 {
+		log.Printf("No apps found in pending data for user: %s, source: %s", userID, sourceID)
+		return
+	}
+
+	log.Printf("Found %d apps in pending data for user: %s, source: %s", len(appsMap), userID, sourceID)
+
+	// Create hydration tasks for each app
+	// 为每个应用创建水合任务
+	tasksCreated := 0
+	for appID, appDataInterface := range appsMap {
+		if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
+			// Check if task already exists for this app
+			// 检查该应用是否已有任务存在
+			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				// Check if app hydration is already complete before creating new task
+				// 在创建新任务前检查应用水合是否已完成
+				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
+					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+					// 	appID, userID, sourceID)
+					continue
+				}
+
+				task := hydrationfn.NewHydrationTask(
+					userID, sourceID, appID,
+					appDataMap, h.cache, h.settingsManager,
+				)
+
+				if err := h.EnqueueTask(task); err != nil {
+					log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
+						appID, userID, sourceID, err)
+				} else {
+					log.Printf("Created hydration task for app: %s (user: %s, source: %s)",
+						appID, userID, sourceID)
+					tasksCreated++
+				}
+			} else {
+				log.Printf("Task already exists for app: %s (user: %s, source: %s)",
+					appID, userID, sourceID)
+			}
+		} else {
+			log.Printf("Warning: app data is not a map for app: %s (user: %s, source: %s)",
+				appID, userID, sourceID)
+		}
+	}
+
+	log.Printf("Created %d hydration tasks from pending data for user: %s, source: %s",
+		tasksCreated, userID, sourceID)
 }

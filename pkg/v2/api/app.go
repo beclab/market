@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
-	"strconv"
+	"time"
 
 	"market/internal/v2/types"
 
@@ -17,23 +19,16 @@ type MarketInfoResponse struct {
 	CacheStats   map[string]interface{}     `json:"cache_stats"`
 	TotalUsers   int                        `json:"total_users"`
 	TotalSources int                        `json:"total_sources"`
-	Applications []ApplicationEntry         `json:"applications"`
-}
-
-// ApplicationEntry represents a simplified application entry for market display
-// 应用条目，用于市场展示的简化应用信息
-type ApplicationEntry struct {
-	UserID    string                 `json:"user_id"`
-	SourceID  string                 `json:"source_id"`
-	AppData   map[string]interface{} `json:"app_data"`
-	DataType  string                 `json:"data_type"`
-	Timestamp int64                  `json:"timestamp"`
-	Version   string                 `json:"version,omitempty"`
 }
 
 // 1. Get market information
 func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 	log.Println("GET /api/v2/market - Getting market information")
+
+	// Add timeout context
+	// 添加超时上下文
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
 
 	// Check if cache manager is available
 	// 检查缓存管理器是否可用
@@ -43,178 +38,69 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get query parameters for filtering
-	// 获取过滤查询参数
-	userID := r.URL.Query().Get("user_id")
-	sourceID := r.URL.Query().Get("source_id")
-	dataType := r.URL.Query().Get("data_type")
-	limitStr := r.URL.Query().Get("limit")
-
-	limit := 100 // Default limit
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
-		}
+	// Create a channel to receive the result
+	// 创建通道接收结果
+	type result struct {
+		data  MarketInfoResponse
+		stats map[string]interface{}
+		err   error
 	}
+	resultChan := make(chan result, 1)
 
-	// Get all users data from cache
-	// 从缓存获取所有用户数据
-	allUsersData := s.cacheManager.GetAllUsersData()
+	// Run the data retrieval in a goroutine
+	// 在协程中运行数据检索
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in getMarketInfo: %v", r)
+				resultChan <- result{err: fmt.Errorf("internal error occurred")}
+			}
+		}()
 
-	// Get cache statistics
-	// 获取缓存统计信息
-	cacheStats := s.cacheManager.GetCacheStats()
-
-	// Extract applications data based on filters
-	// 根据过滤条件提取应用数据
-	var applications []ApplicationEntry
-	totalSources := 0
-	count := 0
-
-	for currentUserID, userData := range allUsersData {
-		// Filter by user ID if specified
-		// 如果指定了用户ID则过滤
-		if userID != "" && currentUserID != userID {
-			continue
+		// Get all users data from cache
+		// 从缓存获取所有用户数据
+		allUsersData := s.cacheManager.GetAllUsersData()
+		if allUsersData == nil {
+			log.Println("Warning: GetAllUsersData returned nil")
+			allUsersData = make(map[string]*types.UserData)
 		}
 
-		userData.Mutex.RLock()
-		for currentSourceID, sourceData := range userData.Sources {
-			// Filter by source ID if specified
-			// 如果指定了源ID则过滤
-			if sourceID != "" && currentSourceID != sourceID {
-				continue
-			}
-
-			totalSources++
-			sourceData.Mutex.RLock()
-
-			// Add AppInfoLatest if available and matches filter
-			// 如果可用且符合过滤条件，添加AppInfoLatest
-			if sourceData.AppInfoLatest != nil &&
-				(dataType == "" || dataType == string(types.AppInfoLatest)) {
-				if count < limit {
-					applications = append(applications, ApplicationEntry{
-						UserID:    currentUserID,
-						SourceID:  currentSourceID,
-						AppData:   sourceData.AppInfoLatest.Data,
-						DataType:  string(sourceData.AppInfoLatest.Type),
-						Timestamp: sourceData.AppInfoLatest.Timestamp,
-						Version:   sourceData.AppInfoLatest.Version,
-					})
-					count++
-				}
-			}
-
-			// Add AppStateLatest if available and matches filter
-			// 如果可用且符合过滤条件，添加AppStateLatest
-			if sourceData.AppStateLatest != nil &&
-				(dataType == "" || dataType == string(types.AppStateLatest)) {
-				if count < limit {
-					applications = append(applications, ApplicationEntry{
-						UserID:    currentUserID,
-						SourceID:  currentSourceID,
-						AppData:   sourceData.AppStateLatest.Data,
-						DataType:  string(sourceData.AppStateLatest.Type),
-						Timestamp: sourceData.AppStateLatest.Timestamp,
-						Version:   sourceData.AppStateLatest.Version,
-					})
-					count++
-				}
-			}
-
-			// Add AppInfoLatestPending if available and matches filter
-			// 如果可用且符合过滤条件，添加AppInfoLatestPending
-			if sourceData.AppInfoLatestPending != nil &&
-				(dataType == "" || dataType == string(types.AppInfoLatestPending)) {
-				if count < limit {
-					applications = append(applications, ApplicationEntry{
-						UserID:    currentUserID,
-						SourceID:  currentSourceID,
-						AppData:   sourceData.AppInfoLatestPending.Data,
-						DataType:  string(sourceData.AppInfoLatestPending.Type),
-						Timestamp: sourceData.AppInfoLatestPending.Timestamp,
-						Version:   sourceData.AppInfoLatestPending.Version,
-					})
-					count++
-				}
-			}
-
-			// Add history entries if matches filter
-			// 如果符合过滤条件，添加历史记录条目
-			if dataType == "" || dataType == string(types.AppInfoHistory) {
-				for _, historyEntry := range sourceData.AppInfoHistory {
-					if count < limit && historyEntry != nil {
-						applications = append(applications, ApplicationEntry{
-							UserID:    currentUserID,
-							SourceID:  currentSourceID,
-							AppData:   historyEntry.Data,
-							DataType:  string(historyEntry.Type),
-							Timestamp: historyEntry.Timestamp,
-							Version:   historyEntry.Version,
-						})
-						count++
-					}
-				}
-			}
-
-			// Add other data entries if matches filter
-			// 如果符合过滤条件，添加其他数据条目
-			if dataType == "" || dataType == string(types.Other) {
-				for subType, otherData := range sourceData.Other {
-					if count < limit && otherData != nil {
-						// Add sub_type to the data for identification
-						// 为标识添加sub_type到数据中
-						dataWithSubType := make(map[string]interface{})
-						for k, v := range otherData.Data {
-							dataWithSubType[k] = v
-						}
-						dataWithSubType["sub_type"] = subType
-
-						applications = append(applications, ApplicationEntry{
-							UserID:    currentUserID,
-							SourceID:  currentSourceID,
-							AppData:   dataWithSubType,
-							DataType:  string(otherData.Type),
-							Timestamp: otherData.Timestamp,
-							Version:   otherData.Version,
-						})
-						count++
-					}
-				}
-			}
-
-			sourceData.Mutex.RUnlock()
-
-			// Break if we've reached the limit
-			// 如果已达到限制则跳出
-			if count >= limit {
-				break
-			}
+		// Get cache statistics
+		// 获取缓存统计信息
+		cacheStats := s.cacheManager.GetCacheStats()
+		if cacheStats == nil {
+			log.Println("Warning: GetCacheStats returned nil")
+			cacheStats = make(map[string]interface{})
 		}
-		userData.Mutex.RUnlock()
 
-		// Break if we've reached the limit
-		// 如果已达到限制则跳出
-		if count >= limit {
-			break
+		// Prepare response data
+		// 准备响应数据
+		responseData := MarketInfoResponse{
+			UsersData:  allUsersData,
+			CacheStats: cacheStats,
+			TotalUsers: len(allUsersData),
 		}
+
+		resultChan <- result{data: responseData, stats: cacheStats}
+	}()
+
+	// Wait for result or timeout
+	// 等待结果或超时
+	select {
+	case <-ctx.Done():
+		log.Printf("Request timeout or cancelled for /api/v2/market")
+		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
+		return
+	case res := <-resultChan:
+		if res.err != nil {
+			log.Printf("Error retrieving market information: %v", res.err)
+			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market information", nil)
+			return
+		}
+
+		log.Printf("Market information retrieved successfully: %d users", len(res.data.UsersData))
+		s.sendResponse(w, http.StatusOK, true, "Market information retrieved successfully", res.data)
 	}
-
-	// Prepare response data
-	// 准备响应数据
-	responseData := MarketInfoResponse{
-		UsersData:    allUsersData,
-		CacheStats:   cacheStats,
-		TotalUsers:   len(allUsersData),
-		TotalSources: totalSources,
-		Applications: applications,
-	}
-
-	log.Printf("Market information retrieved: %d users, %d sources, %d applications (limited to %d)",
-		len(allUsersData), totalSources, len(applications), limit)
-
-	s.sendResponse(w, http.StatusOK, true, "Market information retrieved successfully", responseData)
 }
 
 // 2. Get specific application information (supports multiple queries)
@@ -260,4 +146,73 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 	// Handle multipart form data for file upload
 
 	s.sendResponse(w, http.StatusOK, true, "App package uploaded successfully", nil)
+}
+
+// extractAppDataFromPending extracts app data from the new AppInfoLatestPendingData structure
+// extractAppDataFromPending 从新的AppInfoLatestPendingData结构中提取应用数据
+func extractAppDataFromPending(pendingData *types.AppInfoLatestPendingData) map[string]interface{} {
+	data := make(map[string]interface{})
+
+	// Add basic pending data information
+	// 添加基本的待处理数据信息
+	data["type"] = string(pendingData.Type)
+	data["timestamp"] = pendingData.Timestamp
+	data["version"] = pendingData.Version
+
+	// Add RawData information if available
+	// 如果可用，添加RawData信息
+	if pendingData.RawData != nil {
+		data["raw_data"] = map[string]interface{}{
+			"id":          pendingData.RawData.ID,
+			"name":        pendingData.RawData.Name,
+			"appID":       pendingData.RawData.AppID,
+			"title":       pendingData.RawData.Title,
+			"version":     pendingData.RawData.Version,
+			"description": pendingData.RawData.Description,
+			"icon":        pendingData.RawData.Icon,
+			"categories":  pendingData.RawData.Categories,
+			"developer":   pendingData.RawData.Developer,
+		}
+	}
+
+	// Add package paths
+	// 添加包路径
+	data["raw_package"] = pendingData.RawPackage
+	data["rendered_package"] = pendingData.RenderedPackage
+
+	// Add Values information if available
+	// 如果可用，添加Values信息
+	if pendingData.Values != nil && len(pendingData.Values) > 0 {
+		valuesData := make([]map[string]interface{}, 0, len(pendingData.Values))
+		for _, value := range pendingData.Values {
+			if value != nil {
+				valueMap := map[string]interface{}{
+					"file_name":    value.FileName,
+					"modify_type":  string(value.ModifyType),
+					"modify_key":   value.ModifyKey,
+					"modify_value": value.ModifyValue,
+				}
+				valuesData = append(valuesData, valueMap)
+			}
+		}
+		data["values"] = valuesData
+	}
+
+	// Add AppInfo information if available
+	// 如果可用，添加AppInfo信息
+	if pendingData.AppInfo != nil {
+		appInfoData := make(map[string]interface{})
+
+		if pendingData.AppInfo.AppEntry != nil {
+			appInfoData["app_entry"] = pendingData.AppInfo.AppEntry
+		}
+
+		if pendingData.AppInfo.ImageAnalysis != nil {
+			appInfoData["image_analysis"] = pendingData.AppInfo.ImageAnalysis
+		}
+
+		data["app_info"] = appInfoData
+	}
+
+	return data
 }

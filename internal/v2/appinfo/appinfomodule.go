@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/utils"
+
 	"github.com/golang/glog"
 )
 
@@ -680,14 +682,14 @@ func DefaultModuleConfig() *ModuleConfig {
 
 // GetDockerImageInfo 是一个便捷函数，用于获取 Docker 镜像信息
 // GetDockerImageInfo is a convenience function to get Docker image information
-func (m *AppInfoModule) GetDockerImageInfo(imageName string) (*DockerImageInfo, error) {
-	return GetDockerImageInfo(imageName)
+func (m *AppInfoModule) GetDockerImageInfo(imageName string) (*utils.DockerImageInfo, error) {
+	return utils.GetDockerImageInfo(imageName)
 }
 
 // GetLayerDownloadProgress 是一个便捷函数，用于获取层下载进度
 // GetLayerDownloadProgress is a convenience function to get layer download progress
-func (m *AppInfoModule) GetLayerDownloadProgress(layerDigest string) (*LayerInfo, error) {
-	return GetLayerDownloadProgress(layerDigest)
+func (m *AppInfoModule) GetLayerDownloadProgress(layerDigest string) (*utils.LayerInfo, error) {
+	return utils.GetLayerDownloadProgress(layerDigest)
 }
 
 // SetAppData 是一个便捷函数，用于设置应用数据
@@ -927,4 +929,147 @@ func (m *AppInfoModule) GetCachedUsers() []string {
 	}
 
 	return users
+}
+
+// CleanupInvalidData cleans up invalid pending data entries from cache
+// CleanupInvalidData 从缓存中清理无效的待处理数据条目
+func (m *AppInfoModule) CleanupInvalidData() (int, error) {
+	if m.cacheManager == nil {
+		return 0, fmt.Errorf("cache manager not available")
+	}
+
+	cleanedCount := m.cacheManager.CleanupInvalidPendingData()
+	glog.Infof("Cleaned up %d invalid pending data entries", cleanedCount)
+
+	return cleanedCount, nil
+}
+
+// GetInvalidDataReport returns a detailed report of invalid pending data entries
+// GetInvalidDataReport 返回无效待处理数据条目的详细报告
+func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
+	if m.cacheManager == nil {
+		return map[string]interface{}{
+			"error": "cache manager not available",
+		}
+	}
+
+	report := map[string]interface{}{
+		"users": make(map[string]interface{}),
+		"totals": map[string]int{
+			"total_users":        0,
+			"total_sources":      0,
+			"total_pending_data": 0,
+			"total_invalid_data": 0,
+		},
+	}
+
+	m.cacheManager.mutex.RLock()
+	defer m.cacheManager.mutex.RUnlock()
+
+	totalUsers := 0
+	totalSources := 0
+	totalPendingData := 0
+	totalInvalidData := 0
+
+	for userID, userData := range m.cacheManager.cache.Users {
+		totalUsers++
+		userReport := map[string]interface{}{
+			"sources": make(map[string]interface{}),
+			"totals": map[string]int{
+				"total_sources":      0,
+				"total_pending_data": 0,
+				"total_invalid_data": 0,
+			},
+		}
+
+		userData.Mutex.RLock()
+		for sourceID, sourceData := range userData.Sources {
+			totalSources++
+			sourceData.Mutex.RLock()
+
+			sourceReport := map[string]interface{}{
+				"total_pending_data": len(sourceData.AppInfoLatestPending),
+				"invalid_entries":    make([]map[string]interface{}, 0),
+			}
+
+			invalidCount := 0
+			for i, pendingData := range sourceData.AppInfoLatestPending {
+				isValid := false
+				invalidReasons := make([]string, 0)
+
+				if pendingData.RawData != nil {
+					if (pendingData.RawData.ID != "" && pendingData.RawData.ID != "0") ||
+						(pendingData.RawData.AppID != "" && pendingData.RawData.AppID != "0") ||
+						(pendingData.RawData.Name != "" && pendingData.RawData.Name != "unknown") {
+						isValid = true
+					} else {
+						if pendingData.RawData.ID == "" || pendingData.RawData.ID == "0" {
+							invalidReasons = append(invalidReasons, "empty or zero ID")
+						}
+						if pendingData.RawData.AppID == "" || pendingData.RawData.AppID == "0" {
+							invalidReasons = append(invalidReasons, "empty or zero AppID")
+						}
+						if pendingData.RawData.Name == "" || pendingData.RawData.Name == "unknown" {
+							invalidReasons = append(invalidReasons, "empty or unknown Name")
+						}
+					}
+				} else {
+					invalidReasons = append(invalidReasons, "null RawData")
+				}
+
+				if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil && !isValid {
+					if (pendingData.AppInfo.AppEntry.ID != "" && pendingData.AppInfo.AppEntry.ID != "0") ||
+						(pendingData.AppInfo.AppEntry.AppID != "" && pendingData.AppInfo.AppEntry.AppID != "0") ||
+						(pendingData.AppInfo.AppEntry.Name != "" && pendingData.AppInfo.AppEntry.Name != "unknown") {
+						isValid = true
+						invalidReasons = make([]string, 0) // Clear reasons if AppInfo is valid
+					}
+				}
+
+				if !isValid {
+					invalidCount++
+					invalidEntry := map[string]interface{}{
+						"index":   i,
+						"reasons": invalidReasons,
+						"data": map[string]interface{}{
+							"timestamp": pendingData.Timestamp,
+							"version":   pendingData.Version,
+						},
+					}
+
+					if pendingData.RawData != nil {
+						invalidEntry["raw_data"] = map[string]interface{}{
+							"id":     pendingData.RawData.ID,
+							"app_id": pendingData.RawData.AppID,
+							"name":   pendingData.RawData.Name,
+							"title":  pendingData.RawData.Title,
+						}
+					}
+
+					sourceReport["invalid_entries"] = append(sourceReport["invalid_entries"].([]map[string]interface{}), invalidEntry)
+				}
+			}
+
+			sourceReport["invalid_count"] = invalidCount
+			totalPendingData += len(sourceData.AppInfoLatestPending)
+			totalInvalidData += invalidCount
+
+			userReport["sources"].(map[string]interface{})[sourceID] = sourceReport
+			userReport["totals"].(map[string]int)["total_sources"]++
+			userReport["totals"].(map[string]int)["total_pending_data"] += len(sourceData.AppInfoLatestPending)
+			userReport["totals"].(map[string]int)["total_invalid_data"] += invalidCount
+
+			sourceData.Mutex.RUnlock()
+		}
+		userData.Mutex.RUnlock()
+
+		report["users"].(map[string]interface{})[userID] = userReport
+	}
+
+	report["totals"].(map[string]int)["total_users"] = totalUsers
+	report["totals"].(map[string]int)["total_sources"] = totalSources
+	report["totals"].(map[string]int)["total_pending_data"] = totalPendingData
+	report["totals"].(map[string]int)["total_invalid_data"] = totalInvalidData
+
+	return report
 }

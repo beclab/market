@@ -153,7 +153,7 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 	historyKey := baseKey + ":app-info-history"
 	historyData, err := r.client.Get(r.ctx, historyKey).Result()
 	if err == nil {
-		var history []*AppData
+		var history []*AppInfoHistoryData
 		if err := json.Unmarshal([]byte(historyData), &history); err == nil {
 			sourceData.AppInfoHistory = history
 		}
@@ -163,9 +163,9 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 	stateKey := baseKey + ":app-state-latest"
 	stateData, err := r.client.Get(r.ctx, stateKey).Result()
 	if err == nil {
-		var state AppData
+		var state []*AppStateLatestData
 		if err := json.Unmarshal([]byte(stateData), &state); err == nil {
-			sourceData.AppStateLatest = &state
+			sourceData.AppStateLatest = state
 		}
 	}
 
@@ -173,9 +173,9 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 	infoKey := baseKey + ":app-info-latest"
 	infoData, err := r.client.Get(r.ctx, infoKey).Result()
 	if err == nil {
-		var info AppData
+		var info []*AppInfoLatestData
 		if err := json.Unmarshal([]byte(infoData), &info); err == nil {
-			sourceData.AppInfoLatest = &info
+			sourceData.AppInfoLatest = info
 		}
 	}
 
@@ -183,34 +183,16 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 	infoPendingKey := baseKey + ":app-info-latest-pending"
 	infoPendingData, err := r.client.Get(r.ctx, infoPendingKey).Result()
 	if err == nil {
-		var infoPending AppData
+		var infoPending []*AppInfoLatestPendingData
 		if err := json.Unmarshal([]byte(infoPendingData), &infoPending); err == nil {
-			sourceData.AppInfoLatestPending = &infoPending
+			sourceData.AppInfoLatestPending = infoPending
 		}
 	}
 
-	// Load other data
-	otherKeys, err := r.client.Keys(r.ctx, baseKey+":other:*").Result()
-	if err == nil {
-		for _, otherKey := range otherKeys {
-			// Extract other type from key
-			// Use prefix checking to handle other types that contain colons
-			expectedPrefix := baseKey + ":other:"
-			if !strings.HasPrefix(otherKey, expectedPrefix) {
-				glog.Errorf("Invalid other key format: %s", otherKey)
-				continue
-			}
-			otherType := otherKey[len(expectedPrefix):]
-
-			otherData, err := r.client.Get(r.ctx, otherKey).Result()
-			if err == nil {
-				var data AppData
-				if err := json.Unmarshal([]byte(otherData), &data); err == nil {
-					sourceData.Other[otherType] = &data
-				}
-			}
-		}
-	}
+	// Note: Other data is now part of AppInfoLatestPendingData.Others field
+	// Legacy "other" data loading is removed as it's now part of the Others structure
+	// 注意：Other数据现在是AppInfoLatestPendingData.Others字段的一部分
+	// 传统的"other"数据加载已被移除，因为它现在是Others结构的一部分
 
 	return sourceData, nil
 }
@@ -255,7 +237,7 @@ func (r *RedisClient) SaveSourceDataToRedis(userID, sourceID string, sourceData 
 	}
 
 	// Save app-state-latest
-	if sourceData.AppStateLatest != nil {
+	if len(sourceData.AppStateLatest) > 0 {
 		stateJSON, err := json.Marshal(sourceData.AppStateLatest)
 		if err == nil {
 			r.client.Set(r.ctx, baseKey+":app-state-latest", stateJSON, 0)
@@ -263,7 +245,7 @@ func (r *RedisClient) SaveSourceDataToRedis(userID, sourceID string, sourceData 
 	}
 
 	// Save app-info-latest
-	if sourceData.AppInfoLatest != nil {
+	if len(sourceData.AppInfoLatest) > 0 {
 		infoJSON, err := json.Marshal(sourceData.AppInfoLatest)
 		if err == nil {
 			r.client.Set(r.ctx, baseKey+":app-info-latest", infoJSON, 0)
@@ -271,23 +253,17 @@ func (r *RedisClient) SaveSourceDataToRedis(userID, sourceID string, sourceData 
 	}
 
 	// Save app-info-latest-pending
-	if sourceData.AppInfoLatestPending != nil {
+	if len(sourceData.AppInfoLatestPending) > 0 {
 		infoPendingJSON, err := json.Marshal(sourceData.AppInfoLatestPending)
 		if err == nil {
 			r.client.Set(r.ctx, baseKey+":app-info-latest-pending", infoPendingJSON, 0)
 		}
 	}
 
-	// Save other data
-	for otherType, otherData := range sourceData.Other {
-		if otherData != nil {
-			otherJSON, err := json.Marshal(otherData)
-			if err == nil {
-				otherKey := fmt.Sprintf("%s:other:%s", baseKey, otherType)
-				r.client.Set(r.ctx, otherKey, otherJSON, 0)
-			}
-		}
-	}
+	// Note: Other data is now part of AppInfoLatestPendingData.Others field
+	// Legacy "other" data saving is removed as it's now part of the Others structure
+	// 注意：Other数据现在是AppInfoLatestPendingData.Others字段的一部分
+	// 传统的"other"数据保存已被移除，因为它现在是Others结构的一部分
 
 	return nil
 }

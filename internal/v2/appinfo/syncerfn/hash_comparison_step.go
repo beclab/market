@@ -2,7 +2,6 @@ package syncerfn
 
 import (
 	"context"
-	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -90,7 +89,7 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 
 	// Calculate local hash
 	// 计算本地hash
-	data.LocalHash = h.calculateLocalHash(data.Cache)
+	data.LocalHash = h.calculateLocalHash(data.Cache, data.GetMarketSource())
 
 	// Compare hashes and set result
 	// 比较hash并设置结果
@@ -113,15 +112,23 @@ func (h *HashComparisonStep) CanSkip(ctx context.Context, data *SyncContext) boo
 	return false // Always execute hash comparison
 }
 
-// calculateLocalHash computes hash of local cache data
-// calculateLocalHash 计算本地缓存数据的hash
-func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData) string {
+// calculateLocalHash computes hash from local SourceData Others.Hash for specific market source
+// calculateLocalHash 从特定市场源的本地SourceData Others.Hash获取hash
+func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSource *settings.MarketSource) string {
 	if cache == nil {
+		log.Printf("Cache is nil, returning empty_cache hash")
 		return "empty_cache"
 	}
 
-	// Create a simple hash based on cache content
-	// 基于缓存内容创建简单的hash
+	if marketSource == nil {
+		log.Printf("MarketSource is nil, returning no_market_source hash")
+		return "no_market_source"
+	}
+
+	// Use market source name as source ID to match syncer.go behavior
+	// 使用市场源名称作为源ID以匹配syncer.go的行为
+	sourceID := marketSource.Name
+
 	cache.Mutex.RLock()
 	defer cache.Mutex.RUnlock()
 
@@ -132,54 +139,47 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData) string {
 		return "empty_cache_no_users"
 	}
 
-	// Generate hash based on actual cache content instead of timestamp
-	// 基于实际缓存内容而不是时间戳生成hash
-	var contentParts []string
+	// Look for Others.Hash only in the current market source
+	// 只在当前市场源中查找Others.Hash
+	var sourceHash string
+	var foundValidHash bool
 
-	// Add user count
-	contentParts = append(contentParts, fmt.Sprintf("users:%d", len(cache.Users)))
-
-	// Add source information for each user
 	for userID, userData := range cache.Users {
 		userData.Mutex.RLock()
-		sourceCount := len(userData.Sources)
-		contentParts = append(contentParts, fmt.Sprintf("user:%s:sources:%d", userID, sourceCount))
 
-		// Add information about each source's data
-		for sourceID, sourceData := range userData.Sources {
+		// Check if this user has data for the specific source
+		// 检查该用户是否有特定源的数据
+		if sourceData, exists := userData.Sources[sourceID]; exists {
 			sourceData.Mutex.RLock()
 
-			// Check if we have any actual app data
-			hasLatest := sourceData.AppInfoLatest != nil
-			hasPending := sourceData.AppInfoLatestPending != nil
-			hasHistory := len(sourceData.AppInfoHistory) > 0
-			hasState := sourceData.AppStateLatest != nil
-			hasOther := len(sourceData.Other) > 0
-
-			contentParts = append(contentParts, fmt.Sprintf("source:%s:latest:%t:pending:%t:history:%t:state:%t:other:%t",
-				sourceID, hasLatest, hasPending, hasHistory, hasState, hasOther))
-
-			// If we have pending data, include its version in hash
-			if hasPending && sourceData.AppInfoLatestPending.Data != nil {
-				if version, ok := sourceData.AppInfoLatestPending.Data["version"].(string); ok {
-					contentParts = append(contentParts, fmt.Sprintf("pending_version:%s", version))
-				}
+			// Check if Others exists and has a Hash
+			// 检查Others是否存在并包含Hash
+			if sourceData.Others != nil && sourceData.Others.Hash != "" {
+				sourceHash = sourceData.Others.Hash
+				foundValidHash = true
+				log.Printf("Found Others.Hash for user:%s source:%s hash:%s", userID, sourceID, sourceHash)
+				sourceData.Mutex.RUnlock()
+				userData.Mutex.RUnlock()
+				break // Use the first valid hash found
+			} else {
+				log.Printf("No valid Others.Hash for user:%s source:%s (Others: %v)", userID, sourceID, sourceData.Others)
 			}
 
 			sourceData.Mutex.RUnlock()
+		} else {
+			log.Printf("No data found for user:%s source:%s", userID, sourceID)
 		}
+
 		userData.Mutex.RUnlock()
 	}
 
-	// Join all parts and calculate MD5 hash
-	content := fmt.Sprintf("%s", contentParts)
+	// If no valid Others.Hash found for the specific source, return appropriate hash
+	// 如果没有为特定源找到有效的Others.Hash，返回相应的hash
+	if !foundValidHash {
+		log.Printf("No valid Others.Hash found for source:%s, returning no_source_hash", sourceID)
+		return "no_source_hash"
+	}
 
-	// Calculate MD5 hash
-	// 计算MD5 hash
-	hasher := md5.New()
-	hasher.Write([]byte(content))
-	localHash := fmt.Sprintf("%x", hasher.Sum(nil))
-
-	log.Printf("Calculated local hash: %s (based on content: %v)", localHash, contentParts)
-	return localHash
+	log.Printf("Using Others.Hash from source:%s as local hash: %s", sourceID, sourceHash)
+	return sourceHash
 }
