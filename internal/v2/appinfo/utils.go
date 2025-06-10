@@ -747,6 +747,13 @@ func getTerminusVersionFromService() (string, error) {
 // GetAdminUsername retrieves the admin username from the app service
 // 从应用服务获取管理员用户名
 func GetAdminUsername(token string) (string, error) {
+	// Check if running in development environment
+	// 检查是否在开发环境中运行
+	if isDevelopmentEnvironment() {
+		glog.Infof("Running in development environment, returning admin username: admin")
+		return "admin", nil
+	}
+
 	// Get app service host and port from environment
 	// 从环境变量获取应用服务主机和端口
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")

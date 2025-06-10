@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -72,7 +73,27 @@ func (r *RedisClient) LoadCacheFromRedis() (*CacheData, error) {
 
 	for _, userKey := range userKeys {
 		// Extract user ID from key (appinfo:user:userID)
-		userID := userKey[len("appinfo:user:"):]
+		// Use strings.SplitN to handle userIDs that contain colons
+		parts := strings.SplitN(userKey, ":", 3)
+		if len(parts) < 3 {
+			glog.Errorf("Invalid user key format: %s", userKey)
+			continue
+		}
+
+		// Skip keys that are deeper than user level (contain more colons after userID)
+		// We only want user marker keys like "appinfo:user:admin", not data keys like "appinfo:user:admin:source:..."
+		userID := parts[2]
+		if strings.Contains(userID, ":") {
+			// This is a data key, not a user marker key, skip it
+			continue
+		}
+
+		// Verify this is actually a user marker key by checking its value
+		value, err := r.client.Get(r.ctx, userKey).Result()
+		if err != nil || value != "1" {
+			// Not a user marker key, skip it
+			continue
+		}
 
 		// Load user data
 		userData, err := r.loadUserData(userID)
@@ -100,7 +121,13 @@ func (r *RedisClient) loadUserData(userID string) (*UserData, error) {
 
 	for _, sourceKey := range sourceKeys {
 		// Extract source ID from key
-		sourceID := sourceKey[len(fmt.Sprintf("appinfo:user:%s:source:", userID)):]
+		// Use strings.SplitN to handle sourceIDs that contain colons
+		expectedPrefix := fmt.Sprintf("appinfo:user:%s:source:", userID)
+		if !strings.HasPrefix(sourceKey, expectedPrefix) {
+			glog.Errorf("Invalid source key format: %s", sourceKey)
+			continue
+		}
+		sourceID := sourceKey[len(expectedPrefix):]
 
 		// Load source data
 		sourceData, err := r.loadSourceData(userID, sourceID)
@@ -166,7 +193,15 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 	otherKeys, err := r.client.Keys(r.ctx, baseKey+":other:*").Result()
 	if err == nil {
 		for _, otherKey := range otherKeys {
-			otherType := otherKey[len(baseKey+":other:"):]
+			// Extract other type from key
+			// Use prefix checking to handle other types that contain colons
+			expectedPrefix := baseKey + ":other:"
+			if !strings.HasPrefix(otherKey, expectedPrefix) {
+				glog.Errorf("Invalid other key format: %s", otherKey)
+				continue
+			}
+			otherType := otherKey[len(expectedPrefix):]
+
 			otherData, err := r.client.Get(r.ctx, otherKey).Result()
 			if err == nil {
 				var data AppData
