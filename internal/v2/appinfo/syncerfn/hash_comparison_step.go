@@ -150,19 +150,24 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData) string {
 			sourceData.Mutex.RLock()
 
 			// Check if we have any actual app data
-			hasLatest := sourceData.AppInfoLatest != nil
-			hasPending := sourceData.AppInfoLatestPending != nil
+			hasLatest := len(sourceData.AppInfoLatest) > 0
+			hasPending := len(sourceData.AppInfoLatestPending) > 0
 			hasHistory := len(sourceData.AppInfoHistory) > 0
-			hasState := sourceData.AppStateLatest != nil
+			hasState := len(sourceData.AppStateLatest) > 0
 			hasOther := len(sourceData.Other) > 0
 
 			contentParts = append(contentParts, fmt.Sprintf("source:%s:latest:%t:pending:%t:history:%t:state:%t:other:%t",
 				sourceID, hasLatest, hasPending, hasHistory, hasState, hasOther))
 
 			// If we have pending data, include its version in hash
-			if hasPending && sourceData.AppInfoLatestPending.Data != nil {
-				if version, ok := sourceData.AppInfoLatestPending.Data["version"].(string); ok {
-					contentParts = append(contentParts, fmt.Sprintf("pending_version:%s", version))
+			if hasPending && len(sourceData.AppInfoLatestPending) > 0 {
+				for _, pendingData := range sourceData.AppInfoLatestPending {
+					// Use the version from the pending data structure itself or from RawData
+					if pendingData.Version != "" {
+						contentParts = append(contentParts, fmt.Sprintf("pending_version:%s", pendingData.Version))
+					} else if pendingData.RawData != nil && pendingData.RawData.Version != "" {
+						contentParts = append(contentParts, fmt.Sprintf("pending_version:%s", pendingData.RawData.Version))
+					}
 				}
 			}
 

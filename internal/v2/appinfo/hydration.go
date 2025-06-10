@@ -298,8 +298,10 @@ func (h *Hydrator) checkForPendingData() {
 
 			// Check if there's pending data
 			// 检查是否有待处理数据
-			if sourceData.AppInfoLatestPending != nil {
-				h.createTasksFromPendingData(userID, sourceID, sourceData.AppInfoLatestPending)
+			if len(sourceData.AppInfoLatestPending) > 0 {
+				for _, pendingData := range sourceData.AppInfoLatestPending {
+					h.createTasksFromPendingData(userID, sourceID, pendingData)
+				}
 			}
 
 			sourceData.Mutex.RUnlock()
@@ -310,39 +312,110 @@ func (h *Hydrator) checkForPendingData() {
 
 // createTasksFromPendingData creates hydration tasks from pending app data
 // createTasksFromPendingData 从待处理应用数据创建水合任务
-func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingData *types.AppData) {
-	if pendingData == nil || pendingData.Data == nil {
+func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingData *types.AppInfoLatestPendingData) {
+	if pendingData == nil {
 		return
 	}
 
-	// Extract apps from pending data
-	// 从待处理数据中提取应用
-	if dataSection, ok := pendingData.Data["data"]; ok {
-		if dataMap, ok := dataSection.(map[string]interface{}); ok {
-			if apps, ok := dataMap["apps"]; ok {
-				if appsMap, ok := apps.(map[string]interface{}); ok {
-					// Create task for each app
-					// 为每个应用创建任务
-					for appID, appData := range appsMap {
-						if appDataMap, ok := appData.(map[string]interface{}); ok {
-							// Check if task already exists for this app
-							// 检查此应用是否已存在任务
-							if !h.hasActiveTaskForApp(userID, sourceID, appID) {
-								task := hydrationfn.NewHydrationTask(
-									userID, sourceID, appID,
-									appDataMap, h.cache, h.settingsManager,
-								)
+	// For the new structure, we can work with RawData if it exists
+	// 对于新结构，如果存在RawData，我们可以使用它
+	if pendingData.RawData != nil {
+		// Create a single task for the specific app
+		// 为特定应用创建单个任务
+		appID := pendingData.RawData.AppID
+		if appID == "" {
+			appID = pendingData.RawData.ID
+		}
 
-								if err := h.EnqueueTask(task); err != nil {
-									log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
-										appID, userID, sourceID, err)
-								}
-							}
-						}
-					}
-				}
+		if appID != "" && !h.hasActiveTaskForApp(userID, sourceID, appID) {
+			// Convert ApplicationInfoEntry to map for task creation
+			// 将ApplicationInfoEntry转换为map以创建任务
+			appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
+
+			task := hydrationfn.NewHydrationTask(
+				userID, sourceID, appID,
+				appDataMap, h.cache, h.settingsManager,
+			)
+
+			if err := h.EnqueueTask(task); err != nil {
+				log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
+					appID, userID, sourceID, err)
 			}
 		}
+		return
+	}
+
+	// Legacy handling: This should be deprecated but kept for backward compatibility
+	// 传统处理：这应该被弃用，但为了向后兼容而保留
+	log.Printf("Warning: createTasksFromPendingData called with legacy data structure")
+}
+
+// convertApplicationInfoEntryToMap converts ApplicationInfoEntry to map for task creation
+// convertApplicationInfoEntryToMap 将ApplicationInfoEntry转换为map以创建任务
+func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[string]interface{} {
+	if entry == nil {
+		return make(map[string]interface{})
+	}
+
+	return map[string]interface{}{
+		"id":          entry.ID,
+		"name":        entry.Name,
+		"cfgType":     entry.CfgType,
+		"chartName":   entry.ChartName,
+		"icon":        entry.Icon,
+		"description": entry.Description,
+		"appID":       entry.AppID,
+		"title":       entry.Title,
+		"version":     entry.Version,
+		"categories":  entry.Categories,
+		"versionName": entry.VersionName,
+
+		"fullDescription":    entry.FullDescription,
+		"upgradeDescription": entry.UpgradeDescription,
+		"promoteImage":       entry.PromoteImage,
+		"promoteVideo":       entry.PromoteVideo,
+		"subCategory":        entry.SubCategory,
+		"locale":             entry.Locale,
+		"developer":          entry.Developer,
+		"requiredMemory":     entry.RequiredMemory,
+		"requiredDisk":       entry.RequiredDisk,
+		"supportClient":      entry.SupportClient,
+		"supportArch":        entry.SupportArch,
+		"requiredGPU":        entry.RequiredGPU,
+		"requiredCPU":        entry.RequiredCPU,
+		"rating":             entry.Rating,
+		"target":             entry.Target,
+		"permission":         entry.Permission,
+		"entrances":          entry.Entrances,
+		"middleware":         entry.Middleware,
+		"options":            entry.Options,
+
+		"submitter":     entry.Submitter,
+		"doc":           entry.Doc,
+		"website":       entry.Website,
+		"featuredImage": entry.FeaturedImage,
+		"sourceCode":    entry.SourceCode,
+		"license":       entry.License,
+		"legal":         entry.Legal,
+		"i18n":          entry.I18n,
+
+		"modelSize": entry.ModelSize,
+		"namespace": entry.Namespace,
+		"onlyAdmin": entry.OnlyAdmin,
+
+		"lastCommitHash": entry.LastCommitHash,
+		"createTime":     entry.CreateTime,
+		"updateTime":     entry.UpdateTime,
+		"appLabels":      entry.AppLabels,
+		"count":          entry.Count,
+		"variants":       entry.Variants,
+
+		"image_analysis": entry.ImageAnalysis,
+
+		"screenshots": entry.Screenshots,
+		"tags":        entry.Tags,
+		"metadata":    entry.Metadata,
+		"updated_at":  entry.UpdatedAt,
 	}
 }
 

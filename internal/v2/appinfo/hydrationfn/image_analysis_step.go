@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"market/internal/v2/types"
 	"market/internal/v2/utils"
 )
 
@@ -85,13 +86,13 @@ func (s *ImageAnalysisStep) Execute(ctx context.Context, task *HydrationTask) er
 		log.Printf("No Docker images found in rendered chart for app: %s", task.AppID)
 		// Still create an empty analysis file
 		// 仍然创建一个空的分析文件
-		emptyAnalysis := &ImageAnalysisResult{
+		emptyAnalysis := &types.ImageAnalysisResult{
 			AppID:       task.AppID,
 			UserID:      task.UserID,
 			SourceID:    task.SourceID,
 			AnalyzedAt:  time.Now(),
 			TotalImages: 0,
-			Images:      make(map[string]*ImageInfo),
+			Images:      make(map[string]*types.ImageInfo),
 		}
 		return s.saveImageAnalysis(chartDir, emptyAnalysis)
 	}
@@ -100,7 +101,7 @@ func (s *ImageAnalysisStep) Execute(ctx context.Context, task *HydrationTask) er
 
 	// Analyze each image to get detailed information
 	// 分析每个镜像以获取详细信息
-	imageInfos := make(map[string]*ImageInfo)
+	imageInfos := make(map[string]*types.ImageInfo)
 	for _, imageName := range images {
 		log.Printf("Analyzing Docker image: %s", imageName)
 
@@ -109,7 +110,7 @@ func (s *ImageAnalysisStep) Execute(ctx context.Context, task *HydrationTask) er
 			log.Printf("Warning: failed to analyze image %s: %v", imageName, err)
 			// Create basic info even if analysis fails
 			// 即使分析失败也创建基本信息
-			imageInfo = &ImageInfo{
+			imageInfo = &types.ImageInfo{
 				Name:         imageName,
 				AnalyzedAt:   time.Now(),
 				Status:       "analysis_failed",
@@ -122,7 +123,7 @@ func (s *ImageAnalysisStep) Execute(ctx context.Context, task *HydrationTask) er
 
 	// Create analysis result
 	// 创建分析结果
-	analysisResult := &ImageAnalysisResult{
+	analysisResult := &types.ImageAnalysisResult{
 		AppID:       task.AppID,
 		UserID:      task.UserID,
 		SourceID:    task.SourceID,
@@ -343,26 +344,35 @@ func (s *ImageAnalysisStep) cleanImageName(imageName string) string {
 	return cleaned
 }
 
-// analyzeImage analyzes a single Docker image to get detailed information
-// analyzeImage 分析单个Docker镜像以获取详细信息
-func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) (*ImageInfo, error) {
-	imageInfo := &ImageInfo{
-		Name:       imageName,
-		AnalyzedAt: time.Now(),
-		Status:     "analyzing",
+// analyzeImage analyzes a single Docker image and returns detailed information
+// analyzeImage 分析单个Docker镜像并返回详细信息
+func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) (*types.ImageInfo, error) {
+	// Clean and validate image name
+	// 清理和验证镜像名称
+	cleanedName := s.cleanImageName(imageName)
+	if !s.isValidImageName(cleanedName) {
+		return nil, fmt.Errorf("invalid image name: %s", imageName)
 	}
 
-	// Skip analysis for obviously private images that require authentication
-	// 跳过明显需要认证的私有镜像分析
-	if s.isPrivateImage(imageName) {
+	// Initialize image info
+	// 初始化镜像信息
+	imageInfo := &types.ImageInfo{
+		Name:       cleanedName,
+		AnalyzedAt: time.Now(),
+		Status:     "not_downloaded",
+	}
+
+	// Check if this is a private image
+	// 检查这是否是私人镜像
+	if s.isPrivateImage(cleanedName) {
 		imageInfo.Status = "private_registry"
-		imageInfo.ErrorMessage = "Private registry image - authentication required"
-		log.Printf("Skipping private image analysis: %s", imageName)
+		imageInfo.ErrorMessage = "Private registry image, analysis limited"
+		log.Printf("Detected private registry image: %s", cleanedName)
 		return imageInfo, nil
 	}
 
-	// Get Docker image info using utils function
-	// 使用utils函数获取Docker镜像信息
+	// Get Docker image info from registry
+	// 从registry获取Docker镜像信息
 	dockerImageInfo, err := utils.GetDockerImageInfo(imageName)
 	if err != nil {
 		imageInfo.Status = "registry_error"
@@ -387,12 +397,12 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 
 	// Analyze each layer
 	// 分析每个层
-	layers := make([]*LayerInfo, 0, len(dockerImageInfo.Layers))
+	layers := make([]*types.LayerInfo, 0, len(dockerImageInfo.Layers))
 	var totalDownloaded int64
 	var downloadedLayers int
 
 	for _, layer := range dockerImageInfo.Layers {
-		layerInfo := &LayerInfo{
+		layerInfo := &types.LayerInfo{
 			Digest:    layer.Digest,
 			Size:      layer.Size,
 			MediaType: layer.MediaType,
@@ -441,7 +451,7 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 
 // analyzeLocalLayers attempts to analyze local layers even when registry access fails
 // analyzeLocalLayers 即使注册表访问失败也尝试分析本地层
-func (s *ImageAnalysisStep) analyzeLocalLayers(imageInfo *ImageInfo, imageName string) {
+func (s *ImageAnalysisStep) analyzeLocalLayers(imageInfo *types.ImageInfo, imageName string) {
 	// Try to extract digest from image name if it contains one
 	// 如果镜像名称包含摘要，尝试提取
 	if strings.Contains(imageName, "@sha256:") {
@@ -449,14 +459,14 @@ func (s *ImageAnalysisStep) analyzeLocalLayers(imageInfo *ImageInfo, imageName s
 		if len(parts) == 2 {
 			digest := parts[1]
 			if layerProgress, err := utils.GetLayerDownloadProgress(digest); err == nil {
-				layer := &LayerInfo{
+				layer := &types.LayerInfo{
 					Digest:     digest,
 					Downloaded: layerProgress.Downloaded,
 					Progress:   layerProgress.Progress,
 					LocalPath:  layerProgress.LocalPath,
 					Size:       layerProgress.Size,
 				}
-				imageInfo.Layers = []*LayerInfo{layer}
+				imageInfo.Layers = []*types.LayerInfo{layer}
 				imageInfo.LayerCount = 1
 				if layer.Downloaded {
 					imageInfo.DownloadedLayers = 1
@@ -470,7 +480,7 @@ func (s *ImageAnalysisStep) analyzeLocalLayers(imageInfo *ImageInfo, imageName s
 
 // saveImageAnalysis saves the image analysis result to a JSON file
 // saveImageAnalysis 将镜像分析结果保存到JSON文件
-func (s *ImageAnalysisStep) saveImageAnalysis(chartDir string, analysis *ImageAnalysisResult) error {
+func (s *ImageAnalysisStep) saveImageAnalysis(chartDir string, analysis *types.ImageAnalysisResult) error {
 	analysisPath := filepath.Join(chartDir, "image-analysis.json")
 
 	// Convert to JSON with pretty formatting
@@ -488,46 +498,6 @@ func (s *ImageAnalysisStep) saveImageAnalysis(chartDir string, analysis *ImageAn
 
 	log.Printf("Image analysis saved to: %s", analysisPath)
 	return nil
-}
-
-// ImageAnalysisResult represents the complete image analysis result
-// ImageAnalysisResult 表示完整的镜像分析结果
-type ImageAnalysisResult struct {
-	AppID       string                `json:"app_id"`
-	UserID      string                `json:"user_id"`
-	SourceID    string                `json:"source_id"`
-	AnalyzedAt  time.Time             `json:"analyzed_at"`
-	TotalImages int                   `json:"total_images"`
-	Images      map[string]*ImageInfo `json:"images"`
-}
-
-// ImageInfo represents detailed information about a Docker image
-// ImageInfo 表示Docker镜像的详细信息
-type ImageInfo struct {
-	Name             string       `json:"name"`
-	Tag              string       `json:"tag,omitempty"`
-	Architecture     string       `json:"architecture,omitempty"`
-	TotalSize        int64        `json:"total_size"`
-	DownloadedSize   int64        `json:"downloaded_size"`
-	DownloadProgress float64      `json:"download_progress"`
-	LayerCount       int          `json:"layer_count"`
-	DownloadedLayers int          `json:"downloaded_layers"`
-	CreatedAt        time.Time    `json:"created_at,omitempty"`
-	AnalyzedAt       time.Time    `json:"analyzed_at"`
-	Status           string       `json:"status"` // fully_downloaded, partially_downloaded, not_downloaded, registry_error, analysis_failed, private_registry
-	ErrorMessage     string       `json:"error_message,omitempty"`
-	Layers           []*LayerInfo `json:"layers,omitempty"`
-}
-
-// LayerInfo represents information about a Docker image layer
-// LayerInfo 表示Docker镜像层的信息
-type LayerInfo struct {
-	Digest     string `json:"digest"`
-	Size       int64  `json:"size"`
-	MediaType  string `json:"media_type,omitempty"`
-	Downloaded bool   `json:"downloaded"`
-	Progress   int    `json:"progress"` // 0-100
-	LocalPath  string `json:"local_path,omitempty"`
 }
 
 // isPrivateImage checks if an image is from a private registry

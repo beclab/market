@@ -325,8 +325,8 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 	defer sourceData.Mutex.Unlock()
 
 	// Create AppData for app-info-latest-pending
-	appData := NewAppData(AppInfoLatestPending, completeData)
-	sourceData.AppInfoLatestPending = appData
+	appData := NewAppInfoLatestPendingDataFromLegacyData(completeData)
+	sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
 
 	log.Printf("Successfully stored data directly to app-info-latest-pending for user: %s, source: %s", userID, sourceID)
 }

@@ -4,51 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
 	"market/internal/v2/settings"
+	"market/internal/v2/types"
 )
-
-// ImageInfo represents detailed information about a Docker image
-// ImageInfo 表示Docker镜像的详细信息
-type ImageInfo struct {
-	Name             string       `json:"name"`
-	Tag              string       `json:"tag,omitempty"`
-	Architecture     string       `json:"architecture,omitempty"`
-	TotalSize        int64        `json:"total_size"`
-	DownloadedSize   int64        `json:"downloaded_size"`
-	DownloadProgress float64      `json:"download_progress"`
-	LayerCount       int          `json:"layer_count"`
-	DownloadedLayers int          `json:"downloaded_layers"`
-	CreatedAt        time.Time    `json:"created_at,omitempty"`
-	AnalyzedAt       time.Time    `json:"analyzed_at"`
-	Status           string       `json:"status"` // fully_downloaded, partially_downloaded, not_downloaded, registry_error, analysis_failed, private_registry
-	ErrorMessage     string       `json:"error_message,omitempty"`
-	Layers           []*LayerInfo `json:"layers,omitempty"`
-}
-
-// LayerInfo represents information about a Docker image layer
-// LayerInfo 表示Docker镜像层的信息
-type LayerInfo struct {
-	Digest     string `json:"digest"`
-	Size       int64  `json:"size"`
-	MediaType  string `json:"media_type,omitempty"`
-	Downloaded bool   `json:"downloaded"`
-	Progress   int    `json:"progress"` // 0-100
-	LocalPath  string `json:"local_path,omitempty"`
-}
-
-// AppImageAnalysis represents the image analysis result for a specific app
-// AppImageAnalysis 表示特定应用的镜像分析结果
-type AppImageAnalysis struct {
-	AppID            string                `json:"app_id"`
-	AnalyzedAt       time.Time             `json:"analyzed_at"`
-	TotalImages      int                   `json:"total_images"`
-	Images           map[string]*ImageInfo `json:"images"`
-	Status           string                `json:"status"` // completed, failed, partial
-	SourceChartURL   string                `json:"source_chart_url,omitempty"`
-	RenderedChartURL string                `json:"rendered_chart_url,omitempty"`
-}
 
 // DetailFetchStep implements the third step: fetch detailed info for each app
 type DetailFetchStep struct {
@@ -56,88 +15,6 @@ type DetailFetchStep struct {
 	BatchSize          int                       // Number of apps to fetch in each batch
 	Version            string                    // Version parameter for API requests
 	SettingsManager    *settings.SettingsManager // Settings manager to build complete URLs
-}
-
-// ApplicationInfoEntry represents the structure returned by the applications/info API
-type ApplicationInfoEntry struct {
-	ID string `json:"id"`
-
-	Name        string   `json:"name"`
-	CfgType     string   `json:"cfgType"`
-	ChartName   string   `json:"chartName"`
-	Icon        string   `json:"icon"`
-	Description string   `json:"description"`
-	AppID       string   `json:"appID"`
-	Title       string   `json:"title"`
-	Version     string   `json:"version"`
-	Categories  []string `json:"categories"`
-	VersionName string   `json:"versionName"`
-
-	FullDescription    string                   `json:"fullDescription"`
-	UpgradeDescription string                   `json:"upgradeDescription"`
-	PromoteImage       []string                 `json:"promoteImage"`
-	PromoteVideo       string                   `json:"promoteVideo"`
-	SubCategory        string                   `json:"subCategory"`
-	Locale             []string                 `json:"locale"`
-	Developer          string                   `json:"developer"`
-	RequiredMemory     string                   `json:"requiredMemory"`
-	RequiredDisk       string                   `json:"requiredDisk"`
-	SupportClient      map[string]interface{}   `json:"supportClient"` // Using interface{} for flexibility
-	SupportArch        []string                 `json:"supportArch"`
-	RequiredGPU        string                   `json:"requiredGPU,omitempty"`
-	RequiredCPU        string                   `json:"requiredCPU"`
-	Rating             float32                  `json:"rating"`
-	Target             string                   `json:"target"`
-	Permission         map[string]interface{}   `json:"permission"` // Using interface{} for flexibility
-	Entrances          []map[string]interface{} `json:"entrances"`  // Using interface{} for flexibility
-	Middleware         map[string]interface{}   `json:"middleware"` // Using interface{} for flexibility
-	Options            map[string]interface{}   `json:"options"`    // Using interface{} for flexibility
-
-	Submitter     string                   `json:"submitter"`
-	Doc           string                   `json:"doc"`
-	Website       string                   `json:"website"`
-	FeaturedImage string                   `json:"featuredImage"`
-	SourceCode    string                   `json:"sourceCode"`
-	License       []map[string]interface{} `json:"license"` // Using interface{} for flexibility
-	Legal         []map[string]interface{} `json:"legal"`   // Using interface{} for flexibility
-	I18n          map[string]interface{}   `json:"i18n"`    // Using interface{} for flexibility
-
-	ModelSize string `json:"modelSize,omitempty"`
-
-	Namespace string `json:"namespace"`
-	OnlyAdmin bool   `json:"onlyAdmin"`
-
-	LastCommitHash string      `json:"lastCommitHash"`
-	CreateTime     int64       `json:"createTime"`
-	UpdateTime     int64       `json:"updateTime"`
-	AppLabels      []string    `json:"appLabels,omitempty"`
-	Count          interface{} `json:"count"`
-
-	Variants map[string]interface{} `json:"variants,omitempty"` // Using interface{} for flexibility
-
-	// Image analysis information
-	// 镜像分析信息
-	ImageAnalysis *AppImageAnalysis `json:"image_analysis,omitempty"`
-
-	// Legacy fields for backward compatibility
-	Screenshots []string               `json:"screenshots"`
-	Tags        []string               `json:"tags"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	UpdatedAt   string                 `json:"updated_at"`
-}
-
-// AppsInfoRequest represents the request body for applications/info API
-type AppsInfoRequest struct {
-	AppIds  []string `json:"app_ids"`
-	Version string   `json:"version"`
-}
-
-// AppsInfoResponse represents the response from applications/info API
-type AppsInfoResponse struct {
-	Apps     map[string]*ApplicationInfoEntry `json:"apps"`
-	Version  string                           `json:"version"`
-	NotFound []string                         `json:"not_found,omitempty"`
-	Message  string                           `json:"message,omitempty"` // For 202 Accepted responses
 }
 
 // NewDetailFetchStep creates a new detail fetch step
@@ -233,12 +110,12 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	// 从市场源基础URL和端点路径构建完整URL
 	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
 
-	request := AppsInfoRequest{
+	request := types.AppsInfoRequest{
 		AppIds:  appIDs,
 		Version: d.Version,
 	}
 
-	var response AppsInfoResponse
+	var response types.AppsInfoResponse
 
 	resp, err := data.Client.R().
 		SetContext(ctx).

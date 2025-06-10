@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	"market/internal/v2/settings"
 )
@@ -100,7 +101,7 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 			userData.Mutex.RLock()
 			for _, sourceData := range userData.Sources {
 				sourceData.Mutex.RLock()
-				if sourceData.AppInfoLatestPending != nil || sourceData.AppInfoLatest != nil {
+				if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
 					hasExistingData = true
 				}
 				sourceData.Mutex.RUnlock()
@@ -163,6 +164,32 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 	// 直接从结构化响应访问apps数据
 	appsMap := data.LatestData.Data.Apps
 
+	// In development environment, limit the original data to only 2 apps
+	// 在开发环境下，将原始数据限制为只有2个应用
+	if isDevelopmentEnvironment() {
+		originalCount := len(appsMap)
+		if originalCount > 2 {
+			log.Printf("Development environment detected, limiting original apps data to 2 (original count: %d)", originalCount)
+
+			// Create a new map with only the first 2 apps
+			// 创建一个只包含前2个应用的新map
+			limitedAppsMap := make(map[string]interface{})
+			count := 0
+			for appID, appData := range appsMap {
+				if count >= 2 {
+					break
+				}
+				limitedAppsMap[appID] = appData
+				count++
+			}
+
+			// Replace the original apps data with limited data
+			// 用限制后的数据替换原始应用数据
+			data.LatestData.Data.Apps = limitedAppsMap
+			appsMap = limitedAppsMap
+		}
+	}
+
 	// Iterate through the apps map where keys are app IDs
 	// 遍历apps映射，其中键是app ID
 	for appID, appData := range appsMap {
@@ -186,4 +213,31 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 		}
 		log.Printf("First %d app IDs: %v", maxLog, data.AppIDs[:maxLog])
 	}
+}
+
+// isDevelopmentEnvironment checks if the application is running in development mode
+// 检查应用是否在开发模式下运行
+func isDevelopmentEnvironment() bool {
+	// Check DEV_MODE environment variable
+	// 检查 DEV_MODE 环境变量
+	devMode := os.Getenv("DEV_MODE")
+	if devMode == "true" {
+		return true
+	}
+
+	// Check ENVIRONMENT environment variable
+	// 检查 ENVIRONMENT 环境变量
+	environment := os.Getenv("ENVIRONMENT")
+	if environment == "development" {
+		return true
+	}
+
+	// Check DEBUG_MODE environment variable
+	// 检查 DEBUG_MODE 环境变量
+	debugMode := os.Getenv("DEBUG_MODE")
+	if debugMode == "true" {
+		return true
+	}
+
+	return false
 }

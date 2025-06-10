@@ -246,9 +246,6 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 	sourceData := userData.Sources[sourceID]
 	sourceData.Mutex.Lock()
 
-	appData := NewAppData(dataType, data)
-	appData.Timestamp = time.Now().Unix()
-
 	// Log image analysis information if present
 	// 如果存在镜像分析信息则记录
 	if imageAnalysis, hasImageAnalysis := data["image_analysis"]; hasImageAnalysis {
@@ -262,13 +259,21 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 
 	switch dataType {
 	case AppInfoHistory:
+		appData := NewAppInfoHistoryData(data)
+		appData.Timestamp = time.Now().Unix()
 		sourceData.AppInfoHistory = append(sourceData.AppInfoHistory, appData)
 	case AppStateLatest:
-		sourceData.AppStateLatest = appData
+		appData := NewAppStateLatestData(data)
+		appData.Timestamp = time.Now().Unix()
+		sourceData.AppStateLatest = append(sourceData.AppStateLatest, appData)
 	case AppInfoLatest:
-		sourceData.AppInfoLatest = appData
+		appData := NewAppInfoLatestData(data)
+		appData.Timestamp = time.Now().Unix()
+		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, appData)
 	case AppInfoLatestPending:
-		sourceData.AppInfoLatestPending = appData
+		appData := NewAppInfoLatestPendingDataFromLegacyData(data)
+		appData.Timestamp = time.Now().Unix()
+		sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
 		// Notify hydrator about pending data update for immediate task creation
 		// 通知水合器关于待处理数据更新以立即创建任务
 		if cm.hydrationNotifier != nil {
@@ -276,6 +281,8 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
 		}
 	case Other:
+		appData := NewAppOtherData(data)
+		appData.Timestamp = time.Now().Unix()
 		// For "other" type, we need to specify a sub-type
 		if subType, ok := data["sub_type"].(string); ok {
 			sourceData.Other[subType] = appData
