@@ -249,6 +249,17 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 	appData := NewAppData(dataType, data)
 	appData.Timestamp = time.Now().Unix()
 
+	// Log image analysis information if present
+	// 如果存在镜像分析信息则记录
+	if imageAnalysis, hasImageAnalysis := data["image_analysis"]; hasImageAnalysis {
+		glog.Infof("Setting app data with image analysis for user=%s, source=%s, type=%s", userID, sourceID, dataType)
+		if analysisMap, ok := imageAnalysis.(map[string]interface{}); ok {
+			if totalImages, ok := analysisMap["total_images"].(int); ok {
+				glog.Infof("App data includes %d Docker images", totalImages)
+			}
+		}
+	}
+
 	switch dataType {
 	case AppInfoHistory:
 		sourceData.AppInfoHistory = append(sourceData.AppInfoHistory, appData)

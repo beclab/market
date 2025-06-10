@@ -18,6 +18,7 @@ type Hydrator struct {
 	steps           []hydrationfn.HydrationStep
 	cache           *types.CacheData
 	settingsManager *settings.SettingsManager
+	cacheManager    *CacheManager // Added cache manager for database sync
 	taskQueue       chan *hydrationfn.HydrationTask
 	workerCount     int
 	stopChan        chan struct{}
@@ -31,6 +32,13 @@ type Hydrator struct {
 	failedTasks    map[string]*hydrationfn.HydrationTask
 	taskMutex      sync.RWMutex
 
+	// Batch completion tracking
+	// 批量完成跟踪
+	batchCompletionQueue chan string   // Queue for completed tasks
+	completedTaskCount   int64         // Total completed tasks counter
+	lastSyncTime         time.Time     // Last database sync time
+	syncInterval         time.Duration // Interval for database sync
+
 	// Metrics
 	// 指标
 	totalTasksProcessed int64
@@ -43,16 +51,19 @@ type Hydrator struct {
 // NewHydrator 使用给定配置创建新的水合器
 func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManager, config HydratorConfig) *Hydrator {
 	hydrator := &Hydrator{
-		steps:           make([]hydrationfn.HydrationStep, 0),
-		cache:           cache,
-		settingsManager: settingsManager,
-		taskQueue:       make(chan *hydrationfn.HydrationTask, config.QueueSize),
-		workerCount:     config.WorkerCount,
-		stopChan:        make(chan struct{}),
-		isRunning:       false,
-		activeTasks:     make(map[string]*hydrationfn.HydrationTask),
-		completedTasks:  make(map[string]*hydrationfn.HydrationTask),
-		failedTasks:     make(map[string]*hydrationfn.HydrationTask),
+		steps:                make([]hydrationfn.HydrationStep, 0),
+		cache:                cache,
+		settingsManager:      settingsManager,
+		cacheManager:         nil, // Will be set later via SetCacheManager
+		taskQueue:            make(chan *hydrationfn.HydrationTask, config.QueueSize),
+		workerCount:          config.WorkerCount,
+		stopChan:             make(chan struct{}),
+		isRunning:            false,
+		activeTasks:          make(map[string]*hydrationfn.HydrationTask),
+		completedTasks:       make(map[string]*hydrationfn.HydrationTask),
+		failedTasks:          make(map[string]*hydrationfn.HydrationTask),
+		batchCompletionQueue: make(chan string, 100), // Buffer for completed task IDs
+		syncInterval:         30 * time.Second,       // Default sync interval
 	}
 
 	// Add default steps
@@ -111,6 +122,16 @@ func (h *Hydrator) Start(ctx context.Context) error {
 	// Start pending data monitor
 	// 启动待处理数据监控器
 	go h.pendingDataMonitor(ctx)
+
+	// Start batch completion processor
+	// 启动批量完成处理器
+	go h.batchCompletionProcessor(ctx)
+
+	// Start database sync monitor if cache manager is available
+	// 如果缓存管理器可用，启动数据库同步监控器
+	if h.cacheManager != nil {
+		go h.databaseSyncMonitor(ctx)
+	}
 
 	return nil
 }
@@ -360,6 +381,18 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
 	h.totalTasksProcessed++
 	h.totalTasksSucceeded++
 	h.metricsMutex.Unlock()
+
+	// Add to batch completion queue for processing
+	// 添加到批量完成队列进行处理
+	select {
+	case h.batchCompletionQueue <- task.ID:
+		// Successfully queued for batch processing
+		// 成功加入批量处理队列
+	default:
+		// Queue is full, log warning but don't block
+		// 队列已满，记录警告但不阻塞
+		log.Printf("Warning: batch completion queue is full, task %s not queued for processing", task.ID)
+	}
 }
 
 // markTaskFailed moves task from active to failed
@@ -653,4 +686,178 @@ func (h *Hydrator) convertStructToMap(data interface{}) map[string]interface{} {
 	}
 
 	return nil
+}
+
+// SetCacheManager sets the cache manager for database synchronization
+// SetCacheManager 设置缓存管理器以进行数据库同步
+func (h *Hydrator) SetCacheManager(cacheManager *CacheManager) {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	h.cacheManager = cacheManager
+	h.lastSyncTime = time.Now()
+	log.Printf("Cache manager set for hydrator with sync interval: %v", h.syncInterval)
+}
+
+// batchCompletionProcessor processes completed tasks in batches
+// batchCompletionProcessor 批量处理已完成的任务
+func (h *Hydrator) batchCompletionProcessor(ctx context.Context) {
+	log.Println("Batch completion processor started")
+	defer log.Println("Batch completion processor stopped")
+
+	ticker := time.NewTicker(time.Second * 10) // Process every 10 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.stopChan:
+			return
+		case taskID := <-h.batchCompletionQueue:
+			h.processCompletedTask(taskID)
+		case <-ticker.C:
+			h.processBatchCompletions()
+		}
+	}
+}
+
+// databaseSyncMonitor monitors for database synchronization needs
+// databaseSyncMonitor 监控数据库同步需求
+func (h *Hydrator) databaseSyncMonitor(ctx context.Context) {
+	log.Println("Database sync monitor started")
+	defer log.Println("Database sync monitor stopped")
+
+	ticker := time.NewTicker(h.syncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.stopChan:
+			return
+		case <-ticker.C:
+			h.checkAndSyncToDatabase()
+		}
+	}
+}
+
+// processCompletedTask processes a single completed task
+// processCompletedTask 处理单个已完成的任务
+func (h *Hydrator) processCompletedTask(taskID string) {
+	h.taskMutex.RLock()
+	task, exists := h.completedTasks[taskID]
+	h.taskMutex.RUnlock()
+
+	if !exists {
+		log.Printf("Warning: completed task %s not found in completed tasks map", taskID)
+		return
+	}
+
+	log.Printf("Processing completed task: %s for app: %s", taskID, task.AppID)
+	// Additional processing can be added here if needed
+	// 如果需要，可以在这里添加额外的处理
+}
+
+// processBatchCompletions processes completed tasks in batches
+// processBatchCompletions 批量处理已完成的任务
+func (h *Hydrator) processBatchCompletions() {
+	h.metricsMutex.RLock()
+	currentCompleted := h.totalTasksSucceeded
+	h.metricsMutex.RUnlock()
+
+	// Check if significant number of tasks completed since last sync
+	// 检查自上次同步以来是否有大量任务完成
+	if currentCompleted > h.completedTaskCount+10 { // Trigger sync after 10 more completions
+		log.Printf("Batch completion detected: %d tasks completed since last check",
+			currentCompleted-h.completedTaskCount)
+		h.completedTaskCount = currentCompleted
+		h.triggerDatabaseSync()
+	}
+}
+
+// checkAndSyncToDatabase checks if database sync is needed and performs it
+// checkAndSyncToDatabase 检查是否需要数据库同步并执行
+func (h *Hydrator) checkAndSyncToDatabase() {
+	if h.cacheManager == nil {
+		log.Printf("Warning: Cache manager not set, skipping database sync")
+		return
+	}
+
+	// Check if there are completed tasks that need syncing
+	// 检查是否有需要同步的已完成任务
+	h.taskMutex.RLock()
+	completedCount := len(h.completedTasks)
+	h.taskMutex.RUnlock()
+
+	if completedCount == 0 {
+		return // No completed tasks to sync
+	}
+
+	// Check if enough time has passed since last sync
+	// 检查自上次同步以来是否已经过了足够的时间
+	if time.Since(h.lastSyncTime) >= h.syncInterval {
+		log.Printf("Periodic database sync triggered - %d completed tasks to sync", completedCount)
+		h.triggerDatabaseSync()
+	}
+}
+
+// triggerDatabaseSync triggers synchronization of cache data to database
+// triggerDatabaseSync 触发缓存数据到数据库的同步
+func (h *Hydrator) triggerDatabaseSync() {
+	if h.cacheManager == nil {
+		log.Printf("Warning: Cache manager not set, cannot sync to database")
+		return
+	}
+
+	log.Printf("Triggering database synchronization")
+
+	// Force sync all cache data to Redis/database
+	// 强制同步所有缓存数据到Redis/数据库
+	if err := h.cacheManager.ForceSync(); err != nil {
+		log.Printf("Error during database sync: %v", err)
+	} else {
+		log.Printf("Database sync completed successfully")
+		h.lastSyncTime = time.Now()
+
+		// Optionally clean up old completed tasks to prevent memory growth
+		// 可选择清理旧的已完成任务以防止内存增长
+		h.cleanupOldCompletedTasks()
+	}
+}
+
+// cleanupOldCompletedTasks removes old completed tasks from memory
+// cleanupOldCompletedTasks 从内存中删除旧的已完成任务
+func (h *Hydrator) cleanupOldCompletedTasks() {
+	h.taskMutex.Lock()
+	defer h.taskMutex.Unlock()
+
+	// Keep only the most recent 100 completed tasks
+	// 只保留最近的100个已完成任务
+	maxCompletedTasks := 100
+	if len(h.completedTasks) > maxCompletedTasks {
+		// Convert to slice to sort by completion time
+		// 转换为切片以按完成时间排序
+		tasks := make([]*hydrationfn.HydrationTask, 0, len(h.completedTasks))
+		for _, task := range h.completedTasks {
+			tasks = append(tasks, task)
+		}
+
+		// Sort by UpdatedAt time (most recent first)
+		// 按UpdatedAt时间排序（最新的在前）
+		// Simple implementation: remove half of the tasks
+		// 简单实现：删除一半的任务
+		toRemove := len(h.completedTasks) - maxCompletedTasks/2
+		removed := 0
+
+		for taskID := range h.completedTasks {
+			if removed >= toRemove {
+				break
+			}
+			delete(h.completedTasks, taskID)
+			removed++
+		}
+
+		log.Printf("Cleaned up %d old completed tasks from memory", removed)
+	}
 }
