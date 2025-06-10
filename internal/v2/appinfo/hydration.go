@@ -320,8 +320,32 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 	// For the new structure, we can work with RawData if it exists
 	// 对于新结构，如果存在RawData，我们可以使用它
 	if pendingData.RawData != nil {
-		// Create a single task for the specific app
-		// 为特定应用创建单个任务
+		// Check if this is legacy data with metadata containing the real app data
+		// 检查这是否是包含真实应用数据元数据的传统数据
+		if pendingData.RawData.Metadata != nil {
+			// Handle legacy data stored in metadata
+			// 处理存储在元数据中的传统数据
+			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
+				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
+					log.Printf("Processing legacy data from metadata for user: %s, source: %s", userID, sourceID)
+					h.createTasksFromPendingDataLegacy(userID, sourceID, legacyDataMap)
+					return
+				}
+			}
+
+			// Handle legacy raw data stored in metadata
+			// 处理存储在元数据中的传统原始数据
+			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
+				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
+					log.Printf("Processing legacy raw data from metadata for user: %s, source: %s", userID, sourceID)
+					h.createTasksFromPendingDataLegacy(userID, sourceID, legacyRawDataMap)
+					return
+				}
+			}
+		}
+
+		// Handle regular structured RawData (not legacy)
+		// 处理常规结构化的RawData（非传统格式）
 		appID := pendingData.RawData.AppID
 		if appID == "" {
 			appID = pendingData.RawData.ID
@@ -340,6 +364,9 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 			if err := h.EnqueueTask(task); err != nil {
 				log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
 					appID, userID, sourceID, err)
+			} else {
+				log.Printf("Created hydration task for structured app: %s (user: %s, source: %s)",
+					appID, userID, sourceID)
 			}
 		}
 		return
@@ -933,4 +960,108 @@ func (h *Hydrator) cleanupOldCompletedTasks() {
 
 		log.Printf("Cleaned up %d old completed tasks from memory", removed)
 	}
+}
+
+// createTasksFromPendingDataLegacy creates hydration tasks from legacy pending data format
+// createTasksFromPendingDataLegacy 从传统的待处理数据格式创建水合任务
+func (h *Hydrator) createTasksFromPendingDataLegacy(userID, sourceID string, pendingData map[string]interface{}) {
+	log.Printf("Creating tasks from pending data for user: %s, source: %s", userID, sourceID)
+
+	// Extract data section from pendingData
+	// 从pendingData中提取数据部分
+	dataSection, ok := pendingData["data"]
+	if !ok {
+		log.Printf("No data section found in pending data for user: %s, source: %s", userID, sourceID)
+		return
+	}
+
+	// Handle different data section formats
+	// 处理不同的数据部分格式
+	var appsMap map[string]interface{}
+
+	// First, try to handle the case where dataSection is an AppStoreDataSection struct
+	// 首先，尝试处理dataSection是AppStoreDataSection结构体的情况
+	log.Printf("Data section type: %T for user: %s, source: %s", dataSection, userID, sourceID)
+
+	// Check if it's an AppStoreDataSection by checking if it has Apps field
+	// 通过检查是否有Apps字段来判断是否为AppStoreDataSection
+	if dataStruct := dataSection; dataStruct != nil {
+		// Use reflection or type assertion to access the Apps field
+		// 使用反射或类型断言来访问Apps字段
+
+		// Try to access as map first (for backwards compatibility)
+		// 首先尝试作为map访问（向后兼容）
+		if dataMap, ok := dataSection.(map[string]interface{}); ok {
+			// Check if it's in the expected format with "apps" key
+			// 检查是否为预期格式（包含"apps"键）
+			if apps, hasApps := dataMap["apps"]; hasApps {
+				if appsMapValue, ok := apps.(map[string]interface{}); ok {
+					appsMap = appsMapValue
+					log.Printf("Found apps data in standard map format for user: %s, source: %s", userID, sourceID)
+				}
+			} else {
+				// Check if the dataMap itself contains app entries
+				// 检查dataMap本身是否包含应用条目
+				if h.looksLikeAppsMap(dataMap) {
+					appsMap = dataMap
+					log.Printf("Data section appears to contain apps directly for user: %s, source: %s", userID, sourceID)
+				}
+			}
+		} else {
+			// Try to handle AppStoreDataSection struct using interface conversion
+			// 尝试使用接口转换处理AppStoreDataSection结构体
+			log.Printf("Attempting to handle AppStoreDataSection struct for user: %s, source: %s", userID, sourceID)
+
+			// Convert struct to map using interface{} conversion
+			// 使用interface{}转换将结构体转换为map
+			if appsData := h.extractAppsFromStruct(dataSection); appsData != nil {
+				appsMap = appsData
+				log.Printf("Successfully extracted apps from AppStoreDataSection struct for user: %s, source: %s", userID, sourceID)
+			} else {
+				log.Printf("Failed to extract apps from data structure for user: %s, source: %s", userID, sourceID)
+				return
+			}
+		}
+	}
+
+	if appsMap == nil || len(appsMap) == 0 {
+		log.Printf("No apps found in pending data for user: %s, source: %s", userID, sourceID)
+		return
+	}
+
+	log.Printf("Found %d apps in pending data for user: %s, source: %s", len(appsMap), userID, sourceID)
+
+	// Create hydration tasks for each app
+	// 为每个应用创建水合任务
+	tasksCreated := 0
+	for appID, appDataInterface := range appsMap {
+		if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
+			// Check if task already exists for this app
+			// 检查该应用是否已有任务存在
+			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				task := hydrationfn.NewHydrationTask(
+					userID, sourceID, appID,
+					appDataMap, h.cache, h.settingsManager,
+				)
+
+				if err := h.EnqueueTask(task); err != nil {
+					log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
+						appID, userID, sourceID, err)
+				} else {
+					log.Printf("Created hydration task for app: %s (user: %s, source: %s)",
+						appID, userID, sourceID)
+					tasksCreated++
+				}
+			} else {
+				log.Printf("Task already exists for app: %s (user: %s, source: %s)",
+					appID, userID, sourceID)
+			}
+		} else {
+			log.Printf("Warning: app data is not a map for app: %s (user: %s, source: %s)",
+				appID, userID, sourceID)
+		}
+	}
+
+	log.Printf("Created %d hydration tasks from pending data for user: %s, source: %s",
+		tasksCreated, userID, sourceID)
 }

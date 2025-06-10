@@ -460,6 +460,68 @@ func (s *DatabaseUpdateStep) isTaskForPendingData(task *HydrationTask, pendingDa
 		log.Printf("isTaskForPendingData: Checking RawData - ID: %s, AppID: %s, Name: %s",
 			pendingData.RawData.ID, pendingData.RawData.AppID, pendingData.RawData.Name)
 
+		// Check if this is legacy data by looking at metadata
+		// 通过查看元数据检查这是否是传统数据
+		if pendingData.RawData.Metadata != nil {
+			// Check for legacy_data in metadata - this contains multiple apps
+			// 检查元数据中的legacy_data - 这包含多个应用
+			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
+				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
+					// Check if task app ID exists in the legacy data apps
+					// 检查任务应用ID是否存在于传统数据应用中
+					if dataSection, hasDataSection := legacyDataMap["data"].(map[string]interface{}); hasDataSection {
+						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+							if _, appExists := appsData[taskAppID]; appExists {
+								log.Printf("isTaskForPendingData: Found task appID %s in legacy_data apps", taskAppID)
+								return true
+							}
+						}
+					}
+				}
+			}
+
+			// Check for legacy_raw_data in metadata
+			// 检查元数据中的legacy_raw_data
+			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
+				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
+					// Similar check for legacy raw data format
+					// 对传统原始数据格式进行类似检查
+					if dataSection, hasDataSection := legacyRawDataMap["data"].(map[string]interface{}); hasDataSection {
+						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+							if _, appExists := appsData[taskAppID]; appExists {
+								log.Printf("isTaskForPendingData: Found task appID %s in legacy_raw_data apps", taskAppID)
+								return true
+							}
+						}
+					}
+				}
+			}
+
+			// Check representative_app_id for legacy summary data
+			// 检查传统汇总数据的representative_app_id
+			if repAppID, hasRepAppID := pendingData.RawData.Metadata["representative_app_id"].(string); hasRepAppID {
+				if repAppID == taskAppID {
+					log.Printf("isTaskForPendingData: Found task appID %s as representative_app_id", taskAppID)
+					return true
+				}
+			}
+
+			// Check data_type to identify legacy data types
+			// 检查data_type以识别传统数据类型
+			if dataType, hasDataType := pendingData.RawData.Metadata["data_type"].(string); hasDataType {
+				log.Printf("isTaskForPendingData: Pending data type: %s", dataType)
+
+				// For legacy data types, we need to check the stored legacy data
+				// 对于传统数据类型，我们需要检查存储的传统数据
+				if dataType == "legacy_complete_data" || dataType == "legacy_unstructured_data" {
+					// Already checked above, but log for debugging
+					log.Printf("isTaskForPendingData: This is legacy data type: %s", dataType)
+				}
+			}
+		}
+
+		// Standard checks for non-legacy data
+		// 对非传统数据进行标准检查
 		// Match by ID, AppID or Name
 		// 通过ID、AppID或Name匹配
 		if pendingData.RawData.ID == taskAppID ||
@@ -485,15 +547,14 @@ func (s *DatabaseUpdateStep) isTaskForPendingData(task *HydrationTask, pendingDa
 	// Check AppInfo if available
 	// 如果可用，检查AppInfo
 	if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
-		entry := pendingData.AppInfo.AppEntry
 		log.Printf("isTaskForPendingData: Checking AppInfo.AppEntry - ID: %s, AppID: %s, Name: %s",
-			entry.ID, entry.AppID, entry.Name)
+			pendingData.AppInfo.AppEntry.ID, pendingData.AppInfo.AppEntry.AppID, pendingData.AppInfo.AppEntry.Name)
 
-		// Match by ID, AppID or Name
-		// 通过ID、AppID或Name匹配
-		if entry.ID == taskAppID ||
-			entry.AppID == taskAppID ||
-			entry.Name == taskAppID {
+		// Match by ID, AppID or Name in AppInfo
+		// 通过AppInfo中的ID、AppID或Name匹配
+		if pendingData.AppInfo.AppEntry.ID == taskAppID ||
+			pendingData.AppInfo.AppEntry.AppID == taskAppID ||
+			pendingData.AppInfo.AppEntry.Name == taskAppID {
 			log.Printf("isTaskForPendingData: Found match in AppInfo.AppEntry")
 			return true
 		}

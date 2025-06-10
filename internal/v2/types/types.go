@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -366,13 +367,130 @@ func getCurrentTimestamp() int64 {
 // NewAppInfoLatestPendingDataFromLegacyData creates AppInfoLatestPendingData from legacy map data
 // NewAppInfoLatestPendingDataFromLegacyData 从传统的map数据创建AppInfoLatestPendingData
 func NewAppInfoLatestPendingDataFromLegacyData(data map[string]interface{}) *AppInfoLatestPendingData {
-	return &AppInfoLatestPendingData{
+	pendingData := &AppInfoLatestPendingData{
 		Type:            AppInfoLatestPending,
 		Timestamp:       getCurrentTimestamp(),
-		RawData:         nil, // Legacy data doesn't have structured RawData
-		RawPackage:      "",  // No package path in legacy data
+		RawData:         nil,
+		RawPackage:      "",
 		Values:          &Values{},
 		AppInfo:         &AppInfo{},
 		RenderedPackage: "",
 	}
+
+	// Extract version from legacy data
+	// 从传统数据中提取版本信息
+	if version, ok := data["version"].(string); ok && version != "" {
+		pendingData.Version = version
+	}
+
+	// Try to extract structured data from the legacy format
+	// 尝试从传统格式中提取结构化数据
+	if dataSection, ok := data["data"].(map[string]interface{}); ok {
+		// Extract apps data if available
+		// 如果可用，提取应用数据
+		if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps && len(appsData) > 0 {
+			// For legacy data with multiple apps, we create a summary RawData entry
+			// 对于包含多个应用的传统数据，我们创建一个汇总的RawData条目
+			pendingData.RawData = &ApplicationInfoEntry{
+				ID:          "legacy-data-summary",
+				Name:        "Legacy Data Summary",
+				AppID:       "legacy-data-summary",
+				Title:       "Legacy App Store Data",
+				Version:     pendingData.Version,
+				Description: fmt.Sprintf("Legacy data containing %d applications", len(appsData)),
+				CreateTime:  getCurrentTimestamp(),
+				UpdateTime:  getCurrentTimestamp(),
+				Metadata:    make(map[string]interface{}),
+			}
+
+			// Store the complete legacy data in metadata for later processing
+			// 将完整的传统数据存储在元数据中供后续处理
+			pendingData.RawData.Metadata["legacy_data"] = data
+			pendingData.RawData.Metadata["apps_count"] = len(appsData)
+			pendingData.RawData.Metadata["data_type"] = "legacy_complete_data"
+
+			// Try to extract first app as representative data
+			// 尝试提取第一个应用作为代表性数据
+			for appID, appDataInterface := range appsData {
+				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
+					// Update RawData with first app's information
+					// 用第一个应用的信息更新RawData
+					if name, ok := appDataMap["name"].(string); ok {
+						pendingData.RawData.Name = name
+					}
+					if title, ok := appDataMap["title"].(string); ok {
+						pendingData.RawData.Title = title
+					}
+					if desc, ok := appDataMap["description"].(string); ok {
+						pendingData.RawData.Description = desc
+					}
+					if icon, ok := appDataMap["icon"].(string); ok {
+						pendingData.RawData.Icon = icon
+					}
+					if version, ok := appDataMap["version"].(string); ok {
+						pendingData.RawData.Version = version
+					}
+
+					// Store individual app ID for reference
+					// 存储单个应用ID作为参考
+					pendingData.RawData.Metadata["representative_app_id"] = appID
+					break // Only process first app as representative
+				}
+			}
+
+			// Update AppInfo with the constructed data
+			// 使用构造的数据更新AppInfo
+			pendingData.AppInfo = &AppInfo{
+				AppEntry:      pendingData.RawData,
+				ImageAnalysis: nil, // Will be filled later during hydration
+			}
+		}
+
+		// Store additional data sections in Values for completeness
+		// 在Values中存储其他数据部分以保持完整性
+		if pendingData.Values.CustomParams == nil {
+			pendingData.Values.CustomParams = make(map[string]interface{})
+		}
+
+		if recommends, hasRecommends := dataSection["recommends"]; hasRecommends {
+			pendingData.Values.CustomParams["recommends"] = recommends
+		}
+		if pages, hasPages := dataSection["pages"]; hasPages {
+			pendingData.Values.CustomParams["pages"] = pages
+		}
+		if topics, hasTopics := dataSection["topics"]; hasTopics {
+			pendingData.Values.CustomParams["topics"] = topics
+		}
+		if topicLists, hasTopicLists := dataSection["topic_lists"]; hasTopicLists {
+			pendingData.Values.CustomParams["topic_lists"] = topicLists
+		}
+	}
+
+	// If no structured data was found, store the raw data as-is
+	// 如果没有找到结构化数据，按原样存储原始数据
+	if pendingData.RawData == nil {
+		pendingData.RawData = &ApplicationInfoEntry{
+			ID:          "legacy-raw-data",
+			Name:        "Legacy Raw Data",
+			AppID:       "legacy-raw-data",
+			Title:       "Unstructured Legacy Data",
+			Version:     pendingData.Version,
+			Description: "Legacy data in unstructured format",
+			CreateTime:  getCurrentTimestamp(),
+			UpdateTime:  getCurrentTimestamp(),
+			Metadata:    make(map[string]interface{}),
+		}
+
+		// Store the complete original data
+		// 存储完整的原始数据
+		pendingData.RawData.Metadata["legacy_raw_data"] = data
+		pendingData.RawData.Metadata["data_type"] = "legacy_unstructured_data"
+
+		pendingData.AppInfo = &AppInfo{
+			AppEntry:      pendingData.RawData,
+			ImageAnalysis: nil,
+		}
+	}
+
+	return pendingData
 }
