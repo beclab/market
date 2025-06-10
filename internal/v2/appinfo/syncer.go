@@ -9,6 +9,7 @@ import (
 
 	"market/internal/v2/appinfo/syncerfn"
 	"market/internal/v2/settings"
+	"market/internal/v2/utils"
 )
 
 // Syncer manages the synchronization process with multiple steps
@@ -142,7 +143,7 @@ func (s *Syncer) syncLoop(ctx context.Context) {
 // getVersionForSync returns the version to use for sync operations with fallback
 // 返回用于同步操作的版本号，包含回退逻辑
 func getVersionForSync() string {
-	if version, err := GetTerminusVersionValue(); err == nil {
+	if version, err := utils.GetTerminusVersionValue(); err == nil {
 		return version
 	} else {
 		log.Printf("Failed to get version, using fallback: %v", err)

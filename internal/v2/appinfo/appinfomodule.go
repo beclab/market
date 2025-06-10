@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/utils"
+
 	"github.com/golang/glog"
 )
 
@@ -680,14 +682,14 @@ func DefaultModuleConfig() *ModuleConfig {
 
 // GetDockerImageInfo 是一个便捷函数，用于获取 Docker 镜像信息
 // GetDockerImageInfo is a convenience function to get Docker image information
-func (m *AppInfoModule) GetDockerImageInfo(imageName string) (*DockerImageInfo, error) {
-	return GetDockerImageInfo(imageName)
+func (m *AppInfoModule) GetDockerImageInfo(imageName string) (*utils.DockerImageInfo, error) {
+	return utils.GetDockerImageInfo(imageName)
 }
 
 // GetLayerDownloadProgress 是一个便捷函数，用于获取层下载进度
 // GetLayerDownloadProgress is a convenience function to get layer download progress
-func (m *AppInfoModule) GetLayerDownloadProgress(layerDigest string) (*LayerInfo, error) {
-	return GetLayerDownloadProgress(layerDigest)
+func (m *AppInfoModule) GetLayerDownloadProgress(layerDigest string) (*utils.LayerInfo, error) {
+	return utils.GetLayerDownloadProgress(layerDigest)
 }
 
 // SetAppData 是一个便捷函数，用于设置应用数据

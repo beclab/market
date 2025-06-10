@@ -10,7 +10,7 @@ import (
 	"io"
 	"log"
 	"market/internal/v2/settings"
-	"net/http"
+	"market/internal/v2/utils"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -465,9 +465,9 @@ func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateD
 	// 初始化Values map
 	templateData.Values = make(map[string]interface{})
 
-	// Get admin username
-	// 获取管理员用户名
-	adminUsername, err := s.getAdminUsername("")
+	// Get admin username using utils function
+	// 使用 utils 函数获取管理员用户名
+	adminUsername, err := utils.GetAdminUsername("")
 	if err != nil {
 		log.Printf("Warning: failed to get admin username, using default: %v", err)
 		adminUsername = "admin" // fallback to default
@@ -579,73 +579,6 @@ func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateD
 	}
 
 	return templateData, nil
-}
-
-// getAdminUsername retrieves the admin username from the app service
-// getAdminUsername 从应用服务获取管理员用户名
-func (s *RenderedChartStep) getAdminUsername(token string) (string, error) {
-	// Get app service host and port from environment
-	// 从环境变量获取应用服务主机和端口
-	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	if appServiceHost == "" || appServicePort == "" {
-		return "", fmt.Errorf("app service host or port not configured")
-	}
-
-	// Build admin username endpoint URL
-	// 构建管理员用户名端点 URL
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/admin/username", appServiceHost, appServicePort)
-
-	// Create HTTP request
-	// 创建 HTTP 请求
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create admin username request: %w", err)
-	}
-
-	// Add authorization token if provided
-	// 如果提供了令牌，添加授权头
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	// Create HTTP client with timeout
-	// 创建带超时的 HTTP 客户端
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	// Execute request
-	// 执行请求
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch admin username from service: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	// 检查响应状态
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("admin username service returned status %d", resp.StatusCode)
-	}
-
-	// Read response body
-	// 读取响应体
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read admin username response: %w", err)
-	}
-
-	log.Printf("Admin username response: %s", string(body))
-
-	// Parse response JSON
-	// 解析响应 JSON
-	var response AdminUsernameResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		log.Printf("Warning: Failed to unmarshal admin username response: %s, error: %v", string(body), err)
-		return "", fmt.Errorf("failed to parse admin username response: %w", err)
-	}
-
-	return response.Data.Username, nil
 }
 
 // renderOlaresManifest finds and renders the OlaresManifest.yaml file
