@@ -199,10 +199,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 					"count":          appInfo.Count,
 					"variants":       appInfo.Variants,
 
-					// Image analysis information
-					// 镜像分析信息
-					"image_analysis": appInfo.ImageAnalysis,
-
 					// Legacy fields for backward compatibility
 					"screenshots": appInfo.Screenshots,
 					"tags":        appInfo.Tags,

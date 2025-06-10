@@ -189,28 +189,10 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 		}
 	}
 
-	// Load other data
-	otherKeys, err := r.client.Keys(r.ctx, baseKey+":other:*").Result()
-	if err == nil {
-		for _, otherKey := range otherKeys {
-			// Extract other type from key
-			// Use prefix checking to handle other types that contain colons
-			expectedPrefix := baseKey + ":other:"
-			if !strings.HasPrefix(otherKey, expectedPrefix) {
-				glog.Errorf("Invalid other key format: %s", otherKey)
-				continue
-			}
-			otherType := otherKey[len(expectedPrefix):]
-
-			otherData, err := r.client.Get(r.ctx, otherKey).Result()
-			if err == nil {
-				var data AppOtherData
-				if err := json.Unmarshal([]byte(otherData), &data); err == nil {
-					sourceData.Other[otherType] = &data
-				}
-			}
-		}
-	}
+	// Note: Other data is now part of AppInfoLatestPendingData.Others field
+	// Legacy "other" data loading is removed as it's now part of the Others structure
+	// 注意：Other数据现在是AppInfoLatestPendingData.Others字段的一部分
+	// 传统的"other"数据加载已被移除，因为它现在是Others结构的一部分
 
 	return sourceData, nil
 }
@@ -278,16 +260,10 @@ func (r *RedisClient) SaveSourceDataToRedis(userID, sourceID string, sourceData 
 		}
 	}
 
-	// Save other data
-	for otherType, otherData := range sourceData.Other {
-		if otherData != nil {
-			otherJSON, err := json.Marshal(otherData)
-			if err == nil {
-				otherKey := fmt.Sprintf("%s:other:%s", baseKey, otherType)
-				r.client.Set(r.ctx, otherKey, otherJSON, 0)
-			}
-		}
-	}
+	// Note: Other data is now part of AppInfoLatestPendingData.Others field
+	// Legacy "other" data saving is removed as it's now part of the Others structure
+	// 注意：Other数据现在是AppInfoLatestPendingData.Others字段的一部分
+	// 传统的"other"数据保存已被移除，因为它现在是Others结构的一部分
 
 	return nil
 }

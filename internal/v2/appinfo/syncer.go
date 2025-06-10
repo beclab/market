@@ -9,6 +9,7 @@ import (
 
 	"market/internal/v2/appinfo/syncerfn"
 	"market/internal/v2/settings"
+	"market/internal/v2/types"
 	"market/internal/v2/utils"
 )
 
@@ -324,11 +325,139 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 	sourceData.Mutex.Lock()
 	defer sourceData.Mutex.Unlock()
 
-	// Create AppData for app-info-latest-pending
-	appData := NewAppInfoLatestPendingDataFromLegacyData(completeData)
-	sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+	// Extract Others data from complete data
+	// 从完整数据中提取Others数据
+	others := &types.Others{}
 
-	log.Printf("Successfully stored data directly to app-info-latest-pending for user: %s, source: %s", userID, sourceID)
+	// Extract version and hash
+	if version, ok := completeData["version"].(string); ok {
+		others.Version = version
+	}
+
+	if dataSection, ok := completeData["data"].(map[string]interface{}); ok {
+		// Convert recommends data
+		if recommendsData, hasRecommends := dataSection["recommends"]; hasRecommends {
+			if recommendsList, ok := recommendsData.([]interface{}); ok {
+				others.Recommends = make([]*types.Recommend, len(recommendsList))
+				for i, rec := range recommendsList {
+					if recMap, ok := rec.(map[string]interface{}); ok {
+						recommend := &types.Recommend{}
+						if name, ok := recMap["name"].(string); ok {
+							recommend.Name = name
+						}
+						if desc, ok := recMap["description"].(string); ok {
+							recommend.Description = desc
+						}
+						if content, ok := recMap["content"].(string); ok {
+							recommend.Content = content
+						}
+						others.Recommends[i] = recommend
+					}
+				}
+			}
+		}
+
+		// Convert pages data
+		if pagesData, hasPages := dataSection["pages"]; hasPages {
+			if pagesList, ok := pagesData.([]interface{}); ok {
+				others.Pages = make([]*types.Page, len(pagesList))
+				for i, page := range pagesList {
+					if pageMap, ok := page.(map[string]interface{}); ok {
+						pageObj := &types.Page{}
+						if category, ok := pageMap["category"].(string); ok {
+							pageObj.Category = category
+						}
+						if content, ok := pageMap["content"].(string); ok {
+							pageObj.Content = content
+						}
+						others.Pages[i] = pageObj
+					}
+				}
+			}
+		}
+
+		// Convert topics data
+		if topicsData, hasTopics := dataSection["topics"]; hasTopics {
+			if topicsList, ok := topicsData.([]interface{}); ok {
+				others.Topics = make([]*types.Topic, len(topicsList))
+				for i, topic := range topicsList {
+					if topicMap, ok := topic.(map[string]interface{}); ok {
+						topicObj := &types.Topic{}
+						if name, ok := topicMap["name"].(string); ok {
+							topicObj.Name = name
+						}
+						if intro, ok := topicMap["introduction"].(string); ok {
+							topicObj.Introduction = intro
+						}
+						if desc, ok := topicMap["des"].(string); ok {
+							topicObj.Des = desc
+						}
+						if iconImg, ok := topicMap["iconimg"].(string); ok {
+							topicObj.IconImg = iconImg
+						}
+						if detailImg, ok := topicMap["detailimg"].(string); ok {
+							topicObj.DetailImg = detailImg
+						}
+						if richText, ok := topicMap["richtext"].(string); ok {
+							topicObj.RichText = richText
+						}
+						if apps, ok := topicMap["apps"].(string); ok {
+							topicObj.Apps = apps
+						}
+						if isDelete, ok := topicMap["isdelete"].(bool); ok {
+							topicObj.IsDelete = isDelete
+						}
+						others.Topics[i] = topicObj
+					}
+				}
+			}
+		}
+
+		// Convert topic_lists data
+		if topicListsData, hasTopicLists := dataSection["topic_lists"]; hasTopicLists {
+			if topicListsList, ok := topicListsData.([]interface{}); ok {
+				others.TopicLists = make([]*types.TopicList, len(topicListsList))
+				for i, topicList := range topicListsList {
+					if topicListMap, ok := topicList.(map[string]interface{}); ok {
+						topicListObj := &types.TopicList{}
+						if name, ok := topicListMap["name"].(string); ok {
+							topicListObj.Name = name
+						}
+						if listType, ok := topicListMap["type"].(string); ok {
+							topicListObj.Type = listType
+						}
+						if desc, ok := topicListMap["description"].(string); ok {
+							topicListObj.Description = desc
+						}
+						if content, ok := topicListMap["content"].(string); ok {
+							topicListObj.Content = content
+						}
+						others.TopicLists[i] = topicListObj
+					}
+				}
+			}
+		}
+
+		// Process each app individually
+		// 单独处理每个应用
+		if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+			for appID, appDataInterface := range appsData {
+				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
+					// Create AppInfoLatestPendingData for this specific app
+					// 为这个特定应用创建AppInfoLatestPendingData
+					appData := NewAppInfoLatestPendingDataFromLegacyCompleteData(appDataMap, others)
+					appData.Version = others.Version
+
+					sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+					log.Printf("Successfully stored app data for app: %s, user: %s, source: %s", appID, userID, sourceID)
+				}
+			}
+		} else {
+			log.Printf("No apps data found in complete data for user: %s, source: %s", userID, sourceID)
+		}
+	} else {
+		log.Printf("No data section found in complete data for user: %s, source: %s", userID, sourceID)
+	}
 }
 
 // storeDataDirectlyBatch stores data directly to cache without going through CacheManager

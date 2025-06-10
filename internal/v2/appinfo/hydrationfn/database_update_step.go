@@ -308,12 +308,6 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 			}
 		}
 
-		// Add image analysis to rawData
-		// 将镜像分析添加到rawData
-		if imageAnalysis != nil {
-			rawData.ImageAnalysis = imageAnalysis
-		}
-
 		// Add processing metadata
 		// 添加处理元数据
 		rawData.Metadata = make(map[string]interface{})
@@ -334,18 +328,17 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 			RawData:   rawData,
 			AppInfo: &types.AppInfo{
 				AppEntry: rawData,
-				ImageAnalysis: &types.ImageAnalysisResult{
-					AnalyzedAt:  imageAnalysis.AnalyzedAt,
-					TotalImages: imageAnalysis.TotalImages,
-					Images:      imageAnalysis.Images,
-				},
 			},
 		}
 
-		// Only add image analysis if available
-		// 只有在可用时才添加镜像分析
-		if imageAnalysis == nil {
-			newPendingData.AppInfo.ImageAnalysis = nil
+		// Add image analysis to AppInfo if available
+		// 如果可用，将镜像分析添加到AppInfo
+		if imageAnalysis != nil {
+			newPendingData.AppInfo.ImageAnalysis = &types.ImageAnalysisResult{
+				AnalyzedAt:  imageAnalysis.AnalyzedAt,
+				TotalImages: imageAnalysis.TotalImages,
+				Images:      imageAnalysis.Images,
+			}
 		}
 
 		// Add to pending data
@@ -360,12 +353,6 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 	// Update the pending data with hydration results
 	// 使用水合结果更新待处理数据
 	if foundPendingData.RawData != nil {
-		// Add image analysis to RawData
-		// 将镜像分析添加到RawData
-		if imageAnalysis != nil {
-			foundPendingData.RawData.ImageAnalysis = imageAnalysis
-		}
-
 		// Update other fields from chart data
 		// 从chart数据更新其他字段
 		if task.ChartData != nil {

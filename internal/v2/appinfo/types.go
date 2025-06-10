@@ -37,14 +37,15 @@ const (
 // Constructor functions for backward compatibility
 // 为了向后兼容而重新导出的构造函数
 var (
-	NewCacheData                              = types.NewCacheData
-	NewUserData                               = types.NewUserData
-	NewSourceData                             = types.NewSourceData
-	NewAppData                                = types.NewAppData
-	NewAppInfoHistoryData                     = types.NewAppInfoHistoryData
-	NewAppStateLatestData                     = types.NewAppStateLatestData
-	NewAppInfoLatestData                      = types.NewAppInfoLatestData
-	NewAppInfoLatestPendingData               = types.NewAppInfoLatestPendingData
-	NewAppInfoLatestPendingDataFromLegacyData = types.NewAppInfoLatestPendingDataFromLegacyData
-	NewAppOtherData                           = types.NewAppOtherData
+	NewCacheData                                      = types.NewCacheData
+	NewUserData                                       = types.NewUserData
+	NewSourceData                                     = types.NewSourceData
+	NewAppData                                        = types.NewAppData
+	NewAppInfoHistoryData                             = types.NewAppInfoHistoryData
+	NewAppStateLatestData                             = types.NewAppStateLatestData
+	NewAppInfoLatestData                              = types.NewAppInfoLatestData
+	NewAppInfoLatestPendingData                       = types.NewAppInfoLatestPendingData
+	NewAppInfoLatestPendingDataFromLegacyData         = types.NewAppInfoLatestPendingDataFromLegacyData
+	NewAppInfoLatestPendingDataFromLegacyCompleteData = types.NewAppInfoLatestPendingDataFromLegacyCompleteData
+	NewAppOtherData                                   = types.NewAppOtherData
 )

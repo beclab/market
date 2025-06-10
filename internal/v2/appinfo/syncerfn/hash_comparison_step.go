@@ -154,10 +154,9 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData) string {
 			hasPending := len(sourceData.AppInfoLatestPending) > 0
 			hasHistory := len(sourceData.AppInfoHistory) > 0
 			hasState := len(sourceData.AppStateLatest) > 0
-			hasOther := len(sourceData.Other) > 0
 
-			contentParts = append(contentParts, fmt.Sprintf("source:%s:latest:%t:pending:%t:history:%t:state:%t:other:%t",
-				sourceID, hasLatest, hasPending, hasHistory, hasState, hasOther))
+			contentParts = append(contentParts, fmt.Sprintf("source:%s:latest:%t:pending:%t:history:%t:state:%t",
+				sourceID, hasLatest, hasPending, hasHistory, hasState))
 
 			// If we have pending data, include its version in hash
 			if hasPending && len(sourceData.AppInfoLatestPending) > 0 {

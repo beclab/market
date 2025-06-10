@@ -131,14 +131,20 @@ func extractAppDataFromPending(pendingData *types.AppInfoLatestPendingData) map[
 
 	// Add Values information if available
 	// 如果可用，添加Values信息
-	if pendingData.Values != nil {
-		data["values"] = map[string]interface{}{
-			"custom_params": pendingData.Values.CustomParams,
-			"environment":   pendingData.Values.Environment,
-			"namespace":     pendingData.Values.Namespace,
-			"resources":     pendingData.Values.Resources,
-			"config":        pendingData.Values.Config,
+	if pendingData.Values != nil && len(pendingData.Values) > 0 {
+		valuesData := make([]map[string]interface{}, 0, len(pendingData.Values))
+		for _, value := range pendingData.Values {
+			if value != nil {
+				valueMap := map[string]interface{}{
+					"file_name":    value.FileName,
+					"modify_type":  string(value.ModifyType),
+					"modify_key":   value.ModifyKey,
+					"modify_value": value.ModifyValue,
+				}
+				valuesData = append(valuesData, valueMap)
+			}
 		}
+		data["values"] = valuesData
 	}
 
 	// Add AppInfo information if available

@@ -280,15 +280,10 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			glog.Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
 			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
 		}
-	case Other:
-		appData := NewAppOtherData(data)
-		appData.Timestamp = time.Now().Unix()
-		// For "other" type, we need to specify a sub-type
-		if subType, ok := data["sub_type"].(string); ok {
-			sourceData.Other[subType] = appData
-		} else {
-			sourceData.Other["default"] = appData
-		}
+		// Note: Other data type is now part of AppInfoLatestPendingData.Others field
+		// 注意：Other数据类型现在是AppInfoLatestPendingData.Others字段的一部分
+		// case Other:
+		//     return sourceData.Other // This field no longer exists
 	}
 
 	sourceData.Mutex.Unlock()
@@ -323,8 +318,10 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 				return sourceData.AppInfoLatest
 			case AppInfoLatestPending:
 				return sourceData.AppInfoLatestPending
-			case Other:
-				return sourceData.Other
+				// Note: Other data type is now part of AppInfoLatestPendingData.Others field
+				// 注意：Other数据类型现在是AppInfoLatestPendingData.Others字段的一部分
+				// case Other:
+				//     return sourceData.Other // This field no longer exists
 			}
 		}
 	}

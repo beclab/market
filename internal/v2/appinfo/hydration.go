@@ -437,8 +437,6 @@ func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfo
 		"count":          entry.Count,
 		"variants":       entry.Variants,
 
-		"image_analysis": entry.ImageAnalysis,
-
 		"screenshots": entry.Screenshots,
 		"tags":        entry.Tags,
 		"metadata":    entry.Metadata,
