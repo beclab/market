@@ -2,6 +2,7 @@ package appinfo
 
 import (
 	"fmt"
+	"market/internal/v2/types"
 	"sync"
 	"time"
 
@@ -271,12 +272,112 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		appData.Timestamp = time.Now().Unix()
 		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, appData)
 	case AppInfoLatestPending:
-		appData := NewAppInfoLatestPendingDataFromLegacyData(data)
-		appData.Timestamp = time.Now().Unix()
-		sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+		// Check if this is a complete market data structure
+		// 检查这是否是完整的市场数据结构
+		if appsData, hasApps := data["apps"].(map[string]interface{}); hasApps {
+			// This is complete market data, extract individual apps
+			// 这是完整的市场数据，提取单个应用
+			glog.Infof("Processing complete market data with %d apps for user=%s, source=%s", len(appsData), userID, sourceID)
+
+			// Also store the "others" data (hash, version, topics, etc.)
+			// 同时存储"others"数据（hash、version、topics等）
+			others := &types.Others{}
+			if version, ok := data["version"].(string); ok {
+				others.Version = version
+			}
+			if hash, ok := data["hash"].(string); ok {
+				others.Hash = hash
+			}
+
+			// Extract topics, recommends, pages if present
+			// 提取topics、recommends、pages（如果存在）
+			if topics, ok := data["topics"].(map[string]interface{}); ok {
+				for _, topicData := range topics {
+					if topicMap, ok := topicData.(map[string]interface{}); ok {
+						topic := &types.Topic{}
+						if name, ok := topicMap["name"].(string); ok {
+							topic.Name = name
+						}
+						if apps, ok := topicMap["apps"].(string); ok {
+							topic.Apps = apps
+						}
+						// ... extract other topic fields as needed
+						others.Topics = append(others.Topics, topic)
+					}
+				}
+			}
+
+			// Store others data in source
+			// 在源数据中存储others数据
+			sourceData.Others = others
+
+			// Process each individual app
+			// 处理每个单独的应用
+			for appID, appDataInterface := range appsData {
+				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
+					glog.Infof("DEBUG: CALL POINT 1 - Processing app %s for user=%s, source=%s", appID, userID, sourceID)
+					glog.Infof("DEBUG: CALL POINT 1 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
+					appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
+					if appData != nil {
+						appData.Timestamp = time.Now().Unix()
+						sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+						glog.V(2).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
+					} else {
+						glog.Warningf("Failed to create app data for app %s (user=%s, source=%s)", appID, userID, sourceID)
+					}
+				}
+			}
+
+			glog.Infof("Successfully processed %d apps from market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
+		} else {
+			// This might be market data with nested apps structure, try to extract apps
+			// 这可能是包含嵌套应用结构的市场数据，尝试提取应用
+			glog.Infof("DEBUG: CALL POINT 2 - Processing potential market data for user=%s, source=%s", userID, sourceID)
+			glog.Infof("DEBUG: CALL POINT 2 - Data before processing: %+v", data)
+
+			// Check if this is market data with nested structure
+			// 检查是否是具有嵌套结构的市场数据
+			if dataSection, hasData := data["data"].(map[string]interface{}); hasData {
+				if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
+					// This is market data with apps - process each app individually
+					// 这是包含应用的市场数据 - 逐个处理每个应用
+					glog.Infof("DEBUG: CALL POINT 2 - Found nested apps structure with %d apps", len(appsData))
+					for appID, appDataInterface := range appsData {
+						if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
+							glog.Infof("DEBUG: CALL POINT 2 - Processing app %s", appID)
+							appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
+							if appData != nil {
+								appData.Timestamp = time.Now().Unix()
+								sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+								glog.V(2).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
+							} else {
+								glog.Warningf("Failed to create app data for app %s (user=%s, source=%s)", appID, userID, sourceID)
+							}
+						}
+					}
+					glog.Infof("Successfully processed %d apps from nested market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
+				} else {
+					glog.Warningf("Market data found but no apps section for user=%s, source=%s", userID, sourceID)
+				}
+			} else {
+				// This might be actual single app data, try to process directly
+				// 这可能是实际的单个应用数据，尝试直接处理
+				glog.Infof("DEBUG: CALL POINT 2 - Trying as single app data for user=%s, source=%s", userID, sourceID)
+				appData := NewAppInfoLatestPendingDataFromLegacyData(data)
+				if appData == nil {
+					glog.Warningf("Failed to create AppInfoLatestPendingData from data for user=%s, source=%s - not recognized as app data or market data", userID, sourceID)
+					return fmt.Errorf("invalid app data: missing required identifiers (id, name, or appID)")
+				}
+
+				appData.Timestamp = time.Now().Unix()
+				sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+				glog.Infof("Successfully processed single app data for user=%s, source=%s", userID, sourceID)
+			}
+		}
+
 		// Notify hydrator about pending data update for immediate task creation
 		// 通知水合器关于待处理数据更新以立即创建任务
-		if cm.hydrationNotifier != nil {
+		if cm.hydrationNotifier != nil && len(sourceData.AppInfoLatestPending) > 0 {
 			glog.Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
 			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
 		}
@@ -398,15 +499,40 @@ func (cm *CacheManager) ForceSync() error {
 
 // GetAllUsersData returns all users data from cache for inspection/debugging
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
+	// First, get the list of user IDs with minimal locking
+	// 首先，用最小锁定获取用户ID列表
 	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
-
-	result := make(map[string]*UserData)
-	for userID, userData := range cm.cache.Users {
-		userData.Mutex.RLock()
-		result[userID] = userData
-		userData.Mutex.RUnlock()
+	userIDs := make([]string, 0, len(cm.cache.Users))
+	for userID := range cm.cache.Users {
+		userIDs = append(userIDs, userID)
 	}
+	cm.mutex.RUnlock()
+
+	// Then, get each user's data individually to avoid nested locking
+	// 然后，逐个获取每个用户的数据以避免嵌套锁定
+	result := make(map[string]*UserData)
+	for _, userID := range userIDs {
+		cm.mutex.RLock()
+		if userData, exists := cm.cache.Users[userID]; exists {
+			// Make a shallow copy to avoid holding locks too long
+			// 进行浅拷贝以避免长时间持有锁
+			userDataCopy := &UserData{
+				Sources: make(map[string]*SourceData),
+			}
+
+			userData.Mutex.RLock()
+			// Copy source data references
+			// 拷贝源数据引用
+			for sourceID, sourceData := range userData.Sources {
+				userDataCopy.Sources[sourceID] = sourceData
+			}
+			userData.Mutex.RUnlock()
+
+			result[userID] = userDataCopy
+		}
+		cm.mutex.RUnlock()
+	}
+
 	return result
 }
 
@@ -505,4 +631,84 @@ func (cm *CacheManager) SyncUserListToCache() error {
 
 	glog.Infof("User list sync completed, added %d new users", newUsersCount)
 	return nil
+}
+
+// CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
+// CleanupInvalidPendingData 移除缺少必需标识符的无效待处理数据条目
+func (cm *CacheManager) CleanupInvalidPendingData() int {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	totalCleaned := 0
+
+	for userID, userData := range cm.cache.Users {
+		userData.Mutex.Lock()
+		for sourceID, sourceData := range userData.Sources {
+			sourceData.Mutex.Lock()
+
+			originalCount := len(sourceData.AppInfoLatestPending)
+			cleanedPendingData := make([]*AppInfoLatestPendingData, 0, originalCount)
+
+			for _, pendingData := range sourceData.AppInfoLatestPending {
+				// Check if this pending data has valid identifiers
+				// 检查此待处理数据是否有有效标识符
+				isValid := false
+
+				if pendingData.RawData != nil {
+					// Check for valid ID or AppID
+					// 检查有效的ID或AppID
+					if (pendingData.RawData.ID != "" && pendingData.RawData.ID != "0") ||
+						(pendingData.RawData.AppID != "" && pendingData.RawData.AppID != "0") ||
+						(pendingData.RawData.Name != "" && pendingData.RawData.Name != "unknown") {
+						isValid = true
+					}
+				}
+
+				if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
+					// Also check AppInfo.AppEntry for valid identifiers
+					// 也检查AppInfo.AppEntry中的有效标识符
+					if (pendingData.AppInfo.AppEntry.ID != "" && pendingData.AppInfo.AppEntry.ID != "0") ||
+						(pendingData.AppInfo.AppEntry.AppID != "" && pendingData.AppInfo.AppEntry.AppID != "0") ||
+						(pendingData.AppInfo.AppEntry.Name != "" && pendingData.AppInfo.AppEntry.Name != "unknown") {
+						isValid = true
+					}
+				}
+
+				if isValid {
+					cleanedPendingData = append(cleanedPendingData, pendingData)
+				} else {
+					glog.Infof("Removing invalid pending data entry for user=%s, source=%s (missing identifiers)", userID, sourceID)
+					totalCleaned++
+				}
+			}
+
+			// Update the source data with cleaned list
+			// 用清理后的列表更新源数据
+			sourceData.AppInfoLatestPending = cleanedPendingData
+
+			if originalCount != len(cleanedPendingData) {
+				glog.Infof("Cleaned %d invalid pending data entries for user=%s, source=%s",
+					originalCount-len(cleanedPendingData), userID, sourceID)
+
+				// Trigger sync to Redis to persist the cleanup
+				// 触发Redis同步以持久化清理
+				if cm.isRunning {
+					cm.requestSync(SyncRequest{
+						UserID:   userID,
+						SourceID: sourceID,
+						Type:     SyncSource,
+					})
+				}
+			}
+
+			sourceData.Mutex.Unlock()
+		}
+		userData.Mutex.Unlock()
+	}
+
+	if totalCleaned > 0 {
+		glog.Infof("Cleanup completed: removed %d invalid pending data entries across all users", totalCleaned)
+	}
+
+	return totalCleaned
 }

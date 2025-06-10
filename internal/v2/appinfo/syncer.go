@@ -438,14 +438,35 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 			}
 		}
 
+		// Store Others data in source
+		// 在源数据中存储Others数据
+		sourceData.Others = others
+
 		// Process each app individually
 		// 单独处理每个应用
 		if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
 			for appID, appDataInterface := range appsData {
 				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
-					// Create AppInfoLatestPendingData for this specific app
-					// 为这个特定应用创建AppInfoLatestPendingData
-					appData := NewAppInfoLatestPendingDataFromLegacyCompleteData(appDataMap, others)
+					// Create AppInfoLatestPendingData for this specific app using the basic function
+					// 使用基础函数为这个特定应用创建AppInfoLatestPendingData
+					log.Printf("DEBUG: CALL POINT 3 - Processing app %s for user %s, source %s", appID, userID, sourceID)
+					log.Printf("DEBUG: CALL POINT 3 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
+					appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
+					// Check if app data creation was successful
+					// 检查应用数据创建是否成功
+					if appData == nil {
+						log.Printf("Warning: Skipping app %s for user %s, source %s - not recognized as valid app data", appID, userID, sourceID)
+						// Log available keys for debugging
+						// 记录可用键以供调试
+						if appDataMap != nil {
+							keys := make([]string, 0, len(appDataMap))
+							for k := range appDataMap {
+								keys = append(keys, k)
+							}
+							log.Printf("Available app data keys for %s: %v", appID, keys)
+						}
+						continue // Skip this app and continue with next one
+					}
 					appData.Version = others.Version
 
 					sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)

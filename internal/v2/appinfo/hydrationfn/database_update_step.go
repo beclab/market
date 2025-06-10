@@ -277,24 +277,44 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 		// 从任务信息创建新的待处理数据条目
 		log.Printf("No matching pending data found for task %s, creating new pending entry", task.ID)
 
+		// Validate task data before creating new pending data entry
+		// 在创建新的待处理数据条目之前验证任务数据
+		if task.AppID == "" && task.AppName == "" {
+			log.Printf("Warning: Task %s has no valid app identifiers (AppID and AppName are both empty), skipping pending data creation", task.ID)
+			return fmt.Errorf("task %s has no valid app identifiers", task.ID)
+		}
+
+		// Use AppID as primary identifier, fallback to AppName if AppID is empty
+		// 使用AppID作为主要标识符，如果AppID为空则回退到AppName
+		primaryID := task.AppID
+		primaryName := task.AppName
+
+		if primaryID == "" && primaryName != "" {
+			primaryID = primaryName // Use AppName as ID if AppID is empty
+		}
+		if primaryName == "" && primaryID != "" {
+			primaryName = primaryID // Use AppID as Name if AppName is empty
+		}
+
 		// Create ApplicationInfoEntry from task data
 		// 从任务数据创建ApplicationInfoEntry
 		rawData := &types.ApplicationInfoEntry{
-			ID:          task.AppID,
-			AppID:       task.AppID,
-			Name:        task.AppName,
+			ID:          primaryID,
+			AppID:       primaryID,
+			Name:        primaryName,
 			Version:     task.AppVersion,
-			Title:       task.AppName,
+			Title:       primaryName,
 			Description: "",
 		}
 
 		// Extract additional fields from task.AppData if available
 		// 如果可用，从task.AppData中提取其他字段
 		if task.AppData != nil {
-			if name, ok := task.AppData["name"].(string); ok {
+			if name, ok := task.AppData["name"].(string); ok && name != "" {
 				rawData.Name = name
+				primaryName = name
 			}
-			if title, ok := task.AppData["title"].(string); ok {
+			if title, ok := task.AppData["title"].(string); ok && title != "" {
 				rawData.Title = title
 			}
 			if desc, ok := task.AppData["description"].(string); ok {
@@ -318,6 +338,10 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 		rawData.Metadata["hydration_task_id"] = task.ID
 		rawData.Metadata["source_chart_url"] = task.SourceChartURL
 		rawData.Metadata["rendered_chart_url"] = task.RenderedChartURL
+		rawData.Metadata["validation_status"] = "validated"
+		rawData.Metadata["primary_identifier"] = primaryID
+		rawData.Metadata["primary_name"] = primaryName
+		rawData.Metadata["data_source"] = "hydration_task"
 
 		// Create new pending data entry
 		// 创建新的待处理数据条目

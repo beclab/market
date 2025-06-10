@@ -1,6 +1,7 @@
 package types
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -440,6 +441,72 @@ func getCurrentTimestamp() int64 {
 // NewAppInfoLatestPendingDataFromLegacyData creates AppInfoLatestPendingData from a single app data
 // NewAppInfoLatestPendingDataFromLegacyData 从单个应用数据创建AppInfoLatestPendingData
 func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *AppInfoLatestPendingData {
+	// Add debug logging to inspect input data
+	// 添加调试日志以检查输入数据
+	log.Printf("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
+	if appData != nil {
+		log.Printf("DEBUG: appData length: %d", len(appData))
+		for key, value := range appData {
+			log.Printf("DEBUG: appData[%s] = %v (type: %T)", key, value, value)
+		}
+	}
+
+	// Validate input data - ensure we have at least basic app identifier
+	// 验证输入数据 - 确保至少有基本的应用标识符
+	if appData == nil || len(appData) == 0 {
+		log.Printf("DEBUG: appData is nil or empty, returning nil")
+		return nil
+	}
+
+	// Check if we have essential app identifiers (id, name, or appID)
+	// 检查是否有基本的应用标识符 (id, name, 或 appID)
+	var primaryID, primaryName string
+
+	if id, ok := appData["id"].(string); ok && id != "" && id != "0" {
+		primaryID = id
+		log.Printf("DEBUG: Found primaryID from 'id': %s", primaryID)
+	}
+	if name, ok := appData["name"].(string); ok && name != "" && name != "unknown" {
+		primaryName = name
+		log.Printf("DEBUG: Found primaryName from 'name': %s", primaryName)
+	}
+	if appID, ok := appData["appID"].(string); ok && appID != "" && appID != "0" {
+		if primaryID == "" {
+			primaryID = appID
+			log.Printf("DEBUG: Found primaryID from 'appID': %s", primaryID)
+		}
+	}
+	if primaryID == "" {
+		if appID, ok := appData["app_id"].(string); ok && appID != "" && appID != "0" {
+			primaryID = appID
+			log.Printf("DEBUG: Found primaryID from 'app_id': %s", primaryID)
+		}
+	}
+	if primaryName == "" {
+		if title, ok := appData["title"].(string); ok && title != "" && title != "unknown" {
+			primaryName = title
+			log.Printf("DEBUG: Found primaryName from 'title': %s", primaryName)
+		}
+	}
+
+	log.Printf("DEBUG: Final primaryID: '%s', primaryName: '%s'", primaryID, primaryName)
+
+	// If this doesn't look like single app data, return nil
+	// 如果这看起来不像单个应用数据，返回nil
+	if primaryID == "" && primaryName == "" {
+		log.Printf("DEBUG: Both primaryID and primaryName are empty, returning nil")
+		return nil
+	}
+
+	// Ensure we have both ID and name
+	// 确保我们有ID和名称
+	if primaryID == "" {
+		primaryID = primaryName
+	}
+	if primaryName == "" {
+		primaryName = primaryID
+	}
+
 	pendingData := &AppInfoLatestPendingData{
 		Type:            AppInfoLatestPending,
 		Timestamp:       getCurrentTimestamp(),
@@ -459,23 +526,17 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	// Create ApplicationInfoEntry from app data
 	// 从应用数据创建ApplicationInfoEntry
 	rawData := &ApplicationInfoEntry{
+		ID:         primaryID,
+		AppID:      primaryID,
+		Name:       primaryName,
+		Title:      primaryName,
 		CreateTime: getCurrentTimestamp(),
 		UpdateTime: getCurrentTimestamp(),
 		Metadata:   make(map[string]interface{}),
 	}
 
-	// Extract basic app information
-	// 提取基本应用信息
-	if id, ok := appData["id"].(string); ok {
-		rawData.ID = id
-		rawData.AppID = id
-	}
-	if name, ok := appData["name"].(string); ok {
-		rawData.Name = name
-	}
-	if title, ok := appData["title"].(string); ok {
-		rawData.Title = title
-	}
+	// Extract other optional fields
+	// 提取其他可选字段
 	if desc, ok := appData["description"].(string); ok {
 		rawData.Description = desc
 	}
@@ -504,6 +565,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	// 将完整的应用数据存储在元数据中供后续处理
 	rawData.Metadata["source_app_data"] = appData
 	rawData.Metadata["data_type"] = "single_app_data"
+	rawData.Metadata["validation_status"] = "validated"
 
 	pendingData.RawData = rawData
 	pendingData.AppInfo = &AppInfo{
@@ -517,7 +579,15 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 // NewAppInfoLatestPendingDataFromLegacyCompleteData creates AppInfoLatestPendingData from complete legacy data with single app
 // NewAppInfoLatestPendingDataFromLegacyCompleteData 从包含单个应用的完整传统数据创建AppInfoLatestPendingData
 func NewAppInfoLatestPendingDataFromLegacyCompleteData(appData map[string]interface{}, others *Others) *AppInfoLatestPendingData {
+	log.Printf("DEBUG: CALL POINT 4 - ")
 	pendingData := NewAppInfoLatestPendingDataFromLegacyData(appData)
+	// Check if base pending data creation was successful
+	// 检查基础待处理数据创建是否成功
+	if pendingData == nil {
+		// Return nil if base data validation failed
+		// 如果基础数据验证失败则返回nil
+		return nil
+	}
 	// Note: Others is now stored in SourceData, not in AppInfoLatestPendingData
 	return pendingData
 }

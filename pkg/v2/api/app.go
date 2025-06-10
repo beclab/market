@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"market/internal/v2/types"
 
@@ -22,6 +25,11 @@ type MarketInfoResponse struct {
 func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 	log.Println("GET /api/v2/market - Getting market information")
 
+	// Add timeout context
+	// 添加超时上下文
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
 	// Check if cache manager is available
 	// 检查缓存管理器是否可用
 	if s.cacheManager == nil {
@@ -30,26 +38,69 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all users data from cache
-	// 从缓存获取所有用户数据
-	allUsersData := s.cacheManager.GetAllUsersData()
-
-	// Get cache statistics
-	// 获取缓存统计信息
-	cacheStats := s.cacheManager.GetCacheStats()
-
-	// Prepare response data
-	// 准备响应数据
-	responseData := MarketInfoResponse{
-		UsersData:  allUsersData,
-		CacheStats: cacheStats,
-		TotalUsers: len(allUsersData),
+	// Create a channel to receive the result
+	// 创建通道接收结果
+	type result struct {
+		data  MarketInfoResponse
+		stats map[string]interface{}
+		err   error
 	}
+	resultChan := make(chan result, 1)
 
-	log.Printf("Market information retrieved: %d users",
-		len(allUsersData))
+	// Run the data retrieval in a goroutine
+	// 在协程中运行数据检索
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in getMarketInfo: %v", r)
+				resultChan <- result{err: fmt.Errorf("internal error occurred")}
+			}
+		}()
 
-	s.sendResponse(w, http.StatusOK, true, "Market information retrieved successfully", responseData)
+		// Get all users data from cache
+		// 从缓存获取所有用户数据
+		allUsersData := s.cacheManager.GetAllUsersData()
+		if allUsersData == nil {
+			log.Println("Warning: GetAllUsersData returned nil")
+			allUsersData = make(map[string]*types.UserData)
+		}
+
+		// Get cache statistics
+		// 获取缓存统计信息
+		cacheStats := s.cacheManager.GetCacheStats()
+		if cacheStats == nil {
+			log.Println("Warning: GetCacheStats returned nil")
+			cacheStats = make(map[string]interface{})
+		}
+
+		// Prepare response data
+		// 准备响应数据
+		responseData := MarketInfoResponse{
+			UsersData:  allUsersData,
+			CacheStats: cacheStats,
+			TotalUsers: len(allUsersData),
+		}
+
+		resultChan <- result{data: responseData, stats: cacheStats}
+	}()
+
+	// Wait for result or timeout
+	// 等待结果或超时
+	select {
+	case <-ctx.Done():
+		log.Printf("Request timeout or cancelled for /api/v2/market")
+		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
+		return
+	case res := <-resultChan:
+		if res.err != nil {
+			log.Printf("Error retrieving market information: %v", res.err)
+			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market information", nil)
+			return
+		}
+
+		log.Printf("Market information retrieved successfully: %d users", len(res.data.UsersData))
+		s.sendResponse(w, http.StatusOK, true, "Market information retrieved successfully", res.data)
+	}
 }
 
 // 2. Get specific application information (supports multiple queries)
