@@ -359,22 +359,32 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 			appID = pendingData.RawData.ID
 		}
 
-		if appID != "" && !h.hasActiveTaskForApp(userID, sourceID, appID) {
-			// Convert ApplicationInfoEntry to map for task creation
-			// 将ApplicationInfoEntry转换为map以创建任务
-			appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
+		if appID != "" {
+			// Check if app hydration is already complete before creating new task
+			// 在创建新任务前检查应用水合是否已完成
+			if h.isAppHydrationComplete(pendingData) {
+				// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+				// 	appID, userID, sourceID)
+				return
+			}
 
-			task := hydrationfn.NewHydrationTask(
-				userID, sourceID, appID,
-				appDataMap, h.cache, h.settingsManager,
-			)
+			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				// Convert ApplicationInfoEntry to map for task creation
+				// 将ApplicationInfoEntry转换为map以创建任务
+				appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
 
-			if err := h.EnqueueTask(task); err != nil {
-				log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
-					appID, userID, sourceID, err)
-			} else {
-				log.Printf("Created hydration task for structured app: %s (user: %s, source: %s)",
-					appID, userID, sourceID)
+				task := hydrationfn.NewHydrationTask(
+					userID, sourceID, appID,
+					appDataMap, h.cache, h.settingsManager,
+				)
+
+				if err := h.EnqueueTask(task); err != nil {
+					log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
+						appID, userID, sourceID, err)
+				} else {
+					log.Printf("Created hydration task for structured app: %s (user: %s, source: %s)",
+						appID, userID, sourceID)
+				}
 			}
 		}
 		return
@@ -383,6 +393,85 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 	// Legacy handling: This should be deprecated but kept for backward compatibility
 	// 传统处理：这应该被弃用，但为了向后兼容而保留
 	log.Printf("Warning: createTasksFromPendingData called with legacy data structure")
+}
+
+// isAppHydrationComplete checks if an app has completed all hydration steps
+// isAppHydrationComplete 检查应用是否已完成所有水合步骤
+func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendingData) bool {
+	if pendingData == nil {
+		return false
+	}
+
+	// Check condition 1: raw_package has value
+	// 检查条件1：raw_package有值
+	if pendingData.RawPackage == "" {
+		log.Printf("App hydration incomplete: missing raw_package")
+		return false
+	}
+
+	// Check condition 2: rendered_package has value
+	// 检查条件2：rendered_package有值
+	if pendingData.RenderedPackage == "" {
+		log.Printf("App hydration incomplete: missing rendered_package")
+		return false
+	}
+
+	// Check condition 3: image_analysis has images with count > 0
+	// 检查条件3：image_analysis中images数量大于0
+	if pendingData.AppInfo == nil || pendingData.AppInfo.ImageAnalysis == nil {
+		log.Printf("App hydration incomplete: missing image analysis")
+		return false
+	}
+
+	if pendingData.AppInfo.ImageAnalysis.TotalImages <= 0 || len(pendingData.AppInfo.ImageAnalysis.Images) <= 0 {
+		log.Printf("App hydration incomplete: no images found in image analysis (total: %d, images count: %d)",
+			pendingData.AppInfo.ImageAnalysis.TotalImages, len(pendingData.AppInfo.ImageAnalysis.Images))
+		return false
+	}
+
+	// log.Printf("App hydration complete: raw_package=%s, rendered_package=%s, images_count=%d",
+	// 	pendingData.RawPackage, pendingData.RenderedPackage, len(pendingData.AppInfo.ImageAnalysis.Images))
+	return true
+}
+
+// isAppDataHydrationComplete checks if an app's hydration is complete by looking up pending data in cache
+// isAppDataHydrationComplete 通过在缓存中查找待处理数据来检查应用的水合是否完成
+func (h *Hydrator) isAppDataHydrationComplete(userID, sourceID, appID string) bool {
+	// Get the source data from cache
+	// 从缓存获取源数据
+	h.cache.Mutex.RLock()
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		h.cache.Mutex.RUnlock()
+		return false
+	}
+	h.cache.Mutex.RUnlock()
+
+	userData.Mutex.RLock()
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		userData.Mutex.RUnlock()
+		return false
+	}
+	userData.Mutex.RUnlock()
+
+	sourceData.Mutex.RLock()
+	defer sourceData.Mutex.RUnlock()
+
+	// Find the pending data for the specific app
+	// 查找特定应用的待处理数据
+	for _, pendingData := range sourceData.AppInfoLatestPending {
+		if pendingData.RawData != nil &&
+			(pendingData.RawData.ID == appID || pendingData.RawData.AppID == appID || pendingData.RawData.Name == appID) {
+			// Found the pending data for this app, check if hydration is complete
+			// 找到此应用的待处理数据，检查水合是否完成
+			return h.isAppHydrationComplete(pendingData)
+		}
+	}
+
+	// If no pending data found for this app, consider it not hydrated
+	// 如果未找到此应用的待处理数据，认为它未被水合
+	return false
 }
 
 // convertApplicationInfoEntryToMap converts ApplicationInfoEntry to map for task creation
@@ -651,6 +740,14 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 			// Check if task already exists for this app to avoid duplicates
 			// 检查此应用是否已存在任务以避免重复
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				// Check if app hydration is already complete before creating new task
+				// 在创建新任务前检查应用水合是否已完成
+				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
+					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+					// 	appID, userID, sourceID)
+					continue
+				}
+
 				// Create and submit task using correct NewHydrationTask signature
 				// 使用正确的NewHydrationTask签名创建并提交任务
 				task := hydrationfn.NewHydrationTask(
@@ -1045,6 +1142,14 @@ func (h *Hydrator) createTasksFromPendingDataLegacy(userID, sourceID string, pen
 			// Check if task already exists for this app
 			// 检查该应用是否已有任务存在
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				// Check if app hydration is already complete before creating new task
+				// 在创建新任务前检查应用水合是否已完成
+				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
+					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+					// 	appID, userID, sourceID)
+					continue
+				}
+
 				task := hydrationfn.NewHydrationTask(
 					userID, sourceID, appID,
 					appDataMap, h.cache, h.settingsManager,
