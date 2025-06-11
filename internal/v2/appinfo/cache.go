@@ -525,8 +525,9 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 			}
 
 			userData.Mutex.RLock()
-			// Copy source data references
-			// 拷贝源数据引用
+			// Copy Hash field and source data references
+			// 复制Hash字段和源数据引用
+			userDataCopy.Hash = userData.Hash
 			for sourceID, sourceData := range userData.Sources {
 				userDataCopy.Sources[sourceID] = sourceData
 			}

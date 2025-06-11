@@ -16,6 +16,7 @@ type AppOtherData = types.AppOtherData
 type SourceData = types.SourceData
 type UserData = types.UserData
 type CacheData = types.CacheData
+type Others = types.Others
 
 // Image-related type aliases for unified access
 // 镜像相关类型别名，用于统一访问

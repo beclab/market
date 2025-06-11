@@ -113,6 +113,17 @@ func (r *RedisClient) LoadCacheFromRedis() (*CacheData, error) {
 func (r *RedisClient) loadUserData(userID string) (*UserData, error) {
 	userData := NewUserData()
 
+	// Load user hash from Redis
+	// 从Redis加载用户hash
+	userHashKey := fmt.Sprintf("appinfo:user:%s:hash", userID)
+	hashValue, err := r.client.Get(r.ctx, userHashKey).Result()
+	if err == nil && hashValue != "" {
+		userData.Hash = hashValue
+		glog.Infof("Loaded user hash from Redis: user=%s, hash=%s", userID, hashValue)
+	} else if err != redis.Nil {
+		glog.Warningf("Failed to load user hash from Redis: user=%s, error=%v", userID, err)
+	}
+
 	// Get all source keys for this user
 	sourceKeys, err := r.client.Keys(r.ctx, fmt.Sprintf("appinfo:user:%s:source:*", userID)).Result()
 	if err != nil {
@@ -203,6 +214,18 @@ func (r *RedisClient) SaveUserDataToRedis(userID string, userData *UserData) err
 
 	userData.Mutex.RLock()
 	defer userData.Mutex.RUnlock()
+
+	// Save user hash to Redis
+	// 保存用户hash到Redis
+	userHashKey := fmt.Sprintf("appinfo:user:%s:hash", userID)
+	if userData.Hash != "" {
+		err := r.client.Set(r.ctx, userHashKey, userData.Hash, 0).Err()
+		if err != nil {
+			glog.Errorf("Failed to save user hash to Redis: %v", err)
+			return err
+		}
+		glog.Infof("Saved user hash to Redis: user=%s, hash=%s", userID, userData.Hash)
+	}
 
 	for sourceID, sourceData := range userData.Sources {
 		if err := r.SaveSourceDataToRedis(userID, sourceID, sourceData); err != nil {

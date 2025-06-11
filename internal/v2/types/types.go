@@ -249,6 +249,7 @@ type SourceData struct {
 // UserData contains all sources for a specific user
 type UserData struct {
 	Sources map[string]*SourceData `json:"sources"`
+	Hash    string                 `json:"hash"`
 	Mutex   sync.RWMutex           `json:"-"`
 }
 
