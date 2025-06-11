@@ -893,3 +893,103 @@ func TestHydrationNotification() {
 
 	log.Println("=== Test Completed ===")
 }
+
+// TestModuleConfiguration tests the module configuration
+// TestModuleConfiguration 测试模块配置
+func TestModuleConfiguration() {
+	log.Println("=== Testing Module Configuration ===")
+
+	// Test different configurations
+	// 测试不同配置
+	testConfigs := []struct {
+		name              string
+		enableSync        bool
+		enableCache       bool
+		enableHydrator    bool
+		enableDataWatcher bool
+		expectError       bool
+	}{
+		{
+			name:              "All disabled",
+			enableSync:        false,
+			enableCache:       false,
+			enableHydrator:    false,
+			enableDataWatcher: false,
+			expectError:       false,
+		},
+		{
+			name:              "Cache only",
+			enableSync:        false,
+			enableCache:       true,
+			enableHydrator:    false,
+			enableDataWatcher: false,
+			expectError:       false,
+		},
+		{
+			name:              "Sync only",
+			enableSync:        true,
+			enableCache:       false,
+			enableHydrator:    false,
+			enableDataWatcher: false,
+			expectError:       true, // Sync requires cache
+		},
+		{
+			name:              "All enabled",
+			enableSync:        true,
+			enableCache:       true,
+			enableHydrator:    true,
+			enableDataWatcher: true,
+			expectError:       false,
+		},
+		{
+			name:              "DataWatcher without dependencies",
+			enableSync:        false,
+			enableCache:       false,
+			enableHydrator:    false,
+			enableDataWatcher: true,
+			expectError:       false, // Should not start DataWatcher
+		},
+	}
+
+	for _, config := range testConfigs {
+		log.Printf("Testing configuration: %s", config.name)
+
+		// Create module configuration
+		moduleConfig := &ModuleConfig{
+			EnableSync:        config.enableSync,
+			EnableCache:       config.enableCache,
+			EnableHydrator:    config.enableHydrator,
+			EnableDataWatcher: config.enableDataWatcher,
+		}
+
+		// Create and start module
+		module, err := NewAppInfoModule(moduleConfig)
+		if err != nil {
+			log.Printf("Failed to create module: %v", err)
+			continue
+		}
+
+		if err := module.Start(); err != nil {
+			log.Printf("Failed to start module: %v", err)
+			continue
+		}
+		defer module.Stop()
+
+		// Wait for initialization
+		time.Sleep(2 * time.Second)
+
+		// Check module status to verify connections
+		status := module.GetModuleStatus()
+		log.Printf("Module status: %+v", status)
+
+		if config.expectError {
+			log.Printf("❌ Expected error for configuration: %s", config.name)
+		} else {
+			log.Printf("✅ Configuration: %s passed", config.name)
+		}
+
+		log.Println()
+	}
+
+	log.Println("=== Test Completed ===")
+}

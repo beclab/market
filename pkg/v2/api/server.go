@@ -33,8 +33,14 @@ func (s *Server) setupRoutes() {
 	// API version prefix
 	api := s.router.PathPrefix("/api/v2").Subrouter()
 
-	// 1. Get market information
-	api.HandleFunc("/market", s.getMarketInfo).Methods("GET")
+	// 1. Get market debug memory information
+	api.HandleFunc("/market/debug-memory", s.getMarketInfo).Methods("GET")
+
+	// Market hash endpoint
+	api.HandleFunc("/market/hash", s.getMarketHash).Methods("GET")
+
+	// Market data endpoint
+	api.HandleFunc("/market/data", s.getMarketData).Methods("GET")
 
 	// 2. Get specific application information (supports multiple queries)
 	api.HandleFunc("/apps", s.getAppsInfo).Methods("GET")

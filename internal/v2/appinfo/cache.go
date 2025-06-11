@@ -187,27 +187,17 @@ func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
 	glog.Infof("Hydration notifier set successfully")
 }
 
-// SetAppData sets app data in cache and triggers sync to Redis
+// SetAppData sets app data in cache using single global lock
 func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
-	// Validate user configuration if available
-	if cm.userConfig != nil {
-		// Check if user is valid
-		isValidUser := false
-		for _, validUser := range cm.userConfig.UserList {
-			if validUser == userID {
-				isValidUser = true
-				break
-			}
-		}
+	if !cm.isRunning {
+		return fmt.Errorf("cache manager is not running")
+	}
 
-		// Allow guest users if enabled, otherwise reject invalid users
-		if !isValidUser && !cm.userConfig.GuestEnabled {
-			glog.Warningf("User '%s' is not authorized to set app data", userID)
-			return fmt.Errorf("user '%s' is not authorized", userID)
-		}
+	if cm.cache == nil {
+		return fmt.Errorf("cache is not initialized")
 	}
 
 	// Ensure user exists
@@ -217,7 +207,8 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 
 	// Check source limit for user
 	userData := cm.cache.Users[userID]
-	userData.Mutex.Lock()
+	// 不再需要嵌套锁，因为我们已经持有全局锁
+	// No nested locks needed since we already hold the global lock
 
 	// Check if we're adding a new source and if it exceeds the limit
 	if _, exists := userData.Sources[sourceID]; !exists {
@@ -233,7 +224,6 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			}
 
 			if len(userData.Sources) >= maxSources {
-				userData.Mutex.Unlock()
 				glog.Warningf("User '%s' has reached maximum sources limit (%d)", userID, maxSources)
 				return fmt.Errorf("user '%s' has reached maximum sources limit (%d)", userID, maxSources)
 			}
@@ -241,11 +231,11 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 
 		userData.Sources[sourceID] = NewSourceData()
 	}
-	userData.Mutex.Unlock()
 
 	// Set the data
 	sourceData := userData.Sources[sourceID]
-	sourceData.Mutex.Lock()
+	// 不再需要嵌套锁，因为我们已经持有全局锁
+	// No nested locks needed since we already hold the global lock
 
 	// Log image analysis information if present
 	// 如果存在镜像分析信息则记录
@@ -269,6 +259,10 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		sourceData.AppStateLatest = append(sourceData.AppStateLatest, appData)
 	case AppInfoLatest:
 		appData := NewAppInfoLatestData(data)
+		if appData == nil {
+			glog.Warningf("Failed to create AppInfoLatestData from data for user=%s, source=%s - data may be invalid", userID, sourceID)
+			return fmt.Errorf("invalid app data: NewAppInfoLatestData returned nil")
+		}
 		appData.Timestamp = time.Now().Unix()
 		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, appData)
 	case AppInfoLatestPending:
@@ -381,13 +375,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			glog.Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
 			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
 		}
-		// Note: Other data type is now part of AppInfoLatestPendingData.Others field
-		// 注意：Other数据类型现在是AppInfoLatestPendingData.Others字段的一部分
-		// case Other:
-		//     return sourceData.Other // This field no longer exists
 	}
-
-	sourceData.Mutex.Unlock()
 
 	// Trigger async sync to Redis
 	cm.requestSync(SyncRequest{
@@ -400,16 +388,15 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 	return nil
 }
 
-// GetAppData retrieves specific app data from cache
+// GetAppData retrieves app data from cache using single global lock
 func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	if userData, exists := cm.cache.Users[userID]; exists {
 		if sourceData, exists := userData.Sources[sourceID]; exists {
-			sourceData.Mutex.RLock()
-			defer sourceData.Mutex.RUnlock()
-
+			// 不再需要嵌套锁，因为我们已经持有全局锁
+			// No nested locks needed since we already hold the global lock
 			switch dataType {
 			case AppInfoHistory:
 				return sourceData.AppInfoHistory
@@ -419,10 +406,6 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 				return sourceData.AppInfoLatest
 			case AppInfoLatestPending:
 				return sourceData.AppInfoLatestPending
-				// Note: Other data type is now part of AppInfoLatestPendingData.Others field
-				// 注意：Other数据类型现在是AppInfoLatestPendingData.Others字段的一部分
-				// case Other:
-				//     return sourceData.Other // This field no longer exists
 			}
 		}
 	}
@@ -447,7 +430,7 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 	return nil
 }
 
-// GetCacheStats returns cache statistics
+// GetCacheStats returns cache statistics using single global lock
 func (cm *CacheManager) GetCacheStats() map[string]interface{} {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
@@ -458,9 +441,9 @@ func (cm *CacheManager) GetCacheStats() map[string]interface{} {
 
 	totalSources := 0
 	for _, userData := range cm.cache.Users {
-		userData.Mutex.RLock()
+		// 不再需要嵌套锁，因为我们已经持有全局锁
+		// No nested locks needed since we already hold the global lock
 		totalSources += len(userData.Sources)
-		userData.Mutex.RUnlock()
 	}
 	stats["total_sources"] = totalSources
 
@@ -497,40 +480,29 @@ func (cm *CacheManager) ForceSync() error {
 	return nil
 }
 
-// GetAllUsersData returns all users data from cache for inspection/debugging
+// GetAllUsersData returns all users data from cache using single global lock
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
-	// First, get the list of user IDs with minimal locking
-	// 首先，用最小锁定获取用户ID列表
 	cm.mutex.RLock()
-	userIDs := make([]string, 0, len(cm.cache.Users))
-	for userID := range cm.cache.Users {
-		userIDs = append(userIDs, userID)
-	}
-	cm.mutex.RUnlock()
+	defer cm.mutex.RUnlock()
 
-	// Then, get each user's data individually to avoid nested locking
-	// 然后，逐个获取每个用户的数据以避免嵌套锁定
+	// 直接返回数据的浅拷贝，无需嵌套锁
+	// Return shallow copy of data directly without nested locks
 	result := make(map[string]*UserData)
-	for _, userID := range userIDs {
-		cm.mutex.RLock()
-		if userData, exists := cm.cache.Users[userID]; exists {
-			// Make a shallow copy to avoid holding locks too long
-			// 进行浅拷贝以避免长时间持有锁
-			userDataCopy := &UserData{
-				Sources: make(map[string]*SourceData),
-			}
-
-			userData.Mutex.RLock()
-			// Copy source data references
-			// 拷贝源数据引用
-			for sourceID, sourceData := range userData.Sources {
-				userDataCopy.Sources[sourceID] = sourceData
-			}
-			userData.Mutex.RUnlock()
-
-			result[userID] = userDataCopy
+	for userID, userData := range cm.cache.Users {
+		// 创建浅拷贝
+		// Create shallow copy
+		userDataCopy := &UserData{
+			Sources: make(map[string]*SourceData),
+			Hash:    userData.Hash,
 		}
-		cm.mutex.RUnlock()
+
+		// 复制源数据引用
+		// Copy source data references
+		for sourceID, sourceData := range userData.Sources {
+			userDataCopy.Sources[sourceID] = sourceData
+		}
+
+		result[userID] = userDataCopy
 	}
 
 	return result
@@ -642,9 +614,11 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 	totalCleaned := 0
 
 	for userID, userData := range cm.cache.Users {
-		userData.Mutex.Lock()
+		// 不再需要嵌套锁，因为我们已经持有全局锁
+		// No nested locks needed since we already hold the global lock
 		for sourceID, sourceData := range userData.Sources {
-			sourceData.Mutex.Lock()
+			// 不再需要嵌套锁，因为我们已经持有全局锁
+			// No nested locks needed since we already hold the global lock
 
 			originalCount := len(sourceData.AppInfoLatestPending)
 			cleanedPendingData := make([]*AppInfoLatestPendingData, 0, originalCount)
@@ -700,10 +674,7 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 					})
 				}
 			}
-
-			sourceData.Mutex.Unlock()
 		}
-		userData.Mutex.Unlock()
 	}
 
 	if totalCleaned > 0 {

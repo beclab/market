@@ -322,9 +322,12 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 // storeDataDirectly stores data directly to cache without going through CacheManager
 // storeDataDirectly 直接存储数据到缓存，不通过CacheManager
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
+	// Use global lock instead of nested locks
+	// 使用全局锁而不是嵌套锁
+	s.cache.Mutex.Lock()
+	defer s.cache.Mutex.Unlock()
+
 	userData := s.cache.Users[userID]
-	userData.Mutex.Lock()
-	defer userData.Mutex.Unlock()
 
 	// Ensure source data exists for this user
 	// 确保此用户的源数据存在
@@ -334,8 +337,13 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 	}
 
 	sourceData := userData.Sources[sourceID]
-	sourceData.Mutex.Lock()
-	defer sourceData.Mutex.Unlock()
+
+	// Check if this is a local source - skip syncer storage for local sources
+	// 检查是否为本地源 - 跳过本地源的同步存储
+	if sourceData.Type == types.SourceDataTypeLocal {
+		log.Printf("Skipping syncer data storage for local source: user=%s, source=%s", userID, sourceID)
+		return
+	}
 
 	// Extract Others data from complete data
 	// 从完整数据中提取Others数据
@@ -505,6 +513,23 @@ func (s *Syncer) storeDataDirectlyBatch(userIDs []string, sourceID string, compl
 // storeDataViaCacheManager 通过CacheManager存储数据
 func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, completeData map[string]interface{}) {
 	for _, userID := range userIDs {
+		// Check if the source is local type - skip syncer operations for local sources
+		// 检查源是否为本地类型 - 跳过本地源的同步操作
+		s.cache.Mutex.RLock()
+		userData, userExists := s.cache.Users[userID]
+		if userExists {
+			sourceData, sourceExists := userData.Sources[sourceID]
+			if sourceExists {
+				sourceType := sourceData.Type
+				if sourceType == types.SourceDataTypeLocal {
+					log.Printf("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
+					s.cache.Mutex.RUnlock()
+					continue
+				}
+			}
+		}
+		s.cache.Mutex.RUnlock()
+
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
 		// 使用CacheManager.SetAppData来触发水合通知（如果可用）
 		if s.cacheManager != nil {

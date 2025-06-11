@@ -293,28 +293,33 @@ func (h *Hydrator) pendingDataMonitor(ctx context.Context) {
 	}
 }
 
-// checkForPendingData checks cache for pending data and creates hydration tasks
-// checkForPendingData 检查缓存中的待处理数据并创建水合任务
+// checkForPendingData scans cache for pending data and creates hydration tasks
+// checkForPendingData 扫描缓存中的待处理数据并创建水合任务
 func (h *Hydrator) checkForPendingData() {
 	h.cache.Mutex.RLock()
 	defer h.cache.Mutex.RUnlock()
 
 	for userID, userData := range h.cache.Users {
-		userData.Mutex.RLock()
+		// 不再需要嵌套锁，因为我们已经持有全局锁
+		// No nested locks needed since we already hold the global lock
 		for sourceID, sourceData := range userData.Sources {
-			sourceData.Mutex.RLock()
+			// 不再需要嵌套锁，因为我们已经持有全局锁
+			// No nested locks needed since we already hold the global lock
 
-			// Check if there's pending data
-			// 检查是否有待处理数据
+			// Log source type for debugging - both local and remote should be processed
+			// 记录源类型以供调试 - 本地和远程类型都应被处理
+			log.Printf("Checking pending data for user: %s, source: %s, type: %s", userID, sourceID, sourceData.Type)
+
+			// Check if there's pending data - process both local and remote sources
+			// 检查是否有待处理数据 - 处理本地和远程源
 			if len(sourceData.AppInfoLatestPending) > 0 {
+				log.Printf("Found %d pending apps for user: %s, source: %s, type: %s",
+					len(sourceData.AppInfoLatestPending), userID, sourceID, sourceData.Type)
 				for _, pendingData := range sourceData.AppInfoLatestPending {
 					h.createTasksFromPendingData(userID, sourceID, pendingData)
 				}
 			}
-
-			sourceData.Mutex.RUnlock()
 		}
-		userData.Mutex.RUnlock()
 	}
 }
 
@@ -402,61 +407,71 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 		return false
 	}
 
-	// Check condition 1: raw_package has value
-	// 检查条件1：raw_package有值
+	// Quick fail-fast checks for most common missing data
+	// 对最常见缺失数据的快速失败检查
 	if pendingData.RawPackage == "" {
-		log.Printf("App hydration incomplete: missing raw_package")
+		// Only log detailed messages in debug builds to reduce noise
+		// 只在调试构建中记录详细消息以减少噪音
 		return false
 	}
 
-	// Check condition 2: rendered_package has value
-	// 检查条件2：rendered_package有值
 	if pendingData.RenderedPackage == "" {
-		log.Printf("App hydration incomplete: missing rendered_package")
 		return false
 	}
 
-	// Check condition 3: image_analysis has images with count > 0
-	// 检查条件3：image_analysis中images数量大于0
-	if pendingData.AppInfo == nil || pendingData.AppInfo.ImageAnalysis == nil {
-		log.Printf("App hydration incomplete: missing image analysis")
+	// Check if AppInfo exists - this is created during hydration
+	// 检查AppInfo是否存在 - 这在水合过程中创建
+	if pendingData.AppInfo == nil {
 		return false
 	}
 
-	if pendingData.AppInfo.ImageAnalysis.TotalImages <= 0 || len(pendingData.AppInfo.ImageAnalysis.Images) <= 0 {
-		log.Printf("App hydration incomplete: no images found in image analysis (total: %d, images count: %d)",
-			pendingData.AppInfo.ImageAnalysis.TotalImages, len(pendingData.AppInfo.ImageAnalysis.Images))
+	imageAnalysis := pendingData.AppInfo.ImageAnalysis
+	if imageAnalysis == nil {
 		return false
 	}
 
-	// log.Printf("App hydration complete: raw_package=%s, rendered_package=%s, images_count=%d",
-	// 	pendingData.RawPackage, pendingData.RenderedPackage, len(pendingData.AppInfo.ImageAnalysis.Images))
-	return true
+	// More flexible image analysis validation - consider private images as valid
+	// 更灵活的镜像分析验证 - 将私有镜像视为有效
+	// If image analysis exists and has been performed (regardless of public/private), consider it complete
+	// 如果镜像分析存在并已执行（无论公有/私有），认为其已完成
+	if imageAnalysis.TotalImages > 0 {
+		// Images found and analyzed (including private images)
+		// 找到并分析了镜像（包括私有镜像）
+		return true
+	}
+
+	// For apps with no images at all, check if analysis was attempted
+	// 对于完全没有镜像的应用，检查是否尝试过分析
+	// If TotalImages is 0 but Images map exists, it means analysis was done but no images found
+	// 如果TotalImages为0但Images映射存在，意味着已完成分析但未找到镜像
+	if imageAnalysis.TotalImages == 0 && imageAnalysis.Images != nil {
+		// Analysis completed - no images found in this app
+		// 分析完成 - 在此应用中未找到镜像
+		return true
+	}
+
+	// Analysis not performed or incomplete
+	// 分析未执行或不完整
+	return false
 }
 
 // isAppDataHydrationComplete checks if an app's hydration is complete by looking up pending data in cache
 // isAppDataHydrationComplete 通过在缓存中查找待处理数据来检查应用的水合是否完成
 func (h *Hydrator) isAppDataHydrationComplete(userID, sourceID, appID string) bool {
-	// Get the source data from cache
-	// 从缓存获取源数据
+	// Get the source data from cache using global lock
+	// 使用全局锁从缓存获取源数据
 	h.cache.Mutex.RLock()
+	defer h.cache.Mutex.RUnlock()
+
 	userData, userExists := h.cache.Users[userID]
 	if !userExists {
-		h.cache.Mutex.RUnlock()
 		return false
 	}
-	h.cache.Mutex.RUnlock()
 
-	userData.Mutex.RLock()
 	sourceData, sourceExists := userData.Sources[sourceID]
 	if !sourceExists {
-		userData.Mutex.RUnlock()
 		return false
 	}
-	userData.Mutex.RUnlock()
-
-	sourceData.Mutex.RLock()
-	defer sourceData.Mutex.RUnlock()
 
 	// Find the pending data for the specific app
 	// 查找特定应用的待处理数据
