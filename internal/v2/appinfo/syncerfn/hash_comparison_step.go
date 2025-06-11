@@ -113,15 +113,14 @@ func (h *HashComparisonStep) CanSkip(ctx context.Context, data *SyncContext) boo
 	return false // Always execute hash comparison
 }
 
-// calculateLocalHash computes hash of local cache data
-// calculateLocalHash 计算本地缓存数据的hash
+// calculateLocalHash computes hash from local SourceData Others.Hash
+// calculateLocalHash 从本地SourceData Others.Hash获取hash
 func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData) string {
 	if cache == nil {
+		log.Printf("Cache is nil, returning empty_cache hash")
 		return "empty_cache"
 	}
 
-	// Create a simple hash based on cache content
-	// 基于缓存内容创建简单的hash
 	cache.Mutex.RLock()
 	defer cache.Mutex.RUnlock()
 
@@ -132,58 +131,61 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData) string {
 		return "empty_cache_no_users"
 	}
 
-	// Generate hash based on actual cache content instead of timestamp
-	// 基于实际缓存内容而不是时间戳生成hash
-	var contentParts []string
+	// Collect all Others.Hash values from all sources across all users
+	// 收集所有用户所有源的Others.Hash值
+	var othersHashes []string
+	var foundValidHash bool
 
-	// Add user count
-	contentParts = append(contentParts, fmt.Sprintf("users:%d", len(cache.Users)))
-
-	// Add source information for each user
 	for userID, userData := range cache.Users {
 		userData.Mutex.RLock()
-		sourceCount := len(userData.Sources)
-		contentParts = append(contentParts, fmt.Sprintf("user:%s:sources:%d", userID, sourceCount))
 
-		// Add information about each source's data
 		for sourceID, sourceData := range userData.Sources {
 			sourceData.Mutex.RLock()
 
-			// Check if we have any actual app data
-			hasLatest := len(sourceData.AppInfoLatest) > 0
-			hasPending := len(sourceData.AppInfoLatestPending) > 0
-			hasHistory := len(sourceData.AppInfoHistory) > 0
-			hasState := len(sourceData.AppStateLatest) > 0
-
-			contentParts = append(contentParts, fmt.Sprintf("source:%s:latest:%t:pending:%t:history:%t:state:%t",
-				sourceID, hasLatest, hasPending, hasHistory, hasState))
-
-			// If we have pending data, include its version in hash
-			if hasPending && len(sourceData.AppInfoLatestPending) > 0 {
-				for _, pendingData := range sourceData.AppInfoLatestPending {
-					// Use the version from the pending data structure itself or from RawData
-					if pendingData.Version != "" {
-						contentParts = append(contentParts, fmt.Sprintf("pending_version:%s", pendingData.Version))
-					} else if pendingData.RawData != nil && pendingData.RawData.Version != "" {
-						contentParts = append(contentParts, fmt.Sprintf("pending_version:%s", pendingData.RawData.Version))
-					}
-				}
+			// Check if Others exists and has a Hash
+			// 检查Others是否存在并包含Hash
+			if sourceData.Others != nil && sourceData.Others.Hash != "" {
+				othersHashes = append(othersHashes, sourceData.Others.Hash)
+				foundValidHash = true
+				log.Printf("Found Others.Hash for user:%s source:%s hash:%s", userID, sourceID, sourceData.Others.Hash)
+			} else {
+				log.Printf("No valid Others.Hash for user:%s source:%s (Others: %v)", userID, sourceID, sourceData.Others)
 			}
 
 			sourceData.Mutex.RUnlock()
 		}
+
 		userData.Mutex.RUnlock()
 	}
 
-	// Join all parts and calculate MD5 hash
-	content := fmt.Sprintf("%s", contentParts)
+	// If no valid Others.Hash found, return appropriate hash
+	// 如果没有找到有效的Others.Hash，返回相应的hash
+	if !foundValidHash {
+		log.Printf("No valid Others.Hash found in any source, returning no_others_hash")
+		return "no_others_hash"
+	}
 
-	// Calculate MD5 hash
-	// 计算MD5 hash
+	// If only one hash found, return it directly
+	// 如果只找到一个hash，直接返回
+	if len(othersHashes) == 1 {
+		localHash := othersHashes[0]
+		log.Printf("Using single Others.Hash as local hash: %s", localHash)
+		return localHash
+	}
+
+	// If multiple hashes found, create a combined hash
+	// 如果找到多个hash，创建组合hash
+	var combinedContent string
+	for i, hash := range othersHashes {
+		combinedContent += fmt.Sprintf("hash_%d:%s", i, hash)
+	}
+
+	// Calculate MD5 hash of combined hashes
+	// 计算组合hash的MD5值
 	hasher := md5.New()
-	hasher.Write([]byte(content))
+	hasher.Write([]byte(combinedContent))
 	localHash := fmt.Sprintf("%x", hasher.Sum(nil))
 
-	log.Printf("Calculated local hash: %s (based on content: %v)", localHash, contentParts)
+	log.Printf("Combined multiple Others.Hash values into local hash: %s (from hashes: %v)", localHash, othersHashes)
 	return localHash
 }

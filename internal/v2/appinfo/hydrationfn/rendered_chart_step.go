@@ -719,11 +719,11 @@ func (s *RenderedChartStep) renderTemplate(templateContent string, data *Templat
 
 	// Show a preview of template content for debugging
 	// 显示模板内容的预览用于调试
-	preview := templateContent
-	if len(preview) > 200 {
-		preview = preview[:200] + "..."
-	}
-	log.Printf("Template content preview: %s", preview)
+	// preview := templateContent
+	// if len(preview) > 200 {
+	// 	preview = preview[:200] + "..."
+	// }
+	// log.Printf("Template content preview: %s", preview)
 
 	// Create template with custom functions (similar to Helm)
 	// 创建带有自定义函数的模板（类似于Helm）

@@ -218,11 +218,11 @@ func (s *ImageAnalysisStep) extractImagesFromContent(content string) []string {
 
 	// Show a preview of content for debugging
 	// 显示内容预览用于调试
-	preview := content
-	if len(preview) > 500 {
-		preview = preview[:500] + "..."
-	}
-	log.Printf("Debug: Content preview: %s", preview)
+	// preview := content
+	// if len(preview) > 500 {
+	// 	preview = preview[:500] + "..."
+	// }
+	// log.Printf("Debug: Content preview: %s", preview)
 
 	matches := s.imageRegex.FindAllStringSubmatch(content, -1)
 	log.Printf("Debug: Found %d regex matches", len(matches))

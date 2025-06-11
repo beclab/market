@@ -444,12 +444,12 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	// Add debug logging to inspect input data
 	// 添加调试日志以检查输入数据
 	log.Printf("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
-	if appData != nil {
-		log.Printf("DEBUG: appData length: %d", len(appData))
-		for key, value := range appData {
-			log.Printf("DEBUG: appData[%s] = %v (type: %T)", key, value, value)
-		}
-	}
+	// if appData != nil {
+	// 	log.Printf("DEBUG: appData length: %d", len(appData))
+	// 	for key, value := range appData {
+	// 		log.Printf("DEBUG: appData[%s] = %v (type: %T)", key, value, value)
+	// 	}
+	// }
 
 	// Validate input data - ensure we have at least basic app identifier
 	// 验证输入数据 - 确保至少有基本的应用标识符
