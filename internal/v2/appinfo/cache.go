@@ -269,6 +269,10 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		sourceData.AppStateLatest = append(sourceData.AppStateLatest, appData)
 	case AppInfoLatest:
 		appData := NewAppInfoLatestData(data)
+		if appData == nil {
+			glog.Warningf("Failed to create AppInfoLatestData from data for user=%s, source=%s - data may be invalid", userID, sourceID)
+			return fmt.Errorf("invalid app data: NewAppInfoLatestData returned nil")
+		}
 		appData.Timestamp = time.Now().Unix()
 		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, appData)
 	case AppInfoLatestPending:

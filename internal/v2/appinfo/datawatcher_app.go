@@ -174,7 +174,7 @@ func (dw *DataWatcher) processUserData(userID string, userData *UserData) (int64
 	defer userData.Mutex.RUnlock()
 
 	// Process each source
-	// 处理每个源
+	// 处理每个源的数据
 	for sourceID, sourceData := range userData.Sources {
 		processed, moved := dw.processSourceData(userID, sourceID, sourceData)
 		totalProcessed += processed
@@ -188,6 +188,21 @@ func (dw *DataWatcher) processUserData(userID string, userData *UserData) (int64
 // processSourceData 处理单个源的数据
 func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *SourceData) (int64, int64) {
 	if sourceData == nil {
+		return 0, 0
+	}
+
+	// Add safety checks for DataWatcher components
+	// 为DataWatcher组件添加安全检查
+	if dw.cacheManager == nil {
+		glog.Errorf("DataWatcher: CacheManager is nil for user=%s, source=%s", userID, sourceID)
+		return 0, 0
+	}
+	if dw.hydrator == nil {
+		glog.Errorf("DataWatcher: Hydrator is nil for user=%s, source=%s", userID, sourceID)
+		return 0, 0
+	}
+	if userID == "" || sourceID == "" {
+		glog.Errorf("DataWatcher: Invalid userID or sourceID (userID=%s, sourceID=%s)", userID, sourceID)
 		return 0, 0
 	}
 
@@ -228,10 +243,18 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 
 	// Move completed apps to AppInfoLatest
 	// 将完成的应用移动到AppInfoLatest
+	actualMovedCount := int64(0)
 	for _, completedApp := range completedApps {
 		latestApp := dw.convertPendingToLatest(completedApp)
 		if latestApp != nil {
 			sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestApp)
+			actualMovedCount++
+		} else {
+			// Log when an app fails conversion
+			// 记录应用转换失败的情况
+			appID := dw.getAppID(completedApp)
+			glog.Warningf("DataWatcher: Failed to convert completed app %s to latest format (user=%s, source=%s)",
+				appID, userID, sourceID)
 		}
 	}
 
@@ -239,7 +262,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 	// 更新待处理应用列表（移除已完成的）
 	sourceData.AppInfoLatestPending = remainingPendingApps
 
-	totalMoved := int64(len(completedApps))
+	totalMoved := actualMovedCount
 
 	if totalMoved > 0 {
 		glog.Infof("DataWatcher: Moved %d completed apps from pending to latest for user=%s, source=%s",
@@ -247,12 +270,28 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 
 		// Trigger sync to Redis for this source
 		// 为此源触发Redis同步
-		go func() {
-			if err := dw.cacheManager.SetAppData(userID, sourceID, AppInfoLatest,
+		go func(userID, sourceID string, cacheManager *CacheManager) {
+			// Add nil checks and validation before calling SetAppData
+			// 在调用SetAppData之前添加nil检查和验证
+			if cacheManager == nil {
+				glog.Errorf("DataWatcher: CacheManager is nil, cannot trigger sync after moving apps")
+				return
+			}
+			if userID == "" || sourceID == "" {
+				glog.Errorf("DataWatcher: Invalid userID or sourceID, cannot trigger sync (userID=%s, sourceID=%s)", userID, sourceID)
+				return
+			}
+
+			if err := cacheManager.SetAppData(userID, sourceID, AppInfoLatest,
 				map[string]interface{}{"sync_trigger": time.Now().Unix()}); err != nil {
 				glog.Errorf("DataWatcher: Failed to trigger sync after moving apps: %v", err)
 			}
-		}()
+		}(userID, sourceID, dw.cacheManager)
+	} else if len(completedApps) > 0 {
+		// Log when completed apps exist but none were moved
+		// 当存在已完成应用但未移动任何应用时记录
+		glog.Warningf("DataWatcher: Found %d completed apps but none were moved to latest (user=%s, source=%s)",
+			len(completedApps), userID, sourceID)
 	}
 
 	return totalProcessed, totalMoved
@@ -261,7 +300,12 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 // isAppHydrationCompleted checks if app hydration is completed using the hydrator
 // isAppHydrationCompleted 使用水合器检查应用水合是否完成
 func (dw *DataWatcher) isAppHydrationCompleted(pendingApp *AppInfoLatestPendingData) bool {
-	if pendingApp == nil || dw.hydrator == nil {
+	if pendingApp == nil {
+		glog.V(2).Infof("DataWatcher: isAppHydrationCompleted called with nil pendingApp")
+		return false
+	}
+	if dw.hydrator == nil {
+		glog.Errorf("DataWatcher: Hydrator is nil, cannot check hydration completion")
 		return false
 	}
 
@@ -308,6 +352,33 @@ func (dw *DataWatcher) getAppID(pendingApp *AppInfoLatestPendingData) string {
 // convertPendingToLatest 将AppInfoLatestPendingData转换为AppInfoLatestData
 func (dw *DataWatcher) convertPendingToLatest(pendingApp *AppInfoLatestPendingData) *AppInfoLatestData {
 	if pendingApp == nil {
+		glog.Warningf("DataWatcher: convertPendingToLatest called with nil pendingApp")
+		return nil
+	}
+
+	// Validate that the pending app has essential data
+	// 验证待处理应用是否包含基本数据
+	hasRawData := pendingApp.RawData != nil
+	hasAppInfo := pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil
+	hasPackageInfo := pendingApp.RawPackage != "" || pendingApp.RenderedPackage != ""
+
+	// Return nil if no essential data is present
+	// 如果没有基本数据则返回nil
+	if !hasRawData && !hasAppInfo && !hasPackageInfo {
+		appID := dw.getAppID(pendingApp)
+		glog.Warningf("DataWatcher: Skipping conversion of pending app %s - no essential data found", appID)
+		return nil
+	}
+
+	// Additional validation for data integrity
+	// 额外的数据完整性验证
+	if hasRawData && (pendingApp.RawData.AppID == "" && pendingApp.RawData.ID == "" && pendingApp.RawData.Name == "") {
+		glog.Warningf("DataWatcher: Skipping conversion - RawData exists but lacks identifying information")
+		return nil
+	}
+
+	if hasAppInfo && (pendingApp.AppInfo.AppEntry.AppID == "" && pendingApp.AppInfo.AppEntry.ID == "" && pendingApp.AppInfo.AppEntry.Name == "") {
+		glog.Warningf("DataWatcher: Skipping conversion - AppInfo exists but lacks identifying information")
 		return nil
 	}
 

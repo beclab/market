@@ -363,6 +363,66 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 
 // NewAppInfoLatestData creates a new app info latest data structure
 func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
+	// Validate input data - ensure we have meaningful data to work with
+	// 验证输入数据 - 确保有有意义的数据可处理
+	if data == nil || len(data) == 0 {
+		log.Printf("DEBUG: NewAppInfoLatestData called with nil or empty data, returning nil")
+		return nil
+	}
+
+	// Check if we have essential app identifiers or meaningful content
+	// 检查是否有基本的应用标识符或有意义的内容
+	var appID, appName string
+	hasEssentialData := false
+
+	if id, ok := data["id"].(string); ok && id != "" {
+		appID = id
+		hasEssentialData = true
+	}
+	if name, ok := data["name"].(string); ok && name != "" {
+		appName = name
+		hasEssentialData = true
+	}
+	if appID == "" {
+		if aid, ok := data["appID"].(string); ok && aid != "" {
+			appID = aid
+			hasEssentialData = true
+		} else if aid, ok := data["app_id"].(string); ok && aid != "" {
+			appID = aid
+			hasEssentialData = true
+		}
+	}
+	if appName == "" {
+		if title, ok := data["title"].(string); ok && title != "" {
+			appName = title
+			hasEssentialData = true
+		}
+	}
+
+	// Check for other indicators of valid app data
+	// 检查其他有效应用数据的指示器
+	if !hasEssentialData {
+		// Check for chart name, icon, or other app-specific fields
+		// 检查chart名称、图标或其他应用特定字段
+		if chartName, ok := data["chartName"].(string); ok && chartName != "" {
+			hasEssentialData = true
+		} else if icon, ok := data["icon"].(string); ok && icon != "" {
+			hasEssentialData = true
+		} else if desc, ok := data["description"].(string); ok && desc != "" {
+			hasEssentialData = true
+		} else if version, ok := data["version"].(string); ok && version != "" {
+			hasEssentialData = true
+		}
+	}
+
+	// If no essential data found, return nil to prevent empty data creation
+	// 如果没有找到基本数据，返回nil以防止创建空数据
+	if !hasEssentialData {
+		log.Printf("DEBUG: NewAppInfoLatestData found no essential app data in input, returning nil")
+		log.Printf("DEBUG: Input data keys: %v", getMapKeys(data))
+		return nil
+	}
+
 	// For backward compatibility, we'll try to create a basic AppInfoLatestData structure
 	// 为了向后兼容，我们将尝试创建基本的AppInfoLatestData结构
 	appInfoLatest := &AppInfoLatestData{
@@ -382,85 +442,65 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 		appInfoLatest.Version = version
 	}
 
-	// For backward compatibility, if the data contains app information,
-	// try to create a basic ApplicationInfoEntry
-	// 为了向后兼容，如果数据包含应用信息，尝试创建基本的ApplicationInfoEntry
-	if len(data) > 0 {
-		// Try to determine if this looks like app data
-		// 尝试确定这是否看起来像应用数据
-		var appID, appName string
+	// Create ApplicationInfoEntry with the validated data
+	// 使用验证过的数据创建ApplicationInfoEntry
+	if appID == "" && appName != "" {
+		appID = appName
+	}
+	if appName == "" && appID != "" {
+		appName = appID
+	}
 
-		if id, ok := data["id"].(string); ok && id != "" {
-			appID = id
-		}
-		if name, ok := data["name"].(string); ok && name != "" {
-			appName = name
-		}
-		if appID == "" {
-			if aid, ok := data["appID"].(string); ok && aid != "" {
-				appID = aid
-			} else if aid, ok := data["app_id"].(string); ok && aid != "" {
-				appID = aid
-			}
-		}
-		if appName == "" {
-			if title, ok := data["title"].(string); ok && title != "" {
-				appName = title
-			}
-		}
+	rawData := &ApplicationInfoEntry{
+		ID:         appID,
+		AppID:      appID,
+		Name:       appName,
+		Title:      appName,
+		CreateTime: getCurrentTimestamp(),
+		UpdateTime: getCurrentTimestamp(),
+		Metadata:   make(map[string]interface{}),
+	}
 
-		// If we have basic app identifiers, create a minimal ApplicationInfoEntry
-		// 如果我们有基本的应用标识符，创建最小的ApplicationInfoEntry
-		if appID != "" || appName != "" {
-			if appID == "" {
-				appID = appName
-			}
-			if appName == "" {
-				appName = appID
-			}
+	// Store the original data in metadata for later processing
+	// 将原始数据存储在元数据中供后续处理
+	rawData.Metadata["source_data"] = data
+	rawData.Metadata["data_type"] = "legacy_app_latest_data"
 
-			rawData := &ApplicationInfoEntry{
-				ID:         appID,
-				AppID:      appID,
-				Name:       appName,
-				Title:      appName,
-				CreateTime: getCurrentTimestamp(),
-				UpdateTime: getCurrentTimestamp(),
-				Metadata:   make(map[string]interface{}),
-			}
+	// Extract other basic fields if available
+	// 如果可用，提取其他基本字段
+	if desc, ok := data["description"].(string); ok {
+		rawData.Description = desc
+	}
+	if icon, ok := data["icon"].(string); ok {
+		rawData.Icon = icon
+	}
+	if version, ok := data["version"].(string); ok {
+		rawData.Version = version
+	}
+	if chartName, ok := data["chartName"].(string); ok {
+		rawData.ChartName = chartName
+	}
+	if cfgType, ok := data["cfgType"].(string); ok {
+		rawData.CfgType = cfgType
+	}
 
-			// Store the original data in metadata for later processing
-			// 将原始数据存储在元数据中供后续处理
-			rawData.Metadata["source_data"] = data
-			rawData.Metadata["data_type"] = "legacy_app_latest_data"
-
-			// Extract other basic fields if available
-			// 如果可用，提取其他基本字段
-			if desc, ok := data["description"].(string); ok {
-				rawData.Description = desc
-			}
-			if icon, ok := data["icon"].(string); ok {
-				rawData.Icon = icon
-			}
-			if version, ok := data["version"].(string); ok {
-				rawData.Version = version
-			}
-			if chartName, ok := data["chartName"].(string); ok {
-				rawData.ChartName = chartName
-			}
-			if cfgType, ok := data["cfgType"].(string); ok {
-				rawData.CfgType = cfgType
-			}
-
-			appInfoLatest.RawData = rawData
-			appInfoLatest.AppInfo = &AppInfo{
-				AppEntry:      rawData,
-				ImageAnalysis: nil, // Will be filled later if needed
-			}
-		}
+	appInfoLatest.RawData = rawData
+	appInfoLatest.AppInfo = &AppInfo{
+		AppEntry:      rawData,
+		ImageAnalysis: nil, // Will be filled later if needed
 	}
 
 	return appInfoLatest
+}
+
+// Helper function to get map keys for debugging
+// 辅助函数，获取map的键用于调试
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // NewAppInfoLatestPendingData creates a new app info latest pending data structure
@@ -559,11 +599,11 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	// 检查是否有基本的应用标识符 (id, name, 或 appID)
 	var primaryID, primaryName string
 
-	if id, ok := appData["id"].(string); ok && id != "" && id != "0" {
+	if id, ok := appData["id"].(string); ok && id != "" {
 		primaryID = id
 		log.Printf("DEBUG: Found primaryID from 'id': %s", primaryID)
 	}
-	if name, ok := appData["name"].(string); ok && name != "" && name != "unknown" {
+	if name, ok := appData["name"].(string); ok && name != "" {
 		primaryName = name
 		log.Printf("DEBUG: Found primaryName from 'name': %s", primaryName)
 	}
@@ -580,7 +620,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 		}
 	}
 	if primaryName == "" {
-		if title, ok := appData["title"].(string); ok && title != "" && title != "unknown" {
+		if title, ok := appData["title"].(string); ok && title != "" {
 			primaryName = title
 			log.Printf("DEBUG: Found primaryName from 'title': %s", primaryName)
 		}
