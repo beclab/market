@@ -304,9 +304,15 @@ func (h *Hydrator) checkForPendingData() {
 		for sourceID, sourceData := range userData.Sources {
 			sourceData.Mutex.RLock()
 
-			// Check if there's pending data
-			// 检查是否有待处理数据
+			// Log source type for debugging - both local and remote should be processed
+			// 记录源类型以供调试 - 本地和远程类型都应被处理
+			log.Printf("Checking pending data for user: %s, source: %s, type: %s", userID, sourceID, sourceData.Type)
+
+			// Check if there's pending data - process both local and remote sources
+			// 检查是否有待处理数据 - 处理本地和远程源
 			if len(sourceData.AppInfoLatestPending) > 0 {
+				log.Printf("Found %d pending apps for user: %s, source: %s, type: %s",
+					len(sourceData.AppInfoLatestPending), userID, sourceID, sourceData.Type)
 				for _, pendingData := range sourceData.AppInfoLatestPending {
 					h.createTasksFromPendingData(userID, sourceID, pendingData)
 				}

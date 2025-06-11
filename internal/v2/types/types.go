@@ -27,6 +27,15 @@ const (
 	Other                AppDataType = "other"
 )
 
+// SourceDataType represents the type of source data
+// SourceDataType 表示源数据的类型
+type SourceDataType string
+
+const (
+	SourceDataTypeLocal  SourceDataType = "local"  // Local source data
+	SourceDataTypeRemote SourceDataType = "remote" // Remote source data
+)
+
 // Recommend represents recommendation configuration
 type Recommend struct {
 	Name        string    `json:"name"`
@@ -238,6 +247,7 @@ type AppOtherData struct {
 
 // SourceData contains all app data for a specific source
 type SourceData struct {
+	Type                 SourceDataType              `json:"type"` // Source type: local or remote
 	AppInfoHistory       []*AppInfoHistoryData       `json:"app_info_history"`
 	AppStateLatest       []*AppStateLatestData       `json:"app_state_latest"`
 	AppInfoLatest        []*AppInfoLatestData        `json:"app_info_latest"`
@@ -320,14 +330,33 @@ func NewCacheData() *CacheData {
 
 // NewUserData creates a new user data structure
 func NewUserData() *UserData {
-	return &UserData{
+	userData := &UserData{
 		Sources: make(map[string]*SourceData),
 	}
+
+	// Create a default local source for the user
+	// 为用户创建默认的本地源
+	userData.Sources["local"] = NewSourceDataWithType(SourceDataTypeLocal)
+
+	return userData
 }
 
 // NewSourceData creates a new source data structure
 func NewSourceData() *SourceData {
 	return &SourceData{
+		Type:                 SourceDataTypeRemote, // Default to remote type
+		AppInfoHistory:       make([]*AppInfoHistoryData, 0),
+		AppStateLatest:       make([]*AppStateLatestData, 0),
+		AppInfoLatest:        make([]*AppInfoLatestData, 0),
+		AppInfoLatestPending: make([]*AppInfoLatestPendingData, 0),
+	}
+}
+
+// NewSourceDataWithType creates a new source data structure with specified type
+// NewSourceDataWithType 创建指定类型的新源数据结构
+func NewSourceDataWithType(sourceType SourceDataType) *SourceData {
+	return &SourceData{
+		Type:                 sourceType,
 		AppInfoHistory:       make([]*AppInfoHistoryData, 0),
 		AppStateLatest:       make([]*AppStateLatestData, 0),
 		AppInfoLatest:        make([]*AppInfoLatestData, 0),
