@@ -23,6 +23,7 @@ type AppInfoModule struct {
 	redisClient  *RedisClient
 	syncer       *Syncer
 	hydrator     *Hydrator
+	dataWatcher  *DataWatcher
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mutex        sync.RWMutex
@@ -32,15 +33,16 @@ type AppInfoModule struct {
 // ModuleConfig holds configuration for the AppInfo module
 // ModuleConfig 保存 AppInfo 模块的配置
 type ModuleConfig struct {
-	Redis          *RedisConfig    `json:"redis"`
-	Syncer         *SyncerConfig   `json:"syncer"`
-	Cache          *CacheConfig    `json:"cache"`
-	User           *UserConfig     `json:"user"`
-	Hydrator       *HydratorConfig `json:"hydrator"`
-	EnableSync     bool            `json:"enable_sync"`
-	EnableCache    bool            `json:"enable_cache"`
-	EnableHydrator bool            `json:"enable_hydrator"`
-	StartTimeout   time.Duration   `json:"start_timeout"`
+	Redis             *RedisConfig    `json:"redis"`
+	Syncer            *SyncerConfig   `json:"syncer"`
+	Cache             *CacheConfig    `json:"cache"`
+	User              *UserConfig     `json:"user"`
+	Hydrator          *HydratorConfig `json:"hydrator"`
+	EnableSync        bool            `json:"enable_sync"`
+	EnableCache       bool            `json:"enable_cache"`
+	EnableHydrator    bool            `json:"enable_hydrator"`
+	EnableDataWatcher bool            `json:"enable_data_watcher"`
+	StartTimeout      time.Duration   `json:"start_timeout"`
 }
 
 // CacheConfig holds cache-specific configuration
@@ -160,6 +162,14 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
+	// Initialize DataWatcher if enabled and dependencies are available
+	// 如果启用且依赖项可用，则初始化DataWatcher
+	if m.config.EnableDataWatcher && m.config.EnableCache && m.config.EnableHydrator {
+		if err := m.initDataWatcher(); err != nil {
+			return fmt.Errorf("failed to initialize DataWatcher: %w", err)
+		}
+	}
+
 	// Set up hydration notifier connection if both cache and hydrator are enabled
 	if m.config.EnableCache && m.config.EnableHydrator && m.cacheManager != nil && m.hydrator != nil {
 		m.cacheManager.SetHydrationNotifier(m.hydrator)
@@ -183,16 +193,20 @@ func (m *AppInfoModule) Stop() error {
 
 	glog.Infof("Stopping AppInfo module...")
 
-	// Stop syncer
-	if m.syncer != nil {
-		m.syncer.Stop()
-		glog.Infof("Syncer stopped")
-	}
-
-	// Stop hydrator
+	// Stop components in reverse order
+	// 按相反顺序停止组件
 	if m.hydrator != nil {
 		m.hydrator.Stop()
-		glog.Infof("Hydrator stopped")
+	}
+
+	// Stop DataWatcher
+	// 停止DataWatcher
+	if m.dataWatcher != nil {
+		m.dataWatcher.Stop()
+	}
+
+	if m.syncer != nil {
+		m.syncer.Stop()
 	}
 
 	// Stop cache manager
@@ -234,12 +248,19 @@ func (m *AppInfoModule) GetSyncer() *Syncer {
 	return m.syncer
 }
 
-// GetHydrator returns the hydrator instance
-// GetHydrator 返回水合器实例
+// GetHydrator returns the hydrator instance (可能为nil)
 func (m *AppInfoModule) GetHydrator() *Hydrator {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.hydrator
+}
+
+// GetDataWatcher returns the DataWatcher instance (可能为nil)
+// GetDataWatcher 返回DataWatcher实例 (可能为nil)
+func (m *AppInfoModule) GetDataWatcher() *DataWatcher {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.dataWatcher
 }
 
 // GetRedisClient returns the Redis client instance
@@ -265,15 +286,17 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	defer m.mutex.RUnlock()
 
 	status := map[string]interface{}{
-		"is_started":      m.isStarted,
-		"enable_sync":     m.config.EnableSync,
-		"enable_cache":    m.config.EnableCache,
-		"enable_hydrator": m.config.EnableHydrator,
+		"is_started":          m.isStarted,
+		"enable_sync":         m.config.EnableSync,
+		"enable_cache":        m.config.EnableCache,
+		"enable_hydrator":     m.config.EnableHydrator,
+		"enable_data_watcher": m.config.EnableDataWatcher,
 		"components": map[string]interface{}{
 			"redis_client":  m.redisClient != nil,
 			"cache_manager": m.cacheManager != nil,
 			"syncer":        m.syncer != nil,
 			"hydrator":      m.hydrator != nil,
+			"data_watcher":  m.dataWatcher != nil,
 		},
 	}
 
@@ -292,6 +315,13 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	if m.hydrator != nil {
 		status["hydrator_running"] = m.hydrator.IsRunning()
 		status["hydrator_metrics"] = m.hydrator.GetMetrics()
+	}
+
+	// Add DataWatcher status
+	// 添加DataWatcher状态
+	if m.dataWatcher != nil {
+		status["data_watcher_running"] = m.dataWatcher.IsRunning()
+		status["data_watcher_metrics"] = m.dataWatcher.GetMetrics()
 	}
 
 	return status
@@ -408,6 +438,32 @@ func (m *AppInfoModule) initHydrator() error {
 	}
 
 	glog.Infof("Hydrator initialized successfully")
+	return nil
+}
+
+// initDataWatcher initializes the DataWatcher
+// initDataWatcher 初始化DataWatcher
+func (m *AppInfoModule) initDataWatcher() error {
+	glog.Infof("Initializing DataWatcher...")
+
+	if m.cacheManager == nil {
+		return fmt.Errorf("cache manager is required for DataWatcher")
+	}
+
+	if m.hydrator == nil {
+		return fmt.Errorf("hydrator is required for DataWatcher")
+	}
+
+	// Create DataWatcher instance
+	// 创建DataWatcher实例
+	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator)
+
+	// Start DataWatcher
+	if err := m.dataWatcher.Start(m.ctx); err != nil {
+		return fmt.Errorf("failed to start DataWatcher: %w", err)
+	}
+
+	glog.Infof("DataWatcher initialized successfully")
 	return nil
 }
 
@@ -537,6 +593,11 @@ func DefaultModuleConfig() *ModuleConfig {
 	enableHydrator, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_HYDRATOR"))
 	if err != nil {
 		enableHydrator = true
+	}
+
+	enableDataWatcher, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_DATA_WATCHER"))
+	if err != nil {
+		enableDataWatcher = true
 	}
 
 	startTimeout, err := time.ParseDuration(os.Getenv("MODULE_START_TIMEOUT"))
@@ -673,10 +734,11 @@ func DefaultModuleConfig() *ModuleConfig {
 			AuthTimeout:           authTimeout,
 			DefaultPermissions:    defaultPermissions,
 		},
-		EnableSync:     enableSync,
-		EnableCache:    enableCache,
-		EnableHydrator: enableHydrator,
-		StartTimeout:   startTimeout,
+		EnableSync:        enableSync,
+		EnableCache:       enableCache,
+		EnableHydrator:    enableHydrator,
+		EnableDataWatcher: enableDataWatcher,
+		StartTimeout:      startTimeout,
 	}
 }
 

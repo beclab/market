@@ -108,10 +108,14 @@ type AppStateLatestData struct {
 
 // AppInfoLatestData contains latest app info data
 type AppInfoLatestData struct {
-	Type      AppDataType            `json:"type"`
-	Data      map[string]interface{} `json:"data"`
-	Timestamp int64                  `json:"timestamp"`
-	Version   string                 `json:"version,omitempty"`
+	Type            AppDataType           `json:"type"`
+	Timestamp       int64                 `json:"timestamp"`
+	Version         string                `json:"version,omitempty"`
+	RawData         *ApplicationInfoEntry `json:"raw_data"`
+	RawPackage      string                `json:"raw_package"`
+	Values          []*Values             `json:"values"` // Changed to array
+	AppInfo         *AppInfo              `json:"app_info"`
+	RenderedPackage string                `json:"rendered_package"`
 }
 
 // Values represents custom rendering parameters
@@ -359,11 +363,104 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 
 // NewAppInfoLatestData creates a new app info latest data structure
 func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
-	return &AppInfoLatestData{
-		Type:      AppInfoLatest,
-		Data:      data,
-		Timestamp: getCurrentTimestamp(),
+	// For backward compatibility, we'll try to create a basic AppInfoLatestData structure
+	// 为了向后兼容，我们将尝试创建基本的AppInfoLatestData结构
+	appInfoLatest := &AppInfoLatestData{
+		Type:            AppInfoLatest,
+		Timestamp:       getCurrentTimestamp(),
+		Version:         "",
+		RawData:         nil,
+		RawPackage:      "",
+		Values:          make([]*Values, 0),
+		AppInfo:         &AppInfo{},
+		RenderedPackage: "",
 	}
+
+	// Extract version if available in the data
+	// 如果数据中有版本信息则提取
+	if version, ok := data["version"].(string); ok && version != "" {
+		appInfoLatest.Version = version
+	}
+
+	// For backward compatibility, if the data contains app information,
+	// try to create a basic ApplicationInfoEntry
+	// 为了向后兼容，如果数据包含应用信息，尝试创建基本的ApplicationInfoEntry
+	if len(data) > 0 {
+		// Try to determine if this looks like app data
+		// 尝试确定这是否看起来像应用数据
+		var appID, appName string
+
+		if id, ok := data["id"].(string); ok && id != "" {
+			appID = id
+		}
+		if name, ok := data["name"].(string); ok && name != "" {
+			appName = name
+		}
+		if appID == "" {
+			if aid, ok := data["appID"].(string); ok && aid != "" {
+				appID = aid
+			} else if aid, ok := data["app_id"].(string); ok && aid != "" {
+				appID = aid
+			}
+		}
+		if appName == "" {
+			if title, ok := data["title"].(string); ok && title != "" {
+				appName = title
+			}
+		}
+
+		// If we have basic app identifiers, create a minimal ApplicationInfoEntry
+		// 如果我们有基本的应用标识符，创建最小的ApplicationInfoEntry
+		if appID != "" || appName != "" {
+			if appID == "" {
+				appID = appName
+			}
+			if appName == "" {
+				appName = appID
+			}
+
+			rawData := &ApplicationInfoEntry{
+				ID:         appID,
+				AppID:      appID,
+				Name:       appName,
+				Title:      appName,
+				CreateTime: getCurrentTimestamp(),
+				UpdateTime: getCurrentTimestamp(),
+				Metadata:   make(map[string]interface{}),
+			}
+
+			// Store the original data in metadata for later processing
+			// 将原始数据存储在元数据中供后续处理
+			rawData.Metadata["source_data"] = data
+			rawData.Metadata["data_type"] = "legacy_app_latest_data"
+
+			// Extract other basic fields if available
+			// 如果可用，提取其他基本字段
+			if desc, ok := data["description"].(string); ok {
+				rawData.Description = desc
+			}
+			if icon, ok := data["icon"].(string); ok {
+				rawData.Icon = icon
+			}
+			if version, ok := data["version"].(string); ok {
+				rawData.Version = version
+			}
+			if chartName, ok := data["chartName"].(string); ok {
+				rawData.ChartName = chartName
+			}
+			if cfgType, ok := data["cfgType"].(string); ok {
+				rawData.CfgType = cfgType
+			}
+
+			appInfoLatest.RawData = rawData
+			appInfoLatest.AppInfo = &AppInfo{
+				AppEntry:      rawData,
+				ImageAnalysis: nil, // Will be filled later if needed
+			}
+		}
+	}
+
+	return appInfoLatest
 }
 
 // NewAppInfoLatestPendingData creates a new app info latest pending data structure
