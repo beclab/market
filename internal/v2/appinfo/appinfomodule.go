@@ -25,6 +25,7 @@ type AppInfoModule struct {
 	hydrator         *Hydrator
 	dataWatcher      *DataWatcher
 	dataWatcherState *DataWatcherState
+	dataWatcherUser  *DataWatcherUser
 	ctx              context.Context
 	cancel           context.CancelFunc
 	mutex            sync.RWMutex
@@ -44,6 +45,7 @@ type ModuleConfig struct {
 	EnableHydrator         bool            `json:"enable_hydrator"`
 	EnableDataWatcher      bool            `json:"enable_data_watcher"`
 	EnableDataWatcherState bool            `json:"enable_data_watcher_state"`
+	EnableDataWatcherUser  bool            `json:"enable_data_watcher_user"`
 	StartTimeout           time.Duration   `json:"start_timeout"`
 }
 
@@ -180,6 +182,14 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
+	// Initialize DataWatcherUser if enabled
+	// 如果启用，则初始化DataWatcherUser
+	if m.config.EnableDataWatcherUser {
+		if err := m.initDataWatcherUser(); err != nil {
+			return fmt.Errorf("failed to initialize DataWatcherUser: %w", err)
+		}
+	}
+
 	// Set up hydration notifier connection if both cache and hydrator are enabled
 	if m.config.EnableCache && m.config.EnableHydrator && m.cacheManager != nil && m.hydrator != nil {
 		m.cacheManager.SetHydrationNotifier(m.hydrator)
@@ -221,6 +231,13 @@ func (m *AppInfoModule) Stop() error {
 		if err := m.dataWatcherState.Stop(); err != nil {
 			glog.Errorf("Failed to stop DataWatcherState: %v", err)
 		}
+	}
+
+	// Stop DataWatcherUser
+	// 停止DataWatcherUser
+	if m.dataWatcherUser != nil {
+		m.dataWatcherUser.Stop()
+		glog.Infof("DataWatcherUser stopped")
 	}
 
 	if m.syncer != nil {
@@ -289,6 +306,14 @@ func (m *AppInfoModule) GetDataWatcherState() *DataWatcherState {
 	return m.dataWatcherState
 }
 
+// GetDataWatcherUser returns the DataWatcherUser instance (可能为nil)
+// GetDataWatcherUser 返回DataWatcherUser实例 (可能为nil)
+func (m *AppInfoModule) GetDataWatcherUser() *DataWatcherUser {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.dataWatcherUser
+}
+
 // GetRedisClient returns the Redis client instance
 // GetRedisClient 返回 Redis 客户端实例
 func (m *AppInfoModule) GetRedisClient() *RedisClient {
@@ -318,6 +343,7 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 		"enable_hydrator":           m.config.EnableHydrator,
 		"enable_data_watcher":       m.config.EnableDataWatcher,
 		"enable_data_watcher_state": m.config.EnableDataWatcherState,
+		"enable_data_watcher_user":  m.config.EnableDataWatcherUser,
 		"components": map[string]interface{}{
 			"redis_client":       m.redisClient != nil,
 			"cache_manager":      m.cacheManager != nil,
@@ -325,6 +351,7 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 			"hydrator":           m.hydrator != nil,
 			"data_watcher":       m.dataWatcher != nil,
 			"data_watcher_state": m.dataWatcherState != nil,
+			"data_watcher_user":  m.dataWatcherUser != nil,
 		},
 	}
 
@@ -350,6 +377,13 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	if m.dataWatcher != nil {
 		status["data_watcher_running"] = m.dataWatcher.IsRunning()
 		status["data_watcher_metrics"] = m.dataWatcher.GetMetrics()
+	}
+
+	// Add DataWatcherUser status
+	// 添加DataWatcherUser状态
+	if m.dataWatcherUser != nil {
+		status["data_watcher_user_healthy"] = m.dataWatcherUser.IsHealthy()
+		status["data_watcher_user_status"] = m.dataWatcherUser.GetStatus()
 	}
 
 	return status
@@ -514,6 +548,24 @@ func (m *AppInfoModule) initDataWatcherState() error {
 	return nil
 }
 
+// initDataWatcherUser initializes the DataWatcherUser
+// initDataWatcherUser 初始化DataWatcherUser
+func (m *AppInfoModule) initDataWatcherUser() error {
+	glog.Infof("Initializing DataWatcherUser...")
+
+	// Create DataWatcherUser instance
+	// 创建DataWatcherUser实例
+	m.dataWatcherUser = NewDataWatcherUser()
+
+	// Start DataWatcherUser
+	if err := m.dataWatcherUser.Start(m.ctx); err != nil {
+		return fmt.Errorf("failed to start DataWatcherUser: %w", err)
+	}
+
+	glog.Infof("DataWatcherUser initialized successfully")
+	return nil
+}
+
 // validateConfig validates the module configuration
 // validateConfig 验证模块配置
 func validateConfig(config *ModuleConfig) error {
@@ -650,6 +702,11 @@ func DefaultModuleConfig() *ModuleConfig {
 	enableDataWatcherState, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_DATA_WATCHER_STATE"))
 	if err != nil {
 		enableDataWatcherState = true
+	}
+
+	enableDataWatcherUser, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_DATA_WATCHER_USER"))
+	if err != nil {
+		enableDataWatcherUser = true
 	}
 
 	startTimeout, err := time.ParseDuration(os.Getenv("MODULE_START_TIMEOUT"))
@@ -791,6 +848,7 @@ func DefaultModuleConfig() *ModuleConfig {
 		EnableHydrator:         enableHydrator,
 		EnableDataWatcher:      enableDataWatcher,
 		EnableDataWatcherState: enableDataWatcherState,
+		EnableDataWatcherUser:  enableDataWatcherUser,
 		StartTimeout:           startTimeout,
 	}
 }
