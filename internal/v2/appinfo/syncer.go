@@ -154,6 +154,7 @@ func getVersionForSync() string {
 
 // executeSyncCycle executes one complete synchronization cycle
 func (s *Syncer) executeSyncCycle(ctx context.Context) error {
+	log.Println("==================== SYNC CYCLE STARTED ====================")
 	log.Println("Starting sync cycle")
 	startTime := time.Now()
 
@@ -161,6 +162,7 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	// 获取可用的数据源
 	activeSources := s.settingsManager.GetActiveMarketSources()
 	if len(activeSources) == 0 {
+		log.Println("==================== SYNC CYCLE FAILED ====================")
 		return fmt.Errorf("no active market sources available")
 	}
 
@@ -182,17 +184,21 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		// 使用此源成功
 		duration := time.Since(startTime)
 		log.Printf("Sync cycle completed successfully with source %s in %v", source.Name, duration)
+		log.Println("==================== SYNC CYCLE COMPLETED ====================")
 		return nil
 	}
 
 	// All sources failed
 	// 所有源都失败了
+	log.Println("==================== SYNC CYCLE FAILED ====================")
 	return fmt.Errorf("all market sources failed, last error: %w", lastError)
 }
 
 // executeSyncCycleWithSource executes sync cycle with a specific market source
 // 使用特定市场源执行同步周期
 func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *settings.MarketSource) error {
+	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.Name)
+
 	syncContext := syncerfn.NewSyncContext(s.cache)
 
 	// Set version for API requests using utils function
@@ -207,22 +213,27 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 	steps := s.GetSteps()
 	for i, step := range steps {
+		log.Printf("======== SYNC STEP %d/%d STARTED: %s ========", i+1, len(steps), step.GetStepName())
 		stepStartTime := time.Now()
 
 		// Check if step can be skipped
 		if step.CanSkip(ctx, syncContext) {
 			log.Printf("Skipping step %d: %s", i+1, step.GetStepName())
+			log.Printf("======== SYNC STEP %d/%d SKIPPED: %s ========", i+1, len(steps), step.GetStepName())
 			continue
 		}
 
 		// Execute step
 		if err := step.Execute(ctx, syncContext); err != nil {
 			log.Printf("Step %d (%s) failed: %v", i+1, step.GetStepName(), err)
+			log.Printf("======== SYNC STEP %d/%d FAILED: %s ========", i+1, len(steps), step.GetStepName())
+			log.Printf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.Name)
 			return fmt.Errorf("step %d failed: %w", i+1, err)
 		}
 
 		stepDuration := time.Since(stepStartTime)
 		log.Printf("Step %d (%s) completed in %v", i+1, step.GetStepName(), stepDuration)
+		log.Printf("======== SYNC STEP %d/%d COMPLETED: %s ========", i+1, len(steps), step.GetStepName())
 	}
 
 	// Report any errors collected during the process
@@ -304,6 +315,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			syncContext.HashMatches, syncContext.RemoteHash, syncContext.LocalHash)
 	}
 
+	log.Printf("-------------------- SOURCE SYNC COMPLETED: %s --------------------", source.Name)
 	return nil
 }
 

@@ -200,6 +200,7 @@ func (h *Hydrator) worker(ctx context.Context, workerID int) {
 // processTask processes a single hydration task
 // processTask 处理单个水合任务
 func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationTask, workerID int) {
+	log.Printf("==================== HYDRATION TASK STARTED ====================")
 	log.Printf("Worker %d processing task: %s for app: %s", workerID, task.ID, task.AppID)
 
 	task.SetStatus(hydrationfn.TaskStatusRunning)
@@ -215,16 +216,19 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 		// 检查步骤是否可以跳过
 		if step.CanSkip(ctx, task) {
 			log.Printf("Skipping step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
+			log.Printf("-------- HYDRATION STEP %d/%d SKIPPED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.IncrementStep()
 			continue
 		}
 
+		log.Printf("-------- HYDRATION STEP %d/%d STARTED: %s --------", i+1, len(h.steps), step.GetStepName())
 		log.Printf("Executing step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
 
 		// Execute step
 		// 执行步骤
 		if err := step.Execute(ctx, task); err != nil {
 			log.Printf("Step %d (%s) failed for task: %s, error: %v", i+1, step.GetStepName(), task.ID, err)
+			log.Printf("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.SetError(err)
 
 			// Check if task can be retried
@@ -242,18 +246,21 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 						h.markTaskFailed(task)
 					}
 				}()
+				log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY ====================")
 				return
 			} else {
 				// Max retries exceeded
 				// 超过最大重试次数
 				log.Printf("Task failed after max retries: %s", task.ID)
 				h.markTaskFailed(task)
+				log.Printf("==================== HYDRATION TASK FAILED ====================")
 				return
 			}
 		}
 
 		task.IncrementStep()
 		log.Printf("Step %d (%s) completed for task: %s", i+1, step.GetStepName(), task.ID)
+		log.Printf("-------- HYDRATION STEP %d/%d COMPLETED: %s --------", i+1, len(h.steps), step.GetStepName())
 	}
 
 	// All steps completed successfully
@@ -262,6 +269,7 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 	h.markTaskCompleted(task)
 
 	log.Printf("Task completed successfully: %s for app: %s", task.ID, task.AppID)
+	log.Printf("==================== HYDRATION TASK COMPLETED ====================")
 }
 
 // pendingDataMonitor monitors for new pending data and creates tasks

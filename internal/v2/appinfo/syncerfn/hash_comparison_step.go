@@ -2,7 +2,6 @@ package syncerfn
 
 import (
 	"context"
-	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -90,7 +89,7 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 
 	// Calculate local hash
 	// 计算本地hash
-	data.LocalHash = h.calculateLocalHash(data.Cache)
+	data.LocalHash = h.calculateLocalHash(data.Cache, data.GetMarketSource())
 
 	// Compare hashes and set result
 	// 比较hash并设置结果
@@ -113,13 +112,22 @@ func (h *HashComparisonStep) CanSkip(ctx context.Context, data *SyncContext) boo
 	return false // Always execute hash comparison
 }
 
-// calculateLocalHash computes hash from local SourceData Others.Hash
-// calculateLocalHash 从本地SourceData Others.Hash获取hash
-func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData) string {
+// calculateLocalHash computes hash from local SourceData Others.Hash for specific market source
+// calculateLocalHash 从特定市场源的本地SourceData Others.Hash获取hash
+func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSource *settings.MarketSource) string {
 	if cache == nil {
 		log.Printf("Cache is nil, returning empty_cache hash")
 		return "empty_cache"
 	}
+
+	if marketSource == nil {
+		log.Printf("MarketSource is nil, returning no_market_source hash")
+		return "no_market_source"
+	}
+
+	// Use market source name as source ID to match syncer.go behavior
+	// 使用市场源名称作为源ID以匹配syncer.go的行为
+	sourceID := marketSource.Name
 
 	cache.Mutex.RLock()
 	defer cache.Mutex.RUnlock()
@@ -131,61 +139,47 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData) string {
 		return "empty_cache_no_users"
 	}
 
-	// Collect all Others.Hash values from all sources across all users
-	// 收集所有用户所有源的Others.Hash值
-	var othersHashes []string
+	// Look for Others.Hash only in the current market source
+	// 只在当前市场源中查找Others.Hash
+	var sourceHash string
 	var foundValidHash bool
 
 	for userID, userData := range cache.Users {
 		userData.Mutex.RLock()
 
-		for sourceID, sourceData := range userData.Sources {
+		// Check if this user has data for the specific source
+		// 检查该用户是否有特定源的数据
+		if sourceData, exists := userData.Sources[sourceID]; exists {
 			sourceData.Mutex.RLock()
 
 			// Check if Others exists and has a Hash
 			// 检查Others是否存在并包含Hash
 			if sourceData.Others != nil && sourceData.Others.Hash != "" {
-				othersHashes = append(othersHashes, sourceData.Others.Hash)
+				sourceHash = sourceData.Others.Hash
 				foundValidHash = true
-				log.Printf("Found Others.Hash for user:%s source:%s hash:%s", userID, sourceID, sourceData.Others.Hash)
+				log.Printf("Found Others.Hash for user:%s source:%s hash:%s", userID, sourceID, sourceHash)
+				sourceData.Mutex.RUnlock()
+				userData.Mutex.RUnlock()
+				break // Use the first valid hash found
 			} else {
 				log.Printf("No valid Others.Hash for user:%s source:%s (Others: %v)", userID, sourceID, sourceData.Others)
 			}
 
 			sourceData.Mutex.RUnlock()
+		} else {
+			log.Printf("No data found for user:%s source:%s", userID, sourceID)
 		}
 
 		userData.Mutex.RUnlock()
 	}
 
-	// If no valid Others.Hash found, return appropriate hash
-	// 如果没有找到有效的Others.Hash，返回相应的hash
+	// If no valid Others.Hash found for the specific source, return appropriate hash
+	// 如果没有为特定源找到有效的Others.Hash，返回相应的hash
 	if !foundValidHash {
-		log.Printf("No valid Others.Hash found in any source, returning no_others_hash")
-		return "no_others_hash"
+		log.Printf("No valid Others.Hash found for source:%s, returning no_source_hash", sourceID)
+		return "no_source_hash"
 	}
 
-	// If only one hash found, return it directly
-	// 如果只找到一个hash，直接返回
-	if len(othersHashes) == 1 {
-		localHash := othersHashes[0]
-		log.Printf("Using single Others.Hash as local hash: %s", localHash)
-		return localHash
-	}
-
-	// If multiple hashes found, create a combined hash
-	// 如果找到多个hash，创建组合hash
-	var combinedContent string
-	for i, hash := range othersHashes {
-		combinedContent += fmt.Sprintf("hash_%d:%s", i, hash)
-	}
-
-	// Calculate MD5 hash of combined hashes
-	// 计算组合hash的MD5值
-	hasher := md5.New()
-	hasher.Write([]byte(combinedContent))
-	localHash := fmt.Sprintf("%x", hasher.Sum(nil))
-
-	log.Printf("Combined multiple Others.Hash values into local hash: %s (from hashes: %v)", localHash, othersHashes)
-	return localHash
+	log.Printf("Using Others.Hash from source:%s as local hash: %s", sourceID, sourceHash)
+	return sourceHash
 }
