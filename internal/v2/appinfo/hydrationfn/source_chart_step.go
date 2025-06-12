@@ -84,7 +84,13 @@ func (s *SourceChartStep) CanSkip(ctx context.Context, task *HydrationTask) bool
 		log.Printf("Chart file exists locally, skipping download: %s", localChartPath)
 		// Set the local path in task for consistency
 		// 为了一致性，在任务中设置本地路径
-		task.SourceChartURL = "file://" + localChartPath
+		// Convert to absolute path before creating file:// URL
+		// 在创建file:// URL之前转换为绝对路径
+		absLocalChartPath, err := filepath.Abs(localChartPath)
+		if err != nil {
+			return false // Cannot skip if path conversion fails
+		}
+		task.SourceChartURL = "file://" + absLocalChartPath
 		task.ChartData["source_info"] = chartInfo
 		task.ChartData["local_path"] = localChartPath
 		return true
@@ -155,7 +161,13 @@ func (s *SourceChartStep) Execute(ctx context.Context, task *HydrationTask) erro
 	// 检查本地chart文件是否已存在
 	if _, err := os.Stat(localChartPath); err == nil {
 		log.Printf("Chart file already exists locally: %s", localChartPath)
-		task.SourceChartURL = "file://" + localChartPath
+		// Convert to absolute path before creating file:// URL
+		// 在创建file:// URL之前转换为绝对路径
+		absLocalChartPath, err := filepath.Abs(localChartPath)
+		if err != nil {
+			return fmt.Errorf("failed to convert chart path to absolute path: %w", err)
+		}
+		task.SourceChartURL = "file://" + absLocalChartPath
 		task.ChartData["local_path"] = localChartPath
 
 		// Update AppInfoLatestPendingData with source chart path
@@ -186,7 +198,13 @@ func (s *SourceChartStep) Execute(ctx context.Context, task *HydrationTask) erro
 
 	// Store the local chart path in task
 	// 在任务中存储本地chart路径
-	task.SourceChartURL = "file://" + localChartPath
+	// Convert to absolute path before creating file:// URL
+	// 在创建file:// URL之前转换为绝对路径
+	absLocalChartPath, err := filepath.Abs(localChartPath)
+	if err != nil {
+		return fmt.Errorf("failed to convert chart path to absolute path: %w", err)
+	}
+	task.SourceChartURL = "file://" + absLocalChartPath
 	task.ChartData["local_path"] = localChartPath
 	task.ChartData["download_url"] = downloadURL
 

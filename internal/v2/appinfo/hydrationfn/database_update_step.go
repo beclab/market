@@ -295,8 +295,14 @@ func (s *DatabaseUpdateStep) updatePackageInformation(task *HydrationTask) error
 	if task.SourceChartURL != "" {
 		pendingDataRef.RawPackage = task.SourceChartURL
 	}
-	if task.RenderedChartURL != "" {
-		pendingDataRef.RenderedPackage = task.RenderedChartURL
+
+	// RenderedPackage should only contain local file paths, not remote URLs
+	// RenderedPackage应该只包含本地文件路径，而不是远程URL
+	if renderedChartDir, exists := task.ChartData["rendered_chart_dir"].(string); exists && renderedChartDir != "" {
+		pendingDataRef.RenderedPackage = renderedChartDir
+		log.Printf("Updated RenderedPackage with local path: %s", renderedChartDir)
+	} else {
+		log.Printf("No local rendered chart directory found, keeping existing RenderedPackage value")
 	}
 
 	log.Printf("Updated package information for app: %s (RawPackage: %s, RenderedPackage: %s)",
