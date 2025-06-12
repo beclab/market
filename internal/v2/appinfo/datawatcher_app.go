@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
@@ -141,17 +142,38 @@ func (dw *DataWatcher) processCompletedApps() {
 	}
 	defer dw.processingMutex.Unlock()
 
+	processingStart := time.Now()
 	dw.metricsMutex.Lock()
 	dw.lastRunTime = time.Now()
 	dw.metricsMutex.Unlock()
 
 	glog.Infof("DataWatcher: Starting to process completed apps")
 
-	// Get all users data from cache manager
-	// 从缓存管理器获取所有用户数据
-	allUsersData := dw.cacheManager.GetAllUsersData()
+	// Create timeout context for entire processing cycle
+	// 为整个处理周期创建超时上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	// Get all users data from cache manager with timeout
+	// 带超时从缓存管理器获取所有用户数据
+	var allUsersData map[string]*types.UserData
+
+	userDataChan := make(chan map[string]*types.UserData, 1)
+	go func() {
+		data := dw.cacheManager.GetAllUsersData()
+		userDataChan <- data
+	}()
+
+	select {
+	case allUsersData = <-userDataChan:
+		// Successfully got user data
+	case <-ctx.Done():
+		glog.Errorf("DataWatcher: Timeout getting all users data")
+		return
+	}
+
 	if len(allUsersData) == 0 {
-		glog.Infof("DataWatcher: No users data found, processing cycle completed")
+		glog.Infof("DataWatcher: No users data found, processing cycle completed in %v", time.Since(processingStart))
 		return
 	}
 
@@ -159,16 +181,39 @@ func (dw *DataWatcher) processCompletedApps() {
 	totalProcessed := int64(0)
 	totalMoved := int64(0)
 
-	// Process each user's data
-	// 处理每个用户的数据
+	// Process users in batches to avoid holding locks too long
+	// 批量处理用户以避免长时间持有锁
+	const batchSize = 5
 	userCount := 0
+	userBatch := make([]string, 0, batchSize)
+	userDataBatch := make(map[string]*types.UserData)
+
 	for userID, userData := range allUsersData {
+		userBatch = append(userBatch, userID)
+		userDataBatch[userID] = userData
 		userCount++
-		glog.Infof("DataWatcher: Processing user %d/%d: %s", userCount, len(allUsersData), userID)
-		processed, moved := dw.processUserData(userID, userData)
-		totalProcessed += processed
-		totalMoved += moved
-		glog.Infof("DataWatcher: User %s completed: %d processed, %d moved", userID, processed, moved)
+
+		// Process batch when it's full or we've reached the end
+		// 当批次满或到达末尾时处理批次
+		if len(userBatch) >= batchSize || userCount == len(allUsersData) {
+			batchProcessed, batchMoved := dw.processUserBatch(ctx, userBatch, userDataBatch)
+			totalProcessed += batchProcessed
+			totalMoved += batchMoved
+
+			// Clear batch for next iteration
+			// 清除批次以进行下一次迭代
+			userBatch = userBatch[:0]
+			userDataBatch = make(map[string]*types.UserData)
+
+			// Check timeout between batches
+			// 在批次之间检查超时
+			select {
+			case <-ctx.Done():
+				glog.Errorf("DataWatcher: Timeout during batch processing after processing %d users", userCount)
+				return
+			default:
+			}
+		}
 	}
 
 	// Update metrics
@@ -178,12 +223,45 @@ func (dw *DataWatcher) processCompletedApps() {
 	dw.totalAppsMoved += totalMoved
 	dw.metricsMutex.Unlock()
 
+	processingDuration := time.Since(processingStart)
 	if totalMoved > 0 {
-		glog.Infof("DataWatcher: Processing cycle completed - %d apps processed, %d moved to AppInfoLatest",
-			totalProcessed, totalMoved)
+		glog.Infof("DataWatcher: Processing cycle completed in %v - %d apps processed, %d moved to AppInfoLatest",
+			processingDuration, totalProcessed, totalMoved)
 	} else {
-		glog.Infof("DataWatcher: Processing cycle completed - %d apps processed, no moves needed", totalProcessed)
+		glog.Infof("DataWatcher: Processing cycle completed in %v - %d apps processed, no moves needed",
+			processingDuration, totalProcessed)
 	}
+}
+
+// processUserBatch processes a batch of users
+// processUserBatch 处理一批用户
+func (dw *DataWatcher) processUserBatch(ctx context.Context, userIDs []string, userDataMap map[string]*types.UserData) (int64, int64) {
+	totalProcessed := int64(0)
+	totalMoved := int64(0)
+
+	for i, userID := range userIDs {
+		// Check timeout during batch processing
+		// 在批处理过程中检查超时
+		select {
+		case <-ctx.Done():
+			glog.Errorf("DataWatcher: Timeout during user batch processing (user %d/%d)", i+1, len(userIDs))
+			return totalProcessed, totalMoved
+		default:
+		}
+
+		userData := userDataMap[userID]
+		if userData == nil {
+			continue
+		}
+
+		glog.Infof("DataWatcher: Processing user %d/%d in batch: %s", i+1, len(userIDs), userID)
+		processed, moved := dw.processUserData(userID, userData)
+		totalProcessed += processed
+		totalMoved += moved
+		glog.V(2).Infof("DataWatcher: User %s completed: %d processed, %d moved", userID, processed, moved)
+	}
+
+	return totalProcessed, totalMoved
 }
 
 // processUserData processes a single user's data
@@ -497,23 +575,11 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 		return 0, 0
 	}
 
-	// Add safety checks for DataWatcher components
-	// 为DataWatcher组件添加安全检查
-	if dw.cacheManager == nil {
-		glog.Errorf("DataWatcher: CacheManager is nil for user=%s, source=%s", userID, sourceID)
-		return 0, 0
-	}
-	if dw.hydrator == nil {
-		glog.Errorf("DataWatcher: Hydrator is nil for user=%s, source=%s", userID, sourceID)
-		return 0, 0
-	}
-	if userID == "" || sourceID == "" {
-		glog.Errorf("DataWatcher: Invalid userID or sourceID (userID=%s, sourceID=%s)", userID, sourceID)
-		return 0, 0
-	}
+	// Create timeout context for this source processing
+	// 为此源处理创建超时上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-	// Step 1: Use read lock to check and identify completed apps
-	// 步骤1：使用读锁检查并识别已完成的应用
 	var pendingApps []*AppInfoLatestPendingData
 	var completedApps []*AppInfoLatestPendingData
 	// Initialize as empty slice instead of nil to ensure it's never null
@@ -521,30 +587,52 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 	remainingPendingApps := make([]*AppInfoLatestPendingData, 0)
 
 	glog.V(2).Infof("DataWatcher: Acquiring read lock to check pending apps for user=%s, source=%s", userID, sourceID)
-	sourceData.Mutex.RLock()
 
-	// Quick check - if no pending apps, exit early
-	// 快速检查 - 如果没有待处理应用，提早退出
-	if len(sourceData.AppInfoLatestPending) == 0 {
-		sourceData.Mutex.RUnlock()
-		glog.V(2).Infof("DataWatcher: No pending apps for user=%s, source=%s", userID, sourceID)
+	// Step 1: Quick check and data copy with minimal lock time
+	// 步骤1：最小锁时间的快速检查和数据复制
+	func() {
+		sourceData.Mutex.RLock()
+		defer sourceData.Mutex.RUnlock()
+
+		// Quick check - if no pending apps, exit early
+		// 快速检查 - 如果没有待处理应用，提早退出
+		if len(sourceData.AppInfoLatestPending) == 0 {
+			glog.V(2).Infof("DataWatcher: No pending apps for user=%s, source=%s", userID, sourceID)
+			return
+		}
+
+		// Copy pending apps for processing outside the lock
+		// 复制待处理应用以在锁外处理
+		pendingApps = make([]*AppInfoLatestPendingData, len(sourceData.AppInfoLatestPending))
+		copy(pendingApps, sourceData.AppInfoLatestPending)
+	}()
+
+	// Early exit if no pending apps found
+	// 如果没有找到待处理应用则提早退出
+	if len(pendingApps) == 0 {
 		return 0, 0
 	}
-
-	// Copy pending apps for processing outside the lock
-	// 复制待处理应用以在锁外处理
-	pendingApps = make([]*AppInfoLatestPendingData, len(sourceData.AppInfoLatestPending))
-	copy(pendingApps, sourceData.AppInfoLatestPending)
-	sourceData.Mutex.RUnlock()
 
 	glog.Infof("DataWatcher: Found %d pending apps to check for user=%s, source=%s", len(pendingApps), userID, sourceID)
 
 	totalProcessed := int64(len(pendingApps))
 
-	// Step 2: Check completion status without holding any locks
-	// 步骤2：在不持有任何锁的情况下检查完成状态
-	for _, pendingApp := range pendingApps {
-		if dw.isAppHydrationCompleted(pendingApp) {
+	// Step 2: Check completion status without any locks
+	// 步骤2：在没有任何锁的情况下检查完成状态
+	for i, pendingApp := range pendingApps {
+		// Check context timeout during processing
+		// 在处理过程中检查上下文超时
+		select {
+		case <-ctx.Done():
+			glog.Errorf("DataWatcher: Timeout during pending apps processing for user=%s, source=%s (processed %d/%d)",
+				userID, sourceID, i, len(pendingApps))
+			return totalProcessed, 0
+		default:
+		}
+
+		// Use timeout-protected hydration check
+		// 使用超时保护的水合检查
+		if dw.isAppHydrationCompletedWithTimeout(ctx, pendingApp) {
 			// App hydration is complete, prepare to move it
 			// 应用水合已完成，准备移动它
 			completedApps = append(completedApps, pendingApp)
@@ -569,28 +657,53 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 	glog.Infof("DataWatcher: Found %d completed apps, acquiring write lock for user=%s, source=%s",
 		len(completedApps), userID, sourceID)
 
-	lockStartTime := time.Now()
-	sourceData.Mutex.Lock()
-	lockAcquireTime := time.Since(lockStartTime)
-	glog.Infof("DataWatcher: Write lock acquired in %v for user=%s, source=%s", lockAcquireTime, userID, sourceID)
+	// Step 4: Attempt write lock with shorter timeout to avoid long waits
+	// 步骤4：尝试获取写锁，使用更短的超时以避免长时间等待
+	lockCtx, lockCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer lockCancel()
 
-	defer func() {
-		sourceData.Mutex.Unlock()
-		totalLockTime := time.Since(lockStartTime)
-		glog.Infof("DataWatcher: Write lock released after %v for user=%s, source=%s", totalLockTime, userID, sourceID)
+	lockStartTime := time.Now()
+	lockAcquired := false
+
+	// Try to acquire write lock with timeout
+	// 尝试获取带超时的写锁
+	writeLockChan := make(chan bool, 1)
+	go func() {
+		sourceData.Mutex.Lock()
+		writeLockChan <- true
 	}()
 
-	// Re-verify that pending apps haven't changed while we were processing
-	// 重新验证在我们处理时待处理应用没有发生变化
-	if len(sourceData.AppInfoLatestPending) != len(pendingApps) {
-		glog.Warningf("DataWatcher: Pending apps changed during processing for user=%s, source=%s (was %d, now %d)",
-			userID, sourceID, len(pendingApps), len(sourceData.AppInfoLatestPending))
-		// Could implement more sophisticated reconciliation here if needed
-		// 如果需要，可以在这里实现更复杂的协调逻辑
+	select {
+	case <-writeLockChan:
+		lockAcquired = true
+		lockAcquireTime := time.Since(lockStartTime)
+		glog.Infof("DataWatcher: Write lock acquired in %v for user=%s, source=%s", lockAcquireTime, userID, sourceID)
+
+		defer func() {
+			sourceData.Mutex.Unlock()
+			totalLockTime := time.Since(lockStartTime)
+			glog.Infof("DataWatcher: Write lock released after %v for user=%s, source=%s", totalLockTime, userID, sourceID)
+		}()
+	case <-lockCtx.Done():
+		glog.Warningf("DataWatcher: Timeout acquiring write lock for user=%s, source=%s, will retry next cycle", userID, sourceID)
+		return totalProcessed, 0
 	}
 
-	// Step 4: Move completed apps to AppInfoLatest (under write lock)
-	// 步骤4：将完成的应用移动到AppInfoLatest（在写锁下）
+	if !lockAcquired {
+		return totalProcessed, 0
+	}
+
+	// Step 5: Re-verify data hasn't changed during our processing
+	// 步骤5：重新验证数据在我们处理期间没有发生变化
+	currentPendingCount := len(sourceData.AppInfoLatestPending)
+	if currentPendingCount != len(pendingApps) {
+		glog.Warningf("DataWatcher: Pending apps changed during processing for user=%s, source=%s (was %d, now %d), will retry next cycle",
+			userID, sourceID, len(pendingApps), currentPendingCount)
+		return totalProcessed, 0
+	}
+
+	// Step 6: Move completed apps to AppInfoLatest (under write lock)
+	// 步骤6：将完成的应用移动到AppInfoLatest（在写锁下）
 	actualMovedCount := int64(0)
 	for _, completedApp := range completedApps {
 		latestApp := dw.convertPendingToLatest(completedApp)
@@ -616,8 +729,8 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 		glog.Infof("DataWatcher: Moved %d completed apps from pending to latest for user=%s, source=%s",
 			totalMoved, userID, sourceID)
 
-		// Trigger sync to Redis for this source
-		// 为此源触发Redis同步
+		// Trigger sync to Redis for this source (async to avoid holding lock)
+		// 为此源触发Redis同步（异步以避免持有锁）
 		go func(userID, sourceID string, cacheManager *CacheManager) {
 			// Add nil checks and validation before calling SetAppData
 			// 在调用SetAppData之前添加nil检查和验证
@@ -645,11 +758,11 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 	return totalProcessed, totalMoved
 }
 
-// isAppHydrationCompleted checks if app hydration is completed using the hydrator
-// isAppHydrationCompleted 使用水合器检查应用水合是否完成
-func (dw *DataWatcher) isAppHydrationCompleted(pendingApp *AppInfoLatestPendingData) bool {
+// isAppHydrationCompletedWithTimeout checks if app hydration is completed with timeout protection
+// isAppHydrationCompletedWithTimeout 带超时保护检查应用水合是否完成
+func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, pendingApp *AppInfoLatestPendingData) bool {
 	if pendingApp == nil {
-		glog.V(2).Infof("DataWatcher: isAppHydrationCompleted called with nil pendingApp")
+		glog.V(2).Infof("DataWatcher: isAppHydrationCompletedWithTimeout called with nil pendingApp")
 		return false
 	}
 	if dw.hydrator == nil {
@@ -657,9 +770,34 @@ func (dw *DataWatcher) isAppHydrationCompleted(pendingApp *AppInfoLatestPendingD
 		return false
 	}
 
-	// Use the hydrator's method to check completion
-	// 使用水合器的方法检查完成状态
-	return dw.hydrator.isAppHydrationComplete(pendingApp)
+	// Create a channel to receive the result
+	// 创建通道接收结果
+	resultChan := make(chan bool, 1)
+
+	// Run hydration check in a goroutine with timeout
+	// 在协程中运行带超时的水合检查
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				glog.Errorf("DataWatcher: Panic in hydration check: %v", r)
+				resultChan <- false
+			}
+		}()
+
+		result := dw.hydrator.isAppHydrationComplete(pendingApp)
+		resultChan <- result
+	}()
+
+	// Wait for result or timeout
+	// 等待结果或超时
+	select {
+	case result := <-resultChan:
+		return result
+	case <-ctx.Done():
+		appID := dw.getAppID(pendingApp)
+		glog.Warningf("DataWatcher: Timeout checking hydration completion for app=%s", appID)
+		return false
+	}
 }
 
 // getAppID extracts app ID from pending app data
@@ -764,6 +902,10 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *AppInfoLatestPendingDa
 	// 复制版本信息
 	latestApp.Version = pendingApp.Version
 
+	// Create AppSimpleInfo from available data
+	// 从可用数据创建AppSimpleInfo
+	latestApp.AppSimpleInfo = dw.createAppSimpleInfo(pendingApp)
+
 	return latestApp
 }
 
@@ -808,4 +950,105 @@ func (dw *DataWatcher) SetInterval(interval time.Duration) {
 
 	dw.interval = interval
 	glog.Infof("DataWatcher interval set to: %v", interval)
+}
+
+// createAppSimpleInfo creates an AppSimpleInfo from pending app data
+// createAppSimpleInfo 从待处理应用数据创建AppSimpleInfo
+func (dw *DataWatcher) createAppSimpleInfo(pendingApp *AppInfoLatestPendingData) *AppSimpleInfo {
+	if pendingApp == nil {
+		return nil
+	}
+
+	appSimpleInfo := &AppSimpleInfo{}
+
+	// Extract information from RawData if available
+	// 如果可用，从RawData中提取信息
+	if pendingApp.RawData != nil {
+		// Use AppID as the primary identifier
+		// 使用AppID作为主要标识符
+		if pendingApp.RawData.AppID != "" {
+			appSimpleInfo.AppID = pendingApp.RawData.AppID
+		} else if pendingApp.RawData.ID != "" {
+			appSimpleInfo.AppID = pendingApp.RawData.ID
+		}
+
+		// Use Name or Title for AppName
+		// 使用Name或Title作为AppName
+		if pendingApp.RawData.Name != "" {
+			appSimpleInfo.AppName = pendingApp.RawData.Name
+		} else if pendingApp.RawData.Title != "" {
+			appSimpleInfo.AppName = pendingApp.RawData.Title
+		}
+
+		// Use Icon for AppIcon
+		// 使用Icon作为AppIcon
+		appSimpleInfo.AppIcon = pendingApp.RawData.Icon
+
+		// Use Description for AppDescription
+		// 使用Description作为AppDescription
+		appSimpleInfo.AppDescription = pendingApp.RawData.Description
+
+		// Use Version for AppVersion
+		// 使用Version作为AppVersion
+		appSimpleInfo.AppVersion = pendingApp.RawData.Version
+	}
+
+	// Fallback to AppInfo data if RawData is insufficient
+	// 如果RawData不足，则回退到AppInfo数据
+	if pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil {
+		entry := pendingApp.AppInfo.AppEntry
+
+		// Fill missing AppID
+		// 填充缺失的AppID
+		if appSimpleInfo.AppID == "" {
+			if entry.AppID != "" {
+				appSimpleInfo.AppID = entry.AppID
+			} else if entry.ID != "" {
+				appSimpleInfo.AppID = entry.ID
+			}
+		}
+
+		// Fill missing AppName
+		// 填充缺失的AppName
+		if appSimpleInfo.AppName == "" {
+			if entry.Name != "" {
+				appSimpleInfo.AppName = entry.Name
+			} else if entry.Title != "" {
+				appSimpleInfo.AppName = entry.Title
+			}
+		}
+
+		// Fill missing AppIcon
+		// 填充缺失的AppIcon
+		if appSimpleInfo.AppIcon == "" {
+			appSimpleInfo.AppIcon = entry.Icon
+		}
+
+		// Fill missing AppDescription
+		// 填充缺失的AppDescription
+		if appSimpleInfo.AppDescription == "" {
+			appSimpleInfo.AppDescription = entry.Description
+		}
+
+		// Fill missing AppVersion
+		// 填充缺失的AppVersion
+		if appSimpleInfo.AppVersion == "" {
+			appSimpleInfo.AppVersion = entry.Version
+		}
+	}
+
+	// Use pendingApp version if still empty
+	// 如果仍为空，使用pendingApp的版本
+	if appSimpleInfo.AppVersion == "" && pendingApp.Version != "" {
+		appSimpleInfo.AppVersion = pendingApp.Version
+	}
+
+	// Return nil if no essential information is available
+	// 如果没有基本信息可用，返回nil
+	if appSimpleInfo.AppID == "" && appSimpleInfo.AppName == "" {
+		glog.Warningf("DataWatcher: createAppSimpleInfo - no essential app information available")
+		return nil
+	}
+
+	return appSimpleInfo
 }

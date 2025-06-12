@@ -190,13 +190,19 @@ func (s *DatabaseUpdateStep) determineAnalysisStatus(result *types.ImageAnalysis
 	}
 
 	successCount := 0
+	analysisAttemptedCount := 0
 	for _, img := range result.Images {
-		if img.Status == "fully_downloaded" || img.Status == "partially_downloaded" {
+		analysisAttemptedCount++
+		// Consider private registry images as successfully analyzed
+		// 将私有注册表镜像视为成功分析
+		if img.Status == "fully_downloaded" || img.Status == "partially_downloaded" || img.Status == "private_registry" {
 			successCount++
 		}
 	}
 
-	if successCount == result.TotalImages {
+	// If all images were successfully analyzed (including private registry detection)
+	// 如果所有镜像都成功分析（包括私有注册表检测）
+	if successCount == result.TotalImages && analysisAttemptedCount == result.TotalImages {
 		return "completed"
 	} else if successCount > 0 {
 		return "partial"
@@ -221,237 +227,178 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 		return fmt.Errorf("cache reference is nil")
 	}
 
-	// Lock cache for thread-safe access
-	// 锁定缓存以进行线程安全访问
-	task.Cache.Mutex.Lock()
-	defer task.Cache.Mutex.Unlock()
+	// Step 1: Prepare all data outside of any locks
+	// 步骤1：在任何锁之外准备所有数据
+	log.Printf("Preparing update data for app: %s (user: %s, source: %s)", task.AppID, task.UserID, task.SourceID)
 
-	// Ensure user exists in cache
-	// 确保用户在缓存中存在
-	if _, exists := task.Cache.Users[task.UserID]; !exists {
-		task.Cache.Users[task.UserID] = types.NewUserData()
-		log.Printf("Created user data in cache for user: %s", task.UserID)
+	// Prepare metadata for hydration completion
+	// 为水合完成准备元数据
+	hydrationMetadata := map[string]interface{}{
+		"hydration_status":    "completed",
+		"hydration_timestamp": time.Now().Unix(),
+		"processing_time":     time.Since(task.CreatedAt).Seconds(),
+		"retry_count":         task.RetryCount,
+		"hydration_task_id":   task.ID,
+		"source_chart_url":    task.SourceChartURL,
+		"rendered_chart_url":  task.RenderedChartURL,
+		"validation_status":   "validated",
+		"data_source":         "hydration_task",
 	}
 
-	userData := task.Cache.Users[task.UserID]
-	userData.Mutex.Lock()
-	defer userData.Mutex.Unlock()
-
-	// Ensure source exists for user
-	// 确保用户的源存在
-	if _, exists := userData.Sources[task.SourceID]; !exists {
-		userData.Sources[task.SourceID] = types.NewSourceData()
-		log.Printf("Created source data in cache for user: %s, source: %s", task.UserID, task.SourceID)
+	// Step 2: Update RawPackage and RenderedPackage fields in pending data
+	// 步骤2：更新待处理数据中的RawPackage和RenderedPackage字段
+	log.Printf("Updating package information for app: %s", task.AppID)
+	if err := s.updatePackageInformation(task); err != nil {
+		log.Printf("Warning: Failed to update package information for app %s: %v", task.AppID, err)
+		// Continue with other updates even if package update fails
+		// 即使包更新失败也继续其他更新
 	}
 
-	sourceData := userData.Sources[task.SourceID]
-	sourceData.Mutex.Lock()
-	defer sourceData.Mutex.Unlock()
-
-	// Find and update the corresponding pending data
-	// 查找并更新对应的待处理数据
-	var foundPendingData *types.AppInfoLatestPendingData
-
-	log.Printf("Looking for pending data for task %s (appID: %s) among %d pending entries",
-		task.ID, task.AppID, len(sourceData.AppInfoLatestPending))
-
-	for i, pendingData := range sourceData.AppInfoLatestPending {
-		log.Printf("Checking pending data %d: RawData exists: %t", i, pendingData.RawData != nil)
-		if pendingData.RawData != nil {
-			log.Printf("  RawData - ID: %s, AppID: %s", pendingData.RawData.ID, pendingData.RawData.AppID)
-		}
-		if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
-			log.Printf("  AppInfo.AppEntry - ID: %s, AppID: %s",
-				pendingData.AppInfo.AppEntry.ID, pendingData.AppInfo.AppEntry.AppID)
-		}
-
-		if s.isTaskForPendingData(task, pendingData) {
-			foundPendingData = sourceData.AppInfoLatestPending[i]
-			log.Printf("Found matching pending data at index %d for task %s", i, task.ID)
-			break
-		}
+	// Step 3: Update AppInfo with image analysis
+	// 步骤3：使用镜像分析更新AppInfo
+	log.Printf("Updating AppInfo with image analysis for app: %s", task.AppID)
+	if err := s.updateAppInfoWithImages(task, imageAnalysis, hydrationMetadata); err != nil {
+		return fmt.Errorf("failed to update AppInfo with images: %w", err)
 	}
 
-	if foundPendingData == nil {
-		// Create new pending data entry from task information
-		// 从任务信息创建新的待处理数据条目
-		log.Printf("No matching pending data found for task %s, creating new pending entry", task.ID)
+	log.Printf("Cache update completed for app: %s with %d Docker images analyzed",
+		task.AppID, s.getImageCount(imageAnalysis))
+	return nil
+}
 
-		// Validate task data before creating new pending data entry
-		// 在创建新的待处理数据条目之前验证任务数据
-		if task.AppID == "" && task.AppName == "" {
-			log.Printf("Warning: Task %s has no valid app identifiers (AppID and AppName are both empty), skipping pending data creation", task.ID)
-			return fmt.Errorf("task %s has no valid app identifiers", task.ID)
-		}
+// updatePackageInformation updates RawPackage and RenderedPackage fields
+// updatePackageInformation 更新RawPackage和RenderedPackage字段
+func (s *DatabaseUpdateStep) updatePackageInformation(task *HydrationTask) error {
+	if task.Cache == nil {
+		return fmt.Errorf("cache reference is nil")
+	}
 
-		// Use AppID as primary identifier, fallback to AppName if AppID is empty
-		// 使用AppID作为主要标识符，如果AppID为空则回退到AppName
-		primaryID := task.AppID
-		primaryName := task.AppName
+	// Get the specific pending data entry for this task
+	// 获取此任务的特定待处理数据条目
+	pendingDataRef, err := s.findPendingDataForTask(task)
+	if err != nil {
+		return fmt.Errorf("failed to find pending data: %w", err)
+	}
 
-		if primaryID == "" && primaryName != "" {
-			primaryID = primaryName // Use AppName as ID if AppID is empty
-		}
-		if primaryName == "" && primaryID != "" {
-			primaryName = primaryID // Use AppID as Name if AppName is empty
-		}
-
-		// Create ApplicationInfoEntry from task data
-		// 从任务数据创建ApplicationInfoEntry
-		rawData := &types.ApplicationInfoEntry{
-			ID:          primaryID,
-			AppID:       primaryID,
-			Name:        primaryName,
-			Version:     task.AppVersion,
-			Title:       primaryName,
-			Description: "",
-		}
-
-		// Extract additional fields from task.AppData if available
-		// 如果可用，从task.AppData中提取其他字段
-		if task.AppData != nil {
-			if name, ok := task.AppData["name"].(string); ok && name != "" {
-				rawData.Name = name
-				primaryName = name
-			}
-			if title, ok := task.AppData["title"].(string); ok && title != "" {
-				rawData.Title = title
-			}
-			if desc, ok := task.AppData["description"].(string); ok {
-				rawData.Description = desc
-			}
-			if icon, ok := task.AppData["icon"].(string); ok {
-				rawData.Icon = icon
-			}
-			if developer, ok := task.AppData["developer"].(string); ok {
-				rawData.Developer = developer
-			}
-		}
-
-		// Add processing metadata
-		// 添加处理元数据
-		rawData.Metadata = make(map[string]interface{})
-		rawData.Metadata["hydration_status"] = "completed"
-		rawData.Metadata["hydration_timestamp"] = time.Now().Unix()
-		rawData.Metadata["processing_time"] = time.Since(task.CreatedAt).Seconds()
-		rawData.Metadata["retry_count"] = task.RetryCount
-		rawData.Metadata["hydration_task_id"] = task.ID
-		rawData.Metadata["source_chart_url"] = task.SourceChartURL
-		rawData.Metadata["rendered_chart_url"] = task.RenderedChartURL
-		rawData.Metadata["validation_status"] = "validated"
-		rawData.Metadata["primary_identifier"] = primaryID
-		rawData.Metadata["primary_name"] = primaryName
-		rawData.Metadata["data_source"] = "hydration_task"
-
-		// Create new pending data entry
-		// 创建新的待处理数据条目
-		newPendingData := &types.AppInfoLatestPendingData{
-			Type:      types.AppInfoLatestPending,
-			Timestamp: time.Now().Unix(),
-			Version:   task.AppVersion,
-			RawData:   rawData,
-			AppInfo: &types.AppInfo{
-				AppEntry: rawData,
-			},
-		}
-
-		// Add image analysis to AppInfo if available
-		// 如果可用，将镜像分析添加到AppInfo
-		if imageAnalysis != nil {
-			newPendingData.AppInfo.ImageAnalysis = &types.ImageAnalysisResult{
-				AnalyzedAt:  imageAnalysis.AnalyzedAt,
-				TotalImages: imageAnalysis.TotalImages,
-				Images:      imageAnalysis.Images,
-			}
-		}
-
-		// Add to pending data
-		// 添加到待处理数据
-		sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, newPendingData)
-
-		log.Printf("Created new pending data entry for app: %s (user: %s, source: %s) with hydration results",
-			task.AppID, task.UserID, task.SourceID)
+	if pendingDataRef == nil {
+		log.Printf("No pending data found for task %s, skipping package update", task.ID)
 		return nil
 	}
 
-	// Update the pending data with hydration results
-	// 使用水合结果更新待处理数据
-	if foundPendingData.RawData != nil {
-		// Update other fields from chart data
-		// 从chart数据更新其他字段
-		if task.ChartData != nil {
-			// Copy relevant chart data to RawData
-			// 将相关chart数据复制到RawData
-			for key, value := range task.ChartData {
-				switch key {
-				case "description":
-					if desc, ok := value.(string); ok {
-						foundPendingData.RawData.Description = desc
-					}
-				case "developer":
-					if developer, ok := value.(string); ok {
-						foundPendingData.RawData.Developer = developer
-					}
-				case "icon":
-					if icon, ok := value.(string); ok {
-						foundPendingData.RawData.Icon = icon
-					}
-				case "title":
-					if title, ok := value.(string); ok {
-						foundPendingData.RawData.Title = title
-					}
-				}
-			}
-		}
+	// Update package fields directly (these are simple string assignments)
+	// 直接更新包字段（这些是简单的字符串赋值）
+	if task.SourceChartURL != "" {
+		pendingDataRef.RawPackage = task.SourceChartURL
+	}
+	if task.RenderedChartURL != "" {
+		pendingDataRef.RenderedPackage = task.RenderedChartURL
 	}
 
-	// Update AppInfo section with processed data
-	// 使用处理后的数据更新AppInfo部分
-	if foundPendingData.AppInfo == nil {
-		foundPendingData.AppInfo = &types.AppInfo{}
+	log.Printf("Updated package information for app: %s (RawPackage: %s, RenderedPackage: %s)",
+		task.AppID, pendingDataRef.RawPackage, pendingDataRef.RenderedPackage)
+	return nil
+}
+
+// updateAppInfoWithImages updates AppInfo with image analysis results
+// updateAppInfoWithImages 使用镜像分析结果更新AppInfo
+func (s *DatabaseUpdateStep) updateAppInfoWithImages(task *HydrationTask, imageAnalysis *types.AppImageAnalysis, metadata map[string]interface{}) error {
+	if task.Cache == nil {
+		return fmt.Errorf("cache reference is nil")
 	}
 
-	// Update the AppEntry with chart URLs and processed data
-	// 使用chart URLs和处理数据更新AppEntry
-	if foundPendingData.AppInfo.AppEntry == nil && foundPendingData.RawData != nil {
-		foundPendingData.AppInfo.AppEntry = foundPendingData.RawData
+	// Get the specific pending data entry for this task
+	// 获取此任务的特定待处理数据条目
+	pendingDataRef, err := s.findPendingDataForTask(task)
+	if err != nil {
+		return fmt.Errorf("failed to find pending data: %w", err)
 	}
 
-	// Add or update image analysis in AppInfo
-	// 在AppInfo中添加或更新镜像分析
+	if pendingDataRef == nil {
+		log.Printf("No pending data found for task %s, skipping AppInfo update", task.ID)
+		return nil
+	}
+
+	// Initialize AppInfo if it doesn't exist
+	// 如果AppInfo不存在则初始化
+	if pendingDataRef.AppInfo == nil {
+		pendingDataRef.AppInfo = &types.AppInfo{}
+	}
+
+	// Set AppEntry to RawData if not already set
+	// 如果尚未设置，将AppEntry设置为RawData
+	if pendingDataRef.AppInfo.AppEntry == nil && pendingDataRef.RawData != nil {
+		pendingDataRef.AppInfo.AppEntry = pendingDataRef.RawData
+	}
+
+	// Update image analysis in AppInfo
+	// 在AppInfo中更新镜像分析
 	if imageAnalysis != nil {
-		foundPendingData.AppInfo.ImageAnalysis = &types.ImageAnalysisResult{
+		pendingDataRef.AppInfo.ImageAnalysis = &types.ImageAnalysisResult{
 			AnalyzedAt:  imageAnalysis.AnalyzedAt,
 			TotalImages: imageAnalysis.TotalImages,
 			Images:      imageAnalysis.Images,
 		}
+		log.Printf("Updated image analysis for app: %s (%d images)", task.AppID, imageAnalysis.TotalImages)
 	}
 
-	// Add processing metadata to pending data
-	// 向待处理数据添加处理元数据
-	if foundPendingData.RawData != nil {
-		// Use existing Metadata field if available
-		// 如果可用，使用现有的Metadata字段
-		if foundPendingData.RawData.Metadata == nil {
-			foundPendingData.RawData.Metadata = make(map[string]interface{})
+	// Update metadata in RawData if available
+	// 如果可用，更新RawData中的元数据
+	if pendingDataRef.RawData != nil {
+		if pendingDataRef.RawData.Metadata == nil {
+			pendingDataRef.RawData.Metadata = make(map[string]interface{})
 		}
-		foundPendingData.RawData.Metadata["hydration_status"] = "completed"
-		foundPendingData.RawData.Metadata["hydration_timestamp"] = time.Now().Unix()
-		foundPendingData.RawData.Metadata["processing_time"] = time.Since(task.CreatedAt).Seconds()
-		foundPendingData.RawData.Metadata["retry_count"] = task.RetryCount
-		foundPendingData.RawData.Metadata["hydration_task_id"] = task.ID
-		foundPendingData.RawData.Metadata["source_chart_url"] = task.SourceChartURL
-		foundPendingData.RawData.Metadata["rendered_chart_url"] = task.RenderedChartURL
+		// Copy hydration metadata
+		// 复制水合元数据
+		for key, value := range metadata {
+			pendingDataRef.RawData.Metadata[key] = value
+		}
 	}
 
 	// Update timestamp to reflect processing completion
 	// 更新时间戳以反映处理完成
-	foundPendingData.Timestamp = time.Now().Unix()
+	pendingDataRef.Timestamp = time.Now().Unix()
 
-	log.Printf("Updated pending data for app: %s (user: %s, source: %s) with hydration results including %d Docker images",
-		task.AppID, task.UserID, task.SourceID, s.getImageCount(imageAnalysis))
-
+	log.Printf("Updated AppInfo for app: %s with hydration completion metadata", task.AppID)
 	return nil
+}
+
+// findPendingDataForTask finds the pending data entry for a specific task
+// findPendingDataForTask 查找特定任务的待处理数据条目
+func (s *DatabaseUpdateStep) findPendingDataForTask(task *HydrationTask) (*types.AppInfoLatestPendingData, error) {
+	if task.Cache == nil {
+		return nil, fmt.Errorf("cache reference is nil")
+	}
+
+	// Only acquire minimal locks to find the data
+	// 只获取最小锁来查找数据
+	task.Cache.Mutex.RLock()
+	defer task.Cache.Mutex.RUnlock()
+
+	userData, userExists := task.Cache.Users[task.UserID]
+	if !userExists {
+		return nil, fmt.Errorf("user %s not found in cache", task.UserID)
+	}
+
+	userData.Mutex.RLock()
+	defer userData.Mutex.RUnlock()
+
+	sourceData, sourceExists := userData.Sources[task.SourceID]
+	if !sourceExists {
+		return nil, fmt.Errorf("source %s not found for user %s", task.SourceID, task.UserID)
+	}
+
+	sourceData.Mutex.RLock()
+	defer sourceData.Mutex.RUnlock()
+
+	// Find the matching pending data
+	// 查找匹配的待处理数据
+	for _, pendingData := range sourceData.AppInfoLatestPending {
+		if s.isTaskForPendingData(task, pendingData) {
+			return pendingData, nil
+		}
+	}
+
+	return nil, nil // Not found, but not an error
 }
 
 // isTaskForPendingData checks if the current task corresponds to the pending data

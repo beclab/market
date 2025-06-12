@@ -125,6 +125,7 @@ type AppInfoLatestData struct {
 	Values          []*Values             `json:"values"` // Changed to array
 	AppInfo         *AppInfo              `json:"app_info"`
 	RenderedPackage string                `json:"rendered_package"`
+	AppSimpleInfo   *AppSimpleInfo        `json:"app_simple_info"`
 }
 
 // Values represents custom rendering parameters
@@ -222,6 +223,14 @@ type AppsInfoResponse struct {
 	Version  string                           `json:"version"`
 	NotFound []string                         `json:"not_found,omitempty"`
 	Message  string                           `json:"message,omitempty"` // For 202 Accepted responses
+}
+
+type AppSimpleInfo struct {
+	AppID          string `json:"app_id"`
+	AppName        string `json:"app_name"`
+	AppIcon        string `json:"app_icon"`
+	AppDescription string `json:"app_description"`
+	AppVersion     string `json:"app_version"`
 }
 
 // AppInfoLatestPendingData contains pending app info data with extended structure
