@@ -257,10 +257,95 @@ func extractAppDataFromPending(pendingData *types.AppInfoLatestPendingData) map[
 func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	log.Println("GET /api/v2/market/hash - Getting market hash")
 
-	// TODO: Implement business logic for getting market hash
-	// TODO: 实现获取市场哈希的业务逻辑
+	// Add timeout context
+	// 添加超时上下文
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
 
-	s.sendResponse(w, http.StatusOK, true, "Market hash retrieved successfully", nil)
+	// Check if cache manager is available
+	// 检查缓存管理器是否可用
+	if s.cacheManager == nil {
+		log.Println("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Convert http.Request to restful.Request to reuse utils functions
+	// 将 http.Request 转换为 restful.Request 以复用 utils 函数
+	restfulReq := s.httpToRestfulRequest(r)
+
+	// Get user information from request using utils module
+	// 使用 utils 模块从请求中获取用户信息
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for hash request: %s", userID)
+
+	// Create a channel to receive the result
+	// 创建通道接收结果
+	type result struct {
+		hash string
+		err  error
+	}
+	resultChan := make(chan result, 1)
+
+	// Run the data retrieval in a goroutine
+	// 在协程中运行数据检索
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in getMarketHash: %v", r)
+				resultChan <- result{err: fmt.Errorf("internal error occurred")}
+			}
+		}()
+
+		// Get user data from cache
+		// 从缓存获取用户数据
+		userData := s.cacheManager.GetUserData(userID)
+		if userData == nil {
+			log.Printf("User data not found for user: %s", userID)
+			resultChan <- result{err: fmt.Errorf("user data not found")}
+			return
+		}
+
+		// Get hash from user data
+		// 从用户数据中获取哈希值
+		hash := userData.Hash
+		log.Printf("Retrieved hash for user %s: %s", userID, hash)
+
+		resultChan <- result{hash: hash}
+	}()
+
+	// Wait for result or timeout
+	// 等待结果或超时
+	select {
+	case <-ctx.Done():
+		log.Printf("Request timeout or cancelled for /api/v2/market/hash")
+		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - hash retrieval took too long", nil)
+		return
+	case res := <-resultChan:
+		if res.err != nil {
+			log.Printf("Error retrieving market hash: %v", res.err)
+			if res.err.Error() == "user data not found" {
+				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+			} else {
+				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market hash", nil)
+			}
+			return
+		}
+
+		// Return hash in response data
+		// 在响应数据中返回哈希值
+		hashData := map[string]string{
+			"hash": res.hash,
+		}
+
+		log.Printf("Market hash retrieved successfully for user: %s", userID)
+		s.sendResponse(w, http.StatusOK, true, "Market hash retrieved successfully", hashData)
+	}
 }
 
 // Get market data information
