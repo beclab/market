@@ -254,7 +254,8 @@ type AppOtherData struct {
 	Version   string                 `json:"version,omitempty"`
 }
 
-// SourceData contains all app data for a specific source
+// SourceData represents data from a specific source
+// SourceData 表示来自特定源的数据
 type SourceData struct {
 	Type                 SourceDataType              `json:"type"` // Source type: local or remote
 	AppInfoHistory       []*AppInfoHistoryData       `json:"app_info_history"`
@@ -262,20 +263,26 @@ type SourceData struct {
 	AppInfoLatest        []*AppInfoLatestData        `json:"app_info_latest"`
 	AppInfoLatestPending []*AppInfoLatestPendingData `json:"app_info_latest_pending"`
 	Others               *Others                     `json:"others,omitempty"` // Additional data like hash, topics, etc.
-	Mutex                sync.RWMutex                `json:"-"`
+	// 移除 Mutex，所有锁操作将由 CacheData 统一管理
+	// Remove Mutex, all lock operations will be managed by CacheData
 }
 
-// UserData contains all sources for a specific user
+// UserData represents data for a specific user
+// UserData 表示特定用户的数据
 type UserData struct {
 	Sources map[string]*SourceData `json:"sources"`
 	Hash    string                 `json:"hash"`
-	Mutex   sync.RWMutex           `json:"-"`
+	// 移除 Mutex，所有锁操作将由 CacheData 统一管理
+	// Remove Mutex, all lock operations will be managed by CacheData
 }
 
-// CacheData represents the entire cache structure
+// CacheData represents the entire cache with a single global lock
+// CacheData 表示整个缓存，使用单一全局锁
 type CacheData struct {
 	Users map[string]*UserData `json:"users"`
-	Mutex sync.RWMutex         `json:"-"`
+	// 单一全局锁，管理所有数据访问
+	// Single global lock to manage all data access
+	Mutex sync.RWMutex `json:"-"`
 }
 
 // ImageInfo represents detailed information about a Docker image

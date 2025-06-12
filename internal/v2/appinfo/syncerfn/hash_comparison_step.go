@@ -145,32 +145,22 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSo
 	var foundValidHash bool
 
 	for userID, userData := range cache.Users {
-		userData.Mutex.RLock()
-
 		// Check if this user has data for the specific source
 		// 检查该用户是否有特定源的数据
 		if sourceData, exists := userData.Sources[sourceID]; exists {
-			sourceData.Mutex.RLock()
-
 			// Check if Others exists and has a Hash
 			// 检查Others是否存在并包含Hash
 			if sourceData.Others != nil && sourceData.Others.Hash != "" {
 				sourceHash = sourceData.Others.Hash
 				foundValidHash = true
 				log.Printf("Found Others.Hash for user:%s source:%s hash:%s", userID, sourceID, sourceHash)
-				sourceData.Mutex.RUnlock()
-				userData.Mutex.RUnlock()
 				break // Use the first valid hash found
 			} else {
 				log.Printf("No valid Others.Hash for user:%s source:%s (Others: %v)", userID, sourceID, sourceData.Others)
 			}
-
-			sourceData.Mutex.RUnlock()
 		} else {
 			log.Printf("No data found for user:%s source:%s", userID, sourceID)
 		}
-
-		userData.Mutex.RUnlock()
 	}
 
 	// If no valid Others.Hash found for the specific source, return appropriate hash

@@ -2,7 +2,6 @@ package appinfo
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"sync"
 	"time"
@@ -266,19 +265,17 @@ func (dw *DataWatcher) processUserBatch(ctx context.Context, userIDs []string, u
 
 // processUserData processes a single user's data
 // processUserData 处理单个用户的数据
-func (dw *DataWatcher) processUserData(userID string, userData *UserData) (int64, int64) {
+func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) (int64, int64) {
 	if userData == nil {
 		return 0, 0
 	}
 
 	// Step 1: Collect source data references under minimal lock
 	// 步骤1：在最小锁保护下收集源数据引用
-	userData.Mutex.RLock()
 	sourceRefs := make(map[string]*SourceData)
 	for sourceID, sourceData := range userData.Sources {
 		sourceRefs[sourceID] = sourceData
 	}
-	userData.Mutex.RUnlock()
 
 	// Step 2: Process each source without holding user lock
 	// 步骤2：在不持有用户锁的情况下处理每个源
@@ -322,7 +319,7 @@ func (dw *DataWatcher) processUserData(userID string, userData *UserData) (int64
 			// 等待短时间以确保所有源处理锁都已释放
 			time.Sleep(100 * time.Millisecond)
 			glog.Infof("DataWatcher: Starting delayed hash calculation for user %s", userID)
-			dw.calculateAndSetUserHashAsync(userID, userData)
+			dw.calculateAndSetUserHash(userID, userData)
 		}()
 	} else {
 		glog.V(2).Infof("DataWatcher: No apps moved for user %s, skipping hash calculation", userID)
@@ -331,140 +328,122 @@ func (dw *DataWatcher) processUserData(userID string, userData *UserData) (int64
 	return totalProcessed, totalMoved
 }
 
-// calculateAndSetUserHash calculates and sets hash for user data
+// calculateAndSetUserHash calculates and sets the hash for user data
 // calculateAndSetUserHash 计算并设置用户数据的hash
-func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *UserData) {
-	startTime := time.Now()
+func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.UserData) {
+	// Check if hash calculation is already in progress for this user
+	// 检查此用户的hash计算是否已在进行中
+	dw.hashMutex.Lock()
+	if dw.activeHashCalculations[userID] {
+		dw.hashMutex.Unlock()
+		glog.Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
+		return
+	}
+	dw.activeHashCalculations[userID] = true
+	dw.hashMutex.Unlock()
+
+	defer func() {
+		dw.hashMutex.Lock()
+		delete(dw.activeHashCalculations, userID)
+		dw.hashMutex.Unlock()
+	}()
+
 	glog.Infof("DataWatcher: Starting hash calculation for user %s", userID)
 
-	// Get the original user data from cache manager instead of using the copied one
-	// 从缓存管理器获取原始用户数据，而不是使用拷贝的数据
+	// Get the original user data from cache manager to ensure we have the latest reference
+	// 从缓存管理器获取原始用户数据以确保我们有最新的引用
 	originalUserData := dw.cacheManager.GetUserData(userID)
 	if originalUserData == nil {
-		glog.Errorf("DataWatcher: Original user data not found in cache for user %s", userID)
+		glog.Errorf("DataWatcher: Failed to get user data from cache manager for user %s", userID)
 		return
 	}
 
-	// Try to acquire user data lock with timeout
-	// 尝试带超时的用户数据锁获取
-	userLockAcquired := make(chan bool, 1)
+	// Use global lock with timeout to avoid deadlocks
+	// 使用带超时的全局锁以避免死锁
+	lockTimeout := 5 * time.Second
+	lockAcquired := make(chan bool, 1)
+
 	go func() {
-		originalUserData.Mutex.RLock()
-		userLockAcquired <- true
+		dw.cacheManager.mutex.RLock()
+		lockAcquired <- true
 	}()
 
 	select {
-	case <-userLockAcquired:
+	case <-lockAcquired:
 		// Lock acquired, proceed with hash calculation
-		defer originalUserData.Mutex.RUnlock()
-		glog.Infof("DataWatcher: User lock acquired for user %s", userID)
-	case <-time.After(5 * time.Second):
-		glog.Errorf("DataWatcher: Timeout acquiring user lock for hash calculation, user %s", userID)
+		defer dw.cacheManager.mutex.RUnlock()
+		glog.Infof("DataWatcher: Global cache lock acquired for user %s", userID)
+	case <-time.After(lockTimeout):
+		glog.Errorf("DataWatcher: Timeout acquiring global cache lock for hash calculation, user %s", userID)
 		return
 	}
 
-	// Quick hash calculation using direct access (already have user lock)
-	// 使用直接访问进行快速hash计算（已有用户锁）
-	glog.Infof("DataWatcher: Performing direct hash calculation for user %s", userID)
-
-	// Simple hash based on basic user data without nested locks
-	// 基于基本用户数据的简单hash，无需嵌套锁
-	hashInput := fmt.Sprintf("user:%s|sources:%d|timestamp:%d",
-		userID, len(originalUserData.Sources), time.Now().Unix())
-
-	newHash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))
-
-	duration := time.Since(startTime)
-	glog.Infof("DataWatcher: Direct hash calculation completed in %v for user %s, hash=%s", duration, userID, newHash)
-
-	if newHash == "" {
-		glog.Infof("DataWatcher: No hash calculated for user %s (empty data)", userID)
+	// Create snapshot for hash calculation
+	// 创建快照用于hash计算
+	snapshot, err := dw.createUserDataSnapshot(userID, originalUserData)
+	if err != nil {
+		glog.Errorf("DataWatcher: Failed to create user data snapshot for user %s: %v", userID, err)
 		return
 	}
 
-	// Update hash on the original user data (we already have the lock)
-	// 在原始用户数据上更新hash（我们已有锁）
-	oldHash := originalUserData.Hash
-	if oldHash == newHash {
-		glog.Infof("DataWatcher: Hash unchanged for user %s", userID)
+	// Calculate hash using the snapshot
+	// 使用快照计算hash
+	newHash, err := utils.CalculateUserDataHash(snapshot)
+	if err != nil {
+		glog.Errorf("DataWatcher: Failed to calculate hash for user %s: %v", userID, err)
 		return
 	}
+
+	// Get current hash for comparison
+	// 获取当前hash进行比较
+	currentHash := originalUserData.Hash
+
+	if currentHash == newHash {
+		glog.V(2).Infof("DataWatcher: Hash unchanged for user %s: %s", userID, newHash)
+		return
+	}
+
+	glog.Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
 
 	// Release read lock and acquire write lock for hash update
 	// 释放读锁并获取写锁以更新hash
-	originalUserData.Mutex.RUnlock()
-	originalUserData.Mutex.Lock()
+	dw.cacheManager.mutex.RUnlock()
+	dw.cacheManager.mutex.Lock()
 	originalUserData.Hash = newHash
-	originalUserData.Mutex.Unlock()
+	dw.cacheManager.mutex.Unlock()
 
 	// Re-acquire read lock for the defer statement
 	// 为defer语句重新获取读锁
-	originalUserData.Mutex.RLock()
+	dw.cacheManager.mutex.RLock()
 
 	glog.Infof("DataWatcher: Hash updated for user %s", userID)
 
-	// Immediately verify the hash was set correctly
-	// 立即验证hash是否正确设置
-	glog.Infof("DataWatcher: Verification - originalUserData.Hash = '%s' for user %s", originalUserData.Hash, userID)
-
-	// Also verify through cache manager
-	// 同时通过缓存管理器验证
-	if dw.cacheManager != nil {
+	// Verification: Check if the hash was actually updated
+	// 验证：检查hash是否实际更新
+	if glog.V(2) {
 		verifyUserData := dw.cacheManager.GetUserData(userID)
 		if verifyUserData != nil {
-			verifyUserData.Mutex.RLock()
+			dw.cacheManager.mutex.RLock()
 			verifyHash := verifyUserData.Hash
-			verifyUserData.Mutex.RUnlock()
+			dw.cacheManager.mutex.RUnlock()
 			glog.Infof("DataWatcher: Verification via CacheManager - hash = '%s' for user %s", verifyHash, userID)
 		} else {
 			glog.Errorf("DataWatcher: Verification failed - CacheManager.GetUserData returned nil for user %s", userID)
 		}
-
-		// Also verify through GetAllUsersData
-		// 同时通过GetAllUsersData验证
-		allUsers := dw.cacheManager.GetAllUsersData()
-		if adminUser, exists := allUsers[userID]; exists {
-			glog.Infof("DataWatcher: Verification via GetAllUsersData - hash = '%s' for user %s", adminUser.Hash, userID)
-		} else {
-			glog.Errorf("DataWatcher: Verification failed - GetAllUsersData does not contain user %s", userID)
-		}
 	}
 
-	glog.Infof("DataWatcher: Updated user data hash for user=%s (old=%s, new=%s) in %v",
-		userID, oldHash, newHash, duration)
-
-	// Trigger sync to Redis for user data update
-	// 为用户数据更新触发Redis同步
-	if dw.cacheManager != nil {
-		glog.Infof("DataWatcher: Triggering sync to Redis for user %s", userID)
-		go func(userID string, cacheManager *CacheManager) {
-			// Add nil checks before calling sync
-			// 在调用同步之前添加nil检查
-			if cacheManager == nil {
-				glog.Errorf("DataWatcher: CacheManager is nil, cannot trigger user sync after hash update")
-				return
-			}
-			if userID == "" {
-				glog.Errorf("DataWatcher: Invalid userID, cannot trigger user sync")
-				return
-			}
-
-			// Trigger user data sync directly instead of using SetAppData
-			// 直接触发用户数据同步而不是使用SetAppData
-			cacheManager.requestSync(SyncRequest{
-				UserID: userID,
-				Type:   SyncUser,
-			})
-			glog.Infof("DataWatcher: Successfully triggered sync to Redis for user %s", userID)
-		}(userID, dw.cacheManager)
+	// Trigger force sync to persist the hash change
+	// 触发强制同步以持久化hash更改
+	if err := dw.cacheManager.ForceSync(); err != nil {
+		glog.Errorf("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
+	} else {
+		glog.V(2).Infof("DataWatcher: Force sync completed after hash update for user %s", userID)
 	}
-
-	glog.Infof("DataWatcher: Hash calculation method completed for user %s", userID)
 }
 
 // calculateAndSetUserHashAsync calculates and sets hash for user data asynchronously
 // calculateAndSetUserHashAsync 异步计算并设置用户数据的hash
-func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *UserData) {
+func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *types.UserData) {
 	glog.Infof("DataWatcher: Starting async hash calculation for user %s", userID)
 
 	// Add timeout to prevent hanging
@@ -494,7 +473,7 @@ func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *Use
 
 // createUserDataSnapshot creates a snapshot of user data for hash calculation
 // createUserDataSnapshot 为hash计算创建用户数据快照
-func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *UserData) (*UserDataSnapshot, error) {
+func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.UserData) (*UserDataSnapshot, error) {
 	// This method is now unused - using direct hash calculation instead
 	// 此方法现在未使用 - 改为使用直接hash计算
 	return nil, fmt.Errorf("snapshot method deprecated")
@@ -568,199 +547,147 @@ func (s *OthersSnapshot) GetPages() []interface{} {
 	return s.Pages
 }
 
-// processSourceData processes a single source's data
-// processSourceData 处理单个源的数据
-func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *SourceData) (int64, int64) {
+// processSourceData processes a single source's data for completed hydration
+// processSourceData 处理单个源的数据以完成水合
+func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *types.SourceData) (int64, int64) {
 	if sourceData == nil {
 		return 0, 0
 	}
 
-	// Create timeout context for this source processing
-	// 为此源处理创建超时上下文
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	var pendingApps []*types.AppInfoLatestPendingData
+	var appInfoLatest []*types.AppInfoLatestData
 
-	var pendingApps []*AppInfoLatestPendingData
-	var completedApps []*AppInfoLatestPendingData
-	// Initialize as empty slice instead of nil to ensure it's never null
-	// 初始化为空slice而不是nil，确保它永远不会是null
-	remainingPendingApps := make([]*AppInfoLatestPendingData, 0)
-
-	glog.V(2).Infof("DataWatcher: Acquiring read lock to check pending apps for user=%s, source=%s", userID, sourceID)
-
-	// Step 1: Quick check and data copy with minimal lock time
 	// 步骤1：最小锁时间的快速检查和数据复制
 	func() {
-		sourceData.Mutex.RLock()
-		defer sourceData.Mutex.RUnlock()
+		dw.cacheManager.mutex.RLock()
+		defer dw.cacheManager.mutex.RUnlock()
 
 		// Quick check - if no pending apps, exit early
 		// 快速检查 - 如果没有待处理应用，提早退出
 		if len(sourceData.AppInfoLatestPending) == 0 {
-			glog.V(2).Infof("DataWatcher: No pending apps for user=%s, source=%s", userID, sourceID)
 			return
 		}
 
-		// Copy pending apps for processing outside the lock
-		// 复制待处理应用以在锁外处理
-		pendingApps = make([]*AppInfoLatestPendingData, len(sourceData.AppInfoLatestPending))
+		// Copy references to pending apps for processing
+		// 复制待处理应用的引用以进行处理
+		pendingApps = make([]*types.AppInfoLatestPendingData, len(sourceData.AppInfoLatestPending))
 		copy(pendingApps, sourceData.AppInfoLatestPending)
+
+		// Copy references to existing AppInfoLatest
+		// 复制现有AppInfoLatest的引用
+		appInfoLatest = make([]*types.AppInfoLatestData, len(sourceData.AppInfoLatest))
+		copy(appInfoLatest, sourceData.AppInfoLatest)
 	}()
 
-	// Early exit if no pending apps found
-	// 如果没有找到待处理应用则提早退出
+	// Early exit if no pending apps
+	// 如果没有待处理应用则提早退出
 	if len(pendingApps) == 0 {
 		return 0, 0
 	}
 
-	glog.Infof("DataWatcher: Found %d pending apps to check for user=%s, source=%s", len(pendingApps), userID, sourceID)
+	glog.Infof("DataWatcher: Processing %d pending apps for user=%s, source=%s", len(pendingApps), userID, sourceID)
 
-	totalProcessed := int64(len(pendingApps))
+	// 步骤2：无锁处理 - 检查水合完成状态
+	var completedApps []*types.AppInfoLatestPendingData
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	// Step 2: Check completion status without any locks
-	// 步骤2：在没有任何锁的情况下检查完成状态
 	for i, pendingApp := range pendingApps {
-		// Check context timeout during processing
-		// 在处理过程中检查上下文超时
-		select {
-		case <-ctx.Done():
-			glog.Errorf("DataWatcher: Timeout during pending apps processing for user=%s, source=%s (processed %d/%d)",
-				userID, sourceID, i, len(pendingApps))
-			return totalProcessed, 0
-		default:
+		if pendingApp == nil {
+			continue
 		}
 
-		// Use timeout-protected hydration check
-		// 使用超时保护的水合检查
-		if dw.isAppHydrationCompletedWithTimeout(ctx, pendingApp) {
-			// App hydration is complete, prepare to move it
-			// 应用水合已完成，准备移动它
-			completedApps = append(completedApps, pendingApp)
+		glog.V(2).Infof("DataWatcher: Checking app %d/%d: %s", i+1, len(pendingApps), dw.getAppID(pendingApp))
 
-			appID := dw.getAppID(pendingApp)
-			glog.Infof("DataWatcher: App hydration completed for app=%s (user=%s, source=%s)",
-				appID, userID, sourceID)
-		} else {
-			// App hydration is not complete, keep it in pending
-			// 应用水合未完成，保持在待处理状态
-			remainingPendingApps = append(remainingPendingApps, pendingApp)
+		if dw.isAppHydrationCompletedWithTimeout(ctx, pendingApp) {
+			completedApps = append(completedApps, pendingApp)
+			glog.Infof("DataWatcher: App hydration completed: %s", dw.getAppID(pendingApp))
 		}
 	}
 
-	// Step 3: Only acquire write lock if we have changes to make
-	// 步骤3：只有在需要进行更改时才获取写锁
 	if len(completedApps) == 0 {
 		glog.V(2).Infof("DataWatcher: No completed apps found for user=%s, source=%s", userID, sourceID)
-		return totalProcessed, 0
+		return int64(len(pendingApps)), 0
 	}
 
-	glog.Infof("DataWatcher: Found %d completed apps, acquiring write lock for user=%s, source=%s",
-		len(completedApps), userID, sourceID)
+	glog.Infof("DataWatcher: Found %d completed apps out of %d pending for user=%s, source=%s",
+		len(completedApps), len(pendingApps), userID, sourceID)
 
-	// Step 4: Attempt write lock with shorter timeout to avoid long waits
-	// 步骤4：尝试获取写锁，使用更短的超时以避免长时间等待
-	lockCtx, lockCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer lockCancel()
-
+	// 步骤3：获取写锁并移动完成的应用
 	lockStartTime := time.Now()
-	lockAcquired := false
-
-	// Try to acquire write lock with timeout
-	// 尝试获取带超时的写锁
 	writeLockChan := make(chan bool, 1)
 	go func() {
-		sourceData.Mutex.Lock()
+		dw.cacheManager.mutex.Lock()
 		writeLockChan <- true
 	}()
 
 	select {
 	case <-writeLockChan:
-		lockAcquired = true
-		lockAcquireTime := time.Since(lockStartTime)
-		glog.Infof("DataWatcher: Write lock acquired in %v for user=%s, source=%s", lockAcquireTime, userID, sourceID)
+		glog.Infof("DataWatcher: Write lock acquired for user=%s, source=%s", userID, sourceID)
 
 		defer func() {
-			sourceData.Mutex.Unlock()
+			dw.cacheManager.mutex.Unlock()
 			totalLockTime := time.Since(lockStartTime)
 			glog.Infof("DataWatcher: Write lock released after %v for user=%s, source=%s", totalLockTime, userID, sourceID)
 		}()
-	case <-lockCtx.Done():
-		glog.Warningf("DataWatcher: Timeout acquiring write lock for user=%s, source=%s, will retry next cycle", userID, sourceID)
-		return totalProcessed, 0
-	}
 
-	if !lockAcquired {
-		return totalProcessed, 0
-	}
+		// Move completed apps from pending to latest
+		// 将完成的应用从待处理移动到最新
+		movedCount := int64(0)
+		for _, completedApp := range completedApps {
+			// Convert to AppInfoLatestData
+			// 转换为AppInfoLatestData
+			latestData := dw.convertPendingToLatest(completedApp)
+			if latestData != nil {
+				// Add to AppInfoLatest
+				// 添加到AppInfoLatest
+				sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
+				movedCount++
 
-	// Step 5: Re-verify data hasn't changed during our processing
-	// 步骤5：重新验证数据在我们处理期间没有发生变化
-	currentPendingCount := len(sourceData.AppInfoLatestPending)
-	if currentPendingCount != len(pendingApps) {
-		glog.Warningf("DataWatcher: Pending apps changed during processing for user=%s, source=%s (was %d, now %d), will retry next cycle",
-			userID, sourceID, len(pendingApps), currentPendingCount)
-		return totalProcessed, 0
-	}
-
-	// Step 6: Move completed apps to AppInfoLatest (under write lock)
-	// 步骤6：将完成的应用移动到AppInfoLatest（在写锁下）
-	actualMovedCount := int64(0)
-	for _, completedApp := range completedApps {
-		latestApp := dw.convertPendingToLatest(completedApp)
-		if latestApp != nil {
-			sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestApp)
-			actualMovedCount++
-		} else {
-			// Log when an app fails conversion
-			// 记录应用转换失败的情况
-			appID := dw.getAppID(completedApp)
-			glog.Warningf("DataWatcher: Failed to convert completed app %s to latest format (user=%s, source=%s)",
-				appID, userID, sourceID)
+				glog.Infof("DataWatcher: Moved app to latest: %s", dw.getAppID(completedApp))
+			}
 		}
+
+		// Remove completed apps from pending list
+		// 从待处理列表中移除完成的应用
+		if movedCount > 0 {
+			newPendingList := make([]*types.AppInfoLatestPendingData, 0, len(sourceData.AppInfoLatestPending)-int(movedCount))
+			completedAppIDs := make(map[string]bool)
+
+			// Create a map of completed app IDs for efficient lookup
+			// 创建完成应用ID的映射以进行高效查找
+			for _, completedApp := range completedApps {
+				appID := dw.getAppID(completedApp)
+				if appID != "" {
+					completedAppIDs[appID] = true
+				}
+			}
+
+			// Filter out completed apps from pending list
+			// 从待处理列表中过滤掉完成的应用
+			for _, pendingApp := range sourceData.AppInfoLatestPending {
+				appID := dw.getAppID(pendingApp)
+				if !completedAppIDs[appID] {
+					newPendingList = append(newPendingList, pendingApp)
+				}
+			}
+
+			sourceData.AppInfoLatestPending = newPendingList
+			glog.Infof("DataWatcher: Updated pending list: %d -> %d apps for user=%s, source=%s",
+				len(sourceData.AppInfoLatestPending)+int(movedCount), len(sourceData.AppInfoLatestPending), userID, sourceID)
+		}
+
+		return int64(len(pendingApps)), movedCount
+
+	case <-time.After(10 * time.Second):
+		glog.Errorf("DataWatcher: Timeout acquiring write lock for user=%s, source=%s", userID, sourceID)
+		return int64(len(pendingApps)), 0
 	}
-
-	// Update pending apps list (remove completed ones)
-	// 更新待处理应用列表（移除已完成的）
-	sourceData.AppInfoLatestPending = remainingPendingApps
-
-	totalMoved := actualMovedCount
-
-	if totalMoved > 0 {
-		glog.Infof("DataWatcher: Moved %d completed apps from pending to latest for user=%s, source=%s",
-			totalMoved, userID, sourceID)
-
-		// Trigger sync to Redis for this source (async to avoid holding lock)
-		// 为此源触发Redis同步（异步以避免持有锁）
-		go func(userID, sourceID string, cacheManager *CacheManager) {
-			// Add nil checks and validation before calling SetAppData
-			// 在调用SetAppData之前添加nil检查和验证
-			if cacheManager == nil {
-				glog.Errorf("DataWatcher: CacheManager is nil, cannot trigger sync after moving apps")
-				return
-			}
-			if userID == "" || sourceID == "" {
-				glog.Errorf("DataWatcher: Invalid userID or sourceID, cannot trigger sync (userID=%s, sourceID=%s)", userID, sourceID)
-				return
-			}
-
-			if err := cacheManager.SetAppData(userID, sourceID, AppInfoLatest,
-				map[string]interface{}{"sync_trigger": time.Now().Unix()}); err != nil {
-				glog.Errorf("DataWatcher: Failed to trigger sync after moving apps: %v", err)
-			}
-		}(userID, sourceID, dw.cacheManager)
-	} else if len(completedApps) > 0 {
-		// Log when completed apps exist but none were moved
-		// 当存在已完成应用但未移动任何应用时记录
-		glog.Warningf("DataWatcher: Found %d completed apps but none were moved to latest (user=%s, source=%s)",
-			len(completedApps), userID, sourceID)
-	}
-
-	return totalProcessed, totalMoved
 }
 
 // isAppHydrationCompletedWithTimeout checks if app hydration is completed with timeout protection
 // isAppHydrationCompletedWithTimeout 带超时保护检查应用水合是否完成
-func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, pendingApp *AppInfoLatestPendingData) bool {
+func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, pendingApp *types.AppInfoLatestPendingData) bool {
 	if pendingApp == nil {
 		glog.V(2).Infof("DataWatcher: isAppHydrationCompletedWithTimeout called with nil pendingApp")
 		return false
@@ -802,7 +729,7 @@ func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, p
 
 // getAppID extracts app ID from pending app data
 // getAppID 从待处理应用数据中提取应用ID
-func (dw *DataWatcher) getAppID(pendingApp *AppInfoLatestPendingData) string {
+func (dw *DataWatcher) getAppID(pendingApp *types.AppInfoLatestPendingData) string {
 	if pendingApp == nil {
 		return "unknown"
 	}
@@ -836,7 +763,7 @@ func (dw *DataWatcher) getAppID(pendingApp *AppInfoLatestPendingData) string {
 
 // convertPendingToLatest converts AppInfoLatestPendingData to AppInfoLatestData
 // convertPendingToLatest 将AppInfoLatestPendingData转换为AppInfoLatestData
-func (dw *DataWatcher) convertPendingToLatest(pendingApp *AppInfoLatestPendingData) *AppInfoLatestData {
+func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPendingData) *types.AppInfoLatestData {
 	if pendingApp == nil {
 		glog.Warningf("DataWatcher: convertPendingToLatest called with nil pendingApp")
 		return nil
@@ -870,8 +797,8 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *AppInfoLatestPendingDa
 
 	// Create the latest app data structure
 	// 创建最新应用数据结构
-	latestApp := &AppInfoLatestData{
-		Type:      AppInfoLatest,
+	latestApp := &types.AppInfoLatestData{
+		Type:      types.AppInfoLatest,
 		Timestamp: time.Now().Unix(),
 	}
 
@@ -954,12 +881,12 @@ func (dw *DataWatcher) SetInterval(interval time.Duration) {
 
 // createAppSimpleInfo creates an AppSimpleInfo from pending app data
 // createAppSimpleInfo 从待处理应用数据创建AppSimpleInfo
-func (dw *DataWatcher) createAppSimpleInfo(pendingApp *AppInfoLatestPendingData) *AppSimpleInfo {
+func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendingData) *types.AppSimpleInfo {
 	if pendingApp == nil {
 		return nil
 	}
 
-	appSimpleInfo := &AppSimpleInfo{}
+	appSimpleInfo := &types.AppSimpleInfo{}
 
 	// Extract information from RawData if available
 	// 如果可用，从RawData中提取信息

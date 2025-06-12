@@ -322,9 +322,12 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 // storeDataDirectly stores data directly to cache without going through CacheManager
 // storeDataDirectly 直接存储数据到缓存，不通过CacheManager
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
+	// Use global lock instead of nested locks
+	// 使用全局锁而不是嵌套锁
+	s.cache.Mutex.Lock()
+	defer s.cache.Mutex.Unlock()
+
 	userData := s.cache.Users[userID]
-	userData.Mutex.Lock()
-	defer userData.Mutex.Unlock()
 
 	// Ensure source data exists for this user
 	// 确保此用户的源数据存在
@@ -334,8 +337,6 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 	}
 
 	sourceData := userData.Sources[sourceID]
-	sourceData.Mutex.Lock()
-	defer sourceData.Mutex.Unlock()
 
 	// Check if this is a local source - skip syncer storage for local sources
 	// 检查是否为本地源 - 跳过本地源的同步存储
@@ -517,21 +518,15 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 		s.cache.Mutex.RLock()
 		userData, userExists := s.cache.Users[userID]
 		if userExists {
-			userData.Mutex.RLock()
 			sourceData, sourceExists := userData.Sources[sourceID]
 			if sourceExists {
-				sourceData.Mutex.RLock()
 				sourceType := sourceData.Type
-				sourceData.Mutex.RUnlock()
-
 				if sourceType == types.SourceDataTypeLocal {
 					log.Printf("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
-					userData.Mutex.RUnlock()
 					s.cache.Mutex.RUnlock()
 					continue
 				}
 			}
-			userData.Mutex.RUnlock()
 		}
 		s.cache.Mutex.RUnlock()
 

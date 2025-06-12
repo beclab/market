@@ -1115,26 +1115,12 @@ func (s *RenderedChartStep) updatePendingDataRenderedPackage(task *HydrationTask
 		return nil
 	}
 
-	userData.Mutex.Lock()
-	defer userData.Mutex.Unlock()
-
-	// Check if source exists for user
-	// 检查用户的源是否存在
-	sourceData, exists := userData.Sources[task.SourceID]
-	if !exists {
-		log.Printf("Source %s not found for user %s, skipping RenderedPackage update", task.SourceID, task.UserID)
-		return nil
-	}
-
-	sourceData.Mutex.Lock()
-	defer sourceData.Mutex.Unlock()
-
 	// Find the corresponding pending data and update RenderedPackage
 	// 查找对应的待处理数据并更新RenderedPackage
-	for i, pendingData := range sourceData.AppInfoLatestPending {
+	for i, pendingData := range userData.Sources[task.SourceID].AppInfoLatestPending {
 		if s.isTaskForPendingDataRendered(task, pendingData) {
 			log.Printf("Updating RenderedPackage for pending data at index %d: %s", i, chartDir)
-			sourceData.AppInfoLatestPending[i].RenderedPackage = chartDir
+			userData.Sources[task.SourceID].AppInfoLatestPending[i].RenderedPackage = chartDir
 			log.Printf("Successfully updated RenderedPackage for app: %s", task.AppID)
 			return nil
 		}

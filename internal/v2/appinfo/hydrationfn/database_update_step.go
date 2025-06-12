@@ -369,8 +369,8 @@ func (s *DatabaseUpdateStep) findPendingDataForTask(task *HydrationTask) (*types
 		return nil, fmt.Errorf("cache reference is nil")
 	}
 
-	// Only acquire minimal locks to find the data
-	// 只获取最小锁来查找数据
+	// 使用全局锁访问缓存数据
+	// Access cache data using global lock
 	task.Cache.Mutex.RLock()
 	defer task.Cache.Mutex.RUnlock()
 
@@ -379,16 +379,10 @@ func (s *DatabaseUpdateStep) findPendingDataForTask(task *HydrationTask) (*types
 		return nil, fmt.Errorf("user %s not found in cache", task.UserID)
 	}
 
-	userData.Mutex.RLock()
-	defer userData.Mutex.RUnlock()
-
 	sourceData, sourceExists := userData.Sources[task.SourceID]
 	if !sourceExists {
 		return nil, fmt.Errorf("source %s not found for user %s", task.SourceID, task.UserID)
 	}
-
-	sourceData.Mutex.RLock()
-	defer sourceData.Mutex.RUnlock()
 
 	// Find the matching pending data
 	// 查找匹配的待处理数据

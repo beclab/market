@@ -104,18 +104,18 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 	if data.Cache != nil {
 		data.Cache.Mutex.RLock()
 		for _, userData := range data.Cache.Users {
-			userData.Mutex.RLock()
+			// 不再需要嵌套锁，因为我们已经持有全局锁
+			// No nested locks needed since we already hold the global lock
 			for _, sourceData := range userData.Sources {
-				sourceData.Mutex.RLock()
+				// 不再需要嵌套锁，因为我们已经持有全局锁
+				// No nested locks needed since we already hold the global lock
 				if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
 					hasExistingData = true
 				}
-				sourceData.Mutex.RUnlock()
 				if hasExistingData {
 					break
 				}
 			}
-			userData.Mutex.RUnlock()
 			if hasExistingData {
 				break
 			}
@@ -527,11 +527,15 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 
 	log.Printf("Updating Others data for %d users: %v, sourceID: %s", len(userIDs), userIDs, sourceID)
 
-	// Update Others for each user
-	// 为每个用户更新Others
+	// Update Others for each user using global lock
+	// 使用全局锁为每个用户更新Others
+	data.Cache.Mutex.Lock()
+	defer data.Cache.Mutex.Unlock()
+
 	for _, userID := range userIDs {
 		userData := data.Cache.Users[userID]
-		userData.Mutex.Lock()
+		// 不再需要嵌套锁，因为我们已经持有全局锁
+		// No nested locks needed since we already hold the global lock
 
 		// Ensure source data exists for this user
 		// 确保此用户的源数据存在
@@ -544,14 +548,12 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 		}
 
 		sourceData := userData.Sources[sourceID]
-		sourceData.Mutex.Lock()
+		// 不再需要嵌套锁，因为我们已经持有全局锁
+		// No nested locks needed since we already hold the global lock
 
 		// Update Others in SourceData
 		// 更新SourceData中的Others
 		sourceData.Others = others
-
-		sourceData.Mutex.Unlock()
-		userData.Mutex.Unlock()
 
 		log.Printf("Updated Others data in cache for user %s, source %s", userID, sourceID)
 	}

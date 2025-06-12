@@ -293,16 +293,18 @@ func (h *Hydrator) pendingDataMonitor(ctx context.Context) {
 	}
 }
 
-// checkForPendingData checks cache for pending data and creates hydration tasks
-// checkForPendingData 检查缓存中的待处理数据并创建水合任务
+// checkForPendingData scans cache for pending data and creates hydration tasks
+// checkForPendingData 扫描缓存中的待处理数据并创建水合任务
 func (h *Hydrator) checkForPendingData() {
 	h.cache.Mutex.RLock()
 	defer h.cache.Mutex.RUnlock()
 
 	for userID, userData := range h.cache.Users {
-		userData.Mutex.RLock()
+		// 不再需要嵌套锁，因为我们已经持有全局锁
+		// No nested locks needed since we already hold the global lock
 		for sourceID, sourceData := range userData.Sources {
-			sourceData.Mutex.RLock()
+			// 不再需要嵌套锁，因为我们已经持有全局锁
+			// No nested locks needed since we already hold the global lock
 
 			// Log source type for debugging - both local and remote should be processed
 			// 记录源类型以供调试 - 本地和远程类型都应被处理
@@ -317,10 +319,7 @@ func (h *Hydrator) checkForPendingData() {
 					h.createTasksFromPendingData(userID, sourceID, pendingData)
 				}
 			}
-
-			sourceData.Mutex.RUnlock()
 		}
-		userData.Mutex.RUnlock()
 	}
 }
 
@@ -459,26 +458,20 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 // isAppDataHydrationComplete checks if an app's hydration is complete by looking up pending data in cache
 // isAppDataHydrationComplete 通过在缓存中查找待处理数据来检查应用的水合是否完成
 func (h *Hydrator) isAppDataHydrationComplete(userID, sourceID, appID string) bool {
-	// Get the source data from cache
-	// 从缓存获取源数据
+	// Get the source data from cache using global lock
+	// 使用全局锁从缓存获取源数据
 	h.cache.Mutex.RLock()
+	defer h.cache.Mutex.RUnlock()
+
 	userData, userExists := h.cache.Users[userID]
 	if !userExists {
-		h.cache.Mutex.RUnlock()
 		return false
 	}
-	h.cache.Mutex.RUnlock()
 
-	userData.Mutex.RLock()
 	sourceData, sourceExists := userData.Sources[sourceID]
 	if !sourceExists {
-		userData.Mutex.RUnlock()
 		return false
 	}
-	userData.Mutex.RUnlock()
-
-	sourceData.Mutex.RLock()
-	defer sourceData.Mutex.RUnlock()
 
 	// Find the pending data for the specific app
 	// 查找特定应用的待处理数据

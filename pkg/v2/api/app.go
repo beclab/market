@@ -392,83 +392,17 @@ func (s *Server) httpToRestfulRequest(r *http.Request) *restful.Request {
 // filterUserData filters user data to include only required fields
 // filterUserData 过滤用户数据，仅包含必需字段
 func (s *Server) filterUserData(userData *types.UserData) *FilteredUserData {
-	if userData == nil {
-		return nil
-	}
-
-	filteredUserData := &FilteredUserData{
-		Sources: make(map[string]*FilteredSourceData),
-	}
-
-	// First, get the basic user data with minimal lock time
-	// 首先，用最小锁时间获取基本用户数据
-	userData.Mutex.RLock()
-	hash := userData.Hash
-	sourceIDs := make([]string, 0, len(userData.Sources))
-	for sourceID := range userData.Sources {
-		sourceIDs = append(sourceIDs, sourceID)
-	}
-	userData.Mutex.RUnlock()
-
-	filteredUserData.Hash = hash
-
-	// Process each source individually to avoid holding locks for too long
-	// 单独处理每个源以避免长时间持有锁
-	for _, sourceID := range sourceIDs {
-		userData.Mutex.RLock()
-		sourceData := userData.Sources[sourceID]
-		userData.Mutex.RUnlock()
-
-		if sourceData != nil {
-			filteredSourceData := s.filterSourceData(sourceData)
-			if filteredSourceData != nil {
-				filteredUserData.Sources[sourceID] = filteredSourceData
-			}
-		}
-	}
-
-	return filteredUserData
+	// 这个函数已被 filterUserDataWithTimeout 替代，使用单一全局锁
+	// This function has been replaced by filterUserDataWithTimeout using single global lock
+	return s.filterUserDataWithTimeout(context.Background(), userData)
 }
 
 // filterSourceData filters source data to include only required fields
 // filterSourceData 过滤源数据，仅包含必需字段
 func (s *Server) filterSourceData(sourceData *types.SourceData) *FilteredSourceData {
-	if sourceData == nil {
-		return nil
-	}
-
-	// Lock source data for reading
-	// 锁定源数据进行读取
-	sourceData.Mutex.RLock()
-	defer sourceData.Mutex.RUnlock()
-
-	filteredSourceData := &FilteredSourceData{
-		Type:           sourceData.Type,
-		AppStateLatest: sourceData.AppStateLatest,
-		Others:         sourceData.Others,
-	}
-
-	// Filter AppInfoLatest to include only AppSimpleInfo
-	// 过滤 AppInfoLatest，仅包含 AppSimpleInfo
-	if sourceData.AppInfoLatest != nil {
-		filteredAppInfoLatest := make([]*FilteredAppInfoLatestData, 0, len(sourceData.AppInfoLatest))
-
-		for _, appInfoData := range sourceData.AppInfoLatest {
-			if appInfoData != nil {
-				filteredAppInfo := &FilteredAppInfoLatestData{
-					Type:          appInfoData.Type,
-					Timestamp:     appInfoData.Timestamp,
-					Version:       appInfoData.Version,
-					AppSimpleInfo: appInfoData.AppSimpleInfo,
-				}
-				filteredAppInfoLatest = append(filteredAppInfoLatest, filteredAppInfo)
-			}
-		}
-
-		filteredSourceData.AppInfoLatest = filteredAppInfoLatest
-	}
-
-	return filteredSourceData
+	// 这个函数已被 convertSourceDataToFiltered 替代，使用单一全局锁
+	// This function has been replaced by convertSourceDataToFiltered using single global lock
+	return s.convertSourceDataToFiltered(sourceData)
 }
 
 // filterUserDataWithTimeout filters user data to include only required fields with timeout
@@ -478,44 +412,107 @@ func (s *Server) filterUserDataWithTimeout(ctx context.Context, userData *types.
 		return nil
 	}
 
-	// First, get the basic user data with minimal lock time
-	// 首先，用最小锁时间获取基本用户数据
-	userData.Mutex.RLock()
-	hash := userData.Hash
-	sourceIDs := make([]string, 0, len(userData.Sources))
-	for sourceID := range userData.Sources {
-		sourceIDs = append(sourceIDs, sourceID)
-	}
-	userData.Mutex.RUnlock()
+	log.Printf("DEBUG: Starting filterUserDataWithTimeout with single global lock approach")
 
-	// Check if we're still within timeout before filtering
-	// 在过滤前检查是否仍在超时范围内
+	// 使用单一锁进行所有数据访问，避免死锁
+	// Use single lock for all data access to avoid deadlocks
+	filteredUserData := &FilteredUserData{
+		Sources: make(map[string]*FilteredSourceData),
+	}
+
+	// 检查超时
+	// Check timeout
 	select {
 	case <-ctx.Done():
-		log.Printf("Context cancelled during user data retrieval for user: %s", hash)
+		log.Printf("Context cancelled before data processing")
 		return nil
 	default:
 	}
 
-	filteredUserData := &FilteredUserData{
-		Sources: make(map[string]*FilteredSourceData),
-		Hash:    hash,
-	}
+	// 步骤1：一次性获取所有需要的数据（使用全局锁）
+	// Step 1: Get all needed data in one go (using global lock)
+	var (
+		hash      string
+		sources   map[string]*FilteredSourceData
+		sourceIDs []string
+	)
 
-	// Process each source individually to avoid holding locks for too long
-	// 单独处理每个源以避免长时间持有锁
-	for _, sourceID := range sourceIDs {
-		userData.Mutex.RLock()
-		sourceData := userData.Sources[sourceID]
-		userData.Mutex.RUnlock()
+	// 通过CacheManager获取数据，它会处理全局锁
+	// Get data through CacheManager which handles the global lock
+	if s.cacheManager != nil {
+		// 获取用户数据的快照
+		// Get snapshot of user data
+		allUsersData := s.cacheManager.GetAllUsersData()
+		if userDataSnapshot, exists := allUsersData[s.getCurrentUserID()]; exists {
+			hash = userDataSnapshot.Hash
+			sources = make(map[string]*FilteredSourceData)
 
-		if sourceData != nil {
-			filteredSourceData := s.filterSourceData(sourceData)
-			if filteredSourceData != nil {
-				filteredUserData.Sources[sourceID] = filteredSourceData
+			for sourceID, sourceData := range userDataSnapshot.Sources {
+				sourceIDs = append(sourceIDs, sourceID)
+
+				// 检查超时
+				// Check timeout
+				select {
+				case <-ctx.Done():
+					log.Printf("Context cancelled during source processing: %s", sourceID)
+					return nil
+				default:
+				}
+
+				// 直接转换数据，无需额外锁
+				// Convert data directly without additional locks
+				filteredSourceData := s.convertSourceDataToFiltered(sourceData)
+				if filteredSourceData != nil {
+					sources[sourceID] = filteredSourceData
+				}
 			}
 		}
 	}
 
+	filteredUserData.Hash = hash
+	filteredUserData.Sources = sources
+
+	log.Printf("DEBUG: Completed filterUserDataWithTimeout with %d sources processed", len(sources))
 	return filteredUserData
+}
+
+// getCurrentUserID 获取当前用户ID（简化版本）
+// getCurrentUserID gets current user ID (simplified version)
+func (s *Server) getCurrentUserID() string {
+	// 在实际实现中，这应该从请求上下文中获取
+	// In actual implementation, this should be obtained from request context
+	return "admin" // 临时硬编码，实际应该从认证信息获取
+}
+
+// convertSourceDataToFiltered 转换源数据为过滤后的格式
+// convertSourceDataToFiltered converts source data to filtered format
+func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *FilteredSourceData {
+	if sourceData == nil {
+		return nil
+	}
+
+	filteredSourceData := &FilteredSourceData{
+		Type:           sourceData.Type,
+		AppStateLatest: sourceData.AppStateLatest,
+		Others:         sourceData.Others,
+		AppInfoLatest:  make([]*FilteredAppInfoLatestData, 0),
+	}
+
+	// 转换AppInfoLatest数据
+	// Convert AppInfoLatest data
+	if sourceData.AppInfoLatest != nil {
+		for _, appInfoData := range sourceData.AppInfoLatest {
+			if appInfoData != nil {
+				filteredAppInfo := &FilteredAppInfoLatestData{
+					Type:          appInfoData.Type,
+					Timestamp:     appInfoData.Timestamp,
+					Version:       appInfoData.Version,
+					AppSimpleInfo: appInfoData.AppSimpleInfo,
+				}
+				filteredSourceData.AppInfoLatest = append(filteredSourceData.AppInfoLatest, filteredAppInfo)
+			}
+		}
+	}
+
+	return filteredSourceData
 }

@@ -1155,10 +1155,8 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 			},
 		}
 
-		userData.Mutex.RLock()
 		for sourceID, sourceData := range userData.Sources {
 			totalSources++
-			sourceData.Mutex.RLock()
 
 			sourceReport := map[string]interface{}{
 				"total_pending_data": len(sourceData.AppInfoLatestPending),
@@ -1231,10 +1229,7 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 			userReport["totals"].(map[string]int)["total_sources"]++
 			userReport["totals"].(map[string]int)["total_pending_data"] += len(sourceData.AppInfoLatestPending)
 			userReport["totals"].(map[string]int)["total_invalid_data"] += invalidCount
-
-			sourceData.Mutex.RUnlock()
 		}
-		userData.Mutex.RUnlock()
 
 		report["users"].(map[string]interface{})[userID] = userReport
 	}
