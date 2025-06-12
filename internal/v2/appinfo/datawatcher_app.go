@@ -288,10 +288,16 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 		totalMoved += moved
 	}
 
-	// Step 3: If any pending apps were moved, calculate and update user data hash asynchronously
-	// 步骤3：如果有任何待处理应用被移动，异步计算并更新用户数据hash
-	if totalMoved > 0 {
-		glog.Infof("DataWatcher: %d apps moved for user %s, scheduling delayed hash calculation", totalMoved, userID)
+	// Step 3: Calculate hash if apps were moved OR if hash is empty
+	// 步骤3：如果有应用移动或hash为空，则计算hash
+	shouldCalculateHash := totalMoved > 0 || userData.Hash == ""
+
+	if shouldCalculateHash {
+		if totalMoved > 0 {
+			glog.Infof("DataWatcher: %d apps moved for user %s, scheduling hash calculation", totalMoved, userID)
+		} else {
+			glog.Infof("DataWatcher: Hash is empty for user %s, scheduling hash calculation", userID)
+		}
 
 		// Check if hash calculation is already in progress for this user
 		// 检查此用户是否已有hash计算正在进行
@@ -313,23 +319,27 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 				dw.hashMutex.Lock()
 				delete(dw.activeHashCalculations, userID)
 				dw.hashMutex.Unlock()
+				glog.Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
 			}()
 
 			// Wait a short time to ensure all source processing locks are released
 			// 等待短时间以确保所有源处理锁都已释放
 			time.Sleep(100 * time.Millisecond)
-			glog.Infof("DataWatcher: Starting delayed hash calculation for user %s", userID)
-			dw.calculateAndSetUserHash(userID, userData)
+			glog.Infof("DataWatcher: Starting hash calculation for user %s", userID)
+
+			// Call the hash calculation function directly without additional tracking
+			// 直接调用hash计算函数，不进行额外的跟踪
+			dw.calculateAndSetUserHashDirect(userID, userData)
 		}()
 	} else {
-		glog.V(2).Infof("DataWatcher: No apps moved for user %s, skipping hash calculation", userID)
+		glog.V(2).Infof("DataWatcher: No apps moved and hash exists for user %s, skipping hash calculation", userID)
 	}
 
 	return totalProcessed, totalMoved
 }
 
-// calculateAndSetUserHash calculates and sets the hash for user data
-// calculateAndSetUserHash 计算并设置用户数据的hash
+// calculateAndSetUserHash calculates and sets the hash for user data (with tracking)
+// calculateAndSetUserHash 计算并设置用户数据的hash（带跟踪）
 func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.UserData) {
 	// Check if hash calculation is already in progress for this user
 	// 检查此用户的hash计算是否已在进行中
@@ -343,12 +353,22 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	dw.hashMutex.Unlock()
 
 	defer func() {
+		// Clean up tracking when done
 		dw.hashMutex.Lock()
 		delete(dw.activeHashCalculations, userID)
 		dw.hashMutex.Unlock()
+		glog.Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
 	}()
 
-	glog.Infof("DataWatcher: Starting hash calculation for user %s", userID)
+	// Call the direct calculation function
+	// 调用直接计算函数
+	dw.calculateAndSetUserHashDirect(userID, userData)
+}
+
+// calculateAndSetUserHashDirect calculates hash without tracking (used internally by goroutines)
+// calculateAndSetUserHashDirect 不进行跟踪地计算hash（由goroutine内部使用）
+func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *types.UserData) {
+	glog.Infof("DataWatcher: Starting direct hash calculation for user %s", userID)
 
 	// Get the original user data from cache manager to ensure we have the latest reference
 	// 从缓存管理器获取原始用户数据以确保我们有最新的引用
@@ -362,22 +382,41 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	// 使用带超时的全局锁以避免死锁
 	lockTimeout := 5 * time.Second
 	lockAcquired := make(chan bool, 1)
+	lockError := make(chan error, 1)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				glog.Errorf("DataWatcher: Panic during lock acquisition for user %s: %v", userID, r)
+				lockError <- fmt.Errorf("panic during lock acquisition: %v", r)
+			}
+		}()
+
+		glog.Infof("DataWatcher: Attempting to acquire global cache lock for user %s", userID)
 		dw.cacheManager.mutex.RLock()
+		glog.Infof("DataWatcher: Global cache read lock acquired for user %s", userID)
 		lockAcquired <- true
 	}()
 
 	select {
 	case <-lockAcquired:
-		// Lock acquired, proceed with hash calculation
-		defer dw.cacheManager.mutex.RUnlock()
+		// Lock acquired successfully
 		glog.Infof("DataWatcher: Global cache lock acquired for user %s", userID)
+	case err := <-lockError:
+		glog.Errorf("DataWatcher: Error acquiring global cache lock for user %s: %v", userID, err)
+		return
 	case <-time.After(lockTimeout):
 		glog.Errorf("DataWatcher: Timeout acquiring global cache lock for hash calculation, user %s", userID)
 		return
 	}
 
+	// Ensure we release the read lock when done with read operations
+	defer func() {
+		glog.Infof("DataWatcher: Releasing global cache read lock for user %s", userID)
+		dw.cacheManager.mutex.RUnlock()
+	}()
+
+	glog.Infof("DataWatcher: Creating user data snapshot for user %s", userID)
 	// Create snapshot for hash calculation
 	// 创建快照用于hash计算
 	snapshot, err := dw.createUserDataSnapshot(userID, originalUserData)
@@ -386,6 +425,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 		return
 	}
 
+	glog.Infof("DataWatcher: Calculating hash for user %s", userID)
 	// Calculate hash using the snapshot
 	// 使用快照计算hash
 	newHash, err := utils.CalculateUserDataHash(snapshot)
@@ -397,6 +437,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	// Get current hash for comparison
 	// 获取当前hash进行比较
 	currentHash := originalUserData.Hash
+	glog.Infof("DataWatcher: Hash comparison for user %s - current: '%s', new: '%s'", userID, currentHash, newHash)
 
 	if currentHash == newHash {
 		glog.V(2).Infof("DataWatcher: Hash unchanged for user %s: %s", userID, newHash)
@@ -405,15 +446,58 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 
 	glog.Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
 
-	// Release read lock and acquire write lock for hash update
-	// 释放读锁并获取写锁以更新hash
+	// Release read lock before acquiring write lock to avoid deadlock
+	// 在获取写锁之前释放读锁以避免死锁
+	glog.Infof("DataWatcher: Releasing read lock to acquire write lock for user %s", userID)
 	dw.cacheManager.mutex.RUnlock()
-	dw.cacheManager.mutex.Lock()
-	originalUserData.Hash = newHash
-	dw.cacheManager.mutex.Unlock()
 
-	// Re-acquire read lock for the defer statement
-	// 为defer语句重新获取读锁
+	// Acquire write lock for hash update
+	// 获取写锁以更新hash
+	writeTimeout := 3 * time.Second
+	writeLockAcquired := make(chan bool, 1)
+	writeLockError := make(chan error, 1)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				glog.Errorf("DataWatcher: Panic during write lock acquisition for user %s: %v", userID, r)
+				writeLockError <- fmt.Errorf("panic during write lock acquisition: %v", r)
+			}
+		}()
+
+		glog.Infof("DataWatcher: Attempting to acquire write lock for user %s", userID)
+		dw.cacheManager.mutex.Lock()
+		glog.Infof("DataWatcher: Write lock acquired for user %s", userID)
+		writeLockAcquired <- true
+	}()
+
+	select {
+	case <-writeLockAcquired:
+		// Write lock acquired successfully
+		glog.Infof("DataWatcher: Write lock acquired for hash update, user %s", userID)
+
+		// Update hash and release lock immediately
+		originalUserData.Hash = newHash
+		glog.Infof("DataWatcher: Hash updated in memory for user %s", userID)
+
+		dw.cacheManager.mutex.Unlock()
+		glog.Infof("DataWatcher: Write lock released for user %s", userID)
+
+	case err := <-writeLockError:
+		glog.Errorf("DataWatcher: Error acquiring write lock for user %s: %v", userID, err)
+		// Re-acquire read lock for the defer statement since we released it earlier
+		dw.cacheManager.mutex.RLock()
+		return
+
+	case <-time.After(writeTimeout):
+		glog.Errorf("DataWatcher: Timeout acquiring write lock for hash update, user %s", userID)
+		// Re-acquire read lock for the defer statement since we released it earlier
+		dw.cacheManager.mutex.RLock()
+		return
+	}
+
+	// Re-acquire read lock for the defer statement since we released it earlier
+	// 重新获取读锁以供defer语句使用，因为我们之前释放了它
 	dw.cacheManager.mutex.RLock()
 
 	glog.Infof("DataWatcher: Hash updated for user %s", userID)
@@ -423,10 +507,8 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	if glog.V(2) {
 		verifyUserData := dw.cacheManager.GetUserData(userID)
 		if verifyUserData != nil {
-			dw.cacheManager.mutex.RLock()
 			verifyHash := verifyUserData.Hash
-			dw.cacheManager.mutex.RUnlock()
-			glog.Infof("DataWatcher: Verification via CacheManager - hash = '%s' for user %s", verifyHash, userID)
+			glog.Infof("DataWatcher: Verification - hash = '%s' for user %s", verifyHash, userID)
 		} else {
 			glog.Errorf("DataWatcher: Verification failed - CacheManager.GetUserData returned nil for user %s", userID)
 		}
@@ -434,10 +516,11 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 
 	// Trigger force sync to persist the hash change
 	// 触发强制同步以持久化hash更改
+	glog.Infof("DataWatcher: Starting force sync for user %s", userID)
 	if err := dw.cacheManager.ForceSync(); err != nil {
 		glog.Errorf("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
 	} else {
-		glog.V(2).Infof("DataWatcher: Force sync completed after hash update for user %s", userID)
+		glog.Infof("DataWatcher: Force sync completed after hash update for user %s", userID)
 	}
 }
 
@@ -474,9 +557,69 @@ func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *typ
 // createUserDataSnapshot creates a snapshot of user data for hash calculation
 // createUserDataSnapshot 为hash计算创建用户数据快照
 func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.UserData) (*UserDataSnapshot, error) {
-	// This method is now unused - using direct hash calculation instead
-	// 此方法现在未使用 - 改为使用直接hash计算
-	return nil, fmt.Errorf("snapshot method deprecated")
+	// Create a lightweight snapshot for hash calculation
+	// 为hash计算创建轻量级快照
+	snapshot := &UserDataSnapshot{
+		Hash:    userData.Hash,
+		Sources: make(map[string]*SourceDataSnapshot),
+	}
+
+	// Convert each source data to snapshot format
+	// 将每个源数据转换为快照格式
+	for sourceID, sourceData := range userData.Sources {
+		if sourceData == nil {
+			continue
+		}
+
+		sourceSnapshot := &SourceDataSnapshot{
+			AppStateLatest: make([]interface{}, len(sourceData.AppStateLatest)),
+			AppInfoLatest:  make([]interface{}, len(sourceData.AppInfoLatest)),
+		}
+
+		// Convert AppStateLatest
+		// 转换AppStateLatest
+		for i, data := range sourceData.AppStateLatest {
+			sourceSnapshot.AppStateLatest[i] = data
+		}
+
+		// Convert AppInfoLatest
+		// 转换AppInfoLatest
+		for i, data := range sourceData.AppInfoLatest {
+			sourceSnapshot.AppInfoLatest[i] = data
+		}
+
+		// Convert Others data
+		// 转换Others数据
+		if sourceData.Others != nil {
+			othersSnapshot := &OthersSnapshot{
+				Topics:     make([]interface{}, len(sourceData.Others.Topics)),
+				TopicLists: make([]interface{}, len(sourceData.Others.TopicLists)),
+				Recommends: make([]interface{}, len(sourceData.Others.Recommends)),
+				Pages:      make([]interface{}, len(sourceData.Others.Pages)),
+			}
+
+			// Convert each Others field
+			// 转换Others的每个字段
+			for i, topic := range sourceData.Others.Topics {
+				othersSnapshot.Topics[i] = topic
+			}
+			for i, topicList := range sourceData.Others.TopicLists {
+				othersSnapshot.TopicLists[i] = topicList
+			}
+			for i, recommend := range sourceData.Others.Recommends {
+				othersSnapshot.Recommends[i] = recommend
+			}
+			for i, page := range sourceData.Others.Pages {
+				othersSnapshot.Pages[i] = page
+			}
+
+			sourceSnapshot.Others = othersSnapshot
+		}
+
+		snapshot.Sources[sourceID] = sourceSnapshot
+	}
+
+	return snapshot, nil
 }
 
 // Snapshot data structures for lock-free hash calculation
@@ -1044,4 +1187,44 @@ func (dw *DataWatcher) copyMultilingualMap(source map[string]string) map[string]
 		result[key] = value
 	}
 	return result
+}
+
+// ForceCalculateUserHash forces hash calculation for a user regardless of app movement
+// ForceCalculateUserHash 强制为用户计算hash，无论是否有应用移动
+func (dw *DataWatcher) ForceCalculateUserHash(userID string) error {
+	glog.Infof("DataWatcher: Force calculating hash for user %s", userID)
+
+	// Get user data from cache manager
+	// 从缓存管理器获取用户数据
+	userData := dw.cacheManager.GetUserData(userID)
+	if userData == nil {
+		return fmt.Errorf("user data not found for user %s", userID)
+	}
+
+	// Call hash calculation directly
+	// 直接调用hash计算
+	dw.calculateAndSetUserHash(userID, userData)
+	return nil
+}
+
+// ForceCalculateAllUsersHash forces hash calculation for all users
+// ForceCalculateAllUsersHash 强制为所有用户计算hash
+func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
+	glog.Infof("DataWatcher: Force calculating hash for all users")
+
+	// Get all users data
+	// 获取所有用户数据
+	allUsersData := dw.cacheManager.GetAllUsersData()
+	if len(allUsersData) == 0 {
+		return fmt.Errorf("no users found in cache")
+	}
+
+	for userID, userData := range allUsersData {
+		if userData != nil {
+			glog.Infof("DataWatcher: Force calculating hash for user: %s", userID)
+			dw.calculateAndSetUserHash(userID, userData)
+		}
+	}
+
+	return nil
 }
