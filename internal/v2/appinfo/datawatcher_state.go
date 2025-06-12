@@ -22,6 +22,7 @@ type AppStateMessage struct {
 	OpType   string `json:"opType"`
 	OpTaskId string `json:"opTaskId"`
 	EventId  string `json:"eventId"`
+	Account  string `json:"account"`
 }
 
 // DataWatcherState handles app state messages from NATS
@@ -183,6 +184,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 		OpType:   opTypes[rand.Intn(len(opTypes))],
 		OpTaskId: fmt.Sprintf("task_%d", rand.Intn(10000)),
 		EventId:  fmt.Sprintf("event_%d_%d", time.Now().Unix(), rand.Intn(1000)),
+		Account:  "admin",
 	}
 
 	jsonData, _ := json.Marshal(msg)
@@ -206,13 +208,14 @@ func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage s
 		Message:  "",                 // Leave message empty as requested
 		Time:     time.Now().Unix(),  // Current timestamp
 		App:      msg.AppId,          // App field from message
+		Account:  msg.Account,        // Account field from message
 		Extended: rawMessage,         // Store complete message in Extended field
 	}
 
 	if err := dw.historyModule.StoreRecord(record); err != nil {
 		log.Printf("Failed to store history record: %v", err)
 	} else {
-		log.Printf("Stored history record for app %s with ID %d", msg.AppId, record.ID)
+		log.Printf("Stored history record for app %s with account %s and ID %d", msg.AppId, msg.Account, record.ID)
 	}
 }
 
@@ -224,6 +227,7 @@ func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	log.Printf("Operation Type: %s", msg.OpType)
 	log.Printf("Operation Task ID: %s", msg.OpTaskId)
 	log.Printf("Event ID: %s", msg.EventId)
+	log.Printf("Account: %s", msg.Account)
 	log.Printf("========================")
 }
 

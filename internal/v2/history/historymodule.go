@@ -37,6 +37,7 @@ type HistoryRecord struct {
 	Message  string      `json:"message" db:"message"`
 	Time     int64       `json:"time" db:"time"`
 	App      string      `json:"app" db:"app"`
+	Account  string      `json:"account" db:"account"`
 	Extended string      `json:"extended" db:"extended"`
 }
 
@@ -44,6 +45,7 @@ type HistoryRecord struct {
 type QueryCondition struct {
 	Type      HistoryType `json:"type,omitempty"`
 	App       string      `json:"app,omitempty"`
+	Account   string      `json:"account,omitempty"`
 	StartTime int64       `json:"start_time,omitempty"`
 	EndTime   int64       `json:"end_time,omitempty"`
 	Limit     int         `json:"limit,omitempty"`
@@ -127,7 +129,8 @@ func NewHistoryModule() (*HistoryModule, error) {
 
 // initSchema creates the history_records table if it doesn't exist
 func (hm *HistoryModule) initSchema() error {
-	schema := `
+	// First, create the table if it doesn't exist
+	createTableSchema := `
 	CREATE TABLE IF NOT EXISTS history_records (
 		id BIGSERIAL PRIMARY KEY,
 		type VARCHAR(100) NOT NULL,
@@ -136,17 +139,53 @@ func (hm *HistoryModule) initSchema() error {
 		app VARCHAR(255) NOT NULL,
 		extended TEXT DEFAULT '',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
+	);`
 
+	_, err := hm.db.Exec(createTableSchema)
+	if err != nil {
+		glog.Errorf("Failed to create base table: %v", err)
+		return err
+	}
+
+	// Check if account column exists, if not add it
+	var columnExists bool
+	checkColumnQuery := `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'history_records' 
+			AND column_name = 'account'
+		);`
+
+	err = hm.db.QueryRow(checkColumnQuery).Scan(&columnExists)
+	if err != nil {
+		glog.Errorf("Failed to check if account column exists: %v", err)
+		return err
+	}
+
+	// Add account column if it doesn't exist
+	if !columnExists {
+		glog.Infof("Account column does not exist, adding it...")
+		addColumnQuery := `ALTER TABLE history_records ADD COLUMN account VARCHAR(255) NOT NULL DEFAULT '';`
+		_, err = hm.db.Exec(addColumnQuery)
+		if err != nil {
+			glog.Errorf("Failed to add account column: %v", err)
+			return err
+		}
+		glog.Infof("Account column added successfully")
+	}
+
+	// Create indexes
+	indexSchema := `
 	CREATE INDEX IF NOT EXISTS idx_history_type ON history_records(type);
 	CREATE INDEX IF NOT EXISTS idx_history_app ON history_records(app);
+	CREATE INDEX IF NOT EXISTS idx_history_account ON history_records(account);
 	CREATE INDEX IF NOT EXISTS idx_history_time ON history_records(time);
 	CREATE INDEX IF NOT EXISTS idx_history_created_at ON history_records(created_at);
 	`
 
-	_, err := hm.db.Exec(schema)
+	_, err = hm.db.Exec(indexSchema)
 	if err != nil {
-		glog.Errorf("Failed to create schema: %v", err)
+		glog.Errorf("Failed to create indexes: %v", err)
 		return err
 	}
 
@@ -158,6 +197,11 @@ func (hm *HistoryModule) initSchema() error {
 func (hm *HistoryModule) StoreRecord(record *HistoryRecord) error {
 	if record == nil {
 		return fmt.Errorf("record cannot be nil")
+	}
+
+	// Validate that account field is not empty
+	if record.Account == "" {
+		return fmt.Errorf("account field cannot be empty")
 	}
 
 	// Set current timestamp if not provided
@@ -174,18 +218,18 @@ func (hm *HistoryModule) StoreRecord(record *HistoryRecord) error {
 	}
 
 	query := `
-		INSERT INTO history_records (type, message, time, app, extended)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO history_records (type, message, time, app, account, extended)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
 	`
 
-	err := hm.db.QueryRow(query, record.Type, record.Message, record.Time, record.App, record.Extended).Scan(&record.ID)
+	err := hm.db.QueryRow(query, record.Type, record.Message, record.Time, record.App, record.Account, record.Extended).Scan(&record.ID)
 	if err != nil {
 		glog.Errorf("Failed to store history record: %v", err)
 		return err
 	}
 
-	glog.Infof("Stored history record with ID: %d, type: %s, app: %s", record.ID, record.Type, record.App)
+	glog.Infof("Stored history record with ID: %d, type: %s, app: %s, account: %s", record.ID, record.Type, record.App, record.Account)
 	return nil
 }
 
@@ -201,7 +245,7 @@ func (hm *HistoryModule) QueryRecords(condition *QueryCondition) ([]*HistoryReco
 	}
 
 	// Build query
-	query := "SELECT id, type, message, time, app, extended FROM history_records WHERE 1=1"
+	query := "SELECT id, type, message, time, app, account, extended FROM history_records WHERE 1=1"
 	args := []interface{}{}
 	argIndex := 1
 
@@ -215,6 +259,12 @@ func (hm *HistoryModule) QueryRecords(condition *QueryCondition) ([]*HistoryReco
 	if condition.App != "" {
 		query += fmt.Sprintf(" AND app = $%d", argIndex)
 		args = append(args, condition.App)
+		argIndex++
+	}
+
+	if condition.Account != "" {
+		query += fmt.Sprintf(" AND account = $%d", argIndex)
+		args = append(args, condition.Account)
 		argIndex++
 	}
 
@@ -257,7 +307,7 @@ func (hm *HistoryModule) QueryRecords(condition *QueryCondition) ([]*HistoryReco
 	var records []*HistoryRecord
 	for rows.Next() {
 		record := &HistoryRecord{}
-		err := rows.Scan(&record.ID, &record.Type, &record.Message, &record.Time, &record.App, &record.Extended)
+		err := rows.Scan(&record.ID, &record.Type, &record.Message, &record.Time, &record.App, &record.Account, &record.Extended)
 		if err != nil {
 			glog.Errorf("Failed to scan history record: %v", err)
 			continue
@@ -345,6 +395,12 @@ func (hm *HistoryModule) GetRecordCount(condition *QueryCondition) (int64, error
 	if condition.App != "" {
 		query += fmt.Sprintf(" AND app = $%d", argIndex)
 		args = append(args, condition.App)
+		argIndex++
+	}
+
+	if condition.Account != "" {
+		query += fmt.Sprintf(" AND account = $%d", argIndex)
+		args = append(args, condition.Account)
 		argIndex++
 	}
 
