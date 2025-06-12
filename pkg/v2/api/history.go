@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"market/internal/v2/history"
+	"market/internal/v2/utils"
 )
 
 // 5. Query logs by specific conditions
@@ -16,6 +17,17 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 	if s.historyModule == nil {
 		log.Println("History module not available")
 		s.sendResponse(w, http.StatusServiceUnavailable, false, "History service not available", nil)
+		return
+	}
+
+	// Convert http.Request to restful.Request to reuse utils functions
+	restfulReq := s.httpToRestfulRequest(r)
+
+	// Get user information from request
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
 
@@ -49,8 +61,9 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Build query condition
 	condition := &history.QueryCondition{
-		Offset: start,
-		Limit:  size,
+		Account: userID, // Only query records for the authenticated user
+		Offset:  start,
+		Limit:   size,
 	}
 
 	// Add optional filters
