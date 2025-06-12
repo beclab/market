@@ -886,7 +886,10 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 		return nil
 	}
 
-	appSimpleInfo := &types.AppSimpleInfo{}
+	appSimpleInfo := &types.AppSimpleInfo{
+		AppDescription: make(map[string]string),
+		AppTitle:       make(map[string]string),
+	}
 
 	// Extract information from RawData if available
 	// 如果可用，从RawData中提取信息
@@ -899,21 +902,31 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 			appSimpleInfo.AppID = pendingApp.RawData.ID
 		}
 
-		// Use Name or Title for AppName
-		// 使用Name或Title作为AppName
+		// Use Name for AppName
+		// 使用Name作为AppName
 		if pendingApp.RawData.Name != "" {
 			appSimpleInfo.AppName = pendingApp.RawData.Name
-		} else if pendingApp.RawData.Title != "" {
-			appSimpleInfo.AppName = pendingApp.RawData.Title
+		} else if len(pendingApp.RawData.Title) > 0 {
+			// Fallback to first available title if name is empty
+			// 如果名称为空，则回退到第一个可用标题
+			appSimpleInfo.AppName = dw.getLocalizedStringValue(pendingApp.RawData.Title, "en-US")
 		}
 
 		// Use Icon for AppIcon
 		// 使用Icon作为AppIcon
 		appSimpleInfo.AppIcon = pendingApp.RawData.Icon
 
-		// Use Description for AppDescription
-		// 使用Description作为AppDescription
-		appSimpleInfo.AppDescription = pendingApp.RawData.Description
+		// Copy multilingual Description to AppDescription
+		// 将多语言Description复制到AppDescription
+		if len(pendingApp.RawData.Description) > 0 {
+			appSimpleInfo.AppDescription = dw.copyMultilingualMap(pendingApp.RawData.Description)
+		}
+
+		// Copy multilingual Title to AppTitle
+		// 将多语言Title复制到AppTitle
+		if len(pendingApp.RawData.Title) > 0 {
+			appSimpleInfo.AppTitle = dw.copyMultilingualMap(pendingApp.RawData.Title)
+		}
 
 		// Use Version for AppVersion
 		// 使用Version作为AppVersion
@@ -940,8 +953,8 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 		if appSimpleInfo.AppName == "" {
 			if entry.Name != "" {
 				appSimpleInfo.AppName = entry.Name
-			} else if entry.Title != "" {
-				appSimpleInfo.AppName = entry.Title
+			} else if len(entry.Title) > 0 {
+				appSimpleInfo.AppName = dw.getLocalizedStringValue(entry.Title, "en-US")
 			}
 		}
 
@@ -953,8 +966,14 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 
 		// Fill missing AppDescription
 		// 填充缺失的AppDescription
-		if appSimpleInfo.AppDescription == "" {
-			appSimpleInfo.AppDescription = entry.Description
+		if len(appSimpleInfo.AppDescription) == 0 && len(entry.Description) > 0 {
+			appSimpleInfo.AppDescription = dw.copyMultilingualMap(entry.Description)
+		}
+
+		// Fill missing AppTitle
+		// 填充缺失的AppTitle
+		if len(appSimpleInfo.AppTitle) == 0 && len(entry.Title) > 0 {
+			appSimpleInfo.AppTitle = dw.copyMultilingualMap(entry.Title)
 		}
 
 		// Fill missing AppVersion
@@ -978,4 +997,51 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 	}
 
 	return appSimpleInfo
+}
+
+// getLocalizedStringValue gets localized string from multilingual map with fallback logic
+// getLocalizedStringValue 从多语言映射中获取本地化字符串，带有回退逻辑
+func (dw *DataWatcher) getLocalizedStringValue(multiLangMap map[string]string, preferredLang string) string {
+	if len(multiLangMap) == 0 {
+		return ""
+	}
+
+	// First try preferred language
+	// 首先尝试首选语言
+	if value, exists := multiLangMap[preferredLang]; exists && value != "" {
+		return value
+	}
+
+	// Try common fallback languages in order
+	// 按顺序尝试常见的回退语言
+	fallbackLanguages := []string{"en-US", "en", "zh-CN", "zh"}
+	for _, lang := range fallbackLanguages {
+		if value, exists := multiLangMap[lang]; exists && value != "" {
+			return value
+		}
+	}
+
+	// Return first available value
+	// 返回第一个可用值
+	for _, value := range multiLangMap {
+		if value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
+// copyMultilingualMap creates a deep copy of a multilingual map
+// copyMultilingualMap 创建多语言映射的深拷贝
+func (dw *DataWatcher) copyMultilingualMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return make(map[string]string)
+	}
+
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }

@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"market/internal/v2/types"
 )
@@ -330,6 +335,14 @@ func (s *DatabaseUpdateStep) updateAppInfoWithImages(task *HydrationTask, imageA
 		pendingDataRef.AppInfo.AppEntry = pendingDataRef.RawData
 	}
 
+	// Update i18n data from i18n directory
+	// 从i18n目录更新国际化数据
+	if err := s.updateI18nData(task, pendingDataRef); err != nil {
+		log.Printf("Warning: Failed to update i18n data for app %s: %v", task.AppID, err)
+		// Continue with other updates even if i18n update fails
+		// 即使i18n更新失败也继续其他更新
+	}
+
 	// Update image analysis in AppInfo
 	// 在AppInfo中更新镜像分析
 	if imageAnalysis != nil {
@@ -360,6 +373,247 @@ func (s *DatabaseUpdateStep) updateAppInfoWithImages(task *HydrationTask, imageA
 
 	log.Printf("Updated AppInfo for app: %s with hydration completion metadata", task.AppID)
 	return nil
+}
+
+// updateI18nData reads i18n data from i18n directory and updates the app info
+// updateI18nData 从i18n目录读取国际化数据并更新应用信息
+func (s *DatabaseUpdateStep) updateI18nData(task *HydrationTask, pendingDataRef *types.AppInfoLatestPendingData) error {
+	// Get the rendered chart directory path from task data
+	// 从任务数据中获取渲染的chart目录路径
+	var chartDir string
+	if renderedChartDir, exists := task.ChartData["rendered_chart_dir"]; exists {
+		if dir, ok := renderedChartDir.(string); ok {
+			chartDir = dir
+		}
+	}
+
+	// Fallback to using RenderedChartURL if no local directory is found
+	// 如果没有找到本地目录，则回退到使用RenderedChartURL
+	if chartDir == "" {
+		if task.RenderedChartURL == "" {
+			log.Printf("No rendered chart directory or URL available for app: %s, skipping i18n update", task.AppID)
+			return nil
+		}
+		chartDir = task.RenderedChartURL
+		if strings.HasPrefix(chartDir, "file://") {
+			chartDir = strings.TrimPrefix(chartDir, "file://")
+		}
+	}
+
+	log.Printf("I18n update: Chart directory for app %s: %s", task.AppID, chartDir)
+
+	// Check if the directory exists
+	// 检查目录是否存在
+	if _, err := os.Stat(chartDir); os.IsNotExist(err) {
+		log.Printf("Chart directory does not exist: %s", chartDir)
+		return nil
+	}
+
+	// Look for i18n directory in multiple possible locations
+	// 在多个可能的位置查找i18n目录
+	var i18nDir string
+	possibleI18nPaths := []string{
+		filepath.Join(chartDir, "i18n"),               // Direct i18n directory
+		filepath.Join(chartDir, task.AppName, "i18n"), // App-specific subdirectory
+	}
+
+	// Also try to find i18n directory by scanning subdirectories
+	// 也尝试通过扫描子目录来查找i18n目录
+	if entries, err := os.ReadDir(chartDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				// Check if this subdirectory contains an i18n folder
+				// 检查这个子目录是否包含i18n文件夹
+				subI18nPath := filepath.Join(chartDir, entry.Name(), "i18n")
+				possibleI18nPaths = append(possibleI18nPaths, subI18nPath)
+			}
+		}
+	}
+
+	for _, path := range possibleI18nPaths {
+		if _, err := os.Stat(path); err == nil {
+			i18nDir = path
+			log.Printf("I18n update: Found i18n directory: %s", i18nDir)
+			break
+		}
+	}
+
+	if i18nDir == "" {
+		log.Printf("No i18n directory found in any of the expected locations for app: %s", task.AppID)
+		log.Printf("Searched paths: %v", possibleI18nPaths)
+		return nil
+	}
+
+	// Get supported languages from app locale or use default languages
+	// 从应用语言环境获取支持的语言或使用默认语言
+	supportedLanguages := []string{"en-US", "zh-CN"} // Default supported languages
+	if pendingDataRef.RawData != nil && len(pendingDataRef.RawData.Locale) > 0 {
+		supportedLanguages = pendingDataRef.RawData.Locale
+	}
+
+	// Initialize multilingual fields if they don't exist for both RawData and AppInfo.AppEntry
+	// 为RawData和AppInfo.AppEntry初始化多语言字段（如果不存在）
+	if pendingDataRef.RawData != nil {
+		if pendingDataRef.RawData.Title == nil {
+			pendingDataRef.RawData.Title = make(map[string]string)
+		}
+		if pendingDataRef.RawData.Description == nil {
+			pendingDataRef.RawData.Description = make(map[string]string)
+		}
+		if pendingDataRef.RawData.FullDescription == nil {
+			pendingDataRef.RawData.FullDescription = make(map[string]string)
+		}
+		if pendingDataRef.RawData.UpgradeDescription == nil {
+			pendingDataRef.RawData.UpgradeDescription = make(map[string]string)
+		}
+	}
+
+	// Ensure AppInfo.AppEntry exists and initialize multilingual fields
+	// 确保AppInfo.AppEntry存在并初始化多语言字段
+	if pendingDataRef.AppInfo == nil {
+		pendingDataRef.AppInfo = &types.AppInfo{}
+	}
+	if pendingDataRef.AppInfo.AppEntry == nil {
+		pendingDataRef.AppInfo.AppEntry = &types.ApplicationInfoEntry{}
+	}
+	if pendingDataRef.AppInfo.AppEntry.Title == nil {
+		pendingDataRef.AppInfo.AppEntry.Title = make(map[string]string)
+	}
+	if pendingDataRef.AppInfo.AppEntry.Description == nil {
+		pendingDataRef.AppInfo.AppEntry.Description = make(map[string]string)
+	}
+	if pendingDataRef.AppInfo.AppEntry.FullDescription == nil {
+		pendingDataRef.AppInfo.AppEntry.FullDescription = make(map[string]string)
+	}
+	if pendingDataRef.AppInfo.AppEntry.UpgradeDescription == nil {
+		pendingDataRef.AppInfo.AppEntry.UpgradeDescription = make(map[string]string)
+	}
+
+	// Read i18n data for each supported language
+	// 为每种支持的语言读取i18n数据
+	for _, lang := range supportedLanguages {
+		log.Printf("I18n update: Processing language: %s for app: %s", lang, task.AppID)
+
+		langDir := filepath.Join(i18nDir, lang)
+		if _, err := os.Stat(langDir); os.IsNotExist(err) {
+			log.Printf("Language directory does not exist: %s", langDir)
+			continue
+		}
+
+		log.Printf("I18n update: Found language directory: %s", langDir)
+
+		// Try to read i18n config file (usually app.cfg or similar)
+		// 尝试读取i18n配置文件（通常是app.cfg或类似文件）
+		configFiles := []string{
+			"OlaresManifest.yaml", // Olares manifest file
+			"OlaresManifest.yml",
+			"app.cfg",
+			"app.yaml",
+			"app.yml",
+			"config.yaml",
+			"config.yml",
+			"manifest.yaml",
+			"manifest.yml",
+		}
+		var i18nData map[string]interface{}
+
+		for _, configFile := range configFiles {
+			configPath := filepath.Join(langDir, configFile)
+			if _, err := os.Stat(configPath); err == nil {
+				log.Printf("I18n update: Found config file: %s", configPath)
+
+				data, err := ioutil.ReadFile(configPath)
+				if err != nil {
+					log.Printf("Failed to read i18n config file %s: %v", configPath, err)
+					continue
+				}
+
+				// Try to parse as YAML first, then JSON
+				// 首先尝试解析为YAML，然后是JSON
+				err = yaml.Unmarshal(data, &i18nData)
+				if err != nil {
+					err = json.Unmarshal(data, &i18nData)
+					if err != nil {
+						log.Printf("Failed to parse i18n config file %s: %v", configPath, err)
+						continue
+					}
+				}
+				log.Printf("I18n update: Successfully parsed config file: %s", configPath)
+				break
+			}
+		}
+
+		if i18nData == nil {
+			log.Printf("No valid i18n config found for language: %s in directory: %s", lang, langDir)
+			continue
+		}
+
+		// Extract and update multilingual fields in both RawData and AppInfo.AppEntry
+		// 在RawData和AppInfo.AppEntry中提取并更新多语言字段
+		s.updateMultilingualFields(i18nData, lang, pendingDataRef.RawData, "RawData")
+		s.updateMultilingualFields(i18nData, lang, pendingDataRef.AppInfo.AppEntry, "AppInfo.AppEntry")
+	}
+
+	log.Printf("Completed i18n data update for app: %s", task.AppID)
+	return nil
+}
+
+// updateMultilingualFields updates multilingual fields in the given ApplicationInfoEntry
+// updateMultilingualFields 更新给定ApplicationInfoEntry中的多语言字段
+func (s *DatabaseUpdateStep) updateMultilingualFields(i18nData map[string]interface{}, lang string, entry *types.ApplicationInfoEntry, entryType string) {
+	if entry == nil {
+		return
+	}
+
+	// Update title from metadata or spec
+	// 从metadata或spec更新标题
+	if metadata, ok := i18nData["metadata"].(map[string]interface{}); ok {
+		if title, ok := metadata["title"].(string); ok && title != "" {
+			entry.Title[lang] = title
+			log.Printf("Updated title for language %s in %s: %s", lang, entryType, title)
+		}
+	}
+
+	// Update description from metadata
+	// 从metadata更新描述
+	if metadata, ok := i18nData["metadata"].(map[string]interface{}); ok {
+		if description, ok := metadata["description"].(string); ok && description != "" {
+			entry.Description[lang] = description
+			log.Printf("Updated description for language %s in %s", lang, entryType)
+		}
+	}
+
+	// Update fullDescription and upgradeDescription from spec
+	// 从spec更新完整描述和升级描述
+	if spec, ok := i18nData["spec"].(map[string]interface{}); ok {
+		if fullDescription, ok := spec["fullDescription"].(string); ok && fullDescription != "" {
+			entry.FullDescription[lang] = fullDescription
+			log.Printf("Updated fullDescription for language %s in %s", lang, entryType)
+		}
+		if upgradeDescription, ok := spec["upgradeDescription"].(string); ok && upgradeDescription != "" {
+			entry.UpgradeDescription[lang] = upgradeDescription
+			log.Printf("Updated upgradeDescription for language %s in %s", lang, entryType)
+		}
+	}
+
+	// Direct field access for backward compatibility
+	// 为向后兼容性进行直接字段访问
+	if title, ok := i18nData["title"].(string); ok && title != "" {
+		entry.Title[lang] = title
+		log.Printf("Updated title (direct) for language %s in %s: %s", lang, entryType, title)
+	}
+	if description, ok := i18nData["description"].(string); ok && description != "" {
+		entry.Description[lang] = description
+		log.Printf("Updated description (direct) for language %s in %s", lang, entryType)
+	}
+	if fullDescription, ok := i18nData["fullDescription"].(string); ok && fullDescription != "" {
+		entry.FullDescription[lang] = fullDescription
+		log.Printf("Updated fullDescription (direct) for language %s in %s", lang, entryType)
+	}
+	if upgradeDescription, ok := i18nData["upgradeDescription"].(string); ok && upgradeDescription != "" {
+		entry.UpgradeDescription[lang] = upgradeDescription
+		log.Printf("Updated upgradeDescription (direct) for language %s in %s", lang, entryType)
+	}
 }
 
 // findPendingDataForTask finds the pending data entry for a specific task

@@ -142,19 +142,19 @@ type Values struct {
 type ApplicationInfoEntry struct {
 	ID string `json:"id"`
 
-	Name        string   `json:"name"`
-	CfgType     string   `json:"cfgType"`
-	ChartName   string   `json:"chartName"`
-	Icon        string   `json:"icon"`
-	Description string   `json:"description"`
-	AppID       string   `json:"appID"`
-	Title       string   `json:"title"`
-	Version     string   `json:"version"`
-	Categories  []string `json:"categories"`
-	VersionName string   `json:"versionName"`
+	Name        string            `json:"name"`
+	CfgType     string            `json:"cfgType"`
+	ChartName   string            `json:"chartName"`
+	Icon        string            `json:"icon"`
+	Description map[string]string `json:"description"` // Changed to support multi-language
+	AppID       string            `json:"appID"`
+	Title       map[string]string `json:"title"` // Changed to support multi-language
+	Version     string            `json:"version"`
+	Categories  []string          `json:"categories"`
+	VersionName string            `json:"versionName"`
 
-	FullDescription    string                   `json:"fullDescription"`
-	UpgradeDescription string                   `json:"upgradeDescription"`
+	FullDescription    map[string]string        `json:"fullDescription"`    // Changed to support multi-language
+	UpgradeDescription map[string]string        `json:"upgradeDescription"` // Changed to support multi-language
 	PromoteImage       []string                 `json:"promoteImage"`
 	PromoteVideo       string                   `json:"promoteVideo"`
 	SubCategory        string                   `json:"subCategory"`
@@ -226,11 +226,12 @@ type AppsInfoResponse struct {
 }
 
 type AppSimpleInfo struct {
-	AppID          string `json:"app_id"`
-	AppName        string `json:"app_name"`
-	AppIcon        string `json:"app_icon"`
-	AppDescription string `json:"app_description"`
-	AppVersion     string `json:"app_version"`
+	AppID          string            `json:"app_id"`
+	AppName        string            `json:"app_name"`
+	AppIcon        string            `json:"app_icon"`
+	AppDescription map[string]string `json:"app_description"`
+	AppVersion     string            `json:"app_version"`
+	AppTitle       map[string]string `json:"app_title"`
 }
 
 // AppInfoLatestPendingData contains pending app info data with extended structure
@@ -501,7 +502,7 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 		ID:         appID,
 		AppID:      appID,
 		Name:       appName,
-		Title:      appName,
+		Title:      map[string]string{"en-US": appName}, // Initialize with default language
 		CreateTime: getCurrentTimestamp(),
 		UpdateTime: getCurrentTimestamp(),
 		Metadata:   make(map[string]interface{}),
@@ -515,7 +516,7 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	// Extract other basic fields if available
 	// 如果可用，提取其他基本字段
 	if desc, ok := data["description"].(string); ok {
-		rawData.Description = desc
+		rawData.Description = map[string]string{"en-US": desc} // Initialize with default language
 	}
 	if icon, ok := data["icon"].(string); ok {
 		rawData.Icon = icon
@@ -712,7 +713,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 		ID:         primaryID,
 		AppID:      primaryID,
 		Name:       primaryName,
-		Title:      primaryName,
+		Title:      map[string]string{"en-US": primaryName}, // Initialize with default language
 		CreateTime: getCurrentTimestamp(),
 		UpdateTime: getCurrentTimestamp(),
 		Metadata:   make(map[string]interface{}),
@@ -721,7 +722,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	// Extract other optional fields
 	// 提取其他可选字段
 	if desc, ok := appData["description"].(string); ok {
-		rawData.Description = desc
+		rawData.Description = map[string]string{"en-US": desc} // Initialize with default language
 	}
 	if icon, ok := appData["icon"].(string); ok {
 		rawData.Icon = icon
