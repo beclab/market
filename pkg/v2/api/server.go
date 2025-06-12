@@ -43,7 +43,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/market/data", s.getMarketData).Methods("GET")
 
 	// 2. Get specific application information (supports multiple queries)
-	api.HandleFunc("/apps", s.getAppsInfo).Methods("GET")
+	api.HandleFunc("/apps", s.getAppsInfo).Methods("POST")
 
 	// 3. Get rendered installation package for specific application (single app only)
 	api.HandleFunc("/apps/{id}/package", s.getAppPackage).Methods("GET")

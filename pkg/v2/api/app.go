@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -13,6 +15,40 @@ import (
 	"github.com/emicklei/go-restful/v3"
 	"github.com/gorilla/mux"
 )
+
+// AppsInfoRequest represents the request body for /api/v2/apps
+// AppsInfoRequest 表示 /api/v2/apps 接口的请求体
+type AppsInfoRequest struct {
+	Apps []AppQueryInfo `json:"apps"`
+}
+
+// AppQueryInfo represents individual app query information
+// AppQueryInfo 表示单个应用查询信息
+type AppQueryInfo struct {
+	AppID          string `json:"appid"`
+	SourceDataName string `json:"sourceDataName"`
+}
+
+// AppInfoLatestDataResponse represents AppInfoLatestData for API response without raw_data
+// AppInfoLatestDataResponse 表示API响应应用的AppInfoLatestData，不包含raw_data字段
+type AppInfoLatestDataResponse struct {
+	Type            types.AppDataType    `json:"type"`
+	Timestamp       int64                `json:"timestamp"`
+	Version         string               `json:"version,omitempty"`
+	RawPackage      string               `json:"raw_package"`
+	Values          []*types.Values      `json:"values"`
+	AppInfo         *types.AppInfo       `json:"app_info"`
+	RenderedPackage string               `json:"rendered_package"`
+	AppSimpleInfo   *types.AppSimpleInfo `json:"app_simple_info"`
+}
+
+// AppsInfoResponse represents the response for /api/v2/apps
+// AppsInfoResponse 表示 /api/v2/apps 接口的响应
+type AppsInfoResponse struct {
+	Apps       []*AppInfoLatestDataResponse `json:"apps"`
+	TotalCount int                          `json:"total_count"`
+	NotFound   []AppQueryInfo               `json:"not_found,omitempty"`
+}
 
 // MarketInfoResponse represents the response structure for market information
 // 市场信息响应结构
@@ -140,15 +176,196 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 
 // 2. Get specific application information (supports multiple queries)
 func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/apps - Getting apps information")
+	log.Println("POST /api/v2/apps - Getting apps information")
 
-	// Get query parameters for filtering
-	appIDs := r.URL.Query()["id"]
-	log.Printf("Requested app IDs: %v", appIDs)
+	// Add timeout context
+	// 添加超时上下文
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
 
-	// TODO: Implement business logic for getting apps information
+	// Check if cache manager is available
+	// 检查缓存管理器是否可用
+	if s.cacheManager == nil {
+		log.Println("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
 
-	s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", nil)
+	// Step 1: Get user information from request
+	// 步骤1：从请求中获取用户信息
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for apps request: %s", userID)
+
+	// Step 2: Parse JSON request body
+	// 步骤2：解析JSON请求体
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+	defer r.Body.Close()
+
+	var request AppsInfoRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		log.Printf("Failed to parse JSON request: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
+		return
+	}
+
+	if len(request.Apps) == 0 {
+		log.Printf("Empty apps array in request")
+		s.sendResponse(w, http.StatusBadRequest, false, "Apps array cannot be empty", nil)
+		return
+	}
+
+	log.Printf("Received request for %d apps from user %s", len(request.Apps), userID)
+
+	// Create a channel to receive the result
+	// 创建通道接收结果
+	type result struct {
+		response AppsInfoResponse
+		err      error
+	}
+	resultChan := make(chan result, 1)
+
+	// Step 3: Process apps information retrieval in goroutine
+	// 步骤3：在goroutine中处理应用信息检索
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in getAppsInfo: %v", r)
+				resultChan <- result{err: fmt.Errorf("internal error occurred")}
+			}
+		}()
+
+		// Get user data from cache
+		// 从缓存获取用户数据
+		userData := s.cacheManager.GetUserData(userID)
+		if userData == nil {
+			log.Printf("User data not found for user: %s", userID)
+			resultChan <- result{err: fmt.Errorf("user data not found")}
+			return
+		}
+
+		var foundApps []*AppInfoLatestDataResponse
+		var notFoundApps []AppQueryInfo
+
+		// Step 4: Find AppInfoLatestData for each requested app
+		// 步骤4：为每个请求的应用查找AppInfoLatestData
+		for _, appQuery := range request.Apps {
+			log.Printf("Searching for app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
+
+			// Check if source exists
+			// 检查源是否存在
+			sourceData, exists := userData.Sources[appQuery.SourceDataName]
+			if !exists {
+				log.Printf("Source data not found: %s for user: %s", appQuery.SourceDataName, userID)
+				notFoundApps = append(notFoundApps, appQuery)
+				continue
+			}
+
+			// Search for app in AppInfoLatest array
+			// 在AppInfoLatest数组中搜索应用
+			found := false
+			for _, appInfoData := range sourceData.AppInfoLatest {
+				if appInfoData == nil {
+					continue
+				}
+
+				// Check multiple possible ID fields for matching
+				// 检查多个可能的ID字段进行匹配
+				var appID string
+				if appInfoData.RawData != nil {
+					// Priority: ID > AppID > Name
+					// 优先级：ID > AppID > Name
+					if appInfoData.RawData.ID != "" {
+						appID = appInfoData.RawData.ID
+					} else if appInfoData.RawData.AppID != "" {
+						appID = appInfoData.RawData.AppID
+					} else if appInfoData.RawData.Name != "" {
+						appID = appInfoData.RawData.Name
+					}
+				}
+
+				// Also check AppSimpleInfo if available
+				// 如果可用，也检查AppSimpleInfo
+				if appID == "" && appInfoData.AppSimpleInfo != nil {
+					appID = appInfoData.AppSimpleInfo.AppID
+				}
+
+				// Match the requested app ID
+				// 匹配请求的应用ID
+				if appID == appQuery.AppID {
+					log.Printf("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
+
+					// Convert AppInfoLatestData to AppInfoLatestDataResponse (without raw_data)
+					// 将AppInfoLatestData转换为AppInfoLatestDataResponse（不包含raw_data）
+					responseData := &AppInfoLatestDataResponse{
+						Type:            appInfoData.Type,
+						Timestamp:       appInfoData.Timestamp,
+						Version:         appInfoData.Version,
+						RawPackage:      appInfoData.RawPackage,
+						Values:          appInfoData.Values,
+						AppInfo:         appInfoData.AppInfo,
+						RenderedPackage: appInfoData.RenderedPackage,
+						AppSimpleInfo:   appInfoData.AppSimpleInfo,
+					}
+
+					foundApps = append(foundApps, responseData)
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				log.Printf("App not found: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
+				notFoundApps = append(notFoundApps, appQuery)
+			}
+		}
+
+		// Step 5: Prepare response
+		// 步骤5：准备响应
+		response := AppsInfoResponse{
+			Apps:       foundApps,
+			TotalCount: len(foundApps),
+		}
+
+		if len(notFoundApps) > 0 {
+			response.NotFound = notFoundApps
+		}
+
+		log.Printf("Apps info retrieval completed: %d found, %d not found", len(foundApps), len(notFoundApps))
+		resultChan <- result{response: response}
+	}()
+
+	// Wait for result or timeout
+	// 等待结果或超时
+	select {
+	case <-ctx.Done():
+		log.Printf("Request timeout or cancelled for /api/v2/apps")
+		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - apps retrieval took too long", nil)
+		return
+	case res := <-resultChan:
+		if res.err != nil {
+			log.Printf("Error retrieving apps information: %v", res.err)
+			if res.err.Error() == "user data not found" {
+				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+			} else {
+				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve apps information", nil)
+			}
+			return
+		}
+
+		log.Printf("Apps information retrieved successfully for user: %s", userID)
+		s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", res.response)
+	}
 }
 
 // 3. Get rendered installation package for specific application (single app only)
