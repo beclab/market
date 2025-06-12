@@ -6,23 +6,33 @@ import (
 	"net/http"
 
 	"market/internal/v2/appinfo"
+	"market/internal/v2/history"
 
 	"github.com/gorilla/mux"
 )
 
 // Server represents the HTTP server
 type Server struct {
-	router       *mux.Router
-	port         string
-	cacheManager *appinfo.CacheManager
+	router        *mux.Router
+	port          string
+	cacheManager  *appinfo.CacheManager
+	historyModule *history.HistoryModule
 }
 
 // NewServer creates a new server instance
 func NewServer(port string, cacheManager *appinfo.CacheManager) *Server {
+	// Initialize history module
+	historyModule, err := history.NewHistoryModule()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize history module: %v", err)
+		// Continue without history module, but log the error
+	}
+
 	s := &Server{
-		router:       mux.NewRouter(),
-		port:         port,
-		cacheManager: cacheManager,
+		router:        mux.NewRouter(),
+		port:          port,
+		cacheManager:  cacheManager,
+		historyModule: historyModule,
 	}
 	s.setupRoutes()
 	return s
@@ -79,6 +89,20 @@ func (s *Server) setupRoutes() {
 func (s *Server) Start() error {
 	log.Printf("Starting server on port %s", s.port)
 	return http.ListenAndServe(":"+s.port, s.router)
+}
+
+// Close gracefully closes the server and its resources
+func (s *Server) Close() error {
+	log.Println("Closing server resources")
+
+	if s.historyModule != nil {
+		if err := s.historyModule.Close(); err != nil {
+			log.Printf("Error closing history module: %v", err)
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Response represents a standard API response

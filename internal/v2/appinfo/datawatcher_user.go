@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/history"
+
 	"github.com/nats-io/nats.go"
 )
 
@@ -21,10 +23,11 @@ type UserStateMessage struct {
 
 // DataWatcherUser manages NATS connection and message processing for user app state updates
 type DataWatcherUser struct {
-	conn       *nats.Conn
-	subject    string
-	isDev      bool
-	cancelFunc context.CancelFunc
+	conn          *nats.Conn
+	subject       string
+	isDev         bool
+	cancelFunc    context.CancelFunc
+	historyModule *history.HistoryModule
 }
 
 // NewDataWatcherUser creates a new DataWatcherUser instance
@@ -41,6 +44,13 @@ func NewDataWatcherUser() *DataWatcherUser {
 func (dw *DataWatcherUser) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	dw.cancelFunc = cancel
+
+	// Initialize history module
+	historyModule, err := history.NewHistoryModule()
+	if err != nil {
+		return fmt.Errorf("failed to initialize history module: %w", err)
+	}
+	dw.historyModule = historyModule
 
 	if dw.isDev {
 		log.Printf("Running in development mode, NATS connection disabled")
@@ -71,6 +81,12 @@ func (dw *DataWatcherUser) Start(ctx context.Context) error {
 func (dw *DataWatcherUser) Stop() {
 	if dw.cancelFunc != nil {
 		dw.cancelFunc()
+	}
+
+	if dw.historyModule != nil {
+		if err := dw.historyModule.Close(); err != nil {
+			log.Printf("Error closing history module: %v", err)
+		}
 	}
 
 	if dw.conn != nil {
@@ -154,6 +170,24 @@ func (dw *DataWatcherUser) processMessage(data []byte) {
 	// Print the received message
 	log.Printf("Received app state message - EventType: %s, Username: %s, Timestamp: %s",
 		message.EventType, message.Username, message.Timestamp)
+
+	// Write to history
+	if dw.historyModule != nil {
+		historyRecord := &history.HistoryRecord{
+			Type:     history.TypeSystem,
+			Message:  "",
+			Time:     time.Now().Unix(),
+			App:      "",
+			Account:  message.Username,
+			Extended: string(data),
+		}
+
+		if err := dw.historyModule.StoreRecord(historyRecord); err != nil {
+			log.Printf("Failed to store history record: %v", err)
+		} else {
+			log.Printf("Successfully stored user state message to history for user: %s", message.Username)
+		}
+	}
 }
 
 // simulateMessages generates random messages every 30 seconds in development mode
@@ -162,7 +196,7 @@ func (dw *DataWatcherUser) simulateMessages(ctx context.Context) {
 	defer ticker.Stop()
 
 	eventTypes := []string{"app_install", "app_uninstall", "app_start", "app_stop", "app_update"}
-	usernames := []string{"admin", "user1", "user2", "testuser", "developer"}
+	usernames := []string{"admin", "user1"}
 
 	// Generate initial message immediately
 	dw.generateRandomMessage(eventTypes, usernames)

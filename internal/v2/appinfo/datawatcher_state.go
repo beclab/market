@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"market/internal/v2/history" // Import history module with correct path
+
 	"github.com/nats-io/nats.go"
 )
 
@@ -20,35 +22,45 @@ type AppStateMessage struct {
 	OpType   string `json:"opType"`
 	OpTaskId string `json:"opTaskId"`
 	EventId  string `json:"eventId"`
+	Account  string `json:"account"`
 }
 
 // DataWatcherState handles app state messages from NATS
 type DataWatcherState struct {
-	nc       *nats.Conn
-	sub      *nats.Subscription
-	ctx      context.Context
-	cancel   context.CancelFunc
-	isDev    bool
-	natsHost string
-	natsPort string
-	natsUser string
-	natsPass string
-	subject  string
+	nc            *nats.Conn
+	sub           *nats.Subscription
+	ctx           context.Context
+	cancel        context.CancelFunc
+	isDev         bool
+	natsHost      string
+	natsPort      string
+	natsUser      string
+	natsPass      string
+	subject       string
+	historyModule *history.HistoryModule // Add history module
 }
 
 // NewDataWatcherState creates a new DataWatcherState instance
 func NewDataWatcherState() *DataWatcherState {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Initialize history module
+	historyModule, err := history.NewHistoryModule()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize history module: %v", err)
+		// Continue without history module
+	}
+
 	dw := &DataWatcherState{
-		ctx:      ctx,
-		cancel:   cancel,
-		isDev:    isDevEnvironment(),
-		natsHost: getEnvOrDefault("NATS_HOST", "localhost"),
-		natsPort: getEnvOrDefault("NATS_PORT", "4222"),
-		natsUser: getEnvOrDefault("NATS_USERNAME", ""),
-		natsPass: getEnvOrDefault("NATS_PASSWORD", ""),
-		subject:  getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "system.app.state"),
+		ctx:           ctx,
+		cancel:        cancel,
+		isDev:         isDevEnvironment(),
+		natsHost:      getEnvOrDefault("NATS_HOST", "localhost"),
+		natsPort:      getEnvOrDefault("NATS_PORT", "4222"),
+		natsUser:      getEnvOrDefault("NATS_USERNAME", ""),
+		natsPass:      getEnvOrDefault("NATS_PASSWORD", ""),
+		subject:       getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "system.app.state"),
+		historyModule: historyModule,
 	}
 
 	return dw
@@ -78,6 +90,13 @@ func (dw *DataWatcherState) Stop() error {
 
 	if dw.nc != nil {
 		dw.nc.Close()
+	}
+
+	// Close history module
+	if dw.historyModule != nil {
+		if err := dw.historyModule.Close(); err != nil {
+			log.Printf("Error closing history module: %v", err)
+		}
 	}
 
 	log.Println("Data watcher stopped")
@@ -125,6 +144,9 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		return
 	}
 
+	// Store as history record
+	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
+
 	// Print the parsed message
 	dw.printAppStateMessage(appStateMsg)
 }
@@ -162,12 +184,39 @@ func (dw *DataWatcherState) generateMockMessage() {
 		OpType:   opTypes[rand.Intn(len(opTypes))],
 		OpTaskId: fmt.Sprintf("task_%d", rand.Intn(10000)),
 		EventId:  fmt.Sprintf("event_%d_%d", time.Now().Unix(), rand.Intn(1000)),
+		Account:  "admin",
 	}
 
 	jsonData, _ := json.Marshal(msg)
 	log.Printf("Generated mock message: %s", string(jsonData))
 
+	// Store as history record
+	dw.storeHistoryRecord(msg, string(jsonData))
+
 	dw.printAppStateMessage(msg)
+}
+
+// storeHistoryRecord stores the app state message as a history record
+func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage string) {
+	if dw.historyModule == nil {
+		log.Printf("History module not available, skipping record storage")
+		return
+	}
+
+	record := &history.HistoryRecord{
+		Type:     history.TypeSystem, // Use system type
+		Message:  "",                 // Leave message empty as requested
+		Time:     time.Now().Unix(),  // Current timestamp
+		App:      msg.AppId,          // App field from message
+		Account:  msg.Account,        // Account field from message
+		Extended: rawMessage,         // Store complete message in Extended field
+	}
+
+	if err := dw.historyModule.StoreRecord(record); err != nil {
+		log.Printf("Failed to store history record: %v", err)
+	} else {
+		log.Printf("Stored history record for app %s with account %s and ID %d", msg.AppId, msg.Account, record.ID)
+	}
 }
 
 // printAppStateMessage prints the app state message details
@@ -178,6 +227,7 @@ func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	log.Printf("Operation Type: %s", msg.OpType)
 	log.Printf("Operation Task ID: %s", msg.OpTaskId)
 	log.Printf("Event ID: %s", msg.EventId)
+	log.Printf("Account: %s", msg.Account)
 	log.Printf("========================")
 }
 
