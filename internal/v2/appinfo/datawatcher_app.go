@@ -516,7 +516,9 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *So
 	// 步骤1：使用读锁检查并识别已完成的应用
 	var pendingApps []*AppInfoLatestPendingData
 	var completedApps []*AppInfoLatestPendingData
-	var remainingPendingApps []*AppInfoLatestPendingData
+	// Initialize as empty slice instead of nil to ensure it's never null
+	// 初始化为空slice而不是nil，确保它永远不会是null
+	remainingPendingApps := make([]*AppInfoLatestPendingData, 0)
 
 	glog.V(2).Infof("DataWatcher: Acquiring read lock to check pending apps for user=%s, source=%s", userID, sourceID)
 	sourceData.Mutex.RLock()
