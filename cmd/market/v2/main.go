@@ -15,6 +15,7 @@ import (
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
 	"market/pkg/v2/api"
+	"market/pkg/v2/helm"
 
 	"github.com/golang/glog"
 )
@@ -85,9 +86,22 @@ func main() {
 	taskModule := task.NewTaskModule()
 	log.Println("Task module started successfully")
 
+	// 4. Initialize Helm Repository Service
+	// 4. 初始化 Helm Repository 服务
+	cacheManager := appInfoModule.GetCacheManager()
+
+	// Start Helm Repository server in a goroutine
+	// 在协程中启动 Helm Repository 服务器
+	go func() {
+		log.Println("Starting Helm Repository server on port 82...")
+		if err := helm.StartHelmRepositoryServerWithCacheManager(cacheManager); err != nil {
+			log.Printf("Failed to start Helm Repository server: %v", err)
+		}
+	}()
+	log.Println("Helm Repository service initialized successfully")
+
 	// Create and start the HTTP server
 	// 创建并启动HTTP服务器
-	cacheManager := appInfoModule.GetCacheManager()
 	server := api.NewServer("8080", cacheManager)
 
 	log.Println("Available endpoints:")
@@ -102,6 +116,26 @@ func main() {
 	log.Println("  POST   /api/v2/apps/upload               - Upload application installation package")
 	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
+	log.Println("")
+	log.Println("Helm Repository endpoints (port 82):")
+	log.Println("  GET    /index.yaml                       - Get Helm repository index (requires X-Market-User and X-Market-Source headers)")
+	log.Println("  GET    /charts/{filename}.tgz            - Download chart package")
+	log.Println("  GET    /api/v1/charts                    - List all charts")
+	log.Println("  POST   /api/v1/charts                    - Upload chart package")
+	log.Println("  GET    /api/v1/charts/{name}             - Get chart information")
+	log.Println("  DELETE /api/v1/charts/{name}/{version}   - Delete chart version")
+	log.Println("  GET    /api/v1/charts/{name}/versions    - Get chart versions")
+	log.Println("  GET    /api/v1/charts/search             - Search charts")
+	log.Println("  GET    /api/v1/charts/{name}/{version}/metadata - Get chart metadata")
+	log.Println("  GET    /api/v1/health                    - Health check")
+	log.Println("  GET    /api/v1/metrics                   - Get metrics")
+	log.Println("  GET    /api/v1/config                    - Get repository configuration")
+	log.Println("  PUT    /api/v1/config                    - Update repository configuration")
+	log.Println("  POST   /api/v1/index/rebuild             - Rebuild index")
+	log.Println("")
+	log.Println("Example Helm Repository usage:")
+	log.Println("  curl -H 'X-Market-User: user1' -H 'X-Market-Source: web-console' http://localhost:82/index.yaml")
+	log.Println("  helm repo add myrepo http://localhost:82 --header 'X-Market-User=user1' --header 'X-Market-Source=web-console'")
 	log.Println("")
 
 	// Start HTTP server in a goroutine
@@ -158,6 +192,8 @@ func main() {
 		if err := redisClient.Close(); err != nil {
 			log.Printf("Error stopping Redis client: %v", err)
 		}
+
+		log.Println("Note: Helm Repository server will stop automatically when main process exits")
 	}()
 
 	// Wait for shutdown completion or timeout
