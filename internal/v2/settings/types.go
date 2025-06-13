@@ -6,7 +6,6 @@ import (
 )
 
 // MarketSource represents a single market source
-// 单个应用市场源
 type MarketSource struct {
 	ID          string    `json:"id" redis:"id"`               // Unique identifier for the source
 	Name        string    `json:"name" redis:"name"`           // Display name of the source
@@ -18,7 +17,6 @@ type MarketSource struct {
 }
 
 // MarketSourcesConfig represents the market sources configuration
-// 应用市场源配置结构，支持多个数据源
 type MarketSourcesConfig struct {
 	Sources       []*MarketSource `json:"sources" redis:"sources"`
 	DefaultSource string          `json:"default_source" redis:"default_source"` // ID of default source
@@ -26,7 +24,6 @@ type MarketSourcesConfig struct {
 }
 
 // APIEndpointsConfig represents the API endpoint paths configuration
-// API端点路径配置
 type APIEndpointsConfig struct {
 	HashPath   string    `json:"hash_path" redis:"hash_path"`     // e.g., "/api/v1/appstore/hash"
 	DataPath   string    `json:"data_path" redis:"data_path"`     // e.g., "/api/v1/appstore/info"
@@ -35,7 +32,6 @@ type APIEndpointsConfig struct {
 }
 
 // SettingsManager manages application settings
-// 设置管理器，管理应用程序设置
 type SettingsManager struct {
 	mu            sync.RWMutex
 	marketSources *MarketSourcesConfig
@@ -44,7 +40,6 @@ type SettingsManager struct {
 }
 
 // RedisClient interface for Redis operations
-// Redis操作接口
 type RedisClient interface {
 	Get(key string) (string, error)
 	Set(key string, value interface{}, expiration time.Duration) error
@@ -53,7 +48,6 @@ type RedisClient interface {
 }
 
 // Constants for Redis keys
-// Redis键常量
 const (
 	RedisKeyMarketSources = "market:sources:config"
 	RedisKeyAPIEndpoints  = "market:api:endpoints"

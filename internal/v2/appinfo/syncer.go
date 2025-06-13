@@ -17,12 +17,12 @@ import (
 type Syncer struct {
 	steps           []syncerfn.SyncStep
 	cache           *CacheData
-	cacheManager    *CacheManager // 添加CacheManager引用用于通知
+	cacheManager    *CacheManager // Reference to CacheManager for notifications
 	syncInterval    time.Duration
 	stopChan        chan struct{}
 	isRunning       bool
 	mutex           sync.RWMutex
-	settingsManager *settings.SettingsManager // 设置管理器用于获取数据源信息
+	settingsManager *settings.SettingsManager // Settings manager for data source information
 }
 
 // NewSyncer creates a new syncer with the given steps
@@ -30,7 +30,7 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 	return &Syncer{
 		steps:           make([]syncerfn.SyncStep, 0),
 		cache:           cache,
-		cacheManager:    nil, // 将在模块初始化时设置
+		cacheManager:    nil,
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
 		isRunning:       false,
@@ -142,7 +142,6 @@ func (s *Syncer) syncLoop(ctx context.Context) {
 }
 
 // getVersionForSync returns the version to use for sync operations with fallback
-// 返回用于同步操作的版本号，包含回退逻辑
 func getVersionForSync() string {
 	if version, err := utils.GetTerminusVersionValue(); err == nil {
 		return version
@@ -159,7 +158,6 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	startTime := time.Now()
 
 	// Get available data sources
-	// 获取可用的数据源
 	activeSources := s.settingsManager.GetActiveMarketSources()
 	if len(activeSources) == 0 {
 		log.Println("==================== SYNC CYCLE FAILED ====================")
@@ -169,7 +167,6 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	log.Printf("Found %d active market sources", len(activeSources))
 
 	// Try each source in priority order until one succeeds
-	// 按优先级顺序尝试每个源，直到有一个成功
 	var lastError error
 	for _, source := range activeSources {
 		log.Printf("Trying market source: %s (%s)", source.Name, source.BaseURL)
@@ -181,7 +178,6 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		}
 
 		// Success with this source
-		// 使用此源成功
 		duration := time.Since(startTime)
 		log.Printf("Sync cycle completed successfully with source %s in %v", source.Name, duration)
 		log.Println("==================== SYNC CYCLE COMPLETED ====================")
@@ -189,26 +185,22 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	}
 
 	// All sources failed
-	// 所有源都失败了
 	log.Println("==================== SYNC CYCLE FAILED ====================")
 	return fmt.Errorf("all market sources failed, last error: %w", lastError)
 }
 
 // executeSyncCycleWithSource executes sync cycle with a specific market source
-// 使用特定市场源执行同步周期
 func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *settings.MarketSource) error {
 	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.Name)
 
 	syncContext := syncerfn.NewSyncContext(s.cache)
 
 	// Set version for API requests using utils function
-	// 使用utils函数为API请求设置版本
 	version := getVersionForSync()
 	syncContext.SetVersion(version)
 	log.Printf("Set version for sync cycle: %s", version)
 
 	// Set the current market source in sync context
-	// 在同步上下文中设置当前市场源
 	syncContext.SetMarketSource(source)
 
 	steps := s.GetSteps()
@@ -246,16 +238,13 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 	}
 
 	// Store complete data to app-info-latest-pending after successful sync
-	// 成功同步后将完整数据存储到所有用户的app-info-latest-pending
 	// Modified condition: Store data if we have LatestData, regardless of hash match status
-	// 修改条件：如果有LatestData就存储数据，不管hash是否匹配
 	if syncContext.LatestData != nil {
 		log.Printf("Storing complete data to app-info-latest-pending for all users")
 		log.Printf("Sync context status - HashMatches: %t, RemoteHash: %s, LocalHash: %s",
 			syncContext.HashMatches, syncContext.RemoteHash, syncContext.LocalHash)
 
 		// Convert LatestData to the format expected by cache
-		// 将LatestData转换为缓存期望的格式
 		completeData := map[string]interface{}{
 			"version": syncContext.LatestData.Version,
 			"data": map[string]interface{}{
@@ -271,7 +260,6 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		log.Printf("Using source ID: %s for data storage", sourceID)
 
 		// Get all existing user IDs with minimal locking
-		// 用最小锁定获取所有现有的用户ID
 		s.cache.Mutex.RLock()
 		var userIDs []string
 		for userID := range s.cache.Users {
@@ -280,7 +268,6 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		s.cache.Mutex.RUnlock()
 
 		// If no users exist, create a system user as fallback
-		// 如果没有用户存在，创建系统用户作为回退
 		if len(userIDs) == 0 {
 			s.cache.Mutex.Lock()
 			// Double-check after acquiring write lock
@@ -301,7 +288,6 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		log.Printf("Storing data for %d users: %v", len(userIDs), userIDs)
 
 		// Determine storage method based on CacheManager availability
-		// 根据CacheManager的可用性确定存储方法
 		if s.cacheManager != nil {
 			log.Printf("Using CacheManager for data storage with hydration notifications")
 			s.storeDataViaCacheManager(userIDs, sourceID, completeData)
@@ -320,17 +306,14 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 }
 
 // storeDataDirectly stores data directly to cache without going through CacheManager
-// storeDataDirectly 直接存储数据到缓存，不通过CacheManager
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
 	// Use global lock instead of nested locks
-	// 使用全局锁而不是嵌套锁
 	s.cache.Mutex.Lock()
 	defer s.cache.Mutex.Unlock()
 
 	userData := s.cache.Users[userID]
 
 	// Ensure source data exists for this user
-	// 确保此用户的源数据存在
 	if _, exists := userData.Sources[sourceID]; !exists {
 		userData.Sources[sourceID] = NewSourceData()
 		log.Printf("Created new source data for user: %s, source: %s", userID, sourceID)
@@ -339,14 +322,12 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 	sourceData := userData.Sources[sourceID]
 
 	// Check if this is a local source - skip syncer storage for local sources
-	// 检查是否为本地源 - 跳过本地源的同步存储
 	if sourceData.Type == types.SourceDataTypeLocal {
 		log.Printf("Skipping syncer data storage for local source: user=%s, source=%s", userID, sourceID)
 		return
 	}
 
 	// Extract Others data from complete data
-	// 从完整数据中提取Others数据
 	others := &types.Others{}
 
 	// Extract version and hash
@@ -459,25 +440,20 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 		}
 
 		// Store Others data in source
-		// 在源数据中存储Others数据
 		sourceData.Others = others
 
 		// Process each app individually
-		// 单独处理每个应用
 		if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
 			for appID, appDataInterface := range appsData {
 				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
 					// Create AppInfoLatestPendingData for this specific app using the basic function
-					// 使用基础函数为这个特定应用创建AppInfoLatestPendingData
 					log.Printf("DEBUG: CALL POINT 3 - Processing app %s for user %s, source %s", appID, userID, sourceID)
 					log.Printf("DEBUG: CALL POINT 3 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
 					appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
 					// Check if app data creation was successful
-					// 检查应用数据创建是否成功
 					if appData == nil {
 						log.Printf("Warning: Skipping app %s for user %s, source %s - not recognized as valid app data", appID, userID, sourceID)
 						// Log available keys for debugging
-						// 记录可用键以供调试
 						if appDataMap != nil {
 							keys := make([]string, 0, len(appDataMap))
 							for k := range appDataMap {
@@ -502,7 +478,6 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 }
 
 // storeDataDirectlyBatch stores data directly to cache without going through CacheManager
-// storeDataDirectlyBatch 直接存储数据到缓存，不通过CacheManager
 func (s *Syncer) storeDataDirectlyBatch(userIDs []string, sourceID string, completeData map[string]interface{}) {
 	for _, userID := range userIDs {
 		s.storeDataDirectly(userID, sourceID, completeData)
@@ -510,11 +485,9 @@ func (s *Syncer) storeDataDirectlyBatch(userIDs []string, sourceID string, compl
 }
 
 // storeDataViaCacheManager stores data via CacheManager
-// storeDataViaCacheManager 通过CacheManager存储数据
 func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, completeData map[string]interface{}) {
 	for _, userID := range userIDs {
 		// Check if the source is local type - skip syncer operations for local sources
-		// 检查源是否为本地类型 - 跳过本地源的同步操作
 		s.cache.Mutex.RLock()
 		userData, userExists := s.cache.Users[userID]
 		if userExists {
@@ -531,7 +504,6 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 		s.cache.Mutex.RUnlock()
 
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
-		// 使用CacheManager.SetAppData来触发水合通知（如果可用）
 		if s.cacheManager != nil {
 			log.Printf("Using CacheManager to store data for user: %s, source: %s", userID, sourceID)
 			err := s.cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData)
@@ -554,12 +526,10 @@ func CreateDefaultSyncer(cache *CacheData, config SyncerConfig, settingsManager 
 	syncer := NewSyncer(cache, config.SyncInterval, settingsManager)
 
 	// Get version for API requests using utils function
-	// 获取API请求版本号
 	version := getVersionForSync()
 	log.Printf("Using version for syncer steps: %s", version)
 
 	// Get API endpoints configuration
-	// 获取API端点配置
 	endpoints := settingsManager.GetAPIEndpoints()
 	if endpoints == nil {
 		log.Printf("Warning: no API endpoints configuration found, using defaults")
@@ -571,7 +541,6 @@ func CreateDefaultSyncer(cache *CacheData, config SyncerConfig, settingsManager 
 	}
 
 	// Add default steps with endpoint paths instead of full URLs
-	// 使用端点路径而不是完整URL添加默认步骤
 	syncer.AddStep(syncerfn.NewHashComparisonStep(endpoints.HashPath, settingsManager))
 	syncer.AddStep(syncerfn.NewDataFetchStep(endpoints.DataPath, settingsManager))
 	syncer.AddStep(syncerfn.NewDetailFetchStep(endpoints.DetailPath, version, settingsManager))
@@ -595,7 +564,6 @@ func DefaultSyncerConfig() SyncerConfig {
 }
 
 // SetCacheManager sets the cache manager for hydration notifications
-// SetCacheManager 设置缓存管理器以进行水合通知
 func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()

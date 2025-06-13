@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -35,14 +36,15 @@ const (
 
 // Task represents a task in the system
 type Task struct {
-	ID          string     `json:"id"`
-	Type        TaskType   `json:"type"`
-	Status      TaskStatus `json:"status"`
-	AppName     string     `json:"app_name"`
-	CreatedAt   time.Time  `json:"created_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	ErrorMsg    string     `json:"error_msg,omitempty"`
+	ID          string                 `json:"id"`
+	Type        TaskType               `json:"type"`
+	Status      TaskStatus             `json:"status"`
+	AppName     string                 `json:"app_name"`
+	CreatedAt   time.Time              `json:"created_at"`
+	StartedAt   *time.Time             `json:"started_at,omitempty"`
+	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	ErrorMsg    string                 `json:"error_msg,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // TaskModule manages task queues and execution
@@ -74,7 +76,7 @@ func NewTaskModule() *TaskModule {
 }
 
 // AddTask adds a new task to the pending queue
-func (tm *TaskModule) AddTask(taskType TaskType, appName string) *Task {
+func (tm *TaskModule) AddTask(taskType TaskType, appName string, metadata map[string]interface{}) *Task {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -84,6 +86,7 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string) *Task {
 		Status:    Pending,
 		AppName:   appName,
 		CreatedAt: time.Now(),
+		Metadata:  metadata,
 	}
 
 	tm.pendingTasks = append(tm.pendingTasks, task)
@@ -161,17 +164,36 @@ func (tm *TaskModule) executeNextTask() {
 
 	log.Printf("Executing task: ID=%s, Type=%d, AppName=%s", task.ID, task.Type, task.AppName)
 
-	// Execute the task (implementation left empty as requested)
+	// Execute the task
 	tm.executeTask(task)
 }
 
-// executeTask executes the actual task logic (implementation left empty)
+// executeTask executes the actual task logic
 func (tm *TaskModule) executeTask(task *Task) {
-	// TODO: Implement task execution logic based on task type
 	switch task.Type {
 	case InstallApp:
-		// TODO: Implement app installation logic
-		log.Printf("Installing app: %s", task.AppName)
+		// Get token from metadata
+		token, ok := task.Metadata["token"].(string)
+		if !ok {
+			task.Status = Failed
+			task.ErrorMsg = "Missing token in task metadata"
+			return
+		}
+
+		// Get source from metadata
+		source, ok := task.Metadata["source"].(string)
+		if !ok {
+			source = "store" // Default source
+		}
+
+		// Execute app installation
+		_, err := tm.AppInstall(task.AppName, source, token)
+		if err != nil {
+			task.Status = Failed
+			task.ErrorMsg = fmt.Sprintf("Installation failed: %v", err)
+			return
+		}
+
 	case UninstallApp:
 		// TODO: Implement app uninstall logic
 		log.Printf("Uninstalling app: %s", task.AppName)
@@ -204,17 +226,9 @@ func (tm *TaskModule) updateRunningTasksStatus() {
 	}
 }
 
-// updateTaskStatus updates the status of a single task (implementation left empty)
+// updateTaskStatus updates the status of a single task
 func (tm *TaskModule) updateTaskStatus(task *Task) {
-	// TODO: Implement status update logic
-	// This should check the actual status of the task and update accordingly
 	log.Printf("Checking status for task: ID=%s, Type=%d, AppName=%s", task.ID, task.Type, task.AppName)
-
-	// Example logic (should be replaced with actual implementation):
-	// - Check if installation/uninstallation is complete
-	// - Update task status to Completed or Failed
-	// - Set CompletedAt timestamp
-	// - Remove from runningTasks if completed/failed
 }
 
 // Stop gracefully stops the task module

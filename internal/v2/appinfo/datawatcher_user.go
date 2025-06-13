@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"market/internal/v2/history"
@@ -32,7 +33,8 @@ type DataWatcherUser struct {
 
 // NewDataWatcherUser creates a new DataWatcherUser instance
 func NewDataWatcherUser() *DataWatcherUser {
-	isDev := os.Getenv("ENVIRONMENT") == "development" || os.Getenv("DEV_MODE") == "true"
+	env := strings.ToLower(os.Getenv("GO_ENV"))
+	isDev := env == "dev" || env == "development" || env == ""
 
 	return &DataWatcherUser{
 		subject: os.Getenv("NATS_SUBJECT_SYSTEM_USER_STATE"),

@@ -12,19 +12,16 @@ import (
 var settingsManager *settings.SettingsManager
 
 // SetSettingsManager sets the global settings manager
-// 设置全局设置管理器
 func SetSettingsManager(sm *settings.SettingsManager) {
 	settingsManager = sm
 }
 
 // MarketSourceRequest represents the request body for setting market source
-// 设置市场源的请求体结构
 type MarketSourceRequest struct {
 	URL string `json:"url"`
 }
 
 // getMarketSource handles GET /api/v2/settings/market-source
-// 处理获取市场源配置的请求
 func (s *Server) getMarketSource(w http.ResponseWriter, r *http.Request) {
 	log.Println("GET /api/v2/settings/market-source - Getting market source configuration")
 
@@ -46,7 +43,6 @@ func (s *Server) getMarketSource(w http.ResponseWriter, r *http.Request) {
 }
 
 // setMarketSource handles PUT /api/v2/settings/market-source
-// 处理设置市场源配置的请求
 func (s *Server) setMarketSource(w http.ResponseWriter, r *http.Request) {
 	log.Println("PUT /api/v2/settings/market-source - Setting market source configuration")
 
@@ -76,7 +72,6 @@ func (s *Server) setMarketSource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the updated configuration to return
-	// 获取更新后的配置用于返回
 	config := settingsManager.GetMarketSource()
 
 	log.Printf("Market source configuration updated to: %s", req.URL)

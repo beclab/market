@@ -10,13 +10,11 @@ import (
 )
 
 // HydrationNotifier interface for notifying hydrator about pending data updates
-// HydrationNotifier 接口用于通知水合器关于待处理数据更新
 type HydrationNotifier interface {
 	NotifyPendingDataUpdate(userID, sourceID string, pendingData map[string]interface{})
 }
 
 // CacheManager manages the in-memory cache and Redis synchronization
-// CacheManager 管理内存缓存和 Redis 同步
 type CacheManager struct {
 	cache             *CacheData
 	redisClient       *RedisClient
@@ -60,31 +58,47 @@ func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheMan
 func (cm *CacheManager) Start() error {
 	glog.Infof("Starting cache manager")
 
-	// Load cache data from Redis
-	cache, err := cm.redisClient.LoadCacheFromRedis()
-	if err != nil {
-		glog.Errorf("Failed to load cache from Redis: %v", err)
-		return err
+	// Load cache data from Redis if ClearCache is false
+	if !cm.userConfig.ClearCache {
+		cache, err := cm.redisClient.LoadCacheFromRedis()
+		if err != nil {
+			glog.Errorf("Failed to load cache from Redis: %v", err)
+			return err
+		}
+		cm.mutex.Lock()
+		cm.cache = cache
+		cm.mutex.Unlock()
+	} else {
+		glog.Infof("ClearCache is enabled, clearing Redis data and starting with empty cache")
+
+		// Clear all Redis data
+		if err := cm.redisClient.ClearAllData(); err != nil {
+			glog.Errorf("Failed to clear Redis data: %v", err)
+			return err
+		}
+
+		cm.mutex.Lock()
+		cm.cache = NewCacheData()
+		cm.mutex.Unlock()
 	}
 
-	cm.mutex.Lock()
-	cm.cache = cache
-
 	// Ensure all users from userConfig.UserList have their data structures initialized
-	// 确保userConfig.UserList中的所有用户都有其数据结构初始化
 	if cm.userConfig != nil && len(cm.userConfig.UserList) > 0 {
 		glog.Infof("Initializing data structures for configured users")
 
+		cm.mutex.Lock()
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.Infof("Creating data structure for new user: %s", userID)
 				cm.cache.Users[userID] = NewUserData()
 			}
 		}
+		cm.mutex.Unlock()
 
 		glog.Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
 	}
 
+	cm.mutex.Lock()
 	cm.isRunning = true
 	cm.mutex.Unlock()
 
@@ -179,7 +193,6 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 }
 
 // SetHydrationNotifier sets the hydration notifier for real-time updates
-// SetHydrationNotifier 设置水合通知器以进行实时更新
 func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -207,7 +220,6 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 
 	// Check source limit for user
 	userData := cm.cache.Users[userID]
-	// 不再需要嵌套锁，因为我们已经持有全局锁
 	// No nested locks needed since we already hold the global lock
 
 	// Check if we're adding a new source and if it exceeds the limit
@@ -234,11 +246,9 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 
 	// Set the data
 	sourceData := userData.Sources[sourceID]
-	// 不再需要嵌套锁，因为我们已经持有全局锁
 	// No nested locks needed since we already hold the global lock
 
 	// Log image analysis information if present
-	// 如果存在镜像分析信息则记录
 	if imageAnalysis, hasImageAnalysis := data["image_analysis"]; hasImageAnalysis {
 		glog.Infof("Setting app data with image analysis for user=%s, source=%s, type=%s", userID, sourceID, dataType)
 		if analysisMap, ok := imageAnalysis.(map[string]interface{}); ok {
@@ -267,14 +277,11 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, appData)
 	case AppInfoLatestPending:
 		// Check if this is a complete market data structure
-		// 检查这是否是完整的市场数据结构
 		if appsData, hasApps := data["apps"].(map[string]interface{}); hasApps {
 			// This is complete market data, extract individual apps
-			// 这是完整的市场数据，提取单个应用
 			glog.Infof("Processing complete market data with %d apps for user=%s, source=%s", len(appsData), userID, sourceID)
 
 			// Also store the "others" data (hash, version, topics, etc.)
-			// 同时存储"others"数据（hash、version、topics等）
 			others := &types.Others{}
 			if version, ok := data["version"].(string); ok {
 				others.Version = version
@@ -284,7 +291,6 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			}
 
 			// Extract topics, recommends, pages if present
-			// 提取topics、recommends、pages（如果存在）
 			if topics, ok := data["topics"].(map[string]interface{}); ok {
 				for _, topicData := range topics {
 					if topicMap, ok := topicData.(map[string]interface{}); ok {
@@ -302,11 +308,9 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			}
 
 			// Store others data in source
-			// 在源数据中存储others数据
 			sourceData.Others = others
 
 			// Process each individual app
-			// 处理每个单独的应用
 			for appID, appDataInterface := range appsData {
 				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
 					glog.Infof("DEBUG: CALL POINT 1 - Processing app %s for user=%s, source=%s", appID, userID, sourceID)
@@ -325,16 +329,13 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			glog.Infof("Successfully processed %d apps from market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
 		} else {
 			// This might be market data with nested apps structure, try to extract apps
-			// 这可能是包含嵌套应用结构的市场数据，尝试提取应用
 			glog.Infof("DEBUG: CALL POINT 2 - Processing potential market data for user=%s, source=%s", userID, sourceID)
 			glog.Infof("DEBUG: CALL POINT 2 - Data before processing: %+v", data)
 
 			// Check if this is market data with nested structure
-			// 检查是否是具有嵌套结构的市场数据
 			if dataSection, hasData := data["data"].(map[string]interface{}); hasData {
 				if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
 					// This is market data with apps - process each app individually
-					// 这是包含应用的市场数据 - 逐个处理每个应用
 					glog.Infof("DEBUG: CALL POINT 2 - Found nested apps structure with %d apps", len(appsData))
 					for appID, appDataInterface := range appsData {
 						if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
@@ -355,7 +356,6 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 				}
 			} else {
 				// This might be actual single app data, try to process directly
-				// 这可能是实际的单个应用数据，尝试直接处理
 				glog.Infof("DEBUG: CALL POINT 2 - Trying as single app data for user=%s, source=%s", userID, sourceID)
 				appData := NewAppInfoLatestPendingDataFromLegacyData(data)
 				if appData == nil {
@@ -370,7 +370,6 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		}
 
 		// Notify hydrator about pending data update for immediate task creation
-		// 通知水合器关于待处理数据更新以立即创建任务
 		if cm.hydrationNotifier != nil && len(sourceData.AppInfoLatestPending) > 0 {
 			glog.Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
 			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
@@ -395,7 +394,6 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 
 	if userData, exists := cm.cache.Users[userID]; exists {
 		if sourceData, exists := userData.Sources[sourceID]; exists {
-			// 不再需要嵌套锁，因为我们已经持有全局锁
 			// No nested locks needed since we already hold the global lock
 			switch dataType {
 			case AppInfoHistory:
@@ -441,7 +439,6 @@ func (cm *CacheManager) GetCacheStats() map[string]interface{} {
 
 	totalSources := 0
 	for _, userData := range cm.cache.Users {
-		// 不再需要嵌套锁，因为我们已经持有全局锁
 		// No nested locks needed since we already hold the global lock
 		totalSources += len(userData.Sources)
 	}
@@ -485,18 +482,15 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
-	// 直接返回数据的浅拷贝，无需嵌套锁
 	// Return shallow copy of data directly without nested locks
 	result := make(map[string]*UserData)
 	for userID, userData := range cm.cache.Users {
-		// 创建浅拷贝
 		// Create shallow copy
 		userDataCopy := &UserData{
 			Sources: make(map[string]*SourceData),
 			Hash:    userData.Hash,
 		}
 
-		// 复制源数据引用
 		// Copy source data references
 		for sourceID, sourceData := range userData.Sources {
 			userDataCopy.Sources[sourceID] = sourceData
@@ -509,7 +503,6 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 }
 
 // UpdateUserConfig updates the user configuration and ensures all users have data structures
-// UpdateUserConfig 更新用户配置并确保所有用户都有数据结构
 func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -524,7 +517,6 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 	cm.userConfig = newUserConfig
 
 	// Initialize data structures for new users in the updated configuration
-	// 为更新配置中的新用户初始化数据结构
 	if len(newUserConfig.UserList) > 0 {
 		for _, userID := range newUserConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
@@ -532,7 +524,6 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 				cm.cache.Users[userID] = NewUserData()
 
 				// Trigger sync to Redis for the new user
-				// 为新用户触发Redis同步
 				if cm.isRunning {
 					cm.requestSync(SyncRequest{
 						UserID: userID,
@@ -545,7 +536,6 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 
 	// Optionally remove users that are no longer in the configuration
 	// (This is commented out by default to preserve data)
-	// 可选择移除不再在配置中的用户（默认注释以保留数据）
 	/*
 		oldUserConfig := cm.userConfig // Uncomment this line if enabling user removal logic
 		if oldUserConfig != nil {
@@ -571,7 +561,6 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 }
 
 // SyncUserListToCache ensures all users from current userConfig have initialized data structures
-// SyncUserListToCache 确保当前userConfig中的所有用户都有初始化的数据结构
 func (cm *CacheManager) SyncUserListToCache() error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -591,7 +580,6 @@ func (cm *CacheManager) SyncUserListToCache() error {
 			newUsersCount++
 
 			// Trigger sync to Redis for the new user
-			// 为新用户触发Redis同步
 			if cm.isRunning {
 				cm.requestSync(SyncRequest{
 					UserID: userID,
@@ -606,7 +594,6 @@ func (cm *CacheManager) SyncUserListToCache() error {
 }
 
 // CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
-// CleanupInvalidPendingData 移除缺少必需标识符的无效待处理数据条目
 func (cm *CacheManager) CleanupInvalidPendingData() int {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -614,10 +601,8 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 	totalCleaned := 0
 
 	for userID, userData := range cm.cache.Users {
-		// 不再需要嵌套锁，因为我们已经持有全局锁
 		// No nested locks needed since we already hold the global lock
 		for sourceID, sourceData := range userData.Sources {
-			// 不再需要嵌套锁，因为我们已经持有全局锁
 			// No nested locks needed since we already hold the global lock
 
 			originalCount := len(sourceData.AppInfoLatestPending)
@@ -625,12 +610,10 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 
 			for _, pendingData := range sourceData.AppInfoLatestPending {
 				// Check if this pending data has valid identifiers
-				// 检查此待处理数据是否有有效标识符
 				isValid := false
 
 				if pendingData.RawData != nil {
 					// Check for valid ID or AppID
-					// 检查有效的ID或AppID
 					if (pendingData.RawData.ID != "" && pendingData.RawData.ID != "0") ||
 						(pendingData.RawData.AppID != "" && pendingData.RawData.AppID != "0") ||
 						(pendingData.RawData.Name != "" && pendingData.RawData.Name != "unknown") {
@@ -640,7 +623,6 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 
 				if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
 					// Also check AppInfo.AppEntry for valid identifiers
-					// 也检查AppInfo.AppEntry中的有效标识符
 					if (pendingData.AppInfo.AppEntry.ID != "" && pendingData.AppInfo.AppEntry.ID != "0") ||
 						(pendingData.AppInfo.AppEntry.AppID != "" && pendingData.AppInfo.AppEntry.AppID != "0") ||
 						(pendingData.AppInfo.AppEntry.Name != "" && pendingData.AppInfo.AppEntry.Name != "unknown") {
@@ -657,7 +639,6 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 			}
 
 			// Update the source data with cleaned list
-			// 用清理后的列表更新源数据
 			sourceData.AppInfoLatestPending = cleanedPendingData
 
 			if originalCount != len(cleanedPendingData) {
@@ -665,7 +646,6 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 					originalCount-len(cleanedPendingData), userID, sourceID)
 
 				// Trigger sync to Redis to persist the cleanup
-				// 触发Redis同步以持久化清理
 				if cm.isRunning {
 					cm.requestSync(SyncRequest{
 						UserID:   userID,

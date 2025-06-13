@@ -11,23 +11,18 @@ import (
 )
 
 // HydrationStep represents an abstract step in the hydration process
-// HydrationStep 表示水合过程中的抽象步骤
 type HydrationStep interface {
 	// GetStepName returns the name of the step for logging and identification
-	// GetStepName 返回步骤名称用于日志和识别
 	GetStepName() string
 
 	// Execute performs the actual step logic
-	// Execute 执行实际的步骤逻辑
 	Execute(ctx context.Context, task *HydrationTask) error
 
 	// CanSkip determines if this step can be skipped based on task state
-	// CanSkip 根据任务状态确定是否可以跳过此步骤
 	CanSkip(ctx context.Context, task *HydrationTask) bool
 }
 
 // HydrationTask represents a single app hydration task
-// HydrationTask 表示单个应用程序水合任务
 type HydrationTask struct {
 	ID          string                 `json:"id"`           // Unique task ID
 	UserID      string                 `json:"user_id"`      // User ID
@@ -46,22 +41,23 @@ type HydrationTask struct {
 	LastError   string                 `json:"last_error"`   // Last error message
 
 	// Step-specific data
-	// 步骤特定数据
 	SourceChartURL     string                 `json:"source_chart_url"`     // Source chart package URL
 	RenderedChartURL   string                 `json:"rendered_chart_url"`   // Rendered chart package URL
 	ChartData          map[string]interface{} `json:"chart_data"`           // Chart data
 	DatabaseUpdateData map[string]interface{} `json:"database_update_data"` // Database update data
 
 	// Context data
-	// 上下文数据
 	Cache           *types.CacheData          `json:"-"` // Cache data reference
 	SettingsManager *settings.SettingsManager `json:"-"` // Settings manager
 
 	mutex sync.RWMutex `json:"-"` // Task mutex for thread safety
+
+	// Task state
+	Error           error
+	LastFailureTime *time.Time // Time of last failure for cooldown period
 }
 
 // TaskStatus represents the status of a hydration task
-// TaskStatus 表示水合任务的状态
 type TaskStatus string
 
 const (
@@ -73,7 +69,6 @@ const (
 )
 
 // NewHydrationTask creates a new hydration task
-// NewHydrationTask 创建新的水合任务
 func NewHydrationTask(userID, sourceID, appID string, appData map[string]interface{}, cache *types.CacheData, settingsManager *settings.SettingsManager) *HydrationTask {
 	taskID := generateTaskID(userID, sourceID, appID)
 
@@ -110,14 +105,12 @@ func NewHydrationTask(userID, sourceID, appID string, appData map[string]interfa
 }
 
 // generateTaskID generates a unique task ID based on user, source, and app
-// generateTaskID 基于用户、源和应用生成唯一任务ID
 func generateTaskID(userID, sourceID, appID string) string {
 	timestamp := time.Now().UnixNano()
 	return fmt.Sprintf("%s_%s_%s_%d", userID, sourceID, appID, timestamp)
 }
 
 // SetStatus sets the task status in a thread-safe manner
-// SetStatus 以线程安全的方式设置任务状态
 func (ht *HydrationTask) SetStatus(status TaskStatus) {
 	ht.mutex.Lock()
 	defer ht.mutex.Unlock()
@@ -126,7 +119,6 @@ func (ht *HydrationTask) SetStatus(status TaskStatus) {
 }
 
 // GetStatus returns the current task status
-// GetStatus 返回当前任务状态
 func (ht *HydrationTask) GetStatus() TaskStatus {
 	ht.mutex.RLock()
 	defer ht.mutex.RUnlock()
@@ -134,7 +126,6 @@ func (ht *HydrationTask) GetStatus() TaskStatus {
 }
 
 // IncrementStep increments the current step counter
-// IncrementStep 增加当前步骤计数器
 func (ht *HydrationTask) IncrementStep() {
 	ht.mutex.Lock()
 	defer ht.mutex.Unlock()
@@ -143,7 +134,6 @@ func (ht *HydrationTask) IncrementStep() {
 }
 
 // SetError sets the last error message and increments retry count
-// SetError 设置最后错误消息并增加重试计数
 func (ht *HydrationTask) SetError(err error) {
 	ht.mutex.Lock()
 	defer ht.mutex.Unlock()
@@ -153,7 +143,6 @@ func (ht *HydrationTask) SetError(err error) {
 }
 
 // CanRetry returns true if the task can be retried
-// CanRetry 如果任务可以重试则返回true
 func (ht *HydrationTask) CanRetry() bool {
 	ht.mutex.RLock()
 	defer ht.mutex.RUnlock()
@@ -161,7 +150,6 @@ func (ht *HydrationTask) CanRetry() bool {
 }
 
 // ResetForRetry resets the task for retry
-// ResetForRetry 重置任务以进行重试
 func (ht *HydrationTask) ResetForRetry() {
 	ht.mutex.Lock()
 	defer ht.mutex.Unlock()
@@ -171,7 +159,6 @@ func (ht *HydrationTask) ResetForRetry() {
 }
 
 // IsCompleted returns true if the task is completed
-// IsCompleted 如果任务已完成则返回true
 func (ht *HydrationTask) IsCompleted() bool {
 	ht.mutex.RLock()
 	defer ht.mutex.RUnlock()

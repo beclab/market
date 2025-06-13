@@ -80,7 +80,6 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 // CanSkip determines if this step can be skipped
 func (d *DetailFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 	// Skip if hashes match or no app IDs
-	// 如果hash匹配或没有app ID则跳过
 	if data.HashMatches {
 		log.Printf("Skipping %s - hashes match, no sync required", d.GetStepName())
 		return true
@@ -97,7 +96,6 @@ func (d *DetailFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 // fetchAppsBatch fetches detailed information for a batch of apps
 func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, data *SyncContext) (int, int) {
 	// Get current market source from context
-	// 从上下文获取当前市场源
 	marketSource := data.GetMarketSource()
 	if marketSource == nil {
 		errMsg := fmt.Errorf("no market source available in sync context for detail fetch")
@@ -107,7 +105,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	}
 
 	// Build complete URL from market source base URL and endpoint path
-	// 从市场源基础URL和端点路径构建完整URL
 	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
 
 	request := types.AppsInfoRequest{
@@ -134,15 +131,12 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	switch resp.StatusCode() {
 	case 200:
 		// Success - process the apps and replace simplified data with detailed data
-		// 成功 - 处理应用并用详细数据替换简化数据
 		data.mutex.Lock()
 
 		// Update the original LatestData with detailed information
-		// 用详细信息更新原始的LatestData
 		if data.LatestData != nil && data.LatestData.Data.Apps != nil {
 			for appID, appInfo := range response.Apps {
 				// Replace the simplified app data with detailed data in LatestData
-				// 在LatestData中用详细数据替换简化的应用数据
 				detailedAppData := map[string]interface{}{
 					// Basic fields
 					"id":          appInfo.ID,
@@ -209,7 +203,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 				data.LatestData.Data.Apps[appID] = detailedAppData
 
 				// Also store in DetailedApps for backward compatibility
-				// 同时存储在DetailedApps中以保持向后兼容
 				data.DetailedApps[appID] = detailedAppData
 
 				// Log the main app information with more details

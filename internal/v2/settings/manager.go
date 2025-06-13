@@ -10,7 +10,6 @@ import (
 )
 
 // NewSettingsManager creates a new settings manager instance
-// 创建新的设置管理器实例
 func NewSettingsManager(redisClient RedisClient) *SettingsManager {
 	return &SettingsManager{
 		redisClient: redisClient,
@@ -18,18 +17,15 @@ func NewSettingsManager(redisClient RedisClient) *SettingsManager {
 }
 
 // Initialize initializes the settings manager
-// 初始化设置管理器
 func (sm *SettingsManager) Initialize() error {
 	log.Println("Initializing settings manager...")
 
 	// Initialize market sources
-	// 初始化市场源
 	if err := sm.initializeMarketSources(); err != nil {
 		return fmt.Errorf("failed to initialize market sources: %w", err)
 	}
 
 	// Initialize API endpoints
-	// 初始化API端点
 	if err := sm.initializeAPIEndpoints(); err != nil {
 		return fmt.Errorf("failed to initialize API endpoints: %w", err)
 	}
@@ -38,20 +34,16 @@ func (sm *SettingsManager) Initialize() error {
 }
 
 // initializeMarketSources initializes market sources configuration
-// 初始化市场源配置
 func (sm *SettingsManager) initializeMarketSources() error {
 	// Try to load from Redis first
-	// 首先尝试从Redis加载
 	config, err := sm.loadMarketSourcesFromRedis()
 	if err != nil {
 		log.Printf("Failed to load market sources from Redis: %v", err)
 
 		// Create default configuration from environment variables
-		// 从环境变量创建默认配置
 		config = sm.createDefaultMarketSources()
 
 		// Save default config to Redis
-		// 将默认配置保存到Redis
 		if err := sm.saveMarketSourcesToRedis(config); err != nil {
 			log.Printf("Failed to save Official Market Sources to Redis: %v", err)
 		}
@@ -62,7 +54,6 @@ func (sm *SettingsManager) initializeMarketSources() error {
 	}
 
 	// Set in memory
-	// 设置到内存中
 	sm.mu.Lock()
 	sm.marketSources = config
 	sm.mu.Unlock()
@@ -71,20 +62,16 @@ func (sm *SettingsManager) initializeMarketSources() error {
 }
 
 // initializeAPIEndpoints initializes API endpoints configuration
-// 初始化API端点配置
 func (sm *SettingsManager) initializeAPIEndpoints() error {
 	// Try to load from Redis first
-	// 首先尝试从Redis加载
 	config, err := sm.loadAPIEndpointsFromRedis()
 	if err != nil {
 		log.Printf("Failed to load API endpoints from Redis: %v", err)
 
 		// Create default configuration from environment variables
-		// 从环境变量创建默认配置
 		config = sm.createDefaultAPIEndpoints()
 
 		// Save default config to Redis
-		// 将默认配置保存到Redis
 		if err := sm.saveAPIEndpointsToRedis(config); err != nil {
 			log.Printf("Failed to save default API endpoints to Redis: %v", err)
 		}
@@ -95,7 +82,6 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 	}
 
 	// Set in memory
-	// 设置到内存中
 	sm.mu.Lock()
 	sm.apiEndpoints = config
 	sm.mu.Unlock()
@@ -104,16 +90,18 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 }
 
 // createDefaultMarketSources creates Official Market Sources from environment
-// 从环境变量创建默认市场源
 func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	baseURL := os.Getenv("SYNCER_REMOTE")
+	log.Printf("Reading SYNCER_REMOTE from environment: %s", baseURL)
+
 	if baseURL == "" {
-		baseURL = "https://appstore-server-test.bttcdn.com"
+		baseURL = "https://appstore-server-prod.bttcdn.com"
+		log.Printf("SYNCER_REMOTE not set, using default: %s", baseURL)
 	}
 
 	// Remove trailing slash
-	// 移除末尾的斜杠
 	baseURL = strings.TrimSuffix(baseURL, "/")
+	log.Printf("Base URL after trimming: %s", baseURL)
 
 	defaultSource := &MarketSource{
 		ID:          "default",
@@ -125,6 +113,8 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 		Description: "Official Market Sources loaded from environment",
 	}
 
+	log.Printf("Created default market source with BaseURL: %s", defaultSource.BaseURL)
+
 	return &MarketSourcesConfig{
 		Sources:       []*MarketSource{defaultSource},
 		DefaultSource: "default",
@@ -133,7 +123,6 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 }
 
 // createDefaultAPIEndpoints creates default API endpoints from environment
-// 从环境变量创建默认API端点
 func (sm *SettingsManager) createDefaultAPIEndpoints() *APIEndpointsConfig {
 	hashPath := os.Getenv("API_HASH_PATH")
 	if hashPath == "" {
@@ -159,7 +148,6 @@ func (sm *SettingsManager) createDefaultAPIEndpoints() *APIEndpointsConfig {
 }
 
 // GetMarketSources gets all market sources
-// 获取所有市场源
 func (sm *SettingsManager) GetMarketSources() *MarketSourcesConfig {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -169,7 +157,6 @@ func (sm *SettingsManager) GetMarketSources() *MarketSourcesConfig {
 	}
 
 	// Return a deep copy to prevent external modification
-	// 返回深拷贝以防止外部修改
 	sources := make([]*MarketSource, len(sm.marketSources.Sources))
 	for i, src := range sm.marketSources.Sources {
 		sources[i] = &MarketSource{
@@ -191,7 +178,6 @@ func (sm *SettingsManager) GetMarketSources() *MarketSourcesConfig {
 }
 
 // GetActiveMarketSources gets all active market sources sorted by priority
-// 获取所有活跃的市场源，按优先级排序
 func (sm *SettingsManager) GetActiveMarketSources() []*MarketSource {
 	config := sm.GetMarketSources()
 	if config == nil {
@@ -206,7 +192,6 @@ func (sm *SettingsManager) GetActiveMarketSources() []*MarketSource {
 	}
 
 	// Sort by priority (descending)
-	// 按优先级排序（降序）
 	for i := 0; i < len(activeSources)-1; i++ {
 		for j := i + 1; j < len(activeSources); j++ {
 			if activeSources[i].Priority < activeSources[j].Priority {
@@ -219,7 +204,6 @@ func (sm *SettingsManager) GetActiveMarketSources() []*MarketSource {
 }
 
 // GetDefaultMarketSource gets the Official Market Sources
-// 获取默认市场源
 func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 	config := sm.GetMarketSources()
 	if config == nil {
@@ -227,7 +211,6 @@ func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 	}
 
 	// Find default source by ID
-	// 通过ID查找默认源
 	for _, source := range config.Sources {
 		if source.ID == config.DefaultSource {
 			return &MarketSource{
@@ -243,7 +226,6 @@ func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 	}
 
 	// If no default found, return first active source
-	// 如果没有找到默认源，返回第一个活跃源
 	for _, source := range config.Sources {
 		if source.IsActive {
 			return &MarketSource{
@@ -262,13 +244,11 @@ func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 }
 
 // GetMarketSource gets a single market source (for API compatibility)
-// 获取单个市场源（为了API兼容性）
 func (sm *SettingsManager) GetMarketSource() *MarketSource {
 	return sm.GetDefaultMarketSource()
 }
 
 // SetMarketSource sets the Official Market Sources URL (for API compatibility)
-// 设置默认市场源URL（为了API兼容性）
 func (sm *SettingsManager) SetMarketSource(url string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -282,7 +262,6 @@ func (sm *SettingsManager) SetMarketSource(url string) error {
 	}
 
 	// Update the default source or create it if it doesn't exist
-	// 更新默认源或者如果不存在则创建它
 	defaultUpdated := false
 	for _, source := range sm.marketSources.Sources {
 		if source.ID == "default" {
@@ -295,7 +274,6 @@ func (sm *SettingsManager) SetMarketSource(url string) error {
 
 	if !defaultUpdated {
 		// Create new default source
-		// 创建新的默认源
 		newSource := &MarketSource{
 			ID:          "default",
 			Name:        "Official-Market-Sources",
@@ -311,12 +289,10 @@ func (sm *SettingsManager) SetMarketSource(url string) error {
 	sm.marketSources.UpdatedAt = time.Now()
 
 	// Save to Redis
-	// 保存到Redis
 	return sm.saveMarketSourcesToRedis(sm.marketSources)
 }
 
 // GetAPIEndpoints gets the API endpoints configuration
-// 获取API端点配置
 func (sm *SettingsManager) GetAPIEndpoints() *APIEndpointsConfig {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -326,7 +302,6 @@ func (sm *SettingsManager) GetAPIEndpoints() *APIEndpointsConfig {
 	}
 
 	// Return a copy to prevent external modification
-	// 返回副本以防止外部修改
 	return &APIEndpointsConfig{
 		HashPath:   sm.apiEndpoints.HashPath,
 		DataPath:   sm.apiEndpoints.DataPath,
@@ -336,15 +311,19 @@ func (sm *SettingsManager) GetAPIEndpoints() *APIEndpointsConfig {
 }
 
 // BuildAPIURL builds a complete API URL from base URL and endpoint path
-// 从基础URL和端点路径构建完整的API URL
 func (sm *SettingsManager) BuildAPIURL(baseURL, endpointPath string) string {
+	log.Printf("Building API URL - Base URL: %s, Endpoint Path: %s", baseURL, endpointPath)
+
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	endpointPath = strings.TrimPrefix(endpointPath, "/")
-	return fmt.Sprintf("%s/%s", baseURL, endpointPath)
+
+	finalURL := fmt.Sprintf("%s/%s", baseURL, endpointPath)
+	log.Printf("Final API URL: %s", finalURL)
+
+	return finalURL
 }
 
 // AddMarketSource adds a new market source
-// 添加新的市场源
 func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	if source.ID == "" {
 		return fmt.Errorf("source ID cannot be empty")
@@ -357,7 +336,6 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	defer sm.mu.Unlock()
 
 	// Check if source with same ID already exists
-	// 检查是否已存在相同ID的源
 	for _, existing := range sm.marketSources.Sources {
 		if existing.ID == source.ID {
 			return fmt.Errorf("source with ID %s already exists", source.ID)
@@ -365,13 +343,11 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	}
 
 	// Add new source
-	// 添加新源
 	source.UpdatedAt = time.Now()
 	sm.marketSources.Sources = append(sm.marketSources.Sources, source)
 	sm.marketSources.UpdatedAt = time.Now()
 
 	// Save to Redis
-	// 保存到Redis
 	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
 		return fmt.Errorf("failed to save market sources to Redis: %w", err)
 	}
@@ -381,7 +357,6 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 }
 
 // UpdateAPIEndpoints updates the API endpoints configuration
-// 更新API端点配置
 func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -390,7 +365,6 @@ func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) err
 	sm.apiEndpoints = endpoints
 
 	// Save to Redis
-	// 保存到Redis
 	if err := sm.saveAPIEndpointsToRedis(endpoints); err != nil {
 		return fmt.Errorf("failed to save API endpoints to Redis: %w", err)
 	}
@@ -400,7 +374,6 @@ func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) err
 }
 
 // loadMarketSourcesFromRedis loads market sources from Redis
-// 从Redis加载市场源
 func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, error) {
 	data, err := sm.redisClient.Get(RedisKeyMarketSources)
 	if err != nil {
@@ -420,7 +393,6 @@ func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, e
 }
 
 // saveMarketSourcesToRedis saves market sources to Redis
-// 将市场源保存到Redis
 func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig) error {
 	data, err := json.Marshal(config)
 	if err != nil {
@@ -431,7 +403,6 @@ func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig)
 }
 
 // loadAPIEndpointsFromRedis loads API endpoints from Redis
-// 从Redis加载API端点
 func (sm *SettingsManager) loadAPIEndpointsFromRedis() (*APIEndpointsConfig, error) {
 	data, err := sm.redisClient.Get(RedisKeyAPIEndpoints)
 	if err != nil {
@@ -451,7 +422,6 @@ func (sm *SettingsManager) loadAPIEndpointsFromRedis() (*APIEndpointsConfig, err
 }
 
 // saveAPIEndpointsToRedis saves API endpoints to Redis
-// 将API端点保存到Redis
 func (sm *SettingsManager) saveAPIEndpointsToRedis(config *APIEndpointsConfig) error {
 	data, err := json.Marshal(config)
 	if err != nil {
