@@ -2,8 +2,12 @@ package helm
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -354,13 +358,17 @@ func (hr *HelmRepository) writeYAMLResponse(w http.ResponseWriter, data interfac
 //   - 416: Range Not Satisfiable - invalid range request
 //   - 500: Internal Server Error - failed to read chart file
 func (hr *HelmRepository) downloadChart(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Helm Repository: Received download request for chart: %s", r.URL.Path)
+
 	// Extract user context from headers
 	// 从请求头中提取用户上下文
 	userCtx := extractUserContext(r)
+	log.Printf("Helm Repository: User context - UserID: %s, Source: %s", userCtx.UserID, userCtx.Source)
 
 	// Validate user context
 	// 验证用户上下文
 	if !validateUserContext(userCtx) {
+		log.Printf("Helm Repository: Invalid user context")
 		http.Error(w, "Missing required headers: X-Market-User and X-Market-Source", http.StatusBadRequest)
 		return
 	}
@@ -369,28 +377,141 @@ func (hr *HelmRepository) downloadChart(w http.ResponseWriter, r *http.Request) 
 	// 从 URL 参数提取文件名
 	vars := mux.Vars(r)
 	filename := vars["filename"]
+	log.Printf("Helm Repository: Extracted filename: %s", filename)
 
 	// Log user action for audit
 	// 记录用户操作用于审计
 	logUserAction(userCtx, "DOWNLOAD", filename)
 
-	// TODO: Implementation needed
-	// 1. Parse filename to extract chart name and version
-	// 2. Check if user has access to this chart (based on userCtx.UserID, userCtx.Source)
-	// 3. Locate chart package file or generate it from AppInfoLatest data
-	// 4. Handle range requests for resumable downloads
-	// 5. Set appropriate headers
-	// 6. Stream file content to response
+	// Check if cache manager is available
+	// 检查缓存管理器是否可用
+	if globalCacheManager == nil {
+		log.Printf("Helm Repository: Cache manager not available")
+		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
 
-	// For now, return not implemented
-	// 目前返回未实现
-	http.Error(w, "Chart download not yet implemented", http.StatusNotImplemented)
+	// Get user data from cache
+	// 从缓存中获取用户数据
+	userData := globalCacheManager.GetUserData(userCtx.UserID)
+	if userData == nil {
+		log.Printf("Helm Repository: No data found for user %s", userCtx.UserID)
+		http.Error(w, "Chart not found", http.StatusNotFound)
+		return
+	}
+	log.Printf("Helm Repository: Found user data for user %s", userCtx.UserID)
 
-	// 实现要点:
-	// 1. 解析文件名提取 chart 名称和版本
-	// 2. 检查用户是否有权限访问此 chart (基于 userCtx.UserID, userCtx.Source)
-	// 3. 定位 chart 包文件或从 AppInfoLatest 数据生成
-	// 4. 处理断点续传请求
-	// 5. 设置适当的响应头
-	// 6. 流式传输文件内容到响应
+	// Get source data from user data
+	// 从用户数据中获取源数据
+	sourceData := userData.Sources[userCtx.Source]
+	if sourceData == nil {
+		log.Printf("Helm Repository: No source data found for user %s, source %s", userCtx.UserID, userCtx.Source)
+		http.Error(w, "Chart not found", http.StatusNotFound)
+		return
+	}
+	log.Printf("Helm Repository: Found source data for user %s, source %s", userCtx.UserID, userCtx.Source)
+
+	// Parse filename to extract chart name and version
+	// 解析文件名提取 chart 名称和版本
+	parts := strings.Split(strings.TrimSuffix(filename, ".tgz"), "-")
+	if len(parts) < 2 {
+		log.Printf("Helm Repository: Invalid chart filename format: %s", filename)
+		http.Error(w, "Invalid chart filename format", http.StatusBadRequest)
+		return
+	}
+	version := parts[len(parts)-1]
+	chartName := strings.Join(parts[:len(parts)-1], "-")
+	log.Printf("Helm Repository: Parsed chart name: %s, version: %s", chartName, version)
+
+	// Find the chart in AppInfoLatest
+	// 在 AppInfoLatest 中查找 chart
+	var targetApp *types.AppInfoLatestData
+	for _, app := range sourceData.AppInfoLatest {
+		if app != nil && app.RawData != nil {
+			log.Printf("Helm Repository: Checking app - Name: %s, Version: %s", app.RawData.Name, app.RawData.Version)
+			if app.RawData.Name == chartName && app.RawData.Version == version {
+				targetApp = app
+				break
+			}
+		}
+	}
+
+	if targetApp == nil {
+		log.Printf("Helm Repository: Chart not found: %s", filename)
+		http.Error(w, "Chart not found", http.StatusNotFound)
+		return
+	}
+	log.Printf("Helm Repository: Found target app in AppInfoLatest")
+
+	// Get chart package path from RenderedPackage
+	// 从 RenderedPackage 获取 chart 包路径
+	chartDir := targetApp.RenderedPackage
+	if chartDir == "" {
+		log.Printf("Helm Repository: Chart package not found for %s", filename)
+		http.Error(w, "Chart package not found", http.StatusNotFound)
+		return
+	}
+	log.Printf("Helm Repository: Chart directory path: %s", chartDir)
+
+	// 构建完整的 chart 包路径
+	chartPath := filepath.Join(chartDir, filename)
+	log.Printf("Helm Repository: Full chart package path: %s", chartPath)
+
+	// Check if file exists
+	// 检查文件是否存在
+	fileInfo, err := os.Stat(chartPath)
+	if err != nil {
+		log.Printf("Helm Repository: Failed to access chart file %s: %v", chartPath, err)
+		http.Error(w, "Failed to access chart file", http.StatusInternalServerError)
+		return
+	}
+
+	// 确保是文件而不是目录
+	if fileInfo.IsDir() {
+		log.Printf("Helm Repository: Path is a directory, not a file: %s", chartPath)
+		http.Error(w, "Invalid chart package", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Helm Repository: Chart file exists, size: %d bytes", fileInfo.Size())
+
+	// Handle range requests
+	// 处理断点续传请求
+	rangeHeader := r.Header.Get("Range")
+	if rangeHeader != "" {
+		// TODO: Implement range request handling
+		// 目前返回完整文件
+		log.Printf("Helm Repository: Range request not implemented yet")
+	}
+
+	f, err := os.Open(chartPath)
+	if err != nil {
+		log.Printf("Helm Repository: Failed to open chart file %s: %v", chartPath, err)
+		http.Error(w, "Failed to open chart file", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Last-Modified", fileInfo.ModTime().Format(http.TimeFormat))
+	w.Header().Set("Accept-Ranges", "bytes")
+	etag := fmt.Sprintf(`"%s-%d"`, filename, fileInfo.ModTime().Unix())
+	w.Header().Set("ETag", etag)
+	if clientETag := r.Header.Get("If-None-Match"); clientETag == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	log.Printf("Helm Repository: Starting to stream file content")
+	_, err = io.Copy(w, f)
+	if err != nil {
+		log.Printf("Helm Repository: Error streaming file: %v", err)
+		// 如果已经发送了部分数据，我们不能返回错误状态码
+		// 但至少记录错误
+		return
+	}
+
+	log.Printf("Helm Repository: Successfully served chart %s to user %s", filename, userCtx.UserID)
 }
