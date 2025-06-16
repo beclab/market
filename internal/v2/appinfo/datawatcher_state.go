@@ -75,7 +75,13 @@ func (dw *DataWatcherState) Start() error {
 	}
 
 	log.Println("Starting data watcher in production mode")
-	return dw.startNatsConnection()
+	// Start NATS connection in a goroutine
+	go func() {
+		if err := dw.startNatsConnection(); err != nil {
+			log.Printf("Error in NATS connection: %v", err)
+		}
+	}()
+	return nil
 }
 
 // Stop stops the data watcher
