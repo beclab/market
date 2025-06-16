@@ -35,7 +35,7 @@ RUN cd bytetrade.io/web3os/market && \
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM alpine:latest
+FROM golang:1.22.2-alpine
 WORKDIR /opt/app
 COPY --from=builder /workspace/bytetrade.io/web3os/market/market .
 

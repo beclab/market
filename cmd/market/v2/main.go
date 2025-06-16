@@ -21,6 +21,8 @@ import (
 )
 
 func main() {
+	log.Printf("Starting market application...")
+
 	// Initialize glog for debug logging
 	// 初始化glog用于调试日志
 	flag.Set("logtostderr", "true")

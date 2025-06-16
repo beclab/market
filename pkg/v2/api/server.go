@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
@@ -122,6 +124,17 @@ func (s *Server) Start() error {
 	log.Printf("  - Cache Manager: %v", s.cacheManager != nil)
 	log.Printf("  - History Module: %v", s.historyModule != nil)
 
+	// Check if port is available
+	// 检查端口是否可用
+	addr := ":" + s.port
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Printf("Port %s is not available: %v", s.port, err)
+		return fmt.Errorf("port %s is not available: %v", s.port, err)
+	}
+	listener.Close()
+	log.Printf("Port %s is available", s.port)
+
 	// Add middleware for request logging
 	s.router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +149,7 @@ func (s *Server) Start() error {
 	})
 
 	log.Printf("Server routes configured and ready to accept connections")
-	err := http.ListenAndServe(":"+s.port, s.router)
+	err = http.ListenAndServe(addr, s.router)
 	if err != nil {
 		log.Printf("Failed to start HTTP server: %v", err)
 		return err
