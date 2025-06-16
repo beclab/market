@@ -60,31 +60,48 @@ func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheMan
 func (cm *CacheManager) Start() error {
 	glog.Infof("Starting cache manager")
 
-	// Load cache data from Redis
-	cache, err := cm.redisClient.LoadCacheFromRedis()
-	if err != nil {
-		glog.Errorf("Failed to load cache from Redis: %v", err)
-		return err
-	}
+	// Load cache data from Redis if ClearCache is false
+	if !cm.userConfig.ClearCache {
+		cache, err := cm.redisClient.LoadCacheFromRedis()
+		if err != nil {
+			glog.Errorf("Failed to load cache from Redis: %v", err)
+			return err
+		}
+		cm.mutex.Lock()
+		cm.cache = cache
+		cm.mutex.Unlock()
+	} else {
+		glog.Infof("ClearCache is enabled, clearing Redis data and starting with empty cache")
 
-	cm.mutex.Lock()
-	cm.cache = cache
+		// Clear all Redis data
+		if err := cm.redisClient.ClearAllData(); err != nil {
+			glog.Errorf("Failed to clear Redis data: %v", err)
+			return err
+		}
+
+		cm.mutex.Lock()
+		cm.cache = NewCacheData()
+		cm.mutex.Unlock()
+	}
 
 	// Ensure all users from userConfig.UserList have their data structures initialized
 	// 确保userConfig.UserList中的所有用户都有其数据结构初始化
 	if cm.userConfig != nil && len(cm.userConfig.UserList) > 0 {
 		glog.Infof("Initializing data structures for configured users")
 
+		cm.mutex.Lock()
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.Infof("Creating data structure for new user: %s", userID)
 				cm.cache.Users[userID] = NewUserData()
 			}
 		}
+		cm.mutex.Unlock()
 
 		glog.Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
 	}
 
+	cm.mutex.Lock()
 	cm.isRunning = true
 	cm.mutex.Unlock()
 

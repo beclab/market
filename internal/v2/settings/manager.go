@@ -108,7 +108,7 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	baseURL := os.Getenv("SYNCER_REMOTE")
 	if baseURL == "" {
-		baseURL = "https://appstore-server-test.bttcdn.com"
+		baseURL = "https://appstore-server-prod.bttcdn.com"
 	}
 
 	// Remove trailing slash

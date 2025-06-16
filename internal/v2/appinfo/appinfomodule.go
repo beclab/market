@@ -55,6 +55,7 @@ type CacheConfig struct {
 	SyncBufferSize int           `json:"sync_buffer_size"`
 	ForceSync      bool          `json:"force_sync"`
 	SyncTimeout    time.Duration `json:"sync_timeout"`
+	ClearCache     bool          `json:"clear_cache"`
 }
 
 // UserConfig holds user-specific configuration
@@ -72,6 +73,7 @@ type UserConfig struct {
 	AuthEnabled           bool          `json:"auth_enabled"`
 	AuthTimeout           time.Duration `json:"auth_timeout"`
 	DefaultPermissions    []string      `json:"default_permissions"`
+	ClearCache            bool          `json:"clear_cache"`
 }
 
 // RedisClientAdapter adapts appinfo.RedisClient to settings.RedisClient interface
@@ -678,6 +680,11 @@ func DefaultModuleConfig() *ModuleConfig {
 		syncTimeout = 10 * time.Second
 	}
 
+	clearCache, err := strconv.ParseBool(os.Getenv("CLEAR_CACHE"))
+	if err != nil {
+		clearCache = false
+	}
+
 	// Parse Module configuration from environment variables
 	enableSync, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_SYNC"))
 	if err != nil {
@@ -824,6 +831,7 @@ func DefaultModuleConfig() *ModuleConfig {
 			SyncBufferSize: syncBufferSize,
 			ForceSync:      forceSync,
 			SyncTimeout:    syncTimeout,
+			ClearCache:     clearCache,
 		},
 		Hydrator: &HydratorConfig{
 			QueueSize:   hydratorQueueSize,
@@ -842,6 +850,7 @@ func DefaultModuleConfig() *ModuleConfig {
 			AuthEnabled:           authEnabled,
 			AuthTimeout:           authTimeout,
 			DefaultPermissions:    defaultPermissions,
+			ClearCache:            clearCache,
 		},
 		EnableSync:             enableSync,
 		EnableCache:            enableCache,

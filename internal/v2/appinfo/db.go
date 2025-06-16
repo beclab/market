@@ -60,6 +60,32 @@ func (r *RedisClient) Close() error {
 	return r.client.Close()
 }
 
+// ClearAllData clears all data from Redis
+// ClearAllData 清除 Redis 中的所有数据
+func (r *RedisClient) ClearAllData() error {
+	glog.Infof("Clearing appinfo data from Redis")
+
+	// Get all appinfo keys
+	keys, err := r.client.Keys(r.ctx, "appinfo:*").Result()
+	if err != nil {
+		return fmt.Errorf("failed to get Redis keys: %w", err)
+	}
+
+	if len(keys) == 0 {
+		glog.Infof("No appinfo data to clear in Redis")
+		return nil
+	}
+
+	// Delete all appinfo keys
+	_, err = r.client.Del(r.ctx, keys...).Result()
+	if err != nil {
+		return fmt.Errorf("failed to delete Redis keys: %w", err)
+	}
+
+	glog.Infof("Successfully cleared %d appinfo keys from Redis", len(keys))
+	return nil
+}
+
 // LoadCacheFromRedis loads all cache data from Redis
 func (r *RedisClient) LoadCacheFromRedis() (*CacheData, error) {
 	glog.Infof("Loading cache data from Redis")
