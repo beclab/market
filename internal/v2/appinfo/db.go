@@ -71,18 +71,28 @@ func (r *RedisClient) ClearAllData() error {
 		return fmt.Errorf("failed to get Redis keys: %w", err)
 	}
 
-	if len(keys) == 0 {
-		glog.Infof("No appinfo data to clear in Redis")
+	// Get all settings keys
+	settingsKeys, err := r.client.Keys(r.ctx, "settings:*").Result()
+	if err != nil {
+		return fmt.Errorf("failed to get settings Redis keys: %w", err)
+	}
+
+	// Combine all keys
+	allKeys := append(keys, settingsKeys...)
+
+	if len(allKeys) == 0 {
+		glog.Infof("No data to clear in Redis")
 		return nil
 	}
 
-	// Delete all appinfo keys
-	_, err = r.client.Del(r.ctx, keys...).Result()
+	// Delete all keys
+	_, err = r.client.Del(r.ctx, allKeys...).Result()
 	if err != nil {
 		return fmt.Errorf("failed to delete Redis keys: %w", err)
 	}
 
-	glog.Infof("Successfully cleared %d appinfo keys from Redis", len(keys))
+	glog.Infof("Successfully cleared %d keys from Redis (%d appinfo keys, %d settings keys)",
+		len(allKeys), len(keys), len(settingsKeys))
 	return nil
 }
 
