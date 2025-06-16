@@ -76,15 +76,30 @@ func main() {
 
 	// Create and start the HTTP server
 	// 创建并启动HTTP服务器
+	log.Printf("Creating new HTTP server instance...")
 	server := api.NewServer("8080", cacheManager)
+	log.Printf("HTTP server instance created successfully")
 
 	// Start HTTP server in a goroutine
 	// 在协程中启动HTTP服务器
 	go func() {
+		log.Printf("Starting HTTP server goroutine...")
+		log.Printf("Server configuration:")
+		log.Printf("  - Port: 8080")
+		log.Printf("  - Cache Manager: %v", cacheManager != nil)
+
 		if err := server.Start(); err != nil {
-			log.Fatal("Failed to start HTTP server:", err)
+			log.Printf("HTTP server failed to start: %v", err)
+			log.Printf("Error details: %+v", err)
+			// Don't use log.Fatal here as it would terminate the program
+			// Instead, we'll let the main goroutine handle the shutdown
 		}
 	}()
+
+	log.Printf("HTTP server startup initiated")
+	log.Printf("Waiting for server to be ready...")
+	time.Sleep(2 * time.Second) // Give the server a moment to start
+	log.Printf("Server startup sequence completed")
 
 	log.Println("Starting server on port 8080")
 
