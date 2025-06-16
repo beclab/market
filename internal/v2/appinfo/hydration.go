@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -232,6 +233,10 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			log.Printf("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.SetError(err)
 
+			// Clean up resources before retry or failure
+			// 在重试或失败前清理资源
+			h.cleanupTaskResources(task)
+
 			// Check if task can be retried
 			// 检查任务是否可以重试
 			if task.CanRetry() {
@@ -271,6 +276,31 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 	log.Printf("Task completed successfully: %s for app: %s", task.ID, task.AppID)
 	log.Printf("==================== HYDRATION TASK COMPLETED ====================")
+}
+
+// cleanupTaskResources cleans up resources associated with a task
+// cleanupTaskResources 清理与任务相关的资源
+func (h *Hydrator) cleanupTaskResources(task *hydrationfn.HydrationTask) {
+	// Clean up chart data
+	// 清理chart数据
+	if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
+		if err := os.RemoveAll(renderedDir); err != nil {
+			log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
+		}
+	}
+
+	// Clean up source chart
+	// 清理源chart
+	if sourceChartPath, exists := task.ChartData["source_chart_path"].(string); exists {
+		if err := os.Remove(sourceChartPath); err != nil {
+			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
+		}
+	}
+
+	// Clear task data maps
+	// 清理任务数据映射
+	task.ChartData = make(map[string]interface{})
+	task.DatabaseUpdateData = make(map[string]interface{})
 }
 
 // pendingDataMonitor monitors for new pending data and creates tasks
@@ -614,12 +644,36 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 
 	task.SetStatus(hydrationfn.TaskStatusFailed)
 	delete(h.activeTasks, task.ID)
+
+	// Limit the size of failed tasks map
+	// 限制失败任务映射的大小
+	maxFailedTasks := 1000
+	if len(h.failedTasks) >= maxFailedTasks {
+		// Remove oldest failed tasks
+		// 删除最旧的失败任务
+		oldestTaskID := ""
+		oldestTime := time.Now()
+		for id, failedTask := range h.failedTasks {
+			if failedTask.UpdatedAt.Before(oldestTime) {
+				oldestTime = failedTask.UpdatedAt
+				oldestTaskID = id
+			}
+		}
+		if oldestTaskID != "" {
+			delete(h.failedTasks, oldestTaskID)
+		}
+	}
+
 	h.failedTasks[task.ID] = task
 
 	h.metricsMutex.Lock()
 	h.totalTasksProcessed++
 	h.totalTasksFailed++
 	h.metricsMutex.Unlock()
+
+	// Clean up task resources
+	// 清理任务资源
+	h.cleanupTaskResources(task)
 }
 
 // GetMetrics returns hydrator metrics

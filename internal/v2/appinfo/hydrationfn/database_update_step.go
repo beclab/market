@@ -255,14 +255,27 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 	log.Printf("Updating package information for app: %s", task.AppID)
 	if err := s.updatePackageInformation(task); err != nil {
 		log.Printf("Warning: Failed to update package information for app %s: %v", task.AppID, err)
-		// Continue with other updates even if package update fails
-		// 即使包更新失败也继续其他更新
+		// Clean up resources on failure
+		// 失败时清理资源
+		if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
+			if err := os.RemoveAll(renderedDir); err != nil {
+				log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
+			}
+		}
+		return fmt.Errorf("failed to update package information: %w", err)
 	}
 
 	// Step 3: Update AppInfo with image analysis
 	// 步骤3：使用镜像分析更新AppInfo
 	log.Printf("Updating AppInfo with image analysis for app: %s", task.AppID)
 	if err := s.updateAppInfoWithImages(task, imageAnalysis, hydrationMetadata); err != nil {
+		// Clean up resources on failure
+		// 失败时清理资源
+		if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
+			if err := os.RemoveAll(renderedDir); err != nil {
+				log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
+			}
+		}
 		return fmt.Errorf("failed to update AppInfo with images: %w", err)
 	}
 
