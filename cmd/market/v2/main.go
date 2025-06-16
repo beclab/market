@@ -72,11 +72,18 @@ func main() {
 
 	// Get cacheManager for HTTP server
 	// 获取HTTP服务器所需的cacheManager
+	log.Printf("Getting cache manager for HTTP server...")
 	cacheManager := appInfoModule.GetCacheManager()
+	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
 
 	// Create and start the HTTP server
 	// 创建并启动HTTP服务器
-	log.Printf("Creating new HTTP server instance...")
+	log.Printf("Preparing to create HTTP server...")
+	log.Printf("Server configuration before creation:")
+	log.Printf("  - Port: 8080")
+	log.Printf("  - Cache Manager: %v", cacheManager != nil)
+	log.Printf("  - AppInfo Module: %v", appInfoModule != nil)
+
 	server := api.NewServer("8080", cacheManager)
 	log.Printf("HTTP server instance created successfully")
 
@@ -84,9 +91,10 @@ func main() {
 	// 在协程中启动HTTP服务器
 	go func() {
 		log.Printf("Starting HTTP server goroutine...")
-		log.Printf("Server configuration:")
+		log.Printf("Server configuration in goroutine:")
 		log.Printf("  - Port: 8080")
 		log.Printf("  - Cache Manager: %v", cacheManager != nil)
+		log.Printf("  - Server instance: %v", server != nil)
 
 		if err := server.Start(); err != nil {
 			log.Printf("HTTP server failed to start: %v", err)
@@ -105,7 +113,7 @@ func main() {
 
 	// Print available endpoints
 	// 打印可用的端点
-	log.Println("Available endpoints:")
+	log.Printf("Available endpoints:")
 	log.Println("  GET    /api/v2/market                    - Get market information")
 	log.Println("  GET    /api/v2/apps                      - Get specific application information (supports multiple queries)")
 	log.Println("  GET    /api/v2/apps/{id}/package         - Get rendered installation package for specific application")

@@ -730,7 +730,7 @@ func DefaultModuleConfig() *ModuleConfig {
 
 	hydratorWorkerCount, err := strconv.Atoi(os.Getenv("HYDRATOR_WORKER_COUNT"))
 	if err != nil || hydratorWorkerCount <= 0 {
-		hydratorWorkerCount = 5
+		hydratorWorkerCount = 1
 	}
 
 	// Parse User configuration from environment variables

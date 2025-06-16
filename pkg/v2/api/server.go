@@ -22,20 +22,32 @@ type Server struct {
 
 // NewServer creates a new server instance
 func NewServer(port string, cacheManager *appinfo.CacheManager) *Server {
+	log.Printf("Creating new server instance with port: %s", port)
+	log.Printf("Cache manager provided: %v", cacheManager != nil)
+
 	// Initialize history module
+	log.Printf("Initializing history module...")
 	historyModule, err := history.NewHistoryModule()
 	if err != nil {
 		log.Printf("Warning: Failed to initialize history module: %v", err)
 		// Continue without history module, but log the error
+	} else {
+		log.Printf("History module initialized successfully")
 	}
 
+	log.Printf("Creating router...")
 	s := &Server{
 		router:        mux.NewRouter(),
 		port:          port,
 		cacheManager:  cacheManager,
 		historyModule: historyModule,
 	}
+	log.Printf("Server struct created successfully")
+
+	log.Printf("Setting up routes...")
 	s.setupRoutes()
+	log.Printf("Routes setup completed")
+
 	return s
 }
 
