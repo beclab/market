@@ -90,7 +90,7 @@ type HydratorConfig struct {
 func DefaultHydratorConfig() HydratorConfig {
 	return HydratorConfig{
 		QueueSize:   1000,
-		WorkerCount: 5,
+		WorkerCount: 1,
 	}
 }
 
