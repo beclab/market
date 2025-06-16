@@ -31,11 +31,8 @@ func main() {
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
 
-	// Initialize core modules
-	// 初始化核心模块
-
-	// 0. Initialize Settings Module
-	// 0. 初始化设置模块
+	// 0. Initialize Settings Module (Required for API)
+	// 0. 初始化设置模块（API所需）
 	redisHost := getEnvOrDefault("REDIS_HOST", "localhost")
 	redisPort := getEnvOrDefault("REDIS_PORT", "6379")
 	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
@@ -60,8 +57,8 @@ func main() {
 	// 为API访问设置设置管理器
 	api.SetSettingsManager(settingsManager)
 
-	// 1. Initialize AppInfo Module
-	// 1. 初始化应用信息模块
+	// 1. Initialize AppInfo Module (Required for cacheManager)
+	// 1. 初始化应用信息模块（cacheManager所需）
 	appInfoConfig := appinfo.DefaultModuleConfig()
 	appInfoModule, err := appinfo.NewAppInfoModule(appInfoConfig)
 	if err != nil {
@@ -72,6 +69,39 @@ func main() {
 		log.Fatalf("Failed to start AppInfo module: %v", err)
 	}
 	log.Println("AppInfo module started successfully")
+
+	// Get cacheManager for HTTP server
+	// 获取HTTP服务器所需的cacheManager
+	cacheManager := appInfoModule.GetCacheManager()
+
+	// Create and start the HTTP server
+	// 创建并启动HTTP服务器
+	server := api.NewServer("8080", cacheManager)
+
+	// Start HTTP server in a goroutine
+	// 在协程中启动HTTP服务器
+	go func() {
+		if err := server.Start(); err != nil {
+			log.Fatal("Failed to start HTTP server:", err)
+		}
+	}()
+
+	log.Println("Starting server on port 8080")
+
+	// Print available endpoints
+	// 打印可用的端点
+	log.Println("Available endpoints:")
+	log.Println("  GET    /api/v2/market                    - Get market information")
+	log.Println("  GET    /api/v2/apps                      - Get specific application information (supports multiple queries)")
+	log.Println("  GET    /api/v2/apps/{id}/package         - Get rendered installation package for specific application")
+	log.Println("  PUT    /api/v2/apps/{id}/config          - Update specific application render configuration")
+	log.Println("  GET    /api/v2/logs                      - Query logs by specific conditions")
+	log.Println("  POST   /api/v2/apps/{id}/install         - Install application")
+	log.Println("  DELETE /api/v2/apps/{id}/install         - Cancel installation")
+	log.Println("  DELETE /api/v2/apps/{id}                 - Uninstall application")
+	log.Println("  POST   /api/v2/apps/upload               - Upload application installation package")
+	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
+	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
 
 	// 2. Initialize History Module
 	// 2. 初始化历史记录模块
@@ -88,8 +118,6 @@ func main() {
 
 	// 4. Initialize Helm Repository Service
 	// 4. 初始化 Helm Repository 服务
-	cacheManager := appInfoModule.GetCacheManager()
-
 	// Start Helm Repository server in a goroutine
 	// 在协程中启动 Helm Repository 服务器
 	go func() {
@@ -100,22 +128,6 @@ func main() {
 	}()
 	log.Println("Helm Repository service initialized successfully")
 
-	// Create and start the HTTP server
-	// 创建并启动HTTP服务器
-	server := api.NewServer("8080", cacheManager)
-
-	log.Println("Available endpoints:")
-	log.Println("  GET    /api/v2/market                    - Get market information")
-	log.Println("  GET    /api/v2/apps                      - Get specific application information (supports multiple queries)")
-	log.Println("  GET    /api/v2/apps/{id}/package         - Get rendered installation package for specific application")
-	log.Println("  PUT    /api/v2/apps/{id}/config          - Update specific application render configuration")
-	log.Println("  GET    /api/v2/logs                      - Query logs by specific conditions")
-	log.Println("  POST   /api/v2/apps/{id}/install         - Install application")
-	log.Println("  DELETE /api/v2/apps/{id}/install         - Cancel installation")
-	log.Println("  DELETE /api/v2/apps/{id}                 - Uninstall application")
-	log.Println("  POST   /api/v2/apps/upload               - Upload application installation package")
-	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
-	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
 	log.Println("")
 	log.Println("Helm Repository endpoints (port 82):")
 	log.Println("  GET    /index.yaml                       - Get Helm repository index (requires X-Market-User and X-Market-Source headers)")
@@ -137,16 +149,6 @@ func main() {
 	log.Println("  curl -H 'X-Market-User: user1' -H 'X-Market-Source: web-console' http://localhost:82/index.yaml")
 	log.Println("  helm repo add myrepo http://localhost:82 --header 'X-Market-User=user1' --header 'X-Market-Source=web-console'")
 	log.Println("")
-
-	// Start HTTP server in a goroutine
-	// 在协程中启动HTTP服务器
-	go func() {
-		if err := server.Start(); err != nil {
-			log.Fatal("Failed to start HTTP server:", err)
-		}
-	}()
-
-	log.Println("Starting server on port 8080")
 
 	// Setup graceful shutdown
 	// 设置优雅关闭
