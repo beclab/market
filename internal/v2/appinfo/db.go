@@ -77,8 +77,15 @@ func (r *RedisClient) ClearAllData() error {
 		return fmt.Errorf("failed to get settings Redis keys: %w", err)
 	}
 
+	// Get market sources config key
+	marketKeys, err := r.client.Keys(r.ctx, "market:*").Result()
+	if err != nil {
+		return fmt.Errorf("failed to get market Redis keys: %w", err)
+	}
+
 	// Combine all keys
 	allKeys := append(keys, settingsKeys...)
+	allKeys = append(allKeys, marketKeys...)
 
 	if len(allKeys) == 0 {
 		glog.Infof("No data to clear in Redis")
@@ -91,8 +98,8 @@ func (r *RedisClient) ClearAllData() error {
 		return fmt.Errorf("failed to delete Redis keys: %w", err)
 	}
 
-	glog.Infof("Successfully cleared %d keys from Redis (%d appinfo keys, %d settings keys)",
-		len(allKeys), len(keys), len(settingsKeys))
+	glog.Infof("Successfully cleared %d keys from Redis (%d appinfo keys, %d settings keys, %d market keys)",
+		len(allKeys), len(keys), len(settingsKeys), len(marketKeys))
 	return nil
 }
 
