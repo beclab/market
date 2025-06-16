@@ -205,6 +205,14 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 	log.Printf("==================== HYDRATION TASK STARTED ====================")
 	log.Printf("Worker %d processing task: %s for app: %s", workerID, task.ID, task.AppID)
 
+	// Check if task is in cooldown period
+	// 检查任务是否在冷却期内
+	if task.LastFailureTime != nil && time.Since(*task.LastFailureTime) < 5*time.Minute {
+		log.Printf("Task %s is in cooldown period, skipping. Next retry available at: %v",
+			task.ID, task.LastFailureTime.Add(5*time.Minute))
+		return
+	}
+
 	task.SetStatus(hydrationfn.TaskStatusRunning)
 
 	// Execute all steps
@@ -237,22 +245,28 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			// 在重试或失败前清理资源
 			h.cleanupTaskResources(task)
 
+			// Set failure time for cooldown period
+			// 设置失败时间用于冷却期
+			now := time.Now()
+			task.LastFailureTime = &now
+
 			// Check if task can be retried
 			// 检查任务是否可以重试
 			if task.CanRetry() {
-				log.Printf("Retrying task: %s (attempt %d/%d)", task.ID, task.RetryCount, task.MaxRetries)
+				log.Printf("Task %s failed, will retry after cooldown period (5 minutes). Next retry available at: %v",
+					task.ID, task.LastFailureTime.Add(5*time.Minute))
 				task.ResetForRetry()
 
-				// Re-enqueue for retry
-				// 重新入队重试
+				// Re-enqueue for retry after cooldown
+				// 冷却期后重新入队重试
 				go func() {
-					time.Sleep(time.Second * 5) // Wait before retry
+					time.Sleep(5 * time.Minute) // Wait for cooldown period
 					if err := h.EnqueueTask(task); err != nil {
 						log.Printf("Failed to re-enqueue task for retry: %s, error: %v", task.ID, err)
 						h.markTaskFailed(task)
 					}
 				}()
-				log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY ====================")
+				log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY AFTER COOLDOWN ====================")
 				return
 			} else {
 				// Max retries exceeded

@@ -58,6 +58,11 @@ type HydrationTask struct {
 	SettingsManager *settings.SettingsManager `json:"-"` // Settings manager
 
 	mutex sync.RWMutex `json:"-"` // Task mutex for thread safety
+
+	// Task state
+	// 任务状态
+	Error           error
+	LastFailureTime *time.Time // Time of last failure for cooldown period
 }
 
 // TaskStatus represents the status of a hydration task
