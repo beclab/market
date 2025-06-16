@@ -107,13 +107,17 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 // 从环境变量创建默认市场源
 func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	baseURL := os.Getenv("SYNCER_REMOTE")
+	log.Printf("Reading SYNCER_REMOTE from environment: %s", baseURL)
+
 	if baseURL == "" {
 		baseURL = "https://appstore-server-prod.bttcdn.com"
+		log.Printf("SYNCER_REMOTE not set, using default: %s", baseURL)
 	}
 
 	// Remove trailing slash
 	// 移除末尾的斜杠
 	baseURL = strings.TrimSuffix(baseURL, "/")
+	log.Printf("Base URL after trimming: %s", baseURL)
 
 	defaultSource := &MarketSource{
 		ID:          "default",
@@ -124,6 +128,8 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 		UpdatedAt:   time.Now(),
 		Description: "Official Market Sources loaded from environment",
 	}
+
+	log.Printf("Created default market source with BaseURL: %s", defaultSource.BaseURL)
 
 	return &MarketSourcesConfig{
 		Sources:       []*MarketSource{defaultSource},
@@ -338,9 +344,15 @@ func (sm *SettingsManager) GetAPIEndpoints() *APIEndpointsConfig {
 // BuildAPIURL builds a complete API URL from base URL and endpoint path
 // 从基础URL和端点路径构建完整的API URL
 func (sm *SettingsManager) BuildAPIURL(baseURL, endpointPath string) string {
+	log.Printf("Building API URL - Base URL: %s, Endpoint Path: %s", baseURL, endpointPath)
+
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	endpointPath = strings.TrimPrefix(endpointPath, "/")
-	return fmt.Sprintf("%s/%s", baseURL, endpointPath)
+
+	finalURL := fmt.Sprintf("%s/%s", baseURL, endpointPath)
+	log.Printf("Final API URL: %s", finalURL)
+
+	return finalURL
 }
 
 // AddMarketSource adds a new market source
