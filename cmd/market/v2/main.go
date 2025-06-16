@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -89,8 +90,10 @@ func main() {
 	server := api.NewServer("8080", cacheManager)
 	log.Printf("HTTP server instance created successfully")
 
-	// Start HTTP server in a goroutine
-	// 在协程中启动HTTP服务器
+	// 锁定到系统线程
+	runtime.LockOSThread()
+
+	// 启动HTTP服务器
 	go func() {
 		log.Printf("Starting HTTP server goroutine...")
 		log.Printf("Server configuration in goroutine:")
