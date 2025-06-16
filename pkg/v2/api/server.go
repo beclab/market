@@ -41,7 +41,7 @@ func NewServer(port string, cacheManager *appinfo.CacheManager) *Server {
 // setupRoutes configures all API routes
 func (s *Server) setupRoutes() {
 	// API version prefix
-	api := s.router.PathPrefix("/api/v2").Subrouter()
+	api := s.router.PathPrefix("/app-store/api/v2").Subrouter()
 
 	// 1. Get market debug memory information
 	api.HandleFunc("/market/debug-memory", s.getMarketInfo).Methods("GET")
