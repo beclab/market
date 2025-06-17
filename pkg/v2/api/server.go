@@ -10,6 +10,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/history"
+	"market/internal/v2/task"
 
 	"github.com/gorilla/mux"
 )
@@ -20,6 +21,7 @@ type Server struct {
 	port          string
 	cacheManager  *appinfo.CacheManager
 	historyModule *history.HistoryModule
+	taskModule    *task.TaskModule
 }
 
 // NewServer creates a new server instance
@@ -43,6 +45,7 @@ func NewServer(port string, cacheManager *appinfo.CacheManager) *Server {
 		port:          port,
 		cacheManager:  cacheManager,
 		historyModule: historyModule,
+		taskModule:    task.NewTaskModule(),
 	}
 	log.Printf("Server struct created successfully")
 

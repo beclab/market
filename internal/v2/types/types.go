@@ -320,6 +320,15 @@ type AppImageAnalysis struct {
 	RenderedChartURL string                `json:"rendered_chart_url,omitempty"`
 }
 
+// InstallOptions represents the options for app installation
+type InstallOptions struct {
+	App       string `json:"app"`
+	Version   string `json:"version"`
+	Source    string `json:"source"`
+	RepoUrl   string `json:"repo_url"`
+	ChartPath string `json:"chart_path"`
+}
+
 // NewCacheData creates a new cache data structure
 func NewCacheData() *CacheData {
 	return &CacheData{
