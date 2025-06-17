@@ -588,7 +588,7 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 	delete(h.activeTasks, task.ID)
 
 	// Limit the size of failed tasks map
-	maxFailedTasks := 1000
+	maxFailedTasks := 10
 	if len(h.failedTasks) >= maxFailedTasks {
 		// Remove oldest failed tasks
 		oldestTaskID := ""
@@ -920,7 +920,7 @@ func (h *Hydrator) cleanupOldCompletedTasks() {
 	defer h.taskMutex.Unlock()
 
 	// Keep only the most recent 100 completed tasks
-	maxCompletedTasks := 100
+	maxCompletedTasks := 10
 	if len(h.completedTasks) > maxCompletedTasks {
 		// Convert to slice to sort by completion time
 		tasks := make([]*hydrationfn.HydrationTask, 0, len(h.completedTasks))
