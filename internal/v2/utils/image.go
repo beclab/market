@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -94,10 +95,47 @@ const (
 	RuntimeUnknown ContainerRuntime = "unknown"
 )
 
+// ImageInfoResponse represents the response from the image info API
+type ImageInfoResponse struct {
+	Images []ImageInfo `json:"images"`
+	Name   string      `json:"name"`
+}
+
+// ImageInfo represents a single image info from the API
+type ImageInfo struct {
+	Node         string      `json:"node"`
+	Name         string      `json:"name"`
+	Architecture string      `json:"architecture"`
+	Variant      string      `json:"variant"`
+	OS           string      `json:"os"`
+	LayersData   []LayerData `json:"layersData"`
+}
+
+// LayerData represents layer information from the API
+type LayerData struct {
+	MediaType string `json:"mediaType"`
+	Digest    string `json:"digest"`
+	Offset    int64  `json:"offset"`
+	Size      int64  `json:"size"`
+}
+
 // GetDockerImageInfo retrieves detailed information about a Docker image from registry
 func GetDockerImageInfo(imageName string) (*DockerImageInfo, error) {
 	glog.Infof("Getting Docker image info for: %s", imageName)
 
+	// Check if it's development environment
+	if isDevelopmentEnvironment() {
+		glog.Infof("Development environment detected, using direct registry access")
+		return getDockerImageInfoFromRegistry(imageName)
+	}
+
+	// Production environment - use API
+	glog.Infof("Production environment detected, using API access")
+	return getDockerImageInfoFromAPI(imageName)
+}
+
+// getDockerImageInfoFromRegistry gets image info directly from registry
+func getDockerImageInfoFromRegistry(imageName string) (*DockerImageInfo, error) {
 	// Parse image name and tag
 	name, tag := parseImageNameAndTag(imageName)
 
@@ -144,6 +182,86 @@ func GetDockerImageInfo(imageName string) (*DockerImageInfo, error) {
 	}
 
 	return imageInfo, nil
+}
+
+// getDockerImageInfoFromAPI gets image info from the app service API
+func getDockerImageInfoFromAPI(imageName string) (*DockerImageInfo, error) {
+	// Get app service host and port from environment
+	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
+
+	if appServiceHost == "" || appServicePort == "" {
+		return nil, fmt.Errorf("app service host or port not configured")
+	}
+
+	// Build request URL
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/image-info", appServiceHost, appServicePort)
+
+	// Prepare request body
+	requestBody := map[string]interface{}{
+		"name":   "image-info",
+		"images": []string{imageName},
+	}
+
+	jsonBody, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+
+	// Send request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	// Parse response
+	var apiResponse ImageInfoResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Check if we got any image info
+	if len(apiResponse.Images) == 0 {
+		return nil, fmt.Errorf("no image info found for %s", imageName)
+	}
+
+	// Convert API response to DockerImageInfo
+	imageInfo := apiResponse.Images[0]
+	layers := make([]LayerInfo, len(imageInfo.LayersData))
+	var totalSize int64
+
+	for i, layer := range imageInfo.LayersData {
+		layers[i] = LayerInfo{
+			Digest:    layer.Digest,
+			Size:      layer.Size,
+			MediaType: layer.MediaType,
+		}
+		totalSize += layer.Size
+	}
+
+	return &DockerImageInfo{
+		Name:         imageInfo.Name,
+		Architecture: imageInfo.Architecture,
+		Layers:       layers,
+		TotalSize:    totalSize,
+		CreatedAt:    time.Now(),
+	}, nil
 }
 
 // GetLayerDownloadProgress checks the download progress of a specific layer locally

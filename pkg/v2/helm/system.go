@@ -9,10 +9,8 @@ import (
 )
 
 // ==================== System Management API ====================
-// ==================== 系统管理 API ====================
 
 // HealthCheckResponse represents the health check response structure
-// HealthCheckResponse 表示健康检查响应结构
 type HealthCheckResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
@@ -27,9 +25,7 @@ type HealthCheckResponse struct {
 }
 
 // healthCheck handles GET /api/v1/health
-// 处理 GET /api/v1/health 请求
 //
-// Purpose: 提供仓库服务的健康状态检查
 // Function: Provides health status check for repository service
 //
 // Request Headers:
@@ -63,29 +59,24 @@ type HealthCheckResponse struct {
 //   - 503: Service is unhealthy or degraded
 func (hr *HelmRepository) healthCheck(w http.ResponseWriter, r *http.Request) {
 	// Extract user context from headers
-	// 从请求头中提取用户上下文
 	userCtx := extractUserContext(r)
 
 	// Validate user context
-	// 验证用户上下文
 	if !validateUserContext(userCtx) {
 		http.Error(w, "Missing required headers: X-Market-User and X-Market-Source", http.StatusBadRequest)
 		return
 	}
 
 	// Log user action for audit
-	// 记录用户操作用于审计
 	logUserAction(userCtx, "HEALTH_CHECK", "system")
 
 	// Check if cache manager is available
-	// 检查缓存管理器是否可用
 	if globalCacheManager == nil {
 		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
 	// Get user data from cache
-	// 从缓存中获取用户数据
 	userData := globalCacheManager.GetUserData(userCtx.UserID)
 	if userData == nil {
 		http.Error(w, "User data not found", http.StatusUnauthorized)
@@ -93,7 +84,6 @@ func (hr *HelmRepository) healthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get source data from user data
-	// 从用户数据中获取源数据
 	sourceData := userData.Sources[userCtx.Source]
 	if sourceData == nil {
 		http.Error(w, "Source data not found", http.StatusUnauthorized)
@@ -101,7 +91,6 @@ func (hr *HelmRepository) healthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if chart root directory exists
-	// 检查 chart 根目录是否存在
 	chartRoot := filepath.Join("CHART_ROOT", userCtx.UserID, userCtx.Source)
 	if _, err := os.Stat(chartRoot); os.IsNotExist(err) {
 		http.Error(w, "Chart root directory not found", http.StatusServiceUnavailable)
@@ -109,14 +98,12 @@ func (hr *HelmRepository) healthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Prepare response
-	// 准备响应
 	response := HealthCheckResponse{
 		Success: true,
 		Message: "Service is healthy",
 	}
 
 	// Set response data
-	// 设置响应数据
 	response.Data.Status = "healthy"
 	response.Data.Timestamp = time.Now().Format(time.RFC3339)
 	response.Data.Version = "1.0.0"
@@ -129,12 +116,10 @@ func (hr *HelmRepository) healthCheck(w http.ResponseWriter, r *http.Request) {
 	response.Data.TotalCharts = len(sourceData.AppInfoLatest)
 
 	// Set response headers
-	// 设置响应头
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
 	// Write response
-	// 写入响应
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
@@ -142,9 +127,7 @@ func (hr *HelmRepository) healthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // getMetrics handles GET /api/v1/metrics
-// 处理 GET /api/v1/metrics 请求
 //
-// Purpose: 获取仓库的统计指标和性能数据
 // Function: Gets repository statistics and performance metrics
 //
 // Query Parameters:
@@ -182,22 +165,18 @@ func (hr *HelmRepository) healthCheck(w http.ResponseWriter, r *http.Request) {
 //   - 500: Internal Server Error - failed to collect metrics
 func (hr *HelmRepository) getMetrics(w http.ResponseWriter, r *http.Request) {
 	// Extract user context from headers
-	// 从请求头中提取用户上下文
 	userCtx := extractUserContext(r)
 
 	// Validate user context
-	// 验证用户上下文
 	if !validateUserContext(userCtx) {
 		http.Error(w, "Missing required headers: X-Market-User and X-Market-Source", http.StatusBadRequest)
 		return
 	}
 
 	// Log user action for audit
-	// 记录用户操作用于审计
 	logUserAction(userCtx, "GET_METRICS", "system")
 
 	// Return not implemented response
-	// 返回未实现响应
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -208,9 +187,7 @@ func (hr *HelmRepository) getMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 // getRepositoryConfig handles GET /api/v1/config
-// 处理 GET /api/v1/config 请求
 //
-// Purpose: 获取仓库的当前配置信息
 // Function: Gets current repository configuration
 //
 // Request Headers:
@@ -246,18 +223,15 @@ func (hr *HelmRepository) getMetrics(w http.ResponseWriter, r *http.Request) {
 //   - 500: Internal Server Error - failed to retrieve configuration
 func (hr *HelmRepository) getRepositoryConfig(w http.ResponseWriter, r *http.Request) {
 	// Extract user context from headers
-	// 从请求头中提取用户上下文
 	userCtx := extractUserContext(r)
 
 	// Validate user context
-	// 验证用户上下文
 	if !validateUserContext(userCtx) {
 		http.Error(w, "Missing required headers: X-Market-User and X-Market-Source", http.StatusBadRequest)
 		return
 	}
 
 	// Log user action for audit
-	// 记录用户操作用于审计
 	logUserAction(userCtx, "GET_CONFIG", "repository")
 
 	// TODO: Implementation needed
@@ -267,18 +241,10 @@ func (hr *HelmRepository) getRepositoryConfig(w http.ResponseWriter, r *http.Req
 	// 4. Sanitize sensitive information
 	// 5. Return configuration data
 
-	// 实现要点:
-	// 1. 检查用户配置访问权限 (基于 userCtx.UserID, userCtx.Source)
-	// 2. 加载用户范围的当前配置
-	// 3. 根据用户访问级别过滤配置
-	// 4. 清理敏感信息
-	// 5. 返回配置数据
 }
 
 // updateRepositoryConfig handles PUT /api/v1/config
-// 处理 PUT /api/v1/config 请求
 //
-// Purpose: 更新仓库配置
 // Function: Updates repository configuration
 //
 // Request Content-Type: application/json
@@ -309,18 +275,15 @@ func (hr *HelmRepository) getRepositoryConfig(w http.ResponseWriter, r *http.Req
 //   - 500: Internal Server Error - failed to save configuration
 func (hr *HelmRepository) updateRepositoryConfig(w http.ResponseWriter, r *http.Request) {
 	// Extract user context from headers
-	// 从请求头中提取用户上下文
 	userCtx := extractUserContext(r)
 
 	// Validate user context
-	// 验证用户上下文
 	if !validateUserContext(userCtx) {
 		http.Error(w, "Missing required headers: X-Market-User and X-Market-Source", http.StatusBadRequest)
 		return
 	}
 
 	// Log user action for audit
-	// 记录用户操作用于审计
 	logUserAction(userCtx, "UPDATE_CONFIG", "repository")
 
 	// TODO: Implementation needed
@@ -331,19 +294,10 @@ func (hr *HelmRepository) updateRepositoryConfig(w http.ResponseWriter, r *http.
 	// 5. Save configuration to persistent storage
 	// 6. Return update status
 
-	// 实现要点:
-	// 1. 检查用户配置修改权限 (基于 userCtx.UserID, userCtx.Source)
-	// 2. 解析和验证请求体
-	// 3. 在用户范围内验证配置更改
-	// 4. 将配置更新应用到用户命名空间
-	// 5. 保存配置到持久存储
-	// 6. 返回更新状态
 }
 
 // rebuildIndex handles POST /api/v1/index/rebuild
-// 处理 POST /api/v1/index/rebuild 请求
 //
-// Purpose: 重新构建仓库索引文件
 // Function: Rebuilds the repository index file
 //
 // Query Parameters:
@@ -380,22 +334,18 @@ func (hr *HelmRepository) updateRepositoryConfig(w http.ResponseWriter, r *http.
 //   - 500: Internal Server Error - rebuild failed
 func (hr *HelmRepository) rebuildIndex(w http.ResponseWriter, r *http.Request) {
 	// Extract user context from headers
-	// 从请求头中提取用户上下文
 	userCtx := extractUserContext(r)
 
 	// Validate user context
-	// 验证用户上下文
 	if !validateUserContext(userCtx) {
 		http.Error(w, "Missing required headers: X-Market-User and X-Market-Source", http.StatusBadRequest)
 		return
 	}
 
 	// Log user action for audit
-	// 记录用户操作用于审计
 	logUserAction(userCtx, "REBUILD_INDEX", "repository")
 
 	// Return not implemented response with explanation
-	// 返回未实现响应并说明原因
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
 	json.NewEncoder(w).Encode(map[string]interface{}{

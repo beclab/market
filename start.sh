@@ -1,13 +1,11 @@
 #!/bin/bash
 
 # Startup script for Market API Server
-# Market API 服务器启动脚本
 
 echo "Starting Market API Server..."
 echo "Loading environment variables from dev.env..."
 
 # Enable automatic export of variables when sourcing
-# 启用source时自动导出变量
 set -a
 source dev.env
 set +a
@@ -22,6 +20,5 @@ echo "  POSTGRES_HOST: $POSTGRES_HOST"
 echo ""
 
 # Run the main program
-# 运行主程序
 echo "Starting application..."
 go run cmd/market/v2/main.go 

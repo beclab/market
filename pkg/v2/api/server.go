@@ -104,7 +104,6 @@ func (s *Server) setupRoutes() {
 	log.Printf("Route configured: POST /app-store/api/v2/apps/upload")
 
 	// Settings endpoints
-	// 设置相关接口
 	// 10. Get market source configuration
 	api.HandleFunc("/settings/market-source", s.getMarketSource).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/market-source")
@@ -125,7 +124,6 @@ func (s *Server) Start() error {
 	log.Printf("  - History Module: %v", s.historyModule != nil)
 
 	// Check if port is available
-	// 检查端口是否可用
 	addr := ":" + s.port
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
