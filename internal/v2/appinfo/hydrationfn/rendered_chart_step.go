@@ -625,32 +625,33 @@ func (s *RenderedChartStep) renderOlaresManifest(chartFiles map[string]*ChartFil
 func (s *RenderedChartStep) renderChartPackage(chartFiles map[string]*ChartFile, templateData *TemplateData) (map[string]string, error) {
 	renderedFiles := make(map[string]string)
 
-	for path, file := range chartFiles {
+	// Create a cleanup function to handle errors
+	cleanup := func() {
+		// Clear any large data structures
+		for _, file := range chartFiles {
+			file.Content = nil // Clear file content
+		}
+	}
+	defer cleanup()
+
+	for filePath, file := range chartFiles {
 		if file.IsDir {
 			continue
 		}
 
-		// Check if file should be rendered (YAML files and certain others)
-		// 检查文件是否应该被渲染（YAML文件和某些其他文件）
-		if s.shouldRenderFile(path) {
-			log.Printf("Rendering file: %s", path)
-			renderedContent, err := s.renderTemplate(string(file.Content), templateData)
-			if err != nil {
-				log.Printf("Warning: failed to render %s: %v", path, err)
-				// Store original content if rendering fails
-				// 如果渲染失败则存储原始内容
-				renderedFiles[path] = string(file.Content)
-			} else {
-				renderedFiles[path] = renderedContent
-			}
-		} else {
-			// Store non-template files as-is
-			// 按原样存储非模板文件
-			renderedFiles[path] = string(file.Content)
+		if !s.shouldRenderFile(filePath) {
+			renderedFiles[filePath] = string(file.Content)
+			continue
 		}
+
+		rendered, err := s.renderTemplate(string(file.Content), templateData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to render file %s: %w", filePath, err)
+		}
+
+		renderedFiles[filePath] = rendered
 	}
 
-	log.Printf("Rendered %d files in chart package", len(renderedFiles))
 	return renderedFiles, nil
 }
 

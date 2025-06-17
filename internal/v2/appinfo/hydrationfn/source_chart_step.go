@@ -357,38 +357,29 @@ func (s *SourceChartStep) buildChartDownloadURL(task *HydrationTask, chartName s
 func (s *SourceChartStep) downloadChartFile(ctx context.Context, downloadURL, localPath string) error {
 	log.Printf("Downloading chart from: %s to: %s", downloadURL, localPath)
 
-	// Create HTTP request to download the file
-	// 创建HTTP请求下载文件
+	// Create the file
+	out, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer out.Close() // Ensure file is closed
+
+	// Download the file
 	resp, err := s.client.R().
 		SetContext(ctx).
+		SetDoNotParseResponse(true).
 		Get(downloadURL)
-
 	if err != nil {
-		return fmt.Errorf("failed to download chart file: %w", err)
+		return fmt.Errorf("failed to download file: %w", err)
 	}
+	defer resp.RawBody().Close() // Ensure response body is closed
 
-	// Check response status
-	// 检查响应状态
-	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-		return fmt.Errorf("failed to download chart file, status: %d, URL: %s", resp.StatusCode(), downloadURL)
-	}
-
-	// Create the local file
-	// 创建本地文件
-	file, err := os.Create(localPath)
+	// Copy the response body to the file
+	_, err = io.Copy(out, resp.RawBody())
 	if err != nil {
-		return fmt.Errorf("failed to create local chart file: %w", err)
-	}
-	defer file.Close()
-
-	// Write response body to file
-	// 将响应体写入文件
-	_, err = io.Copy(file, strings.NewReader(string(resp.Body())))
-	if err != nil {
-		return fmt.Errorf("failed to write chart file: %w", err)
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	log.Printf("Chart file downloaded successfully: %s (%d bytes)", localPath, len(resp.Body()))
 	return nil
 }
 

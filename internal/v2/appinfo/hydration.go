@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -42,6 +43,10 @@ type Hydrator struct {
 	totalTasksSucceeded int64
 	totalTasksFailed    int64
 	metricsMutex        sync.RWMutex
+
+	// Memory monitoring
+	lastMemoryCheck     time.Time
+	memoryCheckInterval time.Duration
 }
 
 // NewHydrator creates a new hydrator with the given configuration
@@ -60,6 +65,8 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 		failedTasks:          make(map[string]*hydrationfn.HydrationTask),
 		batchCompletionQueue: make(chan string, 100), // Buffer for completed task IDs
 		syncInterval:         30 * time.Second,       // Default sync interval
+		memoryCheckInterval:  5 * time.Minute,
+		lastMemoryCheck:      time.Now(),
 	}
 
 	// Add default steps
@@ -183,6 +190,9 @@ func (h *Hydrator) worker(ctx context.Context, workerID int) {
 
 // processTask processes a single hydration task
 func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationTask, workerID int) {
+	// Add memory monitoring at the start of task processing
+	h.monitorMemoryUsage()
+
 	log.Printf("==================== HYDRATION TASK STARTED ====================")
 	log.Printf("Worker %d processing task: %s for app: %s", workerID, task.ID, task.AppID)
 
@@ -282,6 +292,9 @@ func (h *Hydrator) cleanupTaskResources(task *hydrationfn.HydrationTask) {
 	// Clear task data maps
 	task.ChartData = make(map[string]interface{})
 	task.DatabaseUpdateData = make(map[string]interface{})
+
+	// Clear app data to reduce memory usage
+	task.AppData = make(map[string]interface{})
 }
 
 // pendingDataMonitor monitors for new pending data and creates tasks
@@ -562,6 +575,10 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
 	defer h.taskMutex.Unlock()
 
 	delete(h.activeTasks, task.ID)
+
+	// Clean up task resources before storing in completed tasks
+	h.cleanupTaskResources(task)
+
 	h.completedTasks[task.ID] = task
 
 	h.metricsMutex.Lock()
@@ -814,8 +831,12 @@ func (h *Hydrator) batchCompletionProcessor(ctx context.Context) {
 			return
 		case taskID := <-h.batchCompletionQueue:
 			h.processCompletedTask(taskID)
+			// Add memory monitoring after processing completed tasks
+			h.monitorMemoryUsage()
 		case <-ticker.C:
 			h.processBatchCompletions()
+			// Add memory monitoring after batch processing
+			h.monitorMemoryUsage()
 		}
 	}
 }
@@ -1029,4 +1050,102 @@ func (h *Hydrator) createTasksFromPendingDataLegacy(userID, sourceID string, pen
 
 	log.Printf("Created %d hydration tasks from pending data for user: %s, source: %s",
 		tasksCreated, userID, sourceID)
+}
+
+// monitorMemoryUsage monitors memory usage and logs warnings if it's too high
+func (h *Hydrator) monitorMemoryUsage() {
+	if time.Since(h.lastMemoryCheck) < h.memoryCheckInterval {
+		return
+	}
+
+	h.lastMemoryCheck = time.Now()
+
+	h.taskMutex.RLock()
+	activeCount := len(h.activeTasks)
+	completedCount := len(h.completedTasks)
+	failedCount := len(h.failedTasks)
+	h.taskMutex.RUnlock()
+
+	// Log memory usage metrics
+	log.Printf("Memory usage metrics - Active tasks: %d, Completed tasks: %d, Failed tasks: %d",
+		activeCount, completedCount, failedCount)
+
+	// If we have too many tasks, trigger cleanup
+	if activeCount > 100 || completedCount > 100 {
+		log.Printf("Warning: High number of tasks detected, triggering cleanup")
+		h.cleanupOldTasks()
+	}
+}
+
+// cleanupOldTasks cleans up old tasks from all task maps
+func (h *Hydrator) cleanupOldTasks() {
+	h.taskMutex.Lock()
+	defer h.taskMutex.Unlock()
+
+	now := time.Now()
+
+	// Clean up active tasks older than 1 hour
+	for id, task := range h.activeTasks {
+		if now.Sub(task.UpdatedAt) > time.Hour {
+			log.Printf("Cleaning up stale active task: %s", id)
+			h.cleanupTaskResources(task)
+			delete(h.activeTasks, id)
+		}
+	}
+
+	// Clean up completed tasks (keep only last 50)
+	if len(h.completedTasks) > 50 {
+		// Convert to slice to sort by completion time
+		tasks := make([]*hydrationfn.HydrationTask, 0, len(h.completedTasks))
+		for _, task := range h.completedTasks {
+			tasks = append(tasks, task)
+		}
+
+		// Sort by UpdatedAt time (most recent first)
+		sort.Slice(tasks, func(i, j int) bool {
+			return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt)
+		})
+
+		// Keep only the most recent 50 tasks
+		removed := 0
+
+		for _, task := range tasks[50:] {
+			h.cleanupTaskResources(task)
+			delete(h.completedTasks, task.ID)
+			removed++
+		}
+
+		log.Printf("Cleaned up %d old completed tasks", removed)
+	}
+
+	// Failed tasks are already limited to 10
+	if len(h.failedTasks) > 10 {
+		// Convert to slice to sort by failure time
+		tasks := make([]*hydrationfn.HydrationTask, 0, len(h.failedTasks))
+		for _, task := range h.failedTasks {
+			tasks = append(tasks, task)
+		}
+
+		// Sort by LastFailureTime
+		sort.Slice(tasks, func(i, j int) bool {
+			if tasks[i].LastFailureTime == nil {
+				return false
+			}
+			if tasks[j].LastFailureTime == nil {
+				return true
+			}
+			return tasks[i].LastFailureTime.After(*tasks[j].LastFailureTime)
+		})
+
+		// Keep only the most recent 10 failed tasks
+		removed := 0
+
+		for _, task := range tasks[10:] {
+			h.cleanupTaskResources(task)
+			delete(h.failedTasks, task.ID)
+			removed++
+		}
+
+		log.Printf("Cleaned up %d old failed tasks", removed)
+	}
 }
