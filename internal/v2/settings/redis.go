@@ -10,14 +10,12 @@ import (
 )
 
 // RedisClientImpl implements the RedisClient interface using go-redis
-// 使用go-redis实现RedisClient接口
 type RedisClientImpl struct {
 	client *redis.Client
 	ctx    context.Context
 }
 
 // NewRedisClient creates a new Redis client instance
-// 创建新的Redis客户端实例
 func NewRedisClient(host, port, password string, db int) (*RedisClientImpl, error) {
 	addr := fmt.Sprintf("%s:%s", host, port)
 
@@ -30,7 +28,6 @@ func NewRedisClient(host, port, password string, db int) (*RedisClientImpl, erro
 	ctx := context.Background()
 
 	// Test the connection
-	// 测试连接
 	_, err := rdb.Ping(ctx).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
@@ -45,7 +42,6 @@ func NewRedisClient(host, port, password string, db int) (*RedisClientImpl, erro
 }
 
 // Get retrieves a value from Redis
-// 从Redis获取值
 func (r *RedisClientImpl) Get(key string) (string, error) {
 	val, err := r.client.Get(r.ctx, key).Result()
 	if err == redis.Nil {
@@ -55,19 +51,16 @@ func (r *RedisClientImpl) Get(key string) (string, error) {
 }
 
 // Set stores a value in Redis
-// 在Redis中存储值
 func (r *RedisClientImpl) Set(key string, value interface{}, expiration time.Duration) error {
 	return r.client.Set(r.ctx, key, value, expiration).Err()
 }
 
 // HSet stores hash fields in Redis
-// 在Redis中存储哈希字段
 func (r *RedisClientImpl) HSet(key string, fields map[string]interface{}) error {
 	return r.client.HSet(r.ctx, key, fields).Err()
 }
 
 // HGetAll retrieves all hash fields from Redis
-// 从Redis获取所有哈希字段
 func (r *RedisClientImpl) HGetAll(key string) (map[string]string, error) {
 	result, err := r.client.HGetAll(r.ctx, key).Result()
 	if err != nil {
@@ -82,7 +75,6 @@ func (r *RedisClientImpl) HGetAll(key string) (map[string]string, error) {
 }
 
 // Close closes the Redis connection
-// 关闭Redis连接
 func (r *RedisClientImpl) Close() error {
 	return r.client.Close()
 }

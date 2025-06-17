@@ -5,7 +5,6 @@ import (
 )
 
 // Type aliases for backward compatibility
-// 为了向后兼容而创建的类型别名
 type AppDataType = types.AppDataType
 type AppData = types.AppData
 type AppInfoHistoryData = types.AppInfoHistoryData
@@ -20,14 +19,12 @@ type Others = types.Others
 type AppSimpleInfo = types.AppSimpleInfo
 
 // Image-related type aliases for unified access
-// 镜像相关类型别名，用于统一访问
 type ImageInfo = types.ImageInfo
 type LayerInfo = types.LayerInfo
 type ImageAnalysisResult = types.ImageAnalysisResult
 type AppImageAnalysis = types.AppImageAnalysis
 
 // Constants for backward compatibility
-// 为了向后兼容而重新导出的常量
 const (
 	AppInfoHistory       = types.AppInfoHistory
 	AppStateLatest       = types.AppStateLatest
@@ -37,7 +34,6 @@ const (
 )
 
 // Constructor functions for backward compatibility
-// 为了向后兼容而重新导出的构造函数
 var (
 	NewCacheData                                      = types.NewCacheData
 	NewUserData                                       = types.NewUserData

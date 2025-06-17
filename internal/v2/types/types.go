@@ -7,7 +7,6 @@ import (
 )
 
 // ModifyType represents different types of value modifications
-// ModifyType 表示不同类型的值修改
 type ModifyType string
 
 const (
@@ -28,7 +27,6 @@ const (
 )
 
 // SourceDataType represents the type of source data
-// SourceDataType 表示源数据的类型
 type SourceDataType string
 
 const (
@@ -129,7 +127,6 @@ type AppInfoLatestData struct {
 }
 
 // Values represents custom rendering parameters
-// Values 表示自定义渲染参数
 type Values struct {
 	FileName    string     `json:"file_name"`    // File name
 	ModifyType  ModifyType `json:"modify_type"`  // Type of modification
@@ -138,7 +135,6 @@ type Values struct {
 }
 
 // ApplicationInfoEntry represents the structure returned by the applications/info API
-// ApplicationInfoEntry 表示应用信息API返回的结构
 type ApplicationInfoEntry struct {
 	ID string `json:"id"`
 
@@ -203,21 +199,18 @@ type ApplicationInfoEntry struct {
 }
 
 // AppInfo represents complete app information including analysis result
-// AppInfo 表示完整的应用信息，包括分析结果
 type AppInfo struct {
 	AppEntry      *ApplicationInfoEntry `json:"app_entry"`
 	ImageAnalysis *ImageAnalysisResult  `json:"image_analysis"`
 }
 
 // AppsInfoRequest represents the request body for applications/info API
-// AppsInfoRequest 表示应用信息API的请求体
 type AppsInfoRequest struct {
 	AppIds  []string `json:"app_ids"`
 	Version string   `json:"version"`
 }
 
 // AppsInfoResponse represents the response from applications/info API
-// AppsInfoResponse 表示应用信息API的响应
 type AppsInfoResponse struct {
 	Apps     map[string]*ApplicationInfoEntry `json:"apps"`
 	Version  string                           `json:"version"`
@@ -235,7 +228,6 @@ type AppSimpleInfo struct {
 }
 
 // AppInfoLatestPendingData contains pending app info data with extended structure
-// AppInfoLatestPendingData 包含扩展结构的待处理应用信息数据
 type AppInfoLatestPendingData struct {
 	Type            AppDataType           `json:"type"`
 	Timestamp       int64                 `json:"timestamp"`
@@ -256,7 +248,6 @@ type AppOtherData struct {
 }
 
 // SourceData represents data from a specific source
-// SourceData 表示来自特定源的数据
 type SourceData struct {
 	Type                 SourceDataType              `json:"type"` // Source type: local or remote
 	AppInfoHistory       []*AppInfoHistoryData       `json:"app_info_history"`
@@ -264,30 +255,24 @@ type SourceData struct {
 	AppInfoLatest        []*AppInfoLatestData        `json:"app_info_latest"`
 	AppInfoLatestPending []*AppInfoLatestPendingData `json:"app_info_latest_pending"`
 	Others               *Others                     `json:"others,omitempty"` // Additional data like hash, topics, etc.
-	// 移除 Mutex，所有锁操作将由 CacheData 统一管理
 	// Remove Mutex, all lock operations will be managed by CacheData
 }
 
 // UserData represents data for a specific user
-// UserData 表示特定用户的数据
 type UserData struct {
 	Sources map[string]*SourceData `json:"sources"`
 	Hash    string                 `json:"hash"`
-	// 移除 Mutex，所有锁操作将由 CacheData 统一管理
 	// Remove Mutex, all lock operations will be managed by CacheData
 }
 
 // CacheData represents the entire cache with a single global lock
-// CacheData 表示整个缓存，使用单一全局锁
 type CacheData struct {
 	Users map[string]*UserData `json:"users"`
-	// 单一全局锁，管理所有数据访问
 	// Single global lock to manage all data access
 	Mutex sync.RWMutex `json:"-"`
 }
 
 // ImageInfo represents detailed information about a Docker image
-// ImageInfo 表示Docker镜像的详细信息
 type ImageInfo struct {
 	Name             string       `json:"name"`
 	Tag              string       `json:"tag,omitempty"`
@@ -305,7 +290,6 @@ type ImageInfo struct {
 }
 
 // LayerInfo represents information about a Docker image layer
-// LayerInfo 表示Docker镜像层的信息
 type LayerInfo struct {
 	Digest     string `json:"digest"`
 	Size       int64  `json:"size"`
@@ -316,7 +300,6 @@ type LayerInfo struct {
 }
 
 // ImageAnalysisResult represents the complete image analysis result
-// ImageAnalysisResult 表示完整的镜像分析结果
 type ImageAnalysisResult struct {
 	AppID       string                `json:"app_id"`
 	UserID      string                `json:"user_id"`
@@ -327,7 +310,6 @@ type ImageAnalysisResult struct {
 }
 
 // AppImageAnalysis represents the image analysis result for a specific app
-// AppImageAnalysis 表示特定应用的镜像分析结果
 type AppImageAnalysis struct {
 	AppID            string                `json:"app_id"`
 	AnalyzedAt       time.Time             `json:"analyzed_at"`
@@ -352,7 +334,6 @@ func NewUserData() *UserData {
 	}
 
 	// Create a default local source for the user
-	// 为用户创建默认的本地源
 	userData.Sources["local"] = NewSourceDataWithType(SourceDataTypeLocal)
 
 	return userData
@@ -370,7 +351,6 @@ func NewSourceData() *SourceData {
 }
 
 // NewSourceDataWithType creates a new source data structure with specified type
-// NewSourceDataWithType 创建指定类型的新源数据结构
 func NewSourceDataWithType(sourceType SourceDataType) *SourceData {
 	return &SourceData{
 		Type:                 sourceType,
@@ -411,14 +391,12 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 // NewAppInfoLatestData creates a new app info latest data structure
 func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	// Validate input data - ensure we have meaningful data to work with
-	// 验证输入数据 - 确保有有意义的数据可处理
 	if data == nil || len(data) == 0 {
 		log.Printf("DEBUG: NewAppInfoLatestData called with nil or empty data, returning nil")
 		return nil
 	}
 
 	// Check if we have essential app identifiers or meaningful content
-	// 检查是否有基本的应用标识符或有意义的内容
 	var appID, appName string
 	hasEssentialData := false
 
@@ -447,10 +425,8 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	}
 
 	// Check for other indicators of valid app data
-	// 检查其他有效应用数据的指示器
 	if !hasEssentialData {
 		// Check for chart name, icon, or other app-specific fields
-		// 检查chart名称、图标或其他应用特定字段
 		if chartName, ok := data["chartName"].(string); ok && chartName != "" {
 			hasEssentialData = true
 		} else if icon, ok := data["icon"].(string); ok && icon != "" {
@@ -463,7 +439,6 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	}
 
 	// If no essential data found, return nil to prevent empty data creation
-	// 如果没有找到基本数据，返回nil以防止创建空数据
 	if !hasEssentialData {
 		log.Printf("DEBUG: NewAppInfoLatestData found no essential app data in input, returning nil")
 		log.Printf("DEBUG: Input data keys: %v", getMapKeys(data))
@@ -471,7 +446,6 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	}
 
 	// For backward compatibility, we'll try to create a basic AppInfoLatestData structure
-	// 为了向后兼容，我们将尝试创建基本的AppInfoLatestData结构
 	appInfoLatest := &AppInfoLatestData{
 		Type:            AppInfoLatest,
 		Timestamp:       getCurrentTimestamp(),
@@ -484,13 +458,11 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	}
 
 	// Extract version if available in the data
-	// 如果数据中有版本信息则提取
 	if version, ok := data["version"].(string); ok && version != "" {
 		appInfoLatest.Version = version
 	}
 
 	// Create ApplicationInfoEntry with the validated data
-	// 使用验证过的数据创建ApplicationInfoEntry
 	if appID == "" && appName != "" {
 		appID = appName
 	}
@@ -509,12 +481,10 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	}
 
 	// Store the original data in metadata for later processing
-	// 将原始数据存储在元数据中供后续处理
 	rawData.Metadata["source_data"] = data
 	rawData.Metadata["data_type"] = "legacy_app_latest_data"
 
 	// Extract other basic fields if available
-	// 如果可用，提取其他基本字段
 	if desc, ok := data["description"].(string); ok {
 		rawData.Description = map[string]string{"en-US": desc} // Initialize with default language
 	}
@@ -541,7 +511,6 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 }
 
 // Helper function to get map keys for debugging
-// 辅助函数，获取map的键用于调试
 func getMapKeys(m map[string]interface{}) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -623,10 +592,8 @@ func getCurrentTimestamp() int64 {
 }
 
 // NewAppInfoLatestPendingDataFromLegacyData creates AppInfoLatestPendingData from a single app data
-// NewAppInfoLatestPendingDataFromLegacyData 从单个应用数据创建AppInfoLatestPendingData
 func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *AppInfoLatestPendingData {
 	// Add debug logging to inspect input data
-	// 添加调试日志以检查输入数据
 	log.Printf("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
 	// if appData != nil {
 	// 	log.Printf("DEBUG: appData length: %d", len(appData))
@@ -636,14 +603,12 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	// }
 
 	// Validate input data - ensure we have at least basic app identifier
-	// 验证输入数据 - 确保至少有基本的应用标识符
 	if appData == nil || len(appData) == 0 {
 		log.Printf("DEBUG: appData is nil or empty, returning nil")
 		return nil
 	}
 
 	// Check if we have essential app identifiers (id, name, or appID)
-	// 检查是否有基本的应用标识符 (id, name, 或 appID)
 	var primaryID, primaryName string
 
 	if id, ok := appData["id"].(string); ok && id != "" {
@@ -676,14 +641,12 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	log.Printf("DEBUG: Final primaryID: '%s', primaryName: '%s'", primaryID, primaryName)
 
 	// If this doesn't look like single app data, return nil
-	// 如果这看起来不像单个应用数据，返回nil
 	if primaryID == "" && primaryName == "" {
 		log.Printf("DEBUG: Both primaryID and primaryName are empty, returning nil")
 		return nil
 	}
 
 	// Ensure we have both ID and name
-	// 确保我们有ID和名称
 	if primaryID == "" {
 		primaryID = primaryName
 	}
@@ -702,13 +665,11 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	}
 
 	// Extract version from app data if available
-	// 从应用数据中提取版本信息
 	if version, ok := appData["version"].(string); ok && version != "" {
 		pendingData.Version = version
 	}
 
 	// Create ApplicationInfoEntry from app data
-	// 从应用数据创建ApplicationInfoEntry
 	rawData := &ApplicationInfoEntry{
 		ID:         primaryID,
 		AppID:      primaryID,
@@ -720,7 +681,6 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	}
 
 	// Extract other optional fields
-	// 提取其他可选字段
 	if desc, ok := appData["description"].(string); ok {
 		rawData.Description = map[string]string{"en-US": desc} // Initialize with default language
 	}
@@ -746,7 +706,6 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	}
 
 	// Store the complete app data in metadata for later processing
-	// 将完整的应用数据存储在元数据中供后续处理
 	rawData.Metadata["source_app_data"] = appData
 	rawData.Metadata["data_type"] = "single_app_data"
 	rawData.Metadata["validation_status"] = "validated"
@@ -761,15 +720,12 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 }
 
 // NewAppInfoLatestPendingDataFromLegacyCompleteData creates AppInfoLatestPendingData from complete legacy data with single app
-// NewAppInfoLatestPendingDataFromLegacyCompleteData 从包含单个应用的完整传统数据创建AppInfoLatestPendingData
 func NewAppInfoLatestPendingDataFromLegacyCompleteData(appData map[string]interface{}, others *Others) *AppInfoLatestPendingData {
 	log.Printf("DEBUG: CALL POINT 4 - ")
 	pendingData := NewAppInfoLatestPendingDataFromLegacyData(appData)
 	// Check if base pending data creation was successful
-	// 检查基础待处理数据创建是否成功
 	if pendingData == nil {
 		// Return nil if base data validation failed
-		// 如果基础数据验证失败则返回nil
 		return nil
 	}
 	// Note: Others is now stored in SourceData, not in AppInfoLatestPendingData

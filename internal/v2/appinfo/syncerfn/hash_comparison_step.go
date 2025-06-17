@@ -11,7 +11,6 @@ import (
 )
 
 // HashResponse represents the response structure from the remote hash API
-// HashResponse 表示远程hash API的响应结构
 type HashResponse struct {
 	Hash        string `json:"hash"`
 	LastUpdated string `json:"last_updated"`
@@ -42,7 +41,6 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	log.Printf("Executing %s", h.GetStepName())
 
 	// Get version from SyncContext, if not available use default
-	// 从SyncContext获取版本，如果不可用则使用默认值
 	version := data.GetVersion()
 	if version == "" {
 		version = "1.12.0" // fallback version
@@ -52,19 +50,16 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	log.Printf("Using version: %s", version)
 
 	// Get current market source from context
-	// 从上下文获取当前市场源
 	marketSource := data.GetMarketSource()
 	if marketSource == nil {
 		return fmt.Errorf("no market source available in sync context")
 	}
 
 	// Build complete URL from market source base URL and endpoint path
-	// 从市场源基础URL和端点路径构建完整URL
 	hashURL := h.SettingsManager.BuildAPIURL(marketSource.BaseURL, h.HashEndpointPath)
 	log.Printf("Using hash URL: %s", hashURL)
 
 	// Fetch remote hash with version parameter
-	// 携带version参数获取远程hash
 	resp, err := data.Client.R().
 		SetContext(ctx).
 		SetQueryParam("version", version).
@@ -79,7 +74,6 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	}
 
 	// Parse JSON response
-	// 解析JSON响应
 	var hashResponse HashResponse
 	if err := json.Unmarshal(resp.Body(), &hashResponse); err != nil {
 		return fmt.Errorf("failed to parse hash response: %w", err)
@@ -88,11 +82,9 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	data.RemoteHash = hashResponse.Hash
 
 	// Calculate local hash
-	// 计算本地hash
 	data.LocalHash = h.calculateLocalHash(data.Cache, data.GetMarketSource())
 
 	// Compare hashes and set result
-	// 比较hash并设置结果
 	data.HashMatches = data.RemoteHash == data.LocalHash
 
 	log.Printf("Remote hash: %s, Local hash: %s, Match: %t",
@@ -113,7 +105,6 @@ func (h *HashComparisonStep) CanSkip(ctx context.Context, data *SyncContext) boo
 }
 
 // calculateLocalHash computes hash from local SourceData Others.Hash for specific market source
-// calculateLocalHash 从特定市场源的本地SourceData Others.Hash获取hash
 func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSource *settings.MarketSource) string {
 	if cache == nil {
 		log.Printf("Cache is nil, returning empty_cache hash")
@@ -126,30 +117,25 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSo
 	}
 
 	// Use market source name as source ID to match syncer.go behavior
-	// 使用市场源名称作为源ID以匹配syncer.go的行为
 	sourceID := marketSource.Name
 
 	cache.Mutex.RLock()
 	defer cache.Mutex.RUnlock()
 
 	// If no users exist, return empty hash
-	// 如果没有用户存在，返回空hash
 	if len(cache.Users) == 0 {
 		log.Printf("No users in cache, returning empty hash")
 		return "empty_cache_no_users"
 	}
 
 	// Look for Others.Hash only in the current market source
-	// 只在当前市场源中查找Others.Hash
 	var sourceHash string
 	var foundValidHash bool
 
 	for userID, userData := range cache.Users {
 		// Check if this user has data for the specific source
-		// 检查该用户是否有特定源的数据
 		if sourceData, exists := userData.Sources[sourceID]; exists {
 			// Check if Others exists and has a Hash
-			// 检查Others是否存在并包含Hash
 			if sourceData.Others != nil && sourceData.Others.Hash != "" {
 				sourceHash = sourceData.Others.Hash
 				foundValidHash = true
@@ -164,7 +150,6 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSo
 	}
 
 	// If no valid Others.Hash found for the specific source, return appropriate hash
-	// 如果没有为特定源找到有效的Others.Hash，返回相应的hash
 	if !foundValidHash {
 		log.Printf("No valid Others.Hash found for source:%s, returning no_source_hash", sourceID)
 		return "no_source_hash"

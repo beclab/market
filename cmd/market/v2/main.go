@@ -25,7 +25,6 @@ func main() {
 	log.Printf("Starting market application...")
 
 	// Initialize glog for debug logging
-	// 初始化glog用于调试日志
 	flag.Set("logtostderr", "true")
 	flag.Set("v", "2")
 	flag.Parse()
@@ -35,7 +34,6 @@ func main() {
 	glog.Info("glog initialized for debug logging")
 
 	// 0. Initialize Settings Module (Required for API)
-	// 0. 初始化设置模块（API所需）
 	redisHost := getEnvOrDefault("REDIS_HOST", "localhost")
 	redisPort := getEnvOrDefault("REDIS_PORT", "6379")
 	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
@@ -57,11 +55,9 @@ func main() {
 	log.Println("Settings module started successfully")
 
 	// Set the settings manager for API access
-	// 为API访问设置设置管理器
 	api.SetSettingsManager(settingsManager)
 
 	// 1. Initialize AppInfo Module (Required for cacheManager)
-	// 1. 初始化应用信息模块（cacheManager所需）
 	appInfoConfig := appinfo.DefaultModuleConfig()
 	appInfoModule, err := appinfo.NewAppInfoModule(appInfoConfig)
 	if err != nil {
@@ -74,13 +70,11 @@ func main() {
 	log.Println("AppInfo module started successfully")
 
 	// Get cacheManager for HTTP server
-	// 获取HTTP服务器所需的cacheManager
 	log.Printf("Getting cache manager for HTTP server...")
 	cacheManager := appInfoModule.GetCacheManager()
 	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
 
 	// Create and start the HTTP server
-	// 创建并启动HTTP服务器
 	log.Printf("Preparing to create HTTP server...")
 	log.Printf("Server configuration before creation:")
 	log.Printf("  - Port: 8080")
@@ -90,10 +84,9 @@ func main() {
 	server := api.NewServer("8080", cacheManager)
 	log.Printf("HTTP server instance created successfully")
 
-	// 锁定到系统线程
+	// Lock to system thread
 	runtime.LockOSThread()
 
-	// 启动HTTP服务器
 	go func() {
 		log.Printf("Starting HTTP server goroutine...")
 		log.Printf("Server configuration in goroutine:")
@@ -117,7 +110,6 @@ func main() {
 	log.Println("Starting server on port 8080")
 
 	// Print available endpoints
-	// 打印可用的端点
 	log.Printf("Available endpoints:")
 	log.Println("  GET    /api/v2/market                    - Get market information")
 	log.Println("  GET    /api/v2/apps                      - Get specific application information (supports multiple queries)")
@@ -132,7 +124,6 @@ func main() {
 	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
 
 	// 2. Initialize History Module
-	// 2. 初始化历史记录模块
 	historyModule, err := history.NewHistoryModule()
 	if err != nil {
 		log.Fatalf("Failed to create History module: %v", err)
@@ -140,14 +131,11 @@ func main() {
 	log.Println("History module started successfully")
 
 	// 3. Initialize Task Module
-	// 3. 初始化任务模块
 	taskModule := task.NewTaskModule()
 	log.Println("Task module started successfully")
 
 	// 4. Initialize Helm Repository Service
-	// 4. 初始化 Helm Repository 服务
 	// Start Helm Repository server in a goroutine
-	// 在协程中启动 Helm Repository 服务器
 	go func() {
 		log.Println("Starting Helm Repository server on port 82...")
 		if err := helm.StartHelmRepositoryServerWithCacheManager(cacheManager); err != nil {
@@ -179,32 +167,26 @@ func main() {
 	log.Println("")
 
 	// Setup graceful shutdown
-	// 设置优雅关闭
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	// Wait for interrupt signal
-	// 等待中断信号
 	<-c
 	log.Println("Shutting down gracefully...")
 
 	// Set a timeout for graceful shutdown
-	// 为优雅关闭设置超时
 	shutdownTimeout := 30 * time.Second
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	// Channel to signal completion of shutdown
-	// 用于标记关闭完成的通道
 	shutdownComplete := make(chan struct{})
 
 	// Run shutdown in a goroutine
-	// 在协程中运行关闭过程
 	go func() {
 		defer close(shutdownComplete)
 
 		// Stop all modules in reverse order
-		// 按相反顺序停止所有模块
 		log.Println("Stopping Task module...")
 		taskModule.Stop()
 
@@ -227,7 +209,6 @@ func main() {
 	}()
 
 	// Wait for shutdown completion or timeout
-	// 等待关闭完成或超时
 	select {
 	case <-shutdownCtx.Done():
 		log.Printf("Shutdown timeout (%v) exceeded, forcing exit", shutdownTimeout)
@@ -238,7 +219,6 @@ func main() {
 }
 
 // getEnvOrDefault gets environment variable or returns default value
-// 获取环境变量或返回默认值
 func getEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

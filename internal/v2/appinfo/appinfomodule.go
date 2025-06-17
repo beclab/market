@@ -16,7 +16,6 @@ import (
 )
 
 // AppInfoModule represents the main application info module
-// AppInfoModule 代表主要的应用信息模块
 type AppInfoModule struct {
 	config           *ModuleConfig
 	cacheManager     *CacheManager
@@ -33,7 +32,6 @@ type AppInfoModule struct {
 }
 
 // ModuleConfig holds configuration for the AppInfo module
-// ModuleConfig 保存 AppInfo 模块的配置
 type ModuleConfig struct {
 	Redis                  *RedisConfig    `json:"redis"`
 	Syncer                 *SyncerConfig   `json:"syncer"`
@@ -50,7 +48,6 @@ type ModuleConfig struct {
 }
 
 // CacheConfig holds cache-specific configuration
-// CacheConfig 保存缓存相关的配置
 type CacheConfig struct {
 	SyncBufferSize int           `json:"sync_buffer_size"`
 	ForceSync      bool          `json:"force_sync"`
@@ -59,7 +56,6 @@ type CacheConfig struct {
 }
 
 // UserConfig holds user-specific configuration
-// UserConfig 保存用户相关的配置
 type UserConfig struct {
 	UserList              []string      `json:"user_list"`
 	AdminList             []string      `json:"admin_list"`
@@ -77,7 +73,6 @@ type UserConfig struct {
 }
 
 // RedisClientAdapter adapts appinfo.RedisClient to settings.RedisClient interface
-// RedisClientAdapter 将 appinfo.RedisClient 适配为 settings.RedisClient 接口
 type RedisClientAdapter struct {
 	client *RedisClient
 }
@@ -103,7 +98,6 @@ func (r *RedisClientAdapter) HGetAll(key string) (map[string]string, error) {
 }
 
 // NewAppInfoModule creates a new AppInfo module instance
-// NewAppInfoModule 创建一个新的 AppInfo 模块实例
 func NewAppInfoModule(config *ModuleConfig) (*AppInfoModule, error) {
 	if config == nil {
 		config = DefaultModuleConfig()
@@ -129,7 +123,6 @@ func NewAppInfoModule(config *ModuleConfig) (*AppInfoModule, error) {
 }
 
 // Start initializes and starts all module components
-// Start 初始化并启动所有模块组件
 func (m *AppInfoModule) Start() error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -169,7 +162,6 @@ func (m *AppInfoModule) Start() error {
 	}
 
 	// Initialize DataWatcher if enabled and dependencies are available
-	// 如果启用且依赖项可用，则初始化DataWatcher
 	if m.config.EnableDataWatcher && m.config.EnableCache && m.config.EnableHydrator {
 		if err := m.initDataWatcher(); err != nil {
 			return fmt.Errorf("failed to initialize DataWatcher: %w", err)
@@ -177,7 +169,6 @@ func (m *AppInfoModule) Start() error {
 	}
 
 	// Initialize DataWatcherState if enabled
-	// 如果启用，则初始化DataWatcherState
 	if m.config.EnableDataWatcherState {
 		if err := m.initDataWatcherState(); err != nil {
 			return fmt.Errorf("failed to initialize DataWatcherState: %w", err)
@@ -185,7 +176,6 @@ func (m *AppInfoModule) Start() error {
 	}
 
 	// Initialize DataWatcherUser if enabled
-	// 如果启用，则初始化DataWatcherUser
 	if m.config.EnableDataWatcherUser {
 		if err := m.initDataWatcherUser(); err != nil {
 			return fmt.Errorf("failed to initialize DataWatcherUser: %w", err)
@@ -204,7 +194,6 @@ func (m *AppInfoModule) Start() error {
 }
 
 // Stop gracefully shuts down the module
-// Stop 优雅地关闭模块
 func (m *AppInfoModule) Stop() error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -216,19 +205,16 @@ func (m *AppInfoModule) Stop() error {
 	glog.Infof("Stopping AppInfo module...")
 
 	// Stop components in reverse order
-	// 按相反顺序停止组件
 	if m.hydrator != nil {
 		m.hydrator.Stop()
 	}
 
 	// Stop DataWatcher
-	// 停止DataWatcher
 	if m.dataWatcher != nil {
 		m.dataWatcher.Stop()
 	}
 
 	// Stop DataWatcherState
-	// 停止DataWatcherState
 	if m.dataWatcherState != nil {
 		if err := m.dataWatcherState.Stop(); err != nil {
 			glog.Errorf("Failed to stop DataWatcherState: %v", err)
@@ -236,7 +222,6 @@ func (m *AppInfoModule) Stop() error {
 	}
 
 	// Stop DataWatcherUser
-	// 停止DataWatcherUser
 	if m.dataWatcherUser != nil {
 		m.dataWatcherUser.Stop()
 		glog.Infof("DataWatcherUser stopped")
@@ -270,7 +255,6 @@ func (m *AppInfoModule) Stop() error {
 }
 
 // GetCacheManager returns the cache manager instance
-// GetCacheManager 返回缓存管理器实例
 func (m *AppInfoModule) GetCacheManager() *CacheManager {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -278,38 +262,34 @@ func (m *AppInfoModule) GetCacheManager() *CacheManager {
 }
 
 // GetSyncer returns the syncer instance
-// GetSyncer 返回同步器实例
 func (m *AppInfoModule) GetSyncer() *Syncer {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.syncer
 }
 
-// GetHydrator returns the hydrator instance (可能为nil)
+// GetHydrator returns the hydrator instance (can nil)
 func (m *AppInfoModule) GetHydrator() *Hydrator {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.hydrator
 }
 
-// GetDataWatcher returns the DataWatcher instance (可能为nil)
-// GetDataWatcher 返回DataWatcher实例 (可能为nil)
+// GetDataWatcher returns the DataWatcher instance (can nil)
 func (m *AppInfoModule) GetDataWatcher() *DataWatcher {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.dataWatcher
 }
 
-// GetDataWatcherState returns the DataWatcherState instance (可能为nil)
-// GetDataWatcherState 返回DataWatcherState实例 (可能为nil)
+// GetDataWatcherState returns the DataWatcherState instance (can nil)
 func (m *AppInfoModule) GetDataWatcherState() *DataWatcherState {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.dataWatcherState
 }
 
-// GetDataWatcherUser returns the DataWatcherUser instance (可能为nil)
-// GetDataWatcherUser 返回DataWatcherUser实例 (可能为nil)
+// GetDataWatcherUser returns the DataWatcherUser instance (can nil)
 func (m *AppInfoModule) GetDataWatcherUser() *DataWatcherUser {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -317,7 +297,6 @@ func (m *AppInfoModule) GetDataWatcherUser() *DataWatcherUser {
 }
 
 // GetRedisClient returns the Redis client instance
-// GetRedisClient 返回 Redis 客户端实例
 func (m *AppInfoModule) GetRedisClient() *RedisClient {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -325,7 +304,6 @@ func (m *AppInfoModule) GetRedisClient() *RedisClient {
 }
 
 // IsStarted returns whether the module is currently running
-// IsStarted 返回模块是否正在运行
 func (m *AppInfoModule) IsStarted() bool {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -333,7 +311,6 @@ func (m *AppInfoModule) IsStarted() bool {
 }
 
 // GetModuleStatus returns the current status of the module and all components
-// GetModuleStatus 返回模块和所有组件的当前状态
 func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -368,21 +345,18 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	}
 
 	// Add hydrator status
-	// 添加水合器状态
 	if m.hydrator != nil {
 		status["hydrator_running"] = m.hydrator.IsRunning()
 		status["hydrator_metrics"] = m.hydrator.GetMetrics()
 	}
 
 	// Add DataWatcher status
-	// 添加DataWatcher状态
 	if m.dataWatcher != nil {
 		status["data_watcher_running"] = m.dataWatcher.IsRunning()
 		status["data_watcher_metrics"] = m.dataWatcher.GetMetrics()
 	}
 
 	// Add DataWatcherUser status
-	// 添加DataWatcherUser状态
 	if m.dataWatcherUser != nil {
 		status["data_watcher_user_healthy"] = m.dataWatcherUser.IsHealthy()
 		status["data_watcher_user_status"] = m.dataWatcherUser.GetStatus()
@@ -392,7 +366,6 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 }
 
 // initRedisClient initializes the Redis client
-// initRedisClient 初始化 Redis 客户端
 func (m *AppInfoModule) initRedisClient() error {
 	glog.Infof("Initializing Redis client...")
 
@@ -407,7 +380,6 @@ func (m *AppInfoModule) initRedisClient() error {
 }
 
 // initCacheManager initializes the cache manager
-// initCacheManager 初始化缓存管理器
 func (m *AppInfoModule) initCacheManager() error {
 	glog.Infof("Initializing cache manager...")
 
@@ -427,7 +399,6 @@ func (m *AppInfoModule) initCacheManager() error {
 }
 
 // initSyncer initializes the syncer
-// initSyncer 初始化同步器
 func (m *AppInfoModule) initSyncer() error {
 	glog.Infof("Initializing syncer...")
 
@@ -436,11 +407,9 @@ func (m *AppInfoModule) initSyncer() error {
 	}
 
 	// Get the actual cache data from cache manager instead of creating a new one
-	// 从缓存管理器获取实际的缓存数据，而不是创建新的
 	cacheData := m.cacheManager.cache
 
 	// Create settings manager for syncer
-	// 为同步器创建设置管理器
 	redisAdapter := &RedisClientAdapter{client: m.redisClient}
 	settingsManager := settings.NewSettingsManager(redisAdapter)
 	if err := settingsManager.Initialize(); err != nil {
@@ -450,7 +419,6 @@ func (m *AppInfoModule) initSyncer() error {
 	m.syncer = CreateDefaultSyncer(cacheData, *m.config.Syncer, settingsManager)
 
 	// Set cache manager reference for hydration notifications
-	// 设置缓存管理器引用以进行水合通知
 	if m.cacheManager != nil {
 		m.syncer.SetCacheManager(m.cacheManager)
 		glog.Infof("Cache manager reference set in syncer for hydration notifications")
@@ -466,7 +434,6 @@ func (m *AppInfoModule) initSyncer() error {
 }
 
 // initHydrator initializes the hydrator
-// initHydrator 初始化水合器
 func (m *AppInfoModule) initHydrator() error {
 	glog.Infof("Initializing hydrator...")
 
@@ -475,11 +442,9 @@ func (m *AppInfoModule) initHydrator() error {
 	}
 
 	// Get the actual cache data from cache manager
-	// 从缓存管理器获取实际的缓存数据
 	cacheData := m.cacheManager.cache
 
 	// Create settings manager for hydrator
-	// 为水合器创建设置管理器
 	redisAdapter := &RedisClientAdapter{client: m.redisClient}
 	settingsManager := settings.NewSettingsManager(redisAdapter)
 	if err := settingsManager.Initialize(); err != nil {
@@ -487,7 +452,6 @@ func (m *AppInfoModule) initHydrator() error {
 	}
 
 	// Use hydrator config from module config, or default if not specified
-	// 使用模块配置中的水合器配置，如果未指定则使用默认配置
 	hydratorConfig := DefaultHydratorConfig()
 	if m.config.Hydrator != nil {
 		hydratorConfig = *m.config.Hydrator
@@ -496,7 +460,6 @@ func (m *AppInfoModule) initHydrator() error {
 	m.hydrator = NewHydrator(cacheData, settingsManager, hydratorConfig)
 
 	// Start hydrator with context
-	// 使用上下文启动水合器
 	if err := m.hydrator.Start(m.ctx); err != nil {
 		return fmt.Errorf("failed to start hydrator: %w", err)
 	}
@@ -506,7 +469,6 @@ func (m *AppInfoModule) initHydrator() error {
 }
 
 // initDataWatcher initializes the DataWatcher
-// initDataWatcher 初始化DataWatcher
 func (m *AppInfoModule) initDataWatcher() error {
 	glog.Infof("Initializing DataWatcher...")
 
@@ -519,7 +481,6 @@ func (m *AppInfoModule) initDataWatcher() error {
 	}
 
 	// Create DataWatcher instance
-	// 创建DataWatcher实例
 	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator)
 
 	// Start DataWatcher
@@ -532,16 +493,13 @@ func (m *AppInfoModule) initDataWatcher() error {
 }
 
 // initDataWatcherState initializes the DataWatcherState
-// initDataWatcherState 初始化DataWatcherState
 func (m *AppInfoModule) initDataWatcherState() error {
 	glog.Infof("Initializing DataWatcherState...")
 
 	// Create DataWatcherState instance
-	// 创建DataWatcherState实例
 	m.dataWatcherState = NewDataWatcherState()
 
 	// Start DataWatcherState
-	// 启动DataWatcherState
 	if err := m.dataWatcherState.Start(); err != nil {
 		return fmt.Errorf("failed to start DataWatcherState: %w", err)
 	}
@@ -551,12 +509,10 @@ func (m *AppInfoModule) initDataWatcherState() error {
 }
 
 // initDataWatcherUser initializes the DataWatcherUser
-// initDataWatcherUser 初始化DataWatcherUser
 func (m *AppInfoModule) initDataWatcherUser() error {
 	glog.Infof("Initializing DataWatcherUser...")
 
 	// Create DataWatcherUser instance
-	// 创建DataWatcherUser实例
 	m.dataWatcherUser = NewDataWatcherUser()
 
 	// Start DataWatcherUser
@@ -569,7 +525,6 @@ func (m *AppInfoModule) initDataWatcherUser() error {
 }
 
 // validateConfig validates the module configuration
-// validateConfig 验证模块配置
 func validateConfig(config *ModuleConfig) error {
 	if config.EnableCache && config.Redis == nil {
 		return fmt.Errorf("Redis configuration is required when cache is enabled")
@@ -618,7 +573,6 @@ func validateConfig(config *ModuleConfig) error {
 }
 
 // DefaultModuleConfig returns a default module configuration
-// DefaultModuleConfig 返回默认的模块配置
 func DefaultModuleConfig() *ModuleConfig {
 	// Parse Redis configuration from environment variables
 	redisHost := os.Getenv("REDIS_HOST")
@@ -722,7 +676,6 @@ func DefaultModuleConfig() *ModuleConfig {
 	}
 
 	// Parse Hydrator configuration from environment variables
-	// 从环境变量解析水合器配置
 	hydratorQueueSize, err := strconv.Atoi(os.Getenv("HYDRATOR_QUEUE_SIZE"))
 	if err != nil || hydratorQueueSize <= 0 {
 		hydratorQueueSize = 1000
@@ -734,7 +687,6 @@ func DefaultModuleConfig() *ModuleConfig {
 	}
 
 	// Parse User configuration from environment variables
-	// 从环境变量解析用户配置
 	userListStr := os.Getenv("USER_LIST")
 	var userList []string
 	if userListStr != "" {
@@ -862,19 +814,16 @@ func DefaultModuleConfig() *ModuleConfig {
 	}
 }
 
-// GetDockerImageInfo 是一个便捷函数，用于获取 Docker 镜像信息
 // GetDockerImageInfo is a convenience function to get Docker image information
 func (m *AppInfoModule) GetDockerImageInfo(imageName string) (*utils.DockerImageInfo, error) {
 	return utils.GetDockerImageInfo(imageName)
 }
 
-// GetLayerDownloadProgress 是一个便捷函数，用于获取层下载进度
 // GetLayerDownloadProgress is a convenience function to get layer download progress
 func (m *AppInfoModule) GetLayerDownloadProgress(layerDigest string) (*utils.LayerInfo, error) {
 	return utils.GetLayerDownloadProgress(layerDigest)
 }
 
-// SetAppData 是一个便捷函数，用于设置应用数据
 // SetAppData is a convenience function to set app data
 func (m *AppInfoModule) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 	if !m.isStarted || m.cacheManager == nil {
@@ -883,7 +832,6 @@ func (m *AppInfoModule) SetAppData(userID, sourceID string, dataType AppDataType
 	return m.cacheManager.SetAppData(userID, sourceID, dataType, data)
 }
 
-// GetAppData 是一个便捷函数，用于获取应用数据
 // GetAppData is a convenience function to get app data
 func (m *AppInfoModule) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
 	if !m.isStarted || m.cacheManager == nil {
@@ -893,7 +841,6 @@ func (m *AppInfoModule) GetAppData(userID, sourceID string, dataType AppDataType
 }
 
 // GetUserConfig returns the user configuration
-// GetUserConfig 返回用户配置
 func (m *AppInfoModule) GetUserConfig() *UserConfig {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -901,7 +848,6 @@ func (m *AppInfoModule) GetUserConfig() *UserConfig {
 }
 
 // IsValidUser checks if a user ID is in the configured user list
-// IsValidUser 检查用户ID是否在配置的用户列表中
 func (m *AppInfoModule) IsValidUser(userID string) bool {
 	if m.config.User == nil {
 		return false
@@ -916,7 +862,6 @@ func (m *AppInfoModule) IsValidUser(userID string) bool {
 }
 
 // IsAdminUser checks if a user ID is in the admin list
-// IsAdminUser 检查用户ID是否在管理员列表中
 func (m *AppInfoModule) IsAdminUser(userID string) bool {
 	if m.config.User == nil {
 		return false
@@ -931,7 +876,6 @@ func (m *AppInfoModule) IsAdminUser(userID string) bool {
 }
 
 // GetMaxSourcesForUser returns the maximum number of sources allowed per user
-// GetMaxSourcesForUser 返回每个用户允许的最大源数量
 func (m *AppInfoModule) GetMaxSourcesForUser(userID string) int {
 	if m.config.User == nil {
 		return 10 // default value
@@ -946,7 +890,6 @@ func (m *AppInfoModule) GetMaxSourcesForUser(userID string) int {
 }
 
 // ValidateUserAccess validates if a user can access the system
-// ValidateUserAccess 验证用户是否可以访问系统
 func (m *AppInfoModule) ValidateUserAccess(userID string) error {
 	if m.config.User == nil {
 		return fmt.Errorf("user configuration not available")
@@ -965,7 +908,6 @@ func (m *AppInfoModule) ValidateUserAccess(userID string) error {
 }
 
 // GetUserRole returns the role for a given user
-// GetUserRole 返回给定用户的角色
 func (m *AppInfoModule) GetUserRole(userID string) string {
 	if m.config.User == nil {
 		return "unknown"
@@ -987,7 +929,6 @@ func (m *AppInfoModule) GetUserRole(userID string) string {
 }
 
 // GetUserPermissions returns the permissions for a given user
-// GetUserPermissions 返回给定用户的权限
 func (m *AppInfoModule) GetUserPermissions(userID string) []string {
 	if m.config.User == nil {
 		return []string{}
@@ -1007,7 +948,6 @@ func (m *AppInfoModule) GetUserPermissions(userID string) []string {
 }
 
 // UpdateUserConfig updates the user configuration for the module and cache manager
-// UpdateUserConfig 更新模块和缓存管理器的用户配置
 func (m *AppInfoModule) UpdateUserConfig(newUserConfig *UserConfig) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -1037,7 +977,6 @@ func (m *AppInfoModule) UpdateUserConfig(newUserConfig *UserConfig) error {
 }
 
 // SyncUserListToCache synchronizes the current user list to cache
-// SyncUserListToCache 将当前用户列表同步到缓存
 func (m *AppInfoModule) SyncUserListToCache() error {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -1054,7 +993,6 @@ func (m *AppInfoModule) SyncUserListToCache() error {
 }
 
 // RefreshUserDataStructures ensures all configured users have proper data structures
-// RefreshUserDataStructures 确保所有配置的用户都有适当的数据结构
 func (m *AppInfoModule) RefreshUserDataStructures() error {
 	if !m.isStarted {
 		return fmt.Errorf("module is not started")
@@ -1079,7 +1017,6 @@ func (m *AppInfoModule) RefreshUserDataStructures() error {
 }
 
 // GetConfiguredUsers returns the list of configured users
-// GetConfiguredUsers 返回配置的用户列表
 func (m *AppInfoModule) GetConfiguredUsers() []string {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -1095,7 +1032,6 @@ func (m *AppInfoModule) GetConfiguredUsers() []string {
 }
 
 // GetCachedUsers returns the list of users currently in cache
-// GetCachedUsers 返回当前在缓存中的用户列表
 func (m *AppInfoModule) GetCachedUsers() []string {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -1114,7 +1050,6 @@ func (m *AppInfoModule) GetCachedUsers() []string {
 }
 
 // CleanupInvalidData cleans up invalid pending data entries from cache
-// CleanupInvalidData 从缓存中清理无效的待处理数据条目
 func (m *AppInfoModule) CleanupInvalidData() (int, error) {
 	if m.cacheManager == nil {
 		return 0, fmt.Errorf("cache manager not available")
@@ -1127,7 +1062,6 @@ func (m *AppInfoModule) CleanupInvalidData() (int, error) {
 }
 
 // GetInvalidDataReport returns a detailed report of invalid pending data entries
-// GetInvalidDataReport 返回无效待处理数据条目的详细报告
 func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 	if m.cacheManager == nil {
 		return map[string]interface{}{

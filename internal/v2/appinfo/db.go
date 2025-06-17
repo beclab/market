@@ -61,7 +61,6 @@ func (r *RedisClient) Close() error {
 }
 
 // ClearAllData clears all data from Redis
-// ClearAllData 清除 Redis 中的所有数据
 func (r *RedisClient) ClearAllData() error {
 	glog.Infof("Clearing appinfo data from Redis")
 
@@ -159,7 +158,6 @@ func (r *RedisClient) loadUserData(userID string) (*UserData, error) {
 	userData := NewUserData()
 
 	// Load user hash from Redis
-	// 从Redis加载用户hash
 	userHashKey := fmt.Sprintf("appinfo:user:%s:hash", userID)
 	hashValue, err := r.client.Get(r.ctx, userHashKey).Result()
 	if err == nil && hashValue != "" {
@@ -247,19 +245,15 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 
 	// Note: Other data is now part of AppInfoLatestPendingData.Others field
 	// Legacy "other" data loading is removed as it's now part of the Others structure
-	// 注意：Other数据现在是AppInfoLatestPendingData.Others字段的一部分
-	// 传统的"other"数据加载已被移除，因为它现在是Others结构的一部分
 
 	return sourceData, nil
 }
 
 // SaveUserDataToRedis saves user data to Redis with optimized performance
-// SaveUserDataToRedis 以优化性能的方式保存用户数据到Redis
 func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserData) error {
 	glog.Infof("Saving user data to Redis for user: %s", userID)
 
 	// Step 1: Create a snapshot of data (no locks needed as this is called from CacheManager)
-	// 步骤1：创建数据快照（不需要锁，因为这是从CacheManager调用的）
 	var userHash string
 	var sourcesSnapshot map[string]*types.SourceData
 
@@ -270,11 +264,9 @@ func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserDat
 	}
 
 	// Step 2: Prepare all Redis operations outside of locks
-	// 步骤2：在锁外准备所有Redis操作
 	pipeline := r.client.Pipeline()
 
 	// Save user hash to Redis
-	// 保存用户hash到Redis
 	if userHash != "" {
 		userHashKey := fmt.Sprintf("appinfo:user:%s:hash", userID)
 		pipeline.Set(r.ctx, userHashKey, userHash, 0)
@@ -282,7 +274,6 @@ func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserDat
 	}
 
 	// Process each source with minimal lock time
-	// 用最小锁时间处理每个源
 	for sourceID, sourceData := range sourcesSnapshot {
 		if err := r.prepareBatchSourceDataSave(userID, sourceID, sourceData, pipeline); err != nil {
 			glog.Errorf("Failed to prepare source data for batch save: user=%s, source=%s, error=%v", userID, sourceID, err)
@@ -291,7 +282,6 @@ func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserDat
 	}
 
 	// Step 3: Execute all operations in a single pipeline
-	// 步骤3：在单个管道中执行所有操作
 	startTime := time.Now()
 	results, err := pipeline.Exec(r.ctx)
 	duration := time.Since(startTime)
@@ -302,7 +292,6 @@ func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserDat
 	}
 
 	// Check for any failures in the pipeline
-	// 检查管道中的任何失败
 	failedOps := 0
 	for i, result := range results {
 		if result.Err() != nil {
@@ -316,7 +305,6 @@ func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserDat
 	}
 
 	// Set user marker
-	// 设置用户标记
 	userKey := fmt.Sprintf("appinfo:user:%s", userID)
 	err = r.client.Set(r.ctx, userKey, "1", 0).Err()
 	if err != nil {
@@ -330,17 +318,14 @@ func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserDat
 }
 
 // prepareBatchSourceDataSave prepares source data for batch Redis operations
-// prepareBatchSourceDataSave 为批量Redis操作准备源数据
 func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, sourceData *types.SourceData, pipeline redis.Pipeliner) error {
 	// Create a quick snapshot of source data (no locks needed as this is called from CacheManager)
-	// 创建源数据的快速快照（不需要锁，因为这是从CacheManager调用的）
 	var appInfoHistory []*types.AppInfoHistoryData
 	var appStateLatest []*types.AppStateLatestData
 	var appInfoLatest []*types.AppInfoLatestData
 	var appInfoLatestPending []*types.AppInfoLatestPendingData
 
 	// Copy slice references (not deep copy for performance)
-	// 复制切片引用（为了性能不进行深拷贝）
 	if len(sourceData.AppInfoHistory) > 0 {
 		appInfoHistory = sourceData.AppInfoHistory
 	}
@@ -357,7 +342,6 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 	baseKey := fmt.Sprintf("appinfo:user:%s:source:%s", userID, sourceID)
 
 	// Prepare JSON serialization outside of locks
-	// 在锁外准备JSON序列化
 	if len(appInfoHistory) > 0 {
 		historyJSON, err := json.Marshal(appInfoHistory)
 		if err != nil {
@@ -421,10 +405,8 @@ func (r *RedisClient) DeleteUserDataFromRedis(userID string) error {
 }
 
 // SaveSourceDataToRedis saves source data to Redis (legacy method for compatibility)
-// SaveSourceDataToRedis 保存源数据到Redis（为兼容性保留的传统方法）
 func (r *RedisClient) SaveSourceDataToRedis(userID, sourceID string, sourceData *types.SourceData) error {
 	// Use the optimized batch method with a single-source pipeline
-	// 使用优化的批处理方法和单源管道
 	pipeline := r.client.Pipeline()
 	err := r.prepareBatchSourceDataSave(userID, sourceID, sourceData, pipeline)
 	if err != nil {
@@ -441,7 +423,6 @@ func (r *RedisClient) SaveSourceDataToRedis(userID, sourceID string, sourceData 
 	}
 
 	// Check for any failures
-	// 检查任何失败
 	failedOps := 0
 	for i, result := range results {
 		if result.Err() != nil {

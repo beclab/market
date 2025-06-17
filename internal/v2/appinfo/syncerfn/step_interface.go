@@ -24,7 +24,6 @@ type SyncStep interface {
 }
 
 // AppStoreInfoResponse represents the structured response from /appstore/info API
-// 表示从/appstore/info API获取的结构化响应数据
 type AppStoreInfoResponse struct {
 	Version     string                 `json:"version"`
 	Hash        string                 `json:"hash"`
@@ -34,7 +33,6 @@ type AppStoreInfoResponse struct {
 }
 
 // AppStoreDataSection represents the data section of the appstore response
-// 表示appstore响应的data部分
 type AppStoreDataSection struct {
 	Apps       map[string]interface{} `json:"apps"`
 	Recommends map[string]interface{} `json:"recommends"`
@@ -53,7 +51,6 @@ type SyncContext struct {
 	LocalHash    string                 `json:"local_hash"`
 	HashMatches  bool                   `json:"hash_matches"` // Indicates if remote and local hashes match
 	// Updated to use structured response instead of generic map
-	// 更新为使用结构化响应而不是通用map
 	LatestData   *AppStoreInfoResponse  `json:"latest_data"`
 	DetailedApps map[string]interface{} `json:"detailed_apps"`
 	AppIDs       []string               `json:"app_ids"`

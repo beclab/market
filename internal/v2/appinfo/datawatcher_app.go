@@ -13,7 +13,6 @@ import (
 )
 
 // DataWatcher monitors pending app data and moves completed hydration apps to latest
-// DataWatcher 监控待处理应用数据，将完成水合的应用移动到最新
 type DataWatcher struct {
 	cacheManager *CacheManager
 	hydrator     *Hydrator
@@ -23,16 +22,13 @@ type DataWatcher struct {
 	mutex        sync.RWMutex
 
 	// Processing mutex to ensure only one cycle runs at a time
-	// 处理互斥锁确保一次只运行一个周期
 	processingMutex sync.Mutex
 
 	// Active hash calculations tracking
-	// 活跃hash计算跟踪
 	activeHashCalculations map[string]bool
 	hashMutex              sync.Mutex
 
 	// Metrics
-	// 指标
 	totalAppsProcessed int64
 	totalAppsMoved     int64
 	lastRunTime        time.Time
@@ -40,7 +36,6 @@ type DataWatcher struct {
 }
 
 // NewDataWatcher creates a new DataWatcher instance
-// NewDataWatcher 创建新的DataWatcher实例
 func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator) *DataWatcher {
 	return &DataWatcher{
 		cacheManager:           cacheManager,
@@ -53,7 +48,6 @@ func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator) *DataWatcher
 }
 
 // Start begins the data watching process
-// Start 开始数据监控过程
 func (dw *DataWatcher) Start(ctx context.Context) error {
 	dw.mutex.Lock()
 	defer dw.mutex.Unlock()
@@ -74,14 +68,12 @@ func (dw *DataWatcher) Start(ctx context.Context) error {
 	glog.Infof("Starting DataWatcher with interval: %v", dw.interval)
 
 	// Start the monitoring goroutine
-	// 启动监控协程
 	go dw.watchLoop(ctx)
 
 	return nil
 }
 
 // Stop stops the data watching process
-// Stop 停止数据监控过程
 func (dw *DataWatcher) Stop() {
 	dw.mutex.Lock()
 	defer dw.mutex.Unlock()
@@ -96,7 +88,6 @@ func (dw *DataWatcher) Stop() {
 }
 
 // IsRunning returns whether the DataWatcher is currently running
-// IsRunning 返回DataWatcher是否正在运行
 func (dw *DataWatcher) IsRunning() bool {
 	dw.mutex.RLock()
 	defer dw.mutex.RUnlock()
@@ -104,7 +95,6 @@ func (dw *DataWatcher) IsRunning() bool {
 }
 
 // watchLoop is the main monitoring loop
-// watchLoop 是主要的监控循环
 func (dw *DataWatcher) watchLoop(ctx context.Context) {
 	glog.Infof("DataWatcher monitoring loop started")
 	defer glog.Infof("DataWatcher monitoring loop stopped")
@@ -113,7 +103,6 @@ func (dw *DataWatcher) watchLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	// Run once immediately
-	// 立即运行一次
 	dw.processCompletedApps()
 
 	for {
@@ -131,10 +120,8 @@ func (dw *DataWatcher) watchLoop(ctx context.Context) {
 }
 
 // processCompletedApps checks for completed hydration apps and moves them
-// processCompletedApps 检查已完成水合的应用并移动它们
 func (dw *DataWatcher) processCompletedApps() {
 	// Ensure only one processing cycle runs at a time
-	// 确保一次只运行一个处理周期
 	if !dw.processingMutex.TryLock() {
 		glog.Warningf("DataWatcher: Previous processing cycle still running, skipping this cycle")
 		return
@@ -149,12 +136,10 @@ func (dw *DataWatcher) processCompletedApps() {
 	glog.Infof("DataWatcher: Starting to process completed apps")
 
 	// Create timeout context for entire processing cycle
-	// 为整个处理周期创建超时上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
 	// Get all users data from cache manager with timeout
-	// 带超时从缓存管理器获取所有用户数据
 	var allUsersData map[string]*types.UserData
 
 	userDataChan := make(chan map[string]*types.UserData, 1)
@@ -181,7 +166,6 @@ func (dw *DataWatcher) processCompletedApps() {
 	totalMoved := int64(0)
 
 	// Process users in batches to avoid holding locks too long
-	// 批量处理用户以避免长时间持有锁
 	const batchSize = 5
 	userCount := 0
 	userBatch := make([]string, 0, batchSize)
@@ -193,19 +177,16 @@ func (dw *DataWatcher) processCompletedApps() {
 		userCount++
 
 		// Process batch when it's full or we've reached the end
-		// 当批次满或到达末尾时处理批次
 		if len(userBatch) >= batchSize || userCount == len(allUsersData) {
 			batchProcessed, batchMoved := dw.processUserBatch(ctx, userBatch, userDataBatch)
 			totalProcessed += batchProcessed
 			totalMoved += batchMoved
 
 			// Clear batch for next iteration
-			// 清除批次以进行下一次迭代
 			userBatch = userBatch[:0]
 			userDataBatch = make(map[string]*types.UserData)
 
 			// Check timeout between batches
-			// 在批次之间检查超时
 			select {
 			case <-ctx.Done():
 				glog.Errorf("DataWatcher: Timeout during batch processing after processing %d users", userCount)
@@ -216,7 +197,6 @@ func (dw *DataWatcher) processCompletedApps() {
 	}
 
 	// Update metrics
-	// 更新指标
 	dw.metricsMutex.Lock()
 	dw.totalAppsProcessed += totalProcessed
 	dw.totalAppsMoved += totalMoved
@@ -233,14 +213,12 @@ func (dw *DataWatcher) processCompletedApps() {
 }
 
 // processUserBatch processes a batch of users
-// processUserBatch 处理一批用户
 func (dw *DataWatcher) processUserBatch(ctx context.Context, userIDs []string, userDataMap map[string]*types.UserData) (int64, int64) {
 	totalProcessed := int64(0)
 	totalMoved := int64(0)
 
 	for i, userID := range userIDs {
 		// Check timeout during batch processing
-		// 在批处理过程中检查超时
 		select {
 		case <-ctx.Done():
 			glog.Errorf("DataWatcher: Timeout during user batch processing (user %d/%d)", i+1, len(userIDs))
@@ -264,21 +242,18 @@ func (dw *DataWatcher) processUserBatch(ctx context.Context, userIDs []string, u
 }
 
 // processUserData processes a single user's data
-// processUserData 处理单个用户的数据
 func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) (int64, int64) {
 	if userData == nil {
 		return 0, 0
 	}
 
 	// Step 1: Collect source data references under minimal lock
-	// 步骤1：在最小锁保护下收集源数据引用
 	sourceRefs := make(map[string]*SourceData)
 	for sourceID, sourceData := range userData.Sources {
 		sourceRefs[sourceID] = sourceData
 	}
 
 	// Step 2: Process each source without holding user lock
-	// 步骤2：在不持有用户锁的情况下处理每个源
 	totalProcessed := int64(0)
 	totalMoved := int64(0)
 
@@ -289,7 +264,6 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 	}
 
 	// Step 3: Calculate hash if apps were moved OR if hash is empty
-	// 步骤3：如果有应用移动或hash为空，则计算hash
 	shouldCalculateHash := totalMoved > 0 || userData.Hash == ""
 
 	if shouldCalculateHash {
@@ -300,7 +274,6 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 		}
 
 		// Check if hash calculation is already in progress for this user
-		// 检查此用户是否已有hash计算正在进行
 		dw.hashMutex.Lock()
 		if dw.activeHashCalculations[userID] {
 			dw.hashMutex.Unlock()
@@ -311,11 +284,9 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 		dw.hashMutex.Unlock()
 
 		// Schedule hash calculation with a small delay to ensure all locks are released
-		// 安排带小延迟的hash计算以确保所有锁都已释放
 		go func() {
 			defer func() {
 				// Clean up tracking when done
-				// 完成时清理跟踪
 				dw.hashMutex.Lock()
 				delete(dw.activeHashCalculations, userID)
 				dw.hashMutex.Unlock()
@@ -323,12 +294,10 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 			}()
 
 			// Wait a short time to ensure all source processing locks are released
-			// 等待短时间以确保所有源处理锁都已释放
 			time.Sleep(100 * time.Millisecond)
 			glog.Infof("DataWatcher: Starting hash calculation for user %s", userID)
 
 			// Call the hash calculation function directly without additional tracking
-			// 直接调用hash计算函数，不进行额外的跟踪
 			dw.calculateAndSetUserHashDirect(userID, userData)
 		}()
 	} else {
@@ -339,10 +308,8 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 }
 
 // calculateAndSetUserHash calculates and sets the hash for user data (with tracking)
-// calculateAndSetUserHash 计算并设置用户数据的hash（带跟踪）
 func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.UserData) {
 	// Check if hash calculation is already in progress for this user
-	// 检查此用户的hash计算是否已在进行中
 	dw.hashMutex.Lock()
 	if dw.activeHashCalculations[userID] {
 		dw.hashMutex.Unlock()
@@ -361,25 +328,21 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	}()
 
 	// Call the direct calculation function
-	// 调用直接计算函数
 	dw.calculateAndSetUserHashDirect(userID, userData)
 }
 
 // calculateAndSetUserHashDirect calculates hash without tracking (used internally by goroutines)
-// calculateAndSetUserHashDirect 不进行跟踪地计算hash（由goroutine内部使用）
 func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *types.UserData) {
 	glog.Infof("DataWatcher: Starting direct hash calculation for user %s", userID)
 
 	// Get the original user data from cache manager to ensure we have the latest reference
-	// 从缓存管理器获取原始用户数据以确保我们有最新的引用
 	originalUserData := dw.cacheManager.GetUserData(userID)
 	if originalUserData == nil {
 		glog.Errorf("DataWatcher: Failed to get user data from cache manager for user %s", userID)
 		return
 	}
 
-	// Use global lock with timeout to avoid deadlocks
-	// 使用带超时的全局锁以避免死锁
+	// Use global lock with timeout to avoid deadlock
 	lockTimeout := 5 * time.Second
 	lockAcquired := make(chan bool, 1)
 	lockError := make(chan error, 1)
@@ -418,7 +381,6 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	glog.Infof("DataWatcher: Creating user data snapshot for user %s", userID)
 	// Create snapshot for hash calculation
-	// 创建快照用于hash计算
 	snapshot, err := dw.createUserDataSnapshot(userID, originalUserData)
 	if err != nil {
 		glog.Errorf("DataWatcher: Failed to create user data snapshot for user %s: %v", userID, err)
@@ -427,7 +389,6 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	glog.Infof("DataWatcher: Calculating hash for user %s", userID)
 	// Calculate hash using the snapshot
-	// 使用快照计算hash
 	newHash, err := utils.CalculateUserDataHash(snapshot)
 	if err != nil {
 		glog.Errorf("DataWatcher: Failed to calculate hash for user %s: %v", userID, err)
@@ -435,7 +396,6 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	}
 
 	// Get current hash for comparison
-	// 获取当前hash进行比较
 	currentHash := originalUserData.Hash
 	glog.Infof("DataWatcher: Hash comparison for user %s - current: '%s', new: '%s'", userID, currentHash, newHash)
 
@@ -447,12 +407,10 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	glog.Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
 
 	// Release read lock before acquiring write lock to avoid deadlock
-	// 在获取写锁之前释放读锁以避免死锁
 	glog.Infof("DataWatcher: Releasing read lock to acquire write lock for user %s", userID)
 	dw.cacheManager.mutex.RUnlock()
 
 	// Acquire write lock for hash update
-	// 获取写锁以更新hash
 	writeTimeout := 3 * time.Second
 	writeLockAcquired := make(chan bool, 1)
 	writeLockError := make(chan error, 1)
@@ -497,13 +455,11 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	}
 
 	// Re-acquire read lock for the defer statement since we released it earlier
-	// 重新获取读锁以供defer语句使用，因为我们之前释放了它
 	dw.cacheManager.mutex.RLock()
 
 	glog.Infof("DataWatcher: Hash updated for user %s", userID)
 
 	// Verification: Check if the hash was actually updated
-	// 验证：检查hash是否实际更新
 	if glog.V(2) {
 		verifyUserData := dw.cacheManager.GetUserData(userID)
 		if verifyUserData != nil {
@@ -515,7 +471,6 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	}
 
 	// Trigger force sync to persist the hash change
-	// 触发强制同步以持久化hash更改
 	glog.Infof("DataWatcher: Starting force sync for user %s", userID)
 	if err := dw.cacheManager.ForceSync(); err != nil {
 		glog.Errorf("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
@@ -525,12 +480,10 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 }
 
 // calculateAndSetUserHashAsync calculates and sets hash for user data asynchronously
-// calculateAndSetUserHashAsync 异步计算并设置用户数据的hash
 func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *types.UserData) {
 	glog.Infof("DataWatcher: Starting async hash calculation for user %s", userID)
 
 	// Add timeout to prevent hanging
-	// 添加超时以防止挂起
 	done := make(chan bool, 1)
 	go func() {
 		defer func() {
@@ -547,7 +500,6 @@ func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *typ
 	select {
 	case <-done:
 		// Hash calculation completed successfully
-		// hash计算成功完成
 		glog.Infof("DataWatcher: Hash calculation finished successfully for user %s", userID)
 	case <-time.After(10 * time.Second):
 		glog.Errorf("DataWatcher: Hash calculation timeout for user %s after 10 seconds", userID)
@@ -555,17 +507,14 @@ func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *typ
 }
 
 // createUserDataSnapshot creates a snapshot of user data for hash calculation
-// createUserDataSnapshot 为hash计算创建用户数据快照
 func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.UserData) (*UserDataSnapshot, error) {
 	// Create a lightweight snapshot for hash calculation
-	// 为hash计算创建轻量级快照
 	snapshot := &UserDataSnapshot{
 		Hash:    userData.Hash,
 		Sources: make(map[string]*SourceDataSnapshot),
 	}
 
 	// Convert each source data to snapshot format
-	// 将每个源数据转换为快照格式
 	for sourceID, sourceData := range userData.Sources {
 		if sourceData == nil {
 			continue
@@ -577,19 +526,16 @@ func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.Use
 		}
 
 		// Convert AppStateLatest
-		// 转换AppStateLatest
 		for i, data := range sourceData.AppStateLatest {
 			sourceSnapshot.AppStateLatest[i] = data
 		}
 
 		// Convert AppInfoLatest
-		// 转换AppInfoLatest
 		for i, data := range sourceData.AppInfoLatest {
 			sourceSnapshot.AppInfoLatest[i] = data
 		}
 
 		// Convert Others data
-		// 转换Others数据
 		if sourceData.Others != nil {
 			othersSnapshot := &OthersSnapshot{
 				Topics:     make([]interface{}, len(sourceData.Others.Topics)),
@@ -599,7 +545,6 @@ func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.Use
 			}
 
 			// Convert each Others field
-			// 转换Others的每个字段
 			for i, topic := range sourceData.Others.Topics {
 				othersSnapshot.Topics[i] = topic
 			}
@@ -623,7 +568,6 @@ func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.Use
 }
 
 // Snapshot data structures for lock-free hash calculation
-// 用于无锁hash计算的快照数据结构
 
 type UserDataSnapshot struct {
 	Hash    string
@@ -691,7 +635,6 @@ func (s *OthersSnapshot) GetPages() []interface{} {
 }
 
 // processSourceData processes a single source's data for completed hydration
-// processSourceData 处理单个源的数据以完成水合
 func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *types.SourceData) (int64, int64) {
 	if sourceData == nil {
 		return 0, 0
@@ -700,37 +643,33 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	var pendingApps []*types.AppInfoLatestPendingData
 	var appInfoLatest []*types.AppInfoLatestData
 
-	// 步骤1：最小锁时间的快速检查和数据复制
+	// Step 1: Quick check and data copy with minimal lock time
 	func() {
 		dw.cacheManager.mutex.RLock()
 		defer dw.cacheManager.mutex.RUnlock()
 
 		// Quick check - if no pending apps, exit early
-		// 快速检查 - 如果没有待处理应用，提早退出
 		if len(sourceData.AppInfoLatestPending) == 0 {
 			return
 		}
 
 		// Copy references to pending apps for processing
-		// 复制待处理应用的引用以进行处理
 		pendingApps = make([]*types.AppInfoLatestPendingData, len(sourceData.AppInfoLatestPending))
 		copy(pendingApps, sourceData.AppInfoLatestPending)
 
 		// Copy references to existing AppInfoLatest
-		// 复制现有AppInfoLatest的引用
 		appInfoLatest = make([]*types.AppInfoLatestData, len(sourceData.AppInfoLatest))
 		copy(appInfoLatest, sourceData.AppInfoLatest)
 	}()
 
 	// Early exit if no pending apps
-	// 如果没有待处理应用则提早退出
 	if len(pendingApps) == 0 {
 		return 0, 0
 	}
 
 	glog.Infof("DataWatcher: Processing %d pending apps for user=%s, source=%s", len(pendingApps), userID, sourceID)
 
-	// 步骤2：无锁处理 - 检查水合完成状态
+	// Step 2: Lock-free processing - Check hydration completion status
 	var completedApps []*types.AppInfoLatestPendingData
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -740,7 +679,9 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 			continue
 		}
 
-		glog.V(2).Infof("DataWatcher: Checking app %d/%d: %s", i+1, len(pendingApps), dw.getAppID(pendingApp))
+		if isDevEnvironment() {
+			glog.V(2).Infof("DataWatcher: Checking app %d/%d: %s", i+1, len(pendingApps), dw.getAppID(pendingApp))
+		}
 
 		if dw.isAppHydrationCompletedWithTimeout(ctx, pendingApp) {
 			completedApps = append(completedApps, pendingApp)
@@ -756,7 +697,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	glog.Infof("DataWatcher: Found %d completed apps out of %d pending for user=%s, source=%s",
 		len(completedApps), len(pendingApps), userID, sourceID)
 
-	// 步骤3：获取写锁并移动完成的应用
+	// Step 3: Acquire write lock and move completed apps
 	lockStartTime := time.Now()
 	writeLockChan := make(chan bool, 1)
 	go func() {
@@ -775,15 +716,12 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		}()
 
 		// Move completed apps from pending to latest
-		// 将完成的应用从待处理移动到最新
 		movedCount := int64(0)
 		for _, completedApp := range completedApps {
 			// Convert to AppInfoLatestData
-			// 转换为AppInfoLatestData
 			latestData := dw.convertPendingToLatest(completedApp)
 			if latestData != nil {
 				// Add to AppInfoLatest
-				// 添加到AppInfoLatest
 				sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
 				movedCount++
 
@@ -792,13 +730,11 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		}
 
 		// Remove completed apps from pending list
-		// 从待处理列表中移除完成的应用
 		if movedCount > 0 {
 			newPendingList := make([]*types.AppInfoLatestPendingData, 0, len(sourceData.AppInfoLatestPending)-int(movedCount))
 			completedAppIDs := make(map[string]bool)
 
 			// Create a map of completed app IDs for efficient lookup
-			// 创建完成应用ID的映射以进行高效查找
 			for _, completedApp := range completedApps {
 				appID := dw.getAppID(completedApp)
 				if appID != "" {
@@ -807,7 +743,6 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 			}
 
 			// Filter out completed apps from pending list
-			// 从待处理列表中过滤掉完成的应用
 			for _, pendingApp := range sourceData.AppInfoLatestPending {
 				appID := dw.getAppID(pendingApp)
 				if !completedAppIDs[appID] {
@@ -829,7 +764,6 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 }
 
 // isAppHydrationCompletedWithTimeout checks if app hydration is completed with timeout protection
-// isAppHydrationCompletedWithTimeout 带超时保护检查应用水合是否完成
 func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, pendingApp *types.AppInfoLatestPendingData) bool {
 	if pendingApp == nil {
 		glog.V(2).Infof("DataWatcher: isAppHydrationCompletedWithTimeout called with nil pendingApp")
@@ -841,11 +775,9 @@ func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, p
 	}
 
 	// Create a channel to receive the result
-	// 创建通道接收结果
 	resultChan := make(chan bool, 1)
 
 	// Run hydration check in a goroutine with timeout
-	// 在协程中运行带超时的水合检查
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -859,7 +791,6 @@ func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, p
 	}()
 
 	// Wait for result or timeout
-	// 等待结果或超时
 	select {
 	case result := <-resultChan:
 		return result
@@ -871,7 +802,6 @@ func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, p
 }
 
 // getAppID extracts app ID from pending app data
-// getAppID 从待处理应用数据中提取应用ID
 func (dw *DataWatcher) getAppID(pendingApp *types.AppInfoLatestPendingData) string {
 	if pendingApp == nil {
 		return "unknown"
@@ -905,7 +835,6 @@ func (dw *DataWatcher) getAppID(pendingApp *types.AppInfoLatestPendingData) stri
 }
 
 // convertPendingToLatest converts AppInfoLatestPendingData to AppInfoLatestData
-// convertPendingToLatest 将AppInfoLatestPendingData转换为AppInfoLatestData
 func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPendingData) *types.AppInfoLatestData {
 	if pendingApp == nil {
 		glog.Warningf("DataWatcher: convertPendingToLatest called with nil pendingApp")
@@ -913,13 +842,11 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	}
 
 	// Validate that the pending app has essential data
-	// 验证待处理应用是否包含基本数据
 	hasRawData := pendingApp.RawData != nil
 	hasAppInfo := pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil
 	hasPackageInfo := pendingApp.RawPackage != "" || pendingApp.RenderedPackage != ""
 
 	// Return nil if no essential data is present
-	// 如果没有基本数据则返回nil
 	if !hasRawData && !hasAppInfo && !hasPackageInfo {
 		appID := dw.getAppID(pendingApp)
 		glog.Warningf("DataWatcher: Skipping conversion of pending app %s - no essential data found", appID)
@@ -927,7 +854,6 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	}
 
 	// Additional validation for data integrity
-	// 额外的数据完整性验证
 	if hasRawData && (pendingApp.RawData.AppID == "" && pendingApp.RawData.ID == "" && pendingApp.RawData.Name == "") {
 		glog.Warningf("DataWatcher: Skipping conversion - RawData exists but lacks identifying information")
 		return nil
@@ -939,48 +865,40 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	}
 
 	// Create the latest app data structure
-	// 创建最新应用数据结构
 	latestApp := &types.AppInfoLatestData{
 		Type:      types.AppInfoLatest,
 		Timestamp: time.Now().Unix(),
 	}
 
 	// Copy relevant data from pending to latest
-	// 从待处理复制相关数据到最新
 	if pendingApp.AppInfo != nil {
 		latestApp.AppInfo = pendingApp.AppInfo
 	}
 
 	// Copy RawData directly (same type: *ApplicationInfoEntry)
-	// 直接复制RawData（相同类型：*ApplicationInfoEntry）
 	if pendingApp.RawData != nil {
 		latestApp.RawData = pendingApp.RawData
 	}
 
 	// Copy package information
-	// 复制包信息
 	latestApp.RawPackage = pendingApp.RawPackage
 	latestApp.RenderedPackage = pendingApp.RenderedPackage
 
 	// Copy Values if present
-	// 如果存在则复制Values
 	if pendingApp.Values != nil {
 		latestApp.Values = pendingApp.Values
 	}
 
 	// Copy version information
-	// 复制版本信息
 	latestApp.Version = pendingApp.Version
 
 	// Create AppSimpleInfo from available data
-	// 从可用数据创建AppSimpleInfo
 	latestApp.AppSimpleInfo = dw.createAppSimpleInfo(pendingApp)
 
 	return latestApp
 }
 
 // GetMetrics returns DataWatcher metrics
-// GetMetrics 返回DataWatcher指标
 func (dw *DataWatcher) GetMetrics() DataWatcherMetrics {
 	dw.metricsMutex.RLock()
 	defer dw.metricsMutex.RUnlock()
@@ -999,7 +917,6 @@ func (dw *DataWatcher) GetMetrics() DataWatcherMetrics {
 }
 
 // DataWatcherMetrics contains metrics for the DataWatcher
-// DataWatcherMetrics 包含DataWatcher的指标
 type DataWatcherMetrics struct {
 	IsRunning          bool          `json:"is_running"`
 	TotalAppsProcessed int64         `json:"total_apps_processed"`
@@ -1009,7 +926,6 @@ type DataWatcherMetrics struct {
 }
 
 // SetInterval sets the monitoring interval
-// SetInterval 设置监控间隔
 func (dw *DataWatcher) SetInterval(interval time.Duration) {
 	dw.mutex.Lock()
 	defer dw.mutex.Unlock()
@@ -1023,7 +939,6 @@ func (dw *DataWatcher) SetInterval(interval time.Duration) {
 }
 
 // createAppSimpleInfo creates an AppSimpleInfo from pending app data
-// createAppSimpleInfo 从待处理应用数据创建AppSimpleInfo
 func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendingData) *types.AppSimpleInfo {
 	if pendingApp == nil {
 		return nil
@@ -1035,10 +950,8 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 	}
 
 	// Extract information from RawData if available
-	// 如果可用，从RawData中提取信息
 	if pendingApp.RawData != nil {
 		// Use AppID as the primary identifier
-		// 使用AppID作为主要标识符
 		if pendingApp.RawData.AppID != "" {
 			appSimpleInfo.AppID = pendingApp.RawData.AppID
 		} else if pendingApp.RawData.ID != "" {
@@ -1046,43 +959,35 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 		}
 
 		// Use Name for AppName
-		// 使用Name作为AppName
 		if pendingApp.RawData.Name != "" {
 			appSimpleInfo.AppName = pendingApp.RawData.Name
 		} else if len(pendingApp.RawData.Title) > 0 {
 			// Fallback to first available title if name is empty
-			// 如果名称为空，则回退到第一个可用标题
 			appSimpleInfo.AppName = dw.getLocalizedStringValue(pendingApp.RawData.Title, "en-US")
 		}
 
 		// Use Icon for AppIcon
-		// 使用Icon作为AppIcon
 		appSimpleInfo.AppIcon = pendingApp.RawData.Icon
 
 		// Copy multilingual Description to AppDescription
-		// 将多语言Description复制到AppDescription
 		if len(pendingApp.RawData.Description) > 0 {
 			appSimpleInfo.AppDescription = dw.copyMultilingualMap(pendingApp.RawData.Description)
 		}
 
 		// Copy multilingual Title to AppTitle
-		// 将多语言Title复制到AppTitle
 		if len(pendingApp.RawData.Title) > 0 {
 			appSimpleInfo.AppTitle = dw.copyMultilingualMap(pendingApp.RawData.Title)
 		}
 
 		// Use Version for AppVersion
-		// 使用Version作为AppVersion
 		appSimpleInfo.AppVersion = pendingApp.RawData.Version
 	}
 
 	// Fallback to AppInfo data if RawData is insufficient
-	// 如果RawData不足，则回退到AppInfo数据
 	if pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil {
 		entry := pendingApp.AppInfo.AppEntry
 
 		// Fill missing AppID
-		// 填充缺失的AppID
 		if appSimpleInfo.AppID == "" {
 			if entry.AppID != "" {
 				appSimpleInfo.AppID = entry.AppID
@@ -1092,7 +997,6 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 		}
 
 		// Fill missing AppName
-		// 填充缺失的AppName
 		if appSimpleInfo.AppName == "" {
 			if entry.Name != "" {
 				appSimpleInfo.AppName = entry.Name
@@ -1102,38 +1006,32 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 		}
 
 		// Fill missing AppIcon
-		// 填充缺失的AppIcon
 		if appSimpleInfo.AppIcon == "" {
 			appSimpleInfo.AppIcon = entry.Icon
 		}
 
 		// Fill missing AppDescription
-		// 填充缺失的AppDescription
 		if len(appSimpleInfo.AppDescription) == 0 && len(entry.Description) > 0 {
 			appSimpleInfo.AppDescription = dw.copyMultilingualMap(entry.Description)
 		}
 
 		// Fill missing AppTitle
-		// 填充缺失的AppTitle
 		if len(appSimpleInfo.AppTitle) == 0 && len(entry.Title) > 0 {
 			appSimpleInfo.AppTitle = dw.copyMultilingualMap(entry.Title)
 		}
 
 		// Fill missing AppVersion
-		// 填充缺失的AppVersion
 		if appSimpleInfo.AppVersion == "" {
 			appSimpleInfo.AppVersion = entry.Version
 		}
 	}
 
 	// Use pendingApp version if still empty
-	// 如果仍为空，使用pendingApp的版本
 	if appSimpleInfo.AppVersion == "" && pendingApp.Version != "" {
 		appSimpleInfo.AppVersion = pendingApp.Version
 	}
 
 	// Return nil if no essential information is available
-	// 如果没有基本信息可用，返回nil
 	if appSimpleInfo.AppID == "" && appSimpleInfo.AppName == "" {
 		glog.Warningf("DataWatcher: createAppSimpleInfo - no essential app information available")
 		return nil
@@ -1143,20 +1041,17 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 }
 
 // getLocalizedStringValue gets localized string from multilingual map with fallback logic
-// getLocalizedStringValue 从多语言映射中获取本地化字符串，带有回退逻辑
 func (dw *DataWatcher) getLocalizedStringValue(multiLangMap map[string]string, preferredLang string) string {
 	if len(multiLangMap) == 0 {
 		return ""
 	}
 
 	// First try preferred language
-	// 首先尝试首选语言
 	if value, exists := multiLangMap[preferredLang]; exists && value != "" {
 		return value
 	}
 
 	// Try common fallback languages in order
-	// 按顺序尝试常见的回退语言
 	fallbackLanguages := []string{"en-US", "en", "zh-CN", "zh"}
 	for _, lang := range fallbackLanguages {
 		if value, exists := multiLangMap[lang]; exists && value != "" {
@@ -1165,7 +1060,6 @@ func (dw *DataWatcher) getLocalizedStringValue(multiLangMap map[string]string, p
 	}
 
 	// Return first available value
-	// 返回第一个可用值
 	for _, value := range multiLangMap {
 		if value != "" {
 			return value
@@ -1176,7 +1070,6 @@ func (dw *DataWatcher) getLocalizedStringValue(multiLangMap map[string]string, p
 }
 
 // copyMultilingualMap creates a deep copy of a multilingual map
-// copyMultilingualMap 创建多语言映射的深拷贝
 func (dw *DataWatcher) copyMultilingualMap(source map[string]string) map[string]string {
 	if len(source) == 0 {
 		return make(map[string]string)
@@ -1190,30 +1083,25 @@ func (dw *DataWatcher) copyMultilingualMap(source map[string]string) map[string]
 }
 
 // ForceCalculateUserHash forces hash calculation for a user regardless of app movement
-// ForceCalculateUserHash 强制为用户计算hash，无论是否有应用移动
 func (dw *DataWatcher) ForceCalculateUserHash(userID string) error {
 	glog.Infof("DataWatcher: Force calculating hash for user %s", userID)
 
 	// Get user data from cache manager
-	// 从缓存管理器获取用户数据
 	userData := dw.cacheManager.GetUserData(userID)
 	if userData == nil {
 		return fmt.Errorf("user data not found for user %s", userID)
 	}
 
 	// Call hash calculation directly
-	// 直接调用hash计算
 	dw.calculateAndSetUserHash(userID, userData)
 	return nil
 }
 
 // ForceCalculateAllUsersHash forces hash calculation for all users
-// ForceCalculateAllUsersHash 强制为所有用户计算hash
 func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
 	glog.Infof("DataWatcher: Force calculating hash for all users")
 
 	// Get all users data
-	// 获取所有用户数据
 	allUsersData := dw.cacheManager.GetAllUsersData()
 	if len(allUsersData) == 0 {
 		return fmt.Errorf("no users found in cache")
