@@ -649,6 +649,7 @@ func (s *Server) filterUserDataWithTimeout(ctx context.Context, userData *types.
 	// Use single lock for all data access to avoid deadlocks
 	filteredUserData := &FilteredUserData{
 		Sources: make(map[string]*FilteredSourceData),
+		Hash:    userData.Hash,
 	}
 
 	// Check timeout
@@ -659,52 +660,25 @@ func (s *Server) filterUserDataWithTimeout(ctx context.Context, userData *types.
 	default:
 	}
 
-	// Step 1: Get all needed data in one go (using global lock)
-	var (
-		hash      string
-		sources   map[string]*FilteredSourceData
-		sourceIDs []string
-	)
+	// Process each source in the user data
+	for sourceID, sourceData := range userData.Sources {
+		// Check timeout
+		select {
+		case <-ctx.Done():
+			log.Printf("Context cancelled during source processing: %s", sourceID)
+			return nil
+		default:
+		}
 
-	// Get data through CacheManager which handles the global lock
-	if s.cacheManager != nil {
-		// Get snapshot of user data
-		allUsersData := s.cacheManager.GetAllUsersData()
-		if userDataSnapshot, exists := allUsersData[s.getCurrentUserID()]; exists {
-			hash = userDataSnapshot.Hash
-			sources = make(map[string]*FilteredSourceData)
-
-			for sourceID, sourceData := range userDataSnapshot.Sources {
-				sourceIDs = append(sourceIDs, sourceID)
-
-				// Check timeout
-				select {
-				case <-ctx.Done():
-					log.Printf("Context cancelled during source processing: %s", sourceID)
-					return nil
-				default:
-				}
-
-				// Convert data directly without additional locks
-				filteredSourceData := s.convertSourceDataToFiltered(sourceData)
-				if filteredSourceData != nil {
-					sources[sourceID] = filteredSourceData
-				}
-			}
+		// Convert data directly without additional locks
+		filteredSourceData := s.convertSourceDataToFiltered(sourceData)
+		if filteredSourceData != nil {
+			filteredUserData.Sources[sourceID] = filteredSourceData
 		}
 	}
 
-	filteredUserData.Hash = hash
-	filteredUserData.Sources = sources
-
-	log.Printf("DEBUG: Completed filterUserDataWithTimeout with %d sources processed", len(sources))
+	log.Printf("DEBUG: Completed filterUserDataWithTimeout with %d sources processed", len(filteredUserData.Sources))
 	return filteredUserData
-}
-
-// getCurrentUserID gets current user ID (simplified version)
-func (s *Server) getCurrentUserID() string {
-	// In actual implementation, this should be obtained from request context
-	return "admin"
 }
 
 // convertSourceDataToFiltered converts source data to filtered format
