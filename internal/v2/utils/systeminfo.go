@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang/glog"
@@ -73,28 +74,8 @@ func GetTerminusVersionValue() (string, error) {
 // isDevelopmentEnvironment checks if the application is running in development mode
 // 检查应用是否在开发模式下运行
 func isDevelopmentEnvironment() bool {
-	// Check DEV_MODE environment variable
-	// 检查 DEV_MODE 环境变量
-	devMode := os.Getenv("DEV_MODE")
-	if devMode == "true" {
-		return true
-	}
-
-	// Check ENVIRONMENT environment variable
-	// 检查 ENVIRONMENT 环境变量
-	environment := os.Getenv("ENVIRONMENT")
-	if environment == "development" {
-		return true
-	}
-
-	// Check DEBUG_MODE environment variable
-	// 检查 DEBUG_MODE 环境变量
-	debugMode := os.Getenv("DEBUG_MODE")
-	if debugMode == "true" {
-		return true
-	}
-
-	return false
+	env := strings.ToLower(os.Getenv("GO_ENV"))
+	return env == "dev" || env == "development" || env == ""
 }
 
 // isPublicEnvironment checks if the application is running in public mode
