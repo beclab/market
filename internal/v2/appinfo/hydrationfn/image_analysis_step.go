@@ -348,51 +348,70 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 	imageInfo.CreatedAt = dockerImageInfo.CreatedAt
 	imageInfo.LayerCount = len(dockerImageInfo.Layers)
 
-	// Analyze each layer
-	layers := make([]*types.LayerInfo, 0, len(dockerImageInfo.Layers))
-	var totalDownloaded int64
-	var downloadedLayers int
-
+	// Check if we have offset information (production environment)
+	hasOffsetInfo := false
 	for _, layer := range dockerImageInfo.Layers {
-		layerInfo := &types.LayerInfo{
-			Digest:    layer.Digest,
-			Size:      layer.Size,
-			MediaType: layer.MediaType,
+		if layer.Offset > 0 {
+			hasOffsetInfo = true
+			break
 		}
-
-		// Get layer download progress
-		if layerProgress, err := utils.GetLayerDownloadProgress(layer.Digest); err == nil {
-			layerInfo.Downloaded = layerProgress.Downloaded
-			layerInfo.Progress = layerProgress.Progress
-			layerInfo.LocalPath = layerProgress.LocalPath
-
-			if layerProgress.Downloaded {
-				downloadedLayers++
-				totalDownloaded += layer.Size
-			}
-		} else {
-			log.Printf("Warning: failed to get layer progress for %s: %v", layer.Digest, err)
-		}
-
-		layers = append(layers, layerInfo)
 	}
 
-	imageInfo.Layers = layers
-	imageInfo.DownloadedSize = totalDownloaded
-	imageInfo.DownloadedLayers = downloadedLayers
-
-	// Calculate download progress
-	if imageInfo.TotalSize > 0 {
-		imageInfo.DownloadProgress = float64(totalDownloaded) / float64(imageInfo.TotalSize) * 100
-	}
-
-	// Determine overall status
-	if downloadedLayers == len(layers) {
-		imageInfo.Status = "fully_downloaded"
-	} else if downloadedLayers > 0 {
-		imageInfo.Status = "partially_downloaded"
+	if hasOffsetInfo {
+		// Production environment: use offset-based analysis
+		log.Printf("Production environment detected with offset information, using offset-based analysis for %s", imageName)
+		s.analyzeLocalLayersWithOffset(imageInfo, dockerImageInfo.Layers)
 	} else {
-		imageInfo.Status = "not_downloaded"
+		// Development environment: use traditional local layer checking
+		log.Printf("Development environment detected, using traditional local layer checking for %s", imageName)
+
+		// Analyze each layer
+		layers := make([]*types.LayerInfo, 0, len(dockerImageInfo.Layers))
+		var totalDownloaded int64
+		var downloadedLayers int
+
+		for _, layer := range dockerImageInfo.Layers {
+			layerInfo := &types.LayerInfo{
+				Digest:    layer.Digest,
+				Size:      layer.Size,
+				MediaType: layer.MediaType,
+				Offset:    layer.Offset, // Add offset from API response
+			}
+
+			// Get layer download progress
+			if layerProgress, err := utils.GetLayerDownloadProgress(layer.Digest); err == nil {
+				layerInfo.Downloaded = layerProgress.Downloaded
+				layerInfo.Progress = layerProgress.Progress
+				layerInfo.LocalPath = layerProgress.LocalPath
+
+				if layerProgress.Downloaded {
+					downloadedLayers++
+					totalDownloaded += layer.Size
+				}
+			} else {
+				log.Printf("Warning: failed to get layer progress for %s: %v", layer.Digest, err)
+			}
+
+			layers = append(layers, layerInfo)
+		}
+
+		imageInfo.Layers = layers
+		imageInfo.DownloadedSize = totalDownloaded
+		imageInfo.DownloadedLayers = downloadedLayers
+
+		// Calculate download progress
+		if imageInfo.TotalSize > 0 {
+			imageInfo.DownloadProgress = float64(totalDownloaded) / float64(imageInfo.TotalSize) * 100
+		}
+
+		// Determine overall status
+		if downloadedLayers == len(layers) {
+			imageInfo.Status = "fully_downloaded"
+		} else if downloadedLayers > 0 {
+			imageInfo.Status = "partially_downloaded"
+		} else {
+			imageInfo.Status = "not_downloaded"
+		}
 	}
 
 	return imageInfo, nil
@@ -423,6 +442,73 @@ func (s *ImageAnalysisStep) analyzeLocalLayers(imageInfo *types.ImageInfo, image
 			}
 		}
 	}
+}
+
+// analyzeLocalLayersWithOffset analyzes local layers using offset and size information from API
+func (s *ImageAnalysisStep) analyzeLocalLayersWithOffset(imageInfo *types.ImageInfo, layers []utils.LayerInfo) {
+	log.Printf("Analyzing local layers with offset information for image: %s", imageInfo.Name)
+
+	typesLayers := make([]*types.LayerInfo, 0, len(layers))
+	var totalDownloaded int64
+	var downloadedLayers int
+
+	for _, layer := range layers {
+		// Use offset-based progress calculation for production environment
+		if layerProgress, err := utils.GetLayerDownloadProgressByOffset(layer.Digest, layer.Offset, layer.Size); err == nil {
+			typesLayer := &types.LayerInfo{
+				Digest:     layer.Digest,
+				Size:       layer.Size,
+				MediaType:  layer.MediaType,
+				Offset:     layer.Offset,
+				Downloaded: layerProgress.Downloaded,
+				Progress:   layerProgress.Progress,
+				LocalPath:  layerProgress.LocalPath,
+			}
+
+			if layerProgress.Downloaded {
+				downloadedLayers++
+				totalDownloaded += layer.Size
+			}
+
+			typesLayers = append(typesLayers, typesLayer)
+			log.Printf("Layer %s: offset=%d, size=%d, progress=%d%%, downloaded=%v",
+				layer.Digest, layer.Offset, layer.Size, layerProgress.Progress, layerProgress.Downloaded)
+		} else {
+			log.Printf("Warning: failed to calculate layer progress for %s: %v", layer.Digest, err)
+			// Create basic layer info even if progress calculation fails
+			typesLayer := &types.LayerInfo{
+				Digest:     layer.Digest,
+				Size:       layer.Size,
+				MediaType:  layer.MediaType,
+				Offset:     layer.Offset,
+				Downloaded: false,
+				Progress:   0,
+			}
+			typesLayers = append(typesLayers, typesLayer)
+		}
+	}
+
+	imageInfo.Layers = typesLayers
+	imageInfo.LayerCount = len(layers)
+	imageInfo.DownloadedSize = totalDownloaded
+	imageInfo.DownloadedLayers = downloadedLayers
+
+	// Calculate download progress
+	if imageInfo.TotalSize > 0 {
+		imageInfo.DownloadProgress = float64(totalDownloaded) / float64(imageInfo.TotalSize) * 100
+	}
+
+	// Determine overall status
+	if downloadedLayers == len(layers) {
+		imageInfo.Status = "fully_downloaded"
+	} else if downloadedLayers > 0 {
+		imageInfo.Status = "partially_downloaded"
+	} else {
+		imageInfo.Status = "not_downloaded"
+	}
+
+	log.Printf("Image %s analysis completed: %d/%d layers downloaded, %.2f%% progress",
+		imageInfo.Name, downloadedLayers, len(layers), imageInfo.DownloadProgress)
 }
 
 // saveImageAnalysis saves the image analysis result to a JSON file

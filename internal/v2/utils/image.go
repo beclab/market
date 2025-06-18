@@ -34,6 +34,7 @@ type LayerInfo struct {
 	Digest     string `json:"digest"`
 	Size       int64  `json:"size"`
 	MediaType  string `json:"media_type"`
+	Offset     int64  `json:"offset,omitempty"`
 	Downloaded bool   `json:"downloaded"`
 	Progress   int    `json:"progress"` // 0-100
 	LocalPath  string `json:"local_path,omitempty"`
@@ -251,6 +252,7 @@ func getDockerImageInfoFromAPI(imageName string) (*DockerImageInfo, error) {
 			Digest:    layer.Digest,
 			Size:      layer.Size,
 			MediaType: layer.MediaType,
+			Offset:    layer.Offset,
 		}
 		totalSize += layer.Size
 	}
@@ -707,4 +709,35 @@ func parseHumanReadableSize(sizeStr string) int64 {
 	}
 
 	return int64(size)
+}
+
+// GetLayerDownloadProgressByOffset calculates download progress based on offset and size
+// This is used in production environment where we have offset information from API
+func GetLayerDownloadProgressByOffset(digest string, offset, size int64) (*LayerInfo, error) {
+	glog.Infof("Calculating layer download progress by offset for: %s (offset: %d, size: %d)", digest, offset, size)
+
+	layerInfo := &LayerInfo{
+		Digest: digest,
+		Size:   size,
+		Offset: offset,
+	}
+
+	// Calculate progress based on offset
+	if size > 0 {
+		// Progress is calculated as (offset / size) * 100
+		progress := int((float64(offset) / float64(size)) * 100)
+		if progress > 100 {
+			progress = 100 // Cap at 100%
+		}
+		layerInfo.Progress = progress
+		layerInfo.Downloaded = progress >= 100
+	} else {
+		layerInfo.Progress = 0
+		layerInfo.Downloaded = false
+	}
+
+	glog.Infof("Layer %s: offset=%d, size=%d, progress=%d%%, downloaded=%v",
+		digest, offset, size, layerInfo.Progress, layerInfo.Downloaded)
+
+	return layerInfo, nil
 }

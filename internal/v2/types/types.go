@@ -295,6 +295,7 @@ type LayerInfo struct {
 	Digest     string `json:"digest"`
 	Size       int64  `json:"size"`
 	MediaType  string `json:"media_type,omitempty"`
+	Offset     int64  `json:"offset,omitempty"` // Add offset field for production API
 	Downloaded bool   `json:"downloaded"`
 	Progress   int    `json:"progress"` // 0-100
 	LocalPath  string `json:"local_path,omitempty"`
