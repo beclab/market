@@ -98,20 +98,24 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps/{id}/install", s.cancelInstall).Methods("DELETE")
 	log.Printf("Route configured: DELETE /app-store/api/v2/apps/{id}/install")
 
-	// 8. Uninstall application (single)
+	// 8. Upgrade application (single)
+	api.HandleFunc("/apps/{id}/upgrade", s.upgradeApp).Methods("PUT")
+	log.Printf("Route configured: PUT /app-store/api/v2/apps/{id}/upgrade")
+
+	// 9. Uninstall application (single)
 	api.HandleFunc("/apps/{id}", s.uninstallApp).Methods("DELETE")
 	log.Printf("Route configured: DELETE /app-store/api/v2/apps/{id}")
 
-	// 9. Upload application installation package
+	// 10. Upload application installation package
 	api.HandleFunc("/apps/upload", s.uploadAppPackage).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/apps/upload")
 
 	// Settings endpoints
-	// 10. Get market source configuration
+	// 11. Get market source configuration
 	api.HandleFunc("/settings/market-source", s.getMarketSource).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/market-source")
 
-	// 11. Set market source configuration
+	// 12. Set market source configuration
 	api.HandleFunc("/settings/market-source", s.setMarketSource).Methods("PUT")
 	log.Printf("Route configured: PUT /app-store/api/v2/settings/market-source")
 

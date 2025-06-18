@@ -18,6 +18,8 @@ const (
 	UninstallApp
 	// CancelAppInstall represents cancel application installation task
 	CancelAppInstall
+	// UpgradeApp represents application upgrade task
+	UpgradeApp
 )
 
 // TaskStatus defines the status of task
@@ -200,6 +202,15 @@ func (tm *TaskModule) executeTask(task *Task) {
 	case CancelAppInstall:
 		// TODO: Implement cancel installation logic
 		log.Printf("Canceling app installation: %s", task.AppName)
+	case UpgradeApp:
+		// Get source from metadata
+		source, ok := task.Metadata["source"].(string)
+		if !ok {
+			source = "store" // Default source
+		}
+
+		// TODO: Implement app upgrade logic
+		log.Printf("Upgrading app: %s from source: %s", task.AppName, source)
 	}
 }
 
