@@ -320,12 +320,12 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 	}
 
 	// Check if this is a private image
-	if s.isPrivateImage(cleanedName) {
-		imageInfo.Status = "private_registry"
-		imageInfo.ErrorMessage = "Private registry image, analysis limited"
-		log.Printf("Detected private registry image: %s", cleanedName)
-		return imageInfo, nil
-	}
+	// if s.isPrivateImage(cleanedName) {
+	// 	imageInfo.Status = "private_registry"
+	// 	imageInfo.ErrorMessage = "Private registry image, analysis limited"
+	// 	log.Printf("Detected private registry image: %s", cleanedName)
+	// 	return imageInfo, nil
+	// }
 
 	// Get Docker image info from registry
 	dockerImageInfo, err := utils.GetDockerImageInfo(imageName)

@@ -721,11 +721,32 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 			// Convert to AppInfoLatestData
 			latestData := dw.convertPendingToLatest(completedApp)
 			if latestData != nil {
-				// Add to AppInfoLatest
-				sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
-				movedCount++
+				// Check if app with same name already exists in AppInfoLatest
+				appName := dw.getAppName(completedApp)
+				existingIndex := -1
 
-				glog.Infof("DataWatcher: Moved app to latest: %s", dw.getAppID(completedApp))
+				// Find existing app with same name
+				for i, existingApp := range sourceData.AppInfoLatest {
+					if existingApp != nil {
+						existingAppName := dw.getAppNameFromLatest(existingApp)
+						if existingAppName == appName {
+							existingIndex = i
+							break
+						}
+					}
+				}
+
+				if existingIndex >= 0 {
+					// Replace existing app with same name
+					sourceData.AppInfoLatest[existingIndex] = latestData
+					glog.Infof("DataWatcher: Replaced existing app with same name: %s (index: %d)", appName, existingIndex)
+				} else {
+					// Add new app if no existing app with same name
+					sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
+					glog.Infof("DataWatcher: Added new app to latest: %s", appName)
+				}
+
+				movedCount++
 			}
 		}
 
@@ -828,6 +849,59 @@ func (dw *DataWatcher) getAppID(pendingApp *types.AppInfoLatestPendingData) stri
 		}
 		if pendingApp.AppInfo.AppEntry.Name != "" {
 			return pendingApp.AppInfo.AppEntry.Name
+		}
+	}
+
+	return "unknown"
+}
+
+// getAppName extracts app name from pending app data for deduplication
+func (dw *DataWatcher) getAppName(pendingApp *types.AppInfoLatestPendingData) string {
+	if pendingApp == nil {
+		return "unknown"
+	}
+
+	// Try to get name from RawData first
+	if pendingApp.RawData != nil {
+		if pendingApp.RawData.Name != "" {
+			return pendingApp.RawData.Name
+		}
+	}
+
+	// Try to get name from AppInfo
+	if pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil {
+		if pendingApp.AppInfo.AppEntry.Name != "" {
+			return pendingApp.AppInfo.AppEntry.Name
+		}
+	}
+
+	return "unknown"
+}
+
+// getAppNameFromLatest extracts app name from latest app data for deduplication
+func (dw *DataWatcher) getAppNameFromLatest(latestApp *types.AppInfoLatestData) string {
+	if latestApp == nil {
+		return "unknown"
+	}
+
+	// Try to get name from RawData first
+	if latestApp.RawData != nil {
+		if latestApp.RawData.Name != "" {
+			return latestApp.RawData.Name
+		}
+	}
+
+	// Try to get name from AppInfo
+	if latestApp.AppInfo != nil && latestApp.AppInfo.AppEntry != nil {
+		if latestApp.AppInfo.AppEntry.Name != "" {
+			return latestApp.AppInfo.AppEntry.Name
+		}
+	}
+
+	// Try to get name from AppSimpleInfo
+	if latestApp.AppSimpleInfo != nil {
+		if latestApp.AppSimpleInfo.AppName != "" {
+			return latestApp.AppSimpleInfo.AppName
 		}
 	}
 

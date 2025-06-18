@@ -218,7 +218,7 @@ func getDockerImageInfoFromAPI(imageName string) (*DockerImageInfo, error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	// Send request
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
