@@ -276,6 +276,12 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		appData.Timestamp = time.Now().Unix()
 		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, appData)
 	case AppInfoLatestPending:
+		// Clear existing AppInfoLatestPending list before adding new data
+		// This ensures we don't accumulate old data when hash doesn't match
+		originalCount := len(sourceData.AppInfoLatestPending)
+		sourceData.AppInfoLatestPending = sourceData.AppInfoLatestPending[:0] // Clear the slice
+		glog.Infof("Cleared %d existing AppInfoLatestPending entries for user=%s, source=%s", originalCount, userID, sourceID)
+
 		// Check if this is a complete market data structure
 		if appsData, hasApps := data["apps"].(map[string]interface{}); hasApps {
 			// This is complete market data, extract individual apps
@@ -368,6 +374,9 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 				glog.Infof("Successfully processed single app data for user=%s, source=%s", userID, sourceID)
 			}
 		}
+
+		glog.Infof("Updated AppInfoLatestPending list with %d new entries for user=%s, source=%s",
+			len(sourceData.AppInfoLatestPending), userID, sourceID)
 
 		// Notify hydrator about pending data update for immediate task creation
 		if cm.hydrationNotifier != nil && len(sourceData.AppInfoLatestPending) > 0 {

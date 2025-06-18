@@ -2,6 +2,7 @@ package types
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -617,6 +618,18 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 		return nil
 	}
 
+	// Filter out apps with Suspend or Remove labels
+	if appLabels, ok := appData["appLabels"].([]interface{}); ok {
+		for _, labelInterface := range appLabels {
+			if label, ok := labelInterface.(string); ok {
+				if strings.EqualFold(label, "suspend") || strings.EqualFold(label, "remove") {
+					log.Printf("DEBUG: Skipping app with label: %s", label)
+					return nil
+				}
+			}
+		}
+	}
+
 	// Check if we have essential app identifiers (id, name, or appID)
 	var primaryID, primaryName string
 
@@ -710,6 +723,16 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 		for i, cat := range categories {
 			if catStr, ok := cat.(string); ok {
 				rawData.Categories[i] = catStr
+			}
+		}
+	}
+
+	// Extract appLabels field
+	if appLabels, ok := appData["appLabels"].([]interface{}); ok {
+		rawData.AppLabels = make([]string, len(appLabels))
+		for i, label := range appLabels {
+			if labelStr, ok := label.(string); ok {
+				rawData.AppLabels[i] = labelStr
 			}
 		}
 	}
