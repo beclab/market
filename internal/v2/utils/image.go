@@ -17,16 +17,27 @@ import (
 	"github.com/golang/glog"
 )
 
+// DockerNodeInfo contains information about a specific node and its layers
+type DockerNodeInfo struct {
+	NodeName     string      `json:"node_name"`
+	Architecture string      `json:"architecture,omitempty"`
+	Variant      string      `json:"variant,omitempty"`
+	OS           string      `json:"os,omitempty"`
+	Layers       []LayerInfo `json:"layers"`
+	TotalSize    int64       `json:"total_size"`
+	LayerCount   int         `json:"layer_count"`
+}
+
 // DockerImageInfo contains detailed information about a Docker image
 type DockerImageInfo struct {
-	Name         string         `json:"name"`
-	Tag          string         `json:"tag"`
-	Architecture string         `json:"architecture"`
-	Layers       []LayerInfo    `json:"layers"`
-	Manifest     *ImageManifest `json:"manifest,omitempty"`
-	Config       *ImageConfig   `json:"config,omitempty"`
-	TotalSize    int64          `json:"total_size"`
-	CreatedAt    time.Time      `json:"created_at"`
+	Name         string           `json:"name"`
+	Tag          string           `json:"tag"`
+	Architecture string           `json:"architecture"`
+	Nodes        []DockerNodeInfo `json:"nodes"`
+	Manifest     *ImageManifest   `json:"manifest,omitempty"`
+	Config       *ImageConfig     `json:"config,omitempty"`
+	TotalSize    int64            `json:"total_size"`
+	CreatedAt    time.Time        `json:"created_at"`
 }
 
 // LayerInfo contains information about a specific layer
@@ -154,7 +165,7 @@ func getDockerImageInfoFromRegistry(imageName string) (*DockerImageInfo, error) 
 		// Continue without config as it's not critical
 	}
 
-	// Build layer information
+	// Build layer information for a single node (registry access)
 	layers := make([]LayerInfo, len(manifest.Layers))
 	var totalSize int64
 
@@ -167,10 +178,22 @@ func getDockerImageInfoFromRegistry(imageName string) (*DockerImageInfo, error) 
 		totalSize += layer.Size
 	}
 
+	// Create a single node for registry access
+	nodeInfo := DockerNodeInfo{
+		NodeName:   "registry",
+		Layers:     layers,
+		TotalSize:  totalSize,
+		LayerCount: len(layers),
+	}
+
+	if config != nil {
+		nodeInfo.Architecture = config.Architecture
+	}
+
 	imageInfo := &DockerImageInfo{
 		Name:      name,
 		Tag:       tag,
-		Layers:    layers,
+		Nodes:     []DockerNodeInfo{nodeInfo},
 		Manifest:  manifest,
 		Config:    config,
 		TotalSize: totalSize,
@@ -187,6 +210,62 @@ func getDockerImageInfoFromRegistry(imageName string) (*DockerImageInfo, error) 
 
 // getDockerImageInfoFromAPI gets image info from the app service API
 func getDockerImageInfoFromAPI(imageName string) (*DockerImageInfo, error) {
+	// Get the complete API response with node information
+	apiResponse, err := GetImageInfoAPIResponse(imageName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert API response to DockerImageInfo
+	// Use the first image info as base (they should all be for the same image)
+	imageInfo := apiResponse.Images[0]
+
+	// Create nodes from API response
+	nodes := make([]DockerNodeInfo, 0, len(apiResponse.Images))
+	var totalSize int64
+
+	for _, nodeImage := range apiResponse.Images {
+		// Build layers for this node
+		layers := make([]LayerInfo, 0, len(nodeImage.LayersData))
+		var nodeTotalSize int64
+
+		for _, layer := range nodeImage.LayersData {
+			layerInfo := LayerInfo{
+				Digest:    layer.Digest,
+				Size:      layer.Size,
+				MediaType: layer.MediaType,
+				Offset:    layer.Offset,
+			}
+			layers = append(layers, layerInfo)
+			nodeTotalSize += layer.Size
+		}
+
+		// Create node info
+		nodeInfo := DockerNodeInfo{
+			NodeName:     nodeImage.Node,
+			Architecture: nodeImage.Architecture,
+			Variant:      nodeImage.Variant,
+			OS:           nodeImage.OS,
+			Layers:       layers,
+			TotalSize:    nodeTotalSize,
+			LayerCount:   len(layers),
+		}
+
+		nodes = append(nodes, nodeInfo)
+		totalSize += nodeTotalSize
+	}
+
+	return &DockerImageInfo{
+		Name:         imageInfo.Name,
+		Architecture: imageInfo.Architecture,
+		Nodes:        nodes,
+		TotalSize:    totalSize,
+		CreatedAt:    time.Now(),
+	}, nil
+}
+
+// GetImageInfoAPIResponse gets the complete API response with node information
+func GetImageInfoAPIResponse(imageName string) (*ImageInfoResponse, error) {
 	// Get app service host and port from environment
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
@@ -242,28 +321,7 @@ func getDockerImageInfoFromAPI(imageName string) (*DockerImageInfo, error) {
 		return nil, fmt.Errorf("no image info found for %s", imageName)
 	}
 
-	// Convert API response to DockerImageInfo
-	imageInfo := apiResponse.Images[0]
-	layers := make([]LayerInfo, len(imageInfo.LayersData))
-	var totalSize int64
-
-	for i, layer := range imageInfo.LayersData {
-		layers[i] = LayerInfo{
-			Digest:    layer.Digest,
-			Size:      layer.Size,
-			MediaType: layer.MediaType,
-			Offset:    layer.Offset,
-		}
-		totalSize += layer.Size
-	}
-
-	return &DockerImageInfo{
-		Name:         imageInfo.Name,
-		Architecture: imageInfo.Architecture,
-		Layers:       layers,
-		TotalSize:    totalSize,
-		CreatedAt:    time.Now(),
-	}, nil
+	return &apiResponse, nil
 }
 
 // GetLayerDownloadProgress checks the download progress of a specific layer locally

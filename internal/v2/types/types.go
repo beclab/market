@@ -273,21 +273,34 @@ type CacheData struct {
 	Mutex sync.RWMutex `json:"-"`
 }
 
+// NodeInfo represents information about a specific node and its layers
+type NodeInfo struct {
+	NodeName         string       `json:"node_name"`
+	Architecture     string       `json:"architecture,omitempty"`
+	Variant          string       `json:"variant,omitempty"`
+	OS               string       `json:"os,omitempty"`
+	Layers           []*LayerInfo `json:"layers,omitempty"`
+	DownloadedSize   int64        `json:"downloaded_size"`
+	DownloadedLayers int          `json:"downloaded_layers"`
+	TotalSize        int64        `json:"total_size"`
+	LayerCount       int          `json:"layer_count"`
+}
+
 // ImageInfo represents detailed information about a Docker image
 type ImageInfo struct {
-	Name             string       `json:"name"`
-	Tag              string       `json:"tag,omitempty"`
-	Architecture     string       `json:"architecture,omitempty"`
-	TotalSize        int64        `json:"total_size"`
-	DownloadedSize   int64        `json:"downloaded_size"`
-	DownloadProgress float64      `json:"download_progress"`
-	LayerCount       int          `json:"layer_count"`
-	DownloadedLayers int          `json:"downloaded_layers"`
-	CreatedAt        time.Time    `json:"created_at,omitempty"`
-	AnalyzedAt       time.Time    `json:"analyzed_at"`
-	Status           string       `json:"status"` // fully_downloaded, partially_downloaded, not_downloaded, registry_error, analysis_failed, private_registry
-	ErrorMessage     string       `json:"error_message,omitempty"`
-	Layers           []*LayerInfo `json:"layers,omitempty"`
+	Name             string      `json:"name"`
+	Tag              string      `json:"tag,omitempty"`
+	Architecture     string      `json:"architecture,omitempty"`
+	TotalSize        int64       `json:"total_size"`
+	DownloadedSize   int64       `json:"downloaded_size"`
+	DownloadProgress float64     `json:"download_progress"`
+	LayerCount       int         `json:"layer_count"`
+	DownloadedLayers int         `json:"downloaded_layers"`
+	CreatedAt        time.Time   `json:"created_at,omitempty"`
+	AnalyzedAt       time.Time   `json:"analyzed_at"`
+	Status           string      `json:"status"` // fully_downloaded, partially_downloaded, not_downloaded, registry_error, analysis_failed, private_registry
+	ErrorMessage     string      `json:"error_message,omitempty"`
+	Nodes            []*NodeInfo `json:"nodes,omitempty"`
 }
 
 // LayerInfo represents information about a Docker image layer
