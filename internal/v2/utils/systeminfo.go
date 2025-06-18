@@ -20,7 +20,7 @@ type VersionInfo struct {
 // GetTerminusVersion retrieves the Terminus version with environment-aware logic
 func GetTerminusVersion() (string, error) {
 	// Check if running in development environment
-	if isDevelopmentEnvironment() {
+	if IsDevelopmentEnvironment() {
 		glog.Infof("Running in development environment, returning fixed version: 1.12.0")
 		return "1.12.0", nil
 	}
@@ -40,7 +40,7 @@ func GetTerminusVersionValue() (string, error) {
 	}
 
 	// Check development environment
-	if isDevelopmentEnvironment() {
+	if IsDevelopmentEnvironment() {
 		glog.Infof("Development environment detected, returning version: 1.12.0")
 		return "1.12.0", nil
 	}
@@ -64,8 +64,8 @@ func GetTerminusVersionValue() (string, error) {
 	return versionInfo.Version, nil
 }
 
-// isDevelopmentEnvironment checks if the application is running in development mode
-func isDevelopmentEnvironment() bool {
+// IsDevelopmentEnvironment checks if the application is running in development mode
+func IsDevelopmentEnvironment() bool {
 	env := strings.ToLower(os.Getenv("GO_ENV"))
 	return env == "dev" || env == "development" || env == ""
 }

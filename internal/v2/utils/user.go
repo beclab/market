@@ -26,7 +26,7 @@ type UserInfo struct {
 // GetUserInfoFromRequest extracts username from request
 func GetUserInfoFromRequest(req *restful.Request) (string, error) {
 	// Check if it's development environment, return admin user directly
-	if isDevelopmentEnvironment() {
+	if IsDevelopmentEnvironment() {
 		glog.Infof("Development environment detected, returning admin username")
 		return "admin", nil
 	}
@@ -156,7 +156,7 @@ type AdminUsernameResponse struct {
 // GetAdminUsername retrieves the admin username from the app service
 func GetAdminUsername(token string) (string, error) {
 	// Check if running in development environment
-	if isDevelopmentEnvironment() {
+	if IsDevelopmentEnvironment() {
 		glog.Infof("Running in development environment, returning admin username: admin")
 		return "admin", nil
 	}

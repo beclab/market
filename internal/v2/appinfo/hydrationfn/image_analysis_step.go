@@ -355,23 +355,12 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 	}
 	imageInfo.LayerCount = totalLayerCount
 
-	// Check if we have offset information (production environment)
-	hasOffsetInfo := false
-	for _, node := range dockerImageInfo.Nodes {
-		for _, layer := range node.Layers {
-			if layer.Offset > 0 {
-				hasOffsetInfo = true
-				break
-			}
-		}
-		if hasOffsetInfo {
-			break
-		}
-	}
+	// Check if we're in production environment using environment variable
+	isProduction := !utils.IsDevelopmentEnvironment()
 
-	if hasOffsetInfo {
+	if isProduction {
 		// Production environment: use offset-based analysis with node information
-		log.Printf("Production environment detected with offset information, using offset-based analysis for %s", imageName)
+		log.Printf("Production environment detected, using offset-based analysis for %s", imageName)
 		s.analyzeLocalLayersWithOffsetAndNodes(imageInfo, imageName)
 	} else {
 		// Development environment: use traditional local layer checking

@@ -136,7 +136,7 @@ func GetDockerImageInfo(imageName string) (*DockerImageInfo, error) {
 	glog.Infof("Getting Docker image info for: %s", imageName)
 
 	// Check if it's development environment
-	if isDevelopmentEnvironment() {
+	if IsDevelopmentEnvironment() {
 		glog.Infof("Development environment detected, using direct registry access")
 		return getDockerImageInfoFromRegistry(imageName)
 	}
