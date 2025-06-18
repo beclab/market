@@ -2,6 +2,7 @@ package types
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -272,21 +273,34 @@ type CacheData struct {
 	Mutex sync.RWMutex `json:"-"`
 }
 
+// NodeInfo represents information about a specific node and its layers
+type NodeInfo struct {
+	NodeName         string       `json:"node_name"`
+	Architecture     string       `json:"architecture,omitempty"`
+	Variant          string       `json:"variant,omitempty"`
+	OS               string       `json:"os,omitempty"`
+	Layers           []*LayerInfo `json:"layers,omitempty"`
+	DownloadedSize   int64        `json:"downloaded_size"`
+	DownloadedLayers int          `json:"downloaded_layers"`
+	TotalSize        int64        `json:"total_size"`
+	LayerCount       int          `json:"layer_count"`
+}
+
 // ImageInfo represents detailed information about a Docker image
 type ImageInfo struct {
-	Name             string       `json:"name"`
-	Tag              string       `json:"tag,omitempty"`
-	Architecture     string       `json:"architecture,omitempty"`
-	TotalSize        int64        `json:"total_size"`
-	DownloadedSize   int64        `json:"downloaded_size"`
-	DownloadProgress float64      `json:"download_progress"`
-	LayerCount       int          `json:"layer_count"`
-	DownloadedLayers int          `json:"downloaded_layers"`
-	CreatedAt        time.Time    `json:"created_at,omitempty"`
-	AnalyzedAt       time.Time    `json:"analyzed_at"`
-	Status           string       `json:"status"` // fully_downloaded, partially_downloaded, not_downloaded, registry_error, analysis_failed, private_registry
-	ErrorMessage     string       `json:"error_message,omitempty"`
-	Layers           []*LayerInfo `json:"layers,omitempty"`
+	Name             string      `json:"name"`
+	Tag              string      `json:"tag,omitempty"`
+	Architecture     string      `json:"architecture,omitempty"`
+	TotalSize        int64       `json:"total_size"`
+	DownloadedSize   int64       `json:"downloaded_size"`
+	DownloadProgress float64     `json:"download_progress"`
+	LayerCount       int         `json:"layer_count"`
+	DownloadedLayers int         `json:"downloaded_layers"`
+	CreatedAt        time.Time   `json:"created_at,omitempty"`
+	AnalyzedAt       time.Time   `json:"analyzed_at"`
+	Status           string      `json:"status"` // fully_downloaded, partially_downloaded, not_downloaded, registry_error, analysis_failed, private_registry
+	ErrorMessage     string      `json:"error_message,omitempty"`
+	Nodes            []*NodeInfo `json:"nodes,omitempty"`
 }
 
 // LayerInfo represents information about a Docker image layer
@@ -294,6 +308,7 @@ type LayerInfo struct {
 	Digest     string `json:"digest"`
 	Size       int64  `json:"size"`
 	MediaType  string `json:"media_type,omitempty"`
+	Offset     int64  `json:"offset,omitempty"` // Add offset field for production API
 	Downloaded bool   `json:"downloaded"`
 	Progress   int    `json:"progress"` // 0-100
 	LocalPath  string `json:"local_path,omitempty"`
@@ -489,26 +504,12 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 		Metadata:   make(map[string]interface{}),
 	}
 
+	// Use the complete field mapping function to ensure no data is lost
+	mapAllApplicationInfoEntryFields(data, rawData)
+
 	// Store the original data in metadata for later processing
 	rawData.Metadata["source_data"] = data
 	rawData.Metadata["data_type"] = "legacy_app_latest_data"
-
-	// Extract other basic fields if available
-	if desc, ok := data["description"].(string); ok {
-		rawData.Description = map[string]string{"en-US": desc} // Initialize with default language
-	}
-	if icon, ok := data["icon"].(string); ok {
-		rawData.Icon = icon
-	}
-	if version, ok := data["version"].(string); ok {
-		rawData.Version = version
-	}
-	if chartName, ok := data["chartName"].(string); ok {
-		rawData.ChartName = chartName
-	}
-	if cfgType, ok := data["cfgType"].(string); ok {
-		rawData.CfgType = cfgType
-	}
 
 	appInfoLatest.RawData = rawData
 	appInfoLatest.AppInfo = &AppInfo{
@@ -617,6 +618,18 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 		return nil
 	}
 
+	// Filter out apps with Suspend or Remove labels
+	if appLabels, ok := appData["appLabels"].([]interface{}); ok {
+		for _, labelInterface := range appLabels {
+			if label, ok := labelInterface.(string); ok {
+				if strings.EqualFold(label, "suspend") || strings.EqualFold(label, "remove") {
+					log.Printf("DEBUG: Skipping app with label: %s", label)
+					return nil
+				}
+			}
+		}
+	}
+
 	// Check if we have essential app identifiers (id, name, or appID)
 	var primaryID, primaryName string
 
@@ -689,30 +702,14 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 		Metadata:   make(map[string]interface{}),
 	}
 
-	// Extract other optional fields
-	if desc, ok := appData["description"].(string); ok {
-		rawData.Description = map[string]string{"en-US": desc} // Initialize with default language
-	}
-	if icon, ok := appData["icon"].(string); ok {
-		rawData.Icon = icon
-	}
-	if version, ok := appData["version"].(string); ok {
-		rawData.Version = version
-	}
-	if chartName, ok := appData["chartName"].(string); ok {
-		rawData.ChartName = chartName
-	}
-	if cfgType, ok := appData["cfgType"].(string); ok {
-		rawData.CfgType = cfgType
-	}
-	if categories, ok := appData["categories"].([]interface{}); ok {
-		rawData.Categories = make([]string, len(categories))
-		for i, cat := range categories {
-			if catStr, ok := cat.(string); ok {
-				rawData.Categories[i] = catStr
-			}
-		}
-	}
+	// Use the complete field mapping function to ensure no data is lost
+	mapAllApplicationInfoEntryFields(appData, rawData)
+
+	// Debug AppLabels after mapping
+	DebugAppLabelsFlow(appData, rawData, "NewAppInfoLatestPendingDataFromLegacyData")
+
+	// Validate and fix AppLabels if needed
+	ValidateAndFixAppLabels(appData, rawData)
 
 	// Store the complete app data in metadata for later processing
 	rawData.Metadata["source_app_data"] = appData
@@ -739,4 +736,599 @@ func NewAppInfoLatestPendingDataFromLegacyCompleteData(appData map[string]interf
 	}
 	// Note: Others is now stored in SourceData, not in AppInfoLatestPendingData
 	return pendingData
+}
+
+// mapAllApplicationInfoEntryFields maps all fields from source data to ApplicationInfoEntry
+// This function ensures no data is lost during conversion
+func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *ApplicationInfoEntry) {
+	if sourceData == nil || entry == nil {
+		return
+	}
+
+	// Basic fields
+	if val, ok := sourceData["id"].(string); ok && val != "" {
+		entry.ID = val
+	}
+	if val, ok := sourceData["name"].(string); ok && val != "" {
+		entry.Name = val
+	}
+	if val, ok := sourceData["cfgType"].(string); ok && val != "" {
+		entry.CfgType = val
+	}
+	if val, ok := sourceData["chartName"].(string); ok && val != "" {
+		entry.ChartName = val
+	}
+	if val, ok := sourceData["icon"].(string); ok && val != "" {
+		entry.Icon = val
+	}
+	if val, ok := sourceData["appID"].(string); ok && val != "" {
+		entry.AppID = val
+	}
+	if val, ok := sourceData["version"].(string); ok && val != "" {
+		entry.Version = val
+	}
+	if val, ok := sourceData["versionName"].(string); ok && val != "" {
+		entry.VersionName = val
+	}
+
+	// Multi-language fields
+	if val, ok := sourceData["description"].(string); ok && val != "" {
+		if entry.Description == nil {
+			entry.Description = make(map[string]string)
+		}
+		entry.Description["en-US"] = val
+	}
+	if val, ok := sourceData["title"].(string); ok && val != "" {
+		if entry.Title == nil {
+			entry.Title = make(map[string]string)
+		}
+		entry.Title["en-US"] = val
+	}
+
+	// Array fields
+	if val, ok := sourceData["categories"].([]interface{}); ok {
+		entry.Categories = make([]string, len(val))
+		for i, cat := range val {
+			if catStr, ok := cat.(string); ok {
+				entry.Categories[i] = catStr
+			}
+		}
+		// Debug AppLabels mapping
+		DebugAppLabelsFlow(sourceData, entry, "mapAllApplicationInfoEntryFields")
+	}
+	if val, ok := sourceData["appLabels"].([]interface{}); ok {
+		entry.AppLabels = make([]string, len(val))
+		for i, label := range val {
+			if labelStr, ok := label.(string); ok {
+				entry.AppLabels[i] = labelStr
+			}
+		}
+		// Debug AppLabels mapping
+		DebugAppLabelsFlow(sourceData, entry, "mapAllApplicationInfoEntryFields")
+	}
+	if val, ok := sourceData["locale"].([]interface{}); ok {
+		entry.Locale = make([]string, len(val))
+		for i, loc := range val {
+			if locStr, ok := loc.(string); ok {
+				entry.Locale[i] = locStr
+			}
+		}
+	}
+	if val, ok := sourceData["supportArch"].([]interface{}); ok {
+		entry.SupportArch = make([]string, len(val))
+		for i, arch := range val {
+			if archStr, ok := arch.(string); ok {
+				entry.SupportArch[i] = archStr
+			}
+		}
+	}
+	if val, ok := sourceData["promoteImage"].([]interface{}); ok {
+		entry.PromoteImage = make([]string, len(val))
+		for i, img := range val {
+			if imgStr, ok := img.(string); ok {
+				entry.PromoteImage[i] = imgStr
+			}
+		}
+	}
+	if val, ok := sourceData["screenshots"].([]interface{}); ok {
+		entry.Screenshots = make([]string, len(val))
+		for i, screenshot := range val {
+			if screenshotStr, ok := screenshot.(string); ok {
+				entry.Screenshots[i] = screenshotStr
+			}
+		}
+	}
+	if val, ok := sourceData["tags"].([]interface{}); ok {
+		entry.Tags = make([]string, len(val))
+		for i, tag := range val {
+			if tagStr, ok := tag.(string); ok {
+				entry.Tags[i] = tagStr
+			}
+		}
+	}
+
+	// String fields
+	if val, ok := sourceData["fullDescription"].(string); ok && val != "" {
+		if entry.FullDescription == nil {
+			entry.FullDescription = make(map[string]string)
+		}
+		entry.FullDescription["en-US"] = val
+	}
+	if val, ok := sourceData["upgradeDescription"].(string); ok && val != "" {
+		if entry.UpgradeDescription == nil {
+			entry.UpgradeDescription = make(map[string]string)
+		}
+		entry.UpgradeDescription["en-US"] = val
+	}
+	if val, ok := sourceData["promoteVideo"].(string); ok && val != "" {
+		entry.PromoteVideo = val
+	}
+	if val, ok := sourceData["subCategory"].(string); ok && val != "" {
+		entry.SubCategory = val
+	}
+	if val, ok := sourceData["developer"].(string); ok && val != "" {
+		entry.Developer = val
+	}
+	if val, ok := sourceData["requiredMemory"].(string); ok && val != "" {
+		entry.RequiredMemory = val
+	}
+	if val, ok := sourceData["requiredDisk"].(string); ok && val != "" {
+		entry.RequiredDisk = val
+	}
+	if val, ok := sourceData["requiredGPU"].(string); ok && val != "" {
+		entry.RequiredGPU = val
+	}
+	if val, ok := sourceData["requiredCPU"].(string); ok && val != "" {
+		entry.RequiredCPU = val
+	}
+	if val, ok := sourceData["target"].(string); ok && val != "" {
+		entry.Target = val
+	}
+	if val, ok := sourceData["submitter"].(string); ok && val != "" {
+		entry.Submitter = val
+	}
+	if val, ok := sourceData["doc"].(string); ok && val != "" {
+		entry.Doc = val
+	}
+	if val, ok := sourceData["website"].(string); ok && val != "" {
+		entry.Website = val
+	}
+	if val, ok := sourceData["featuredImage"].(string); ok && val != "" {
+		entry.FeaturedImage = val
+	}
+	if val, ok := sourceData["sourceCode"].(string); ok && val != "" {
+		entry.SourceCode = val
+	}
+	if val, ok := sourceData["modelSize"].(string); ok && val != "" {
+		entry.ModelSize = val
+	}
+	if val, ok := sourceData["namespace"].(string); ok && val != "" {
+		entry.Namespace = val
+	}
+	if val, ok := sourceData["lastCommitHash"].(string); ok && val != "" {
+		entry.LastCommitHash = val
+	}
+	if val, ok := sourceData["updated_at"].(string); ok && val != "" {
+		entry.UpdatedAt = val
+	}
+
+	// Numeric fields
+	if val, ok := sourceData["rating"].(float64); ok {
+		entry.Rating = float32(val)
+	}
+	if val, ok := sourceData["createTime"].(int64); ok {
+		entry.CreateTime = val
+	}
+	if val, ok := sourceData["updateTime"].(int64); ok {
+		entry.UpdateTime = val
+	}
+
+	// Boolean fields
+	if val, ok := sourceData["onlyAdmin"].(bool); ok {
+		entry.OnlyAdmin = val
+	}
+
+	// Interface{} fields (complex objects)
+	if val, ok := sourceData["supportClient"].(map[string]interface{}); ok {
+		entry.SupportClient = val
+	}
+	if val, ok := sourceData["permission"].(map[string]interface{}); ok {
+		entry.Permission = val
+	}
+	if val, ok := sourceData["middleware"].(map[string]interface{}); ok {
+		entry.Middleware = val
+	}
+	if val, ok := sourceData["options"].(map[string]interface{}); ok {
+		entry.Options = val
+	}
+	if val, ok := sourceData["i18n"].(map[string]interface{}); ok {
+		entry.I18n = val
+	}
+	if val, ok := sourceData["variants"].(map[string]interface{}); ok {
+		entry.Variants = val
+	}
+	if val, ok := sourceData["metadata"].(map[string]interface{}); ok {
+		entry.Metadata = val
+	}
+	if val, ok := sourceData["count"].(interface{}); ok {
+		entry.Count = val
+	}
+
+	// Array of interface{} fields
+	if val, ok := sourceData["entrances"].([]interface{}); ok {
+		entry.Entrances = make([]map[string]interface{}, len(val))
+		for i, entrance := range val {
+			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+				entry.Entrances[i] = entranceMap
+			}
+		}
+	}
+	if val, ok := sourceData["license"].([]interface{}); ok {
+		entry.License = make([]map[string]interface{}, len(val))
+		for i, license := range val {
+			if licenseMap, ok := license.(map[string]interface{}); ok {
+				entry.License[i] = licenseMap
+			}
+		}
+	}
+	if val, ok := sourceData["legal"].([]interface{}); ok {
+		entry.Legal = make([]map[string]interface{}, len(val))
+		for i, legal := range val {
+			if legalMap, ok := legal.(map[string]interface{}); ok {
+				entry.Legal[i] = legalMap
+			}
+		}
+	}
+
+	// Handle legacy field names for backward compatibility
+	if val, ok := sourceData["app_id"].(string); ok && val != "" && entry.AppID == "" {
+		entry.AppID = val
+	}
+	if val, ok := sourceData["app_name"].(string); ok && val != "" && entry.Name == "" {
+		entry.Name = val
+	}
+	if val, ok := sourceData["app_version"].(string); ok && val != "" && entry.Version == "" {
+		entry.Version = val
+	}
+}
+
+// NewApplicationInfoEntry creates a complete ApplicationInfoEntry from source data
+// This function ensures all fields are properly mapped to avoid data loss
+func NewApplicationInfoEntry(sourceData map[string]interface{}) *ApplicationInfoEntry {
+	if sourceData == nil || len(sourceData) == 0 {
+		return nil
+	}
+
+	// Extract essential identifiers
+	var appID, appName string
+
+	if id, ok := sourceData["id"].(string); ok && id != "" {
+		appID = id
+	}
+	if name, ok := sourceData["name"].(string); ok && name != "" {
+		appName = name
+	}
+	if appID == "" {
+		if aid, ok := sourceData["appID"].(string); ok && aid != "" {
+			appID = aid
+		} else if aid, ok := sourceData["app_id"].(string); ok && aid != "" {
+			appID = aid
+		}
+	}
+	if appName == "" {
+		if title, ok := sourceData["title"].(string); ok && title != "" {
+			appName = title
+		}
+	}
+
+	// Ensure we have both ID and name
+	if appID == "" && appName != "" {
+		appID = appName
+	}
+	if appName == "" && appID != "" {
+		appName = appID
+	}
+
+	// If no essential data found, return nil
+	if appID == "" && appName == "" {
+		return nil
+	}
+
+	// Create the entry with basic initialization
+	entry := &ApplicationInfoEntry{
+		ID:                 appID,
+		AppID:              appID,
+		Name:               appName,
+		Title:              map[string]string{"en-US": appName}, // Initialize with default language
+		Description:        make(map[string]string),
+		FullDescription:    make(map[string]string),
+		UpgradeDescription: make(map[string]string),
+		CreateTime:         getCurrentTimestamp(),
+		UpdateTime:         getCurrentTimestamp(),
+		Metadata:           make(map[string]interface{}),
+	}
+
+	// Map all fields from source data
+	mapAllApplicationInfoEntryFields(sourceData, entry)
+
+	// Validate and fix AppLabels if needed
+	ValidateAndFixAppLabels(sourceData, entry)
+
+	// Store source data in metadata for reference
+	entry.Metadata["source_data"] = sourceData
+	entry.Metadata["creation_method"] = "NewApplicationInfoEntry"
+
+	return entry
+}
+
+// ValidateApplicationInfoEntryFields validates that all fields are properly mapped
+// This function helps identify any missing field mappings
+func ValidateApplicationInfoEntryFields(entry *ApplicationInfoEntry) map[string]interface{} {
+	if entry == nil {
+		return map[string]interface{}{"error": "entry is nil"}
+	}
+
+	validation := make(map[string]interface{})
+
+	// Check basic fields
+	validation["id"] = entry.ID
+	validation["name"] = entry.Name
+	validation["cfgType"] = entry.CfgType
+	validation["chartName"] = entry.ChartName
+	validation["icon"] = entry.Icon
+	validation["appID"] = entry.AppID
+	validation["version"] = entry.Version
+	validation["versionName"] = entry.VersionName
+
+	// Check multi-language fields
+	validation["description"] = entry.Description
+	validation["title"] = entry.Title
+	validation["fullDescription"] = entry.FullDescription
+	validation["upgradeDescription"] = entry.UpgradeDescription
+
+	// Check array fields
+	validation["categories"] = entry.Categories
+	validation["appLabels"] = entry.AppLabels
+	validation["locale"] = entry.Locale
+	validation["supportArch"] = entry.SupportArch
+	validation["promoteImage"] = entry.PromoteImage
+	validation["screenshots"] = entry.Screenshots
+	validation["tags"] = entry.Tags
+
+	// Check string fields
+	validation["promoteVideo"] = entry.PromoteVideo
+	validation["subCategory"] = entry.SubCategory
+	validation["developer"] = entry.Developer
+	validation["requiredMemory"] = entry.RequiredMemory
+	validation["requiredDisk"] = entry.RequiredDisk
+	validation["requiredGPU"] = entry.RequiredGPU
+	validation["requiredCPU"] = entry.RequiredCPU
+	validation["target"] = entry.Target
+	validation["submitter"] = entry.Submitter
+	validation["doc"] = entry.Doc
+	validation["website"] = entry.Website
+	validation["featuredImage"] = entry.FeaturedImage
+	validation["sourceCode"] = entry.SourceCode
+	validation["modelSize"] = entry.ModelSize
+	validation["namespace"] = entry.Namespace
+	validation["lastCommitHash"] = entry.LastCommitHash
+	validation["updated_at"] = entry.UpdatedAt
+
+	// Check numeric fields
+	validation["rating"] = entry.Rating
+	validation["createTime"] = entry.CreateTime
+	validation["updateTime"] = entry.UpdateTime
+
+	// Check boolean fields
+	validation["onlyAdmin"] = entry.OnlyAdmin
+
+	// Check interface{} fields
+	validation["supportClient"] = entry.SupportClient
+	validation["permission"] = entry.Permission
+	validation["middleware"] = entry.Middleware
+	validation["options"] = entry.Options
+	validation["i18n"] = entry.I18n
+	validation["variants"] = entry.Variants
+	validation["metadata"] = entry.Metadata
+	validation["count"] = entry.Count
+
+	// Check array of interface{} fields
+	validation["entrances"] = entry.Entrances
+	validation["license"] = entry.License
+	validation["legal"] = entry.Legal
+
+	return validation
+}
+
+// ExampleCompleteFieldMapping demonstrates how to use the complete field mapping
+// This function shows the proper way to create ApplicationInfoEntry without data loss
+func ExampleCompleteFieldMapping() {
+	// Sample source data with all possible fields
+	sampleData := map[string]interface{}{
+		"id":                 "example-app-123",
+		"name":               "Example Application",
+		"cfgType":            "app",
+		"chartName":          "example-chart",
+		"icon":               "https://example.com/icon.png",
+		"appID":              "example-app-123",
+		"version":            "1.0.0",
+		"versionName":        "First Release",
+		"description":        "This is an example application",
+		"title":              "Example App",
+		"fullDescription":    "This is a complete description of the example application",
+		"upgradeDescription": "This update includes new features",
+		"promoteImage":       []interface{}{"https://example.com/promo1.png", "https://example.com/promo2.png"},
+		"promoteVideo":       "https://example.com/video.mp4",
+		"subCategory":        "Development",
+		"locale":             []interface{}{"en-US", "zh-CN"},
+		"developer":          "Example Developer",
+		"requiredMemory":     "512Mi",
+		"requiredDisk":       "1Gi",
+		"supportClient":      map[string]interface{}{"chrome": ">=90", "edge": ">=90"},
+		"supportArch":        []interface{}{"amd64", "arm64"},
+		"requiredGPU":        "1Gi",
+		"requiredCPU":        "1",
+		"rating":             4.5,
+		"target":             "production",
+		"permission":         map[string]interface{}{"appData": true, "userData": []string{"read", "write"}},
+		"entrances":          []interface{}{map[string]interface{}{"name": "main", "host": "localhost", "port": 8080}},
+		"middleware":         map[string]interface{}{"postgres": map[string]interface{}{"enabled": true}},
+		"options":            map[string]interface{}{"policies": []interface{}{}},
+		"submitter":          "example@example.com",
+		"doc":                "https://example.com/docs",
+		"website":            "https://example.com",
+		"featuredImage":      "https://example.com/featured.png",
+		"sourceCode":         "https://github.com/example/app",
+		"license":            []interface{}{map[string]interface{}{"text": "MIT", "url": "https://opensource.org/licenses/MIT"}},
+		"legal":              []interface{}{map[string]interface{}{"text": "Terms of Service", "url": "https://example.com/terms"}},
+		"i18n":               map[string]interface{}{"en-US": map[string]interface{}{"metadata": map[string]interface{}{"title": "Example App"}}},
+		"modelSize":          "2GB",
+		"namespace":          "default",
+		"onlyAdmin":          false,
+		"lastCommitHash":     "abc123def456",
+		"createTime":         int64(1640995200),
+		"updateTime":         int64(1640995200),
+		"appLabels":          []interface{}{"featured", "recommended"},
+		"count":              42,
+		"variants":           map[string]interface{}{"user": map[string]interface{}{"name": "User Variant"}},
+		"screenshots":        []interface{}{"https://example.com/screenshot1.png"},
+		"tags":               []interface{}{"example", "demo"},
+		"categories":         []interface{}{"Development", "Tools"},
+		"metadata":           map[string]interface{}{"custom_field": "custom_value"},
+		"updated_at":         "2024-01-01T00:00:00Z",
+	}
+
+	// Create ApplicationInfoEntry using the complete field mapping
+	entry := NewApplicationInfoEntry(sampleData)
+	if entry == nil {
+		log.Printf("ERROR: Failed to create ApplicationInfoEntry")
+		return
+	}
+
+	// Validate that all fields are properly mapped
+	validation := ValidateApplicationInfoEntryFields(entry)
+
+	log.Printf("SUCCESS: ApplicationInfoEntry created with %d fields", len(validation))
+	log.Printf("Sample field values:")
+	log.Printf("  ID: %s", entry.ID)
+	log.Printf("  Name: %s", entry.Name)
+	log.Printf("  Version: %s", entry.Version)
+	log.Printf("  Rating: %f", entry.Rating)
+	log.Printf("  Categories: %v", entry.Categories)
+	log.Printf("  RequiredMemory: %s", entry.RequiredMemory)
+	log.Printf("  SupportClient: %v", entry.SupportClient)
+}
+
+// DebugAppLabelsFlow helps debug AppLabels data flow through the system
+func DebugAppLabelsFlow(sourceData map[string]interface{}, entry *ApplicationInfoEntry, stage string) {
+	log.Printf("DEBUG: AppLabels Flow - Stage: %s", stage)
+
+	// Check source data
+	if sourceData != nil {
+		if appLabels, ok := sourceData["appLabels"].([]interface{}); ok {
+			log.Printf("DEBUG: Source data AppLabels: %v (type: %T, length: %d)", appLabels, appLabels, len(appLabels))
+		} else {
+			log.Printf("DEBUG: Source data AppLabels: not found or wrong type")
+		}
+	} else {
+		log.Printf("DEBUG: Source data is nil")
+	}
+
+	// Check entry
+	if entry != nil {
+		log.Printf("DEBUG: Entry AppLabels: %v (type: %T, length: %d)", entry.AppLabels, entry.AppLabels, len(entry.AppLabels))
+		if len(entry.AppLabels) > 0 {
+			for i, label := range entry.AppLabels {
+				log.Printf("DEBUG: Entry AppLabels[%d]: %s", i, label)
+			}
+		}
+	} else {
+		log.Printf("DEBUG: Entry is nil")
+	}
+
+	log.Printf("DEBUG: AppLabels Flow - Stage: %s - END", stage)
+}
+
+// ValidateAndFixAppLabels ensures AppLabels are properly set and not lost
+func ValidateAndFixAppLabels(sourceData map[string]interface{}, entry *ApplicationInfoEntry) {
+	if entry == nil {
+		return
+	}
+
+	// Initialize AppLabels if nil
+	if entry.AppLabels == nil {
+		entry.AppLabels = make([]string, 0)
+	}
+
+	// Check if AppLabels are missing but should be present in source data
+	if len(entry.AppLabels) == 0 {
+		if sourceData != nil {
+			if appLabels, ok := sourceData["appLabels"].([]interface{}); ok && len(appLabels) > 0 {
+				// Re-map AppLabels from source data
+				entry.AppLabels = make([]string, len(appLabels))
+				for i, label := range appLabels {
+					if labelStr, ok := label.(string); ok {
+						entry.AppLabels[i] = labelStr
+					}
+				}
+				log.Printf("DEBUG: Fixed missing AppLabels from source data: %v", entry.AppLabels)
+			}
+		}
+	}
+
+	// Check metadata for stored AppLabels
+	if len(entry.AppLabels) == 0 && entry.Metadata != nil {
+		if sourceAppData, ok := entry.Metadata["source_app_data"].(map[string]interface{}); ok {
+			if appLabels, ok := sourceAppData["appLabels"].([]interface{}); ok && len(appLabels) > 0 {
+				entry.AppLabels = make([]string, len(appLabels))
+				for i, label := range appLabels {
+					if labelStr, ok := label.(string); ok {
+						entry.AppLabels[i] = labelStr
+					}
+				}
+				log.Printf("DEBUG: Fixed missing AppLabels from metadata: %v", entry.AppLabels)
+			}
+		}
+	}
+}
+
+// TestAppLabelsFix demonstrates the AppLabels fix functionality
+func TestAppLabelsFix() {
+	// Test case 1: AppLabels in source data
+	testData1 := map[string]interface{}{
+		"id":        "test-app-1",
+		"name":      "Test App 1",
+		"appLabels": []interface{}{"featured", "recommended", "suspend"},
+	}
+
+	entry1 := NewApplicationInfoEntry(testData1)
+	log.Printf("TEST 1: AppLabels from source data: %v", entry1.AppLabels)
+
+	// Test case 2: AppLabels in metadata
+	testData2 := map[string]interface{}{
+		"id":        "test-app-2",
+		"name":      "Test App 2",
+		"appLabels": []interface{}{"remove", "nsfw"},
+	}
+
+	entry2 := &ApplicationInfoEntry{
+		ID:        "test-app-2",
+		Name:      "Test App 2",
+		AppLabels: []string{}, // Empty AppLabels
+		Metadata: map[string]interface{}{
+			"source_app_data": testData2,
+		},
+	}
+
+	ValidateAndFixAppLabels(nil, entry2)
+	log.Printf("TEST 2: AppLabels from metadata: %v", entry2.AppLabels)
+
+	// Test case 3: No AppLabels
+	testData3 := map[string]interface{}{
+		"id":   "test-app-3",
+		"name": "Test App 3",
+	}
+
+	entry3 := NewApplicationInfoEntry(testData3)
+	log.Printf("TEST 3: No AppLabels: %v", entry3.AppLabels)
 }

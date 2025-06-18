@@ -155,7 +155,7 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 	// In development environment, limit the original data to only 2 apps
 	if isDevelopmentEnvironment() {
 		originalCount := len(appsMap)
-		if originalCount > 2 {
+		if originalCount > 200 {
 			log.Printf("Development environment detected, limiting original apps data to 2 (original count: %d)", originalCount)
 
 			// Create a new map with only the first 2 apps

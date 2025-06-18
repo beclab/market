@@ -317,15 +317,16 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 		Name:       cleanedName,
 		AnalyzedAt: time.Now(),
 		Status:     "not_downloaded",
+		Nodes:      make([]*types.NodeInfo, 0),
 	}
 
 	// Check if this is a private image
-	if s.isPrivateImage(cleanedName) {
-		imageInfo.Status = "private_registry"
-		imageInfo.ErrorMessage = "Private registry image, analysis limited"
-		log.Printf("Detected private registry image: %s", cleanedName)
-		return imageInfo, nil
-	}
+	// if s.isPrivateImage(cleanedName) {
+	// 	imageInfo.Status = "private_registry"
+	// 	imageInfo.ErrorMessage = "Private registry image, analysis limited"
+	// 	log.Printf("Detected private registry image: %s", cleanedName)
+	// 	return imageInfo, nil
+	// }
 
 	// Get Docker image info from registry
 	dockerImageInfo, err := utils.GetDockerImageInfo(imageName)
@@ -346,53 +347,86 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 	imageInfo.Architecture = dockerImageInfo.Architecture
 	imageInfo.TotalSize = dockerImageInfo.TotalSize
 	imageInfo.CreatedAt = dockerImageInfo.CreatedAt
-	imageInfo.LayerCount = len(dockerImageInfo.Layers)
 
-	// Analyze each layer
-	layers := make([]*types.LayerInfo, 0, len(dockerImageInfo.Layers))
-	var totalDownloaded int64
-	var downloadedLayers int
-
-	for _, layer := range dockerImageInfo.Layers {
-		layerInfo := &types.LayerInfo{
-			Digest:    layer.Digest,
-			Size:      layer.Size,
-			MediaType: layer.MediaType,
-		}
-
-		// Get layer download progress
-		if layerProgress, err := utils.GetLayerDownloadProgress(layer.Digest); err == nil {
-			layerInfo.Downloaded = layerProgress.Downloaded
-			layerInfo.Progress = layerProgress.Progress
-			layerInfo.LocalPath = layerProgress.LocalPath
-
-			if layerProgress.Downloaded {
-				downloadedLayers++
-				totalDownloaded += layer.Size
-			}
-		} else {
-			log.Printf("Warning: failed to get layer progress for %s: %v", layer.Digest, err)
-		}
-
-		layers = append(layers, layerInfo)
+	// Calculate total layer count across all nodes
+	totalLayerCount := 0
+	for _, node := range dockerImageInfo.Nodes {
+		totalLayerCount += node.LayerCount
 	}
+	imageInfo.LayerCount = totalLayerCount
 
-	imageInfo.Layers = layers
-	imageInfo.DownloadedSize = totalDownloaded
-	imageInfo.DownloadedLayers = downloadedLayers
+	// Check if we're in production environment using environment variable
+	isProduction := !utils.IsDevelopmentEnvironment()
 
-	// Calculate download progress
-	if imageInfo.TotalSize > 0 {
-		imageInfo.DownloadProgress = float64(totalDownloaded) / float64(imageInfo.TotalSize) * 100
-	}
-
-	// Determine overall status
-	if downloadedLayers == len(layers) {
-		imageInfo.Status = "fully_downloaded"
-	} else if downloadedLayers > 0 {
-		imageInfo.Status = "partially_downloaded"
+	if isProduction {
+		// Production environment: use offset-based analysis with node information
+		log.Printf("Production environment detected, using offset-based analysis for %s", imageName)
+		s.analyzeLocalLayersWithOffsetAndNodes(imageInfo, imageName)
 	} else {
-		imageInfo.Status = "not_downloaded"
+		// Development environment: use traditional local layer checking
+		log.Printf("Development environment detected, using traditional local layer checking for %s", imageName)
+
+		// Process each node from DockerImageInfo
+		for _, dockerNode := range dockerImageInfo.Nodes {
+			nodeInfo := &types.NodeInfo{
+				NodeName:     dockerNode.NodeName,
+				Architecture: dockerNode.Architecture,
+				Variant:      dockerNode.Variant,
+				OS:           dockerNode.OS,
+				Layers:       make([]*types.LayerInfo, 0, len(dockerNode.Layers)),
+				LayerCount:   len(dockerNode.Layers),
+			}
+
+			var nodeDownloaded int64
+			var nodeDownloadedLayers int
+
+			for _, layer := range dockerNode.Layers {
+				layerInfo := &types.LayerInfo{
+					Digest:    layer.Digest,
+					Size:      layer.Size,
+					MediaType: layer.MediaType,
+					Offset:    layer.Offset, // Add offset from API response
+				}
+
+				// Get layer download progress
+				if layerProgress, err := utils.GetLayerDownloadProgress(layer.Digest); err == nil {
+					layerInfo.Downloaded = layerProgress.Downloaded
+					layerInfo.Progress = layerProgress.Progress
+					layerInfo.LocalPath = layerProgress.LocalPath
+
+					if layerProgress.Downloaded {
+						nodeDownloadedLayers++
+						nodeDownloaded += layer.Size
+					}
+				} else {
+					log.Printf("Warning: failed to get layer progress for %s: %v", layer.Digest, err)
+				}
+
+				nodeInfo.Layers = append(nodeInfo.Layers, layerInfo)
+			}
+
+			nodeInfo.DownloadedSize = nodeDownloaded
+			nodeInfo.DownloadedLayers = nodeDownloadedLayers
+			nodeInfo.TotalSize = dockerNode.TotalSize
+
+			imageInfo.Nodes = append(imageInfo.Nodes, nodeInfo)
+			imageInfo.DownloadedSize += nodeDownloaded
+			imageInfo.DownloadedLayers += nodeDownloadedLayers
+		}
+
+		// Calculate download progress
+		if imageInfo.TotalSize > 0 {
+			imageInfo.DownloadProgress = float64(imageInfo.DownloadedSize) / float64(imageInfo.TotalSize) * 100
+		}
+
+		// Determine overall status
+		if imageInfo.DownloadedLayers == imageInfo.LayerCount {
+			imageInfo.Status = "fully_downloaded"
+		} else if imageInfo.DownloadedLayers > 0 {
+			imageInfo.Status = "partially_downloaded"
+		} else {
+			imageInfo.Status = "not_downloaded"
+		}
 	}
 
 	return imageInfo, nil
@@ -413,16 +447,217 @@ func (s *ImageAnalysisStep) analyzeLocalLayers(imageInfo *types.ImageInfo, image
 					LocalPath:  layerProgress.LocalPath,
 					Size:       layerProgress.Size,
 				}
-				imageInfo.Layers = []*types.LayerInfo{layer}
+
+				// Create a single node for local analysis
+				nodeInfo := &types.NodeInfo{
+					NodeName:         "local",
+					Layers:           []*types.LayerInfo{layer},
+					LayerCount:       1,
+					DownloadedSize:   0,
+					DownloadedLayers: 0,
+				}
+
+				if layer.Downloaded {
+					nodeInfo.DownloadedLayers = 1
+					nodeInfo.DownloadedSize = layer.Size
+					imageInfo.Status = "fully_downloaded"
+				}
+
+				imageInfo.Nodes = append(imageInfo.Nodes, nodeInfo)
 				imageInfo.LayerCount = 1
 				if layer.Downloaded {
 					imageInfo.DownloadedLayers = 1
 					imageInfo.DownloadedSize = layer.Size
-					imageInfo.Status = "fully_downloaded"
 				}
 			}
 		}
 	}
+}
+
+// analyzeLocalLayersWithOffset analyzes local layers using offset and size information from API
+func (s *ImageAnalysisStep) analyzeLocalLayersWithOffset(imageInfo *types.ImageInfo, layers []utils.LayerInfo) {
+	log.Printf("Analyzing local layers with offset information for image: %s", imageInfo.Name)
+
+	// For production environment, we need to get the actual API response to get node information
+	// Since we don't have node information in the current layers, we'll create a single node
+	// In a real implementation, you would need to modify the API call to return node information
+
+	nodeInfo := &types.NodeInfo{
+		NodeName:   "production",
+		Layers:     make([]*types.LayerInfo, 0, len(layers)),
+		LayerCount: len(layers),
+	}
+
+	var totalDownloaded int64
+	var downloadedLayers int
+
+	for _, layer := range layers {
+		// Use offset-based progress calculation for production environment
+		if layerProgress, err := utils.GetLayerDownloadProgressByOffset(layer.Digest, layer.Offset, layer.Size); err == nil {
+			typesLayer := &types.LayerInfo{
+				Digest:     layer.Digest,
+				Size:       layer.Size,
+				MediaType:  layer.MediaType,
+				Offset:     layer.Offset,
+				Downloaded: layerProgress.Downloaded,
+				Progress:   layerProgress.Progress,
+				LocalPath:  layerProgress.LocalPath,
+			}
+
+			if layerProgress.Downloaded {
+				downloadedLayers++
+				totalDownloaded += layer.Size
+			}
+
+			nodeInfo.Layers = append(nodeInfo.Layers, typesLayer)
+			log.Printf("Layer %s: offset=%d, size=%d, progress=%d%%, downloaded=%v",
+				layer.Digest, layer.Offset, layer.Size, layerProgress.Progress, layerProgress.Downloaded)
+		} else {
+			log.Printf("Warning: failed to calculate layer progress for %s: %v", layer.Digest, err)
+			// Create basic layer info even if progress calculation fails
+			typesLayer := &types.LayerInfo{
+				Digest:     layer.Digest,
+				Size:       layer.Size,
+				MediaType:  layer.MediaType,
+				Offset:     layer.Offset,
+				Downloaded: false,
+				Progress:   0,
+			}
+			nodeInfo.Layers = append(nodeInfo.Layers, typesLayer)
+		}
+	}
+
+	nodeInfo.DownloadedSize = totalDownloaded
+	nodeInfo.DownloadedLayers = downloadedLayers
+	nodeInfo.TotalSize = imageInfo.TotalSize
+
+	imageInfo.Nodes = append(imageInfo.Nodes, nodeInfo)
+	imageInfo.LayerCount = len(layers)
+	imageInfo.DownloadedSize = totalDownloaded
+	imageInfo.DownloadedLayers = downloadedLayers
+
+	// Calculate download progress
+	if imageInfo.TotalSize > 0 {
+		imageInfo.DownloadProgress = float64(totalDownloaded) / float64(imageInfo.TotalSize) * 100
+	}
+
+	// Determine overall status
+	if downloadedLayers == len(layers) {
+		imageInfo.Status = "fully_downloaded"
+	} else if downloadedLayers > 0 {
+		imageInfo.Status = "partially_downloaded"
+	} else {
+		imageInfo.Status = "not_downloaded"
+	}
+
+	log.Printf("Image %s analysis completed: %d/%d layers downloaded, %.2f%% progress",
+		imageInfo.Name, downloadedLayers, len(layers), imageInfo.DownloadProgress)
+}
+
+// analyzeLocalLayersWithOffsetAndNodes analyzes local layers using offset and size information from API with node information
+func (s *ImageAnalysisStep) analyzeLocalLayersWithOffsetAndNodes(imageInfo *types.ImageInfo, imageName string) {
+	log.Printf("Analyzing local layers with offset and node information for image: %s", imageName)
+
+	// Get the complete API response with node information
+	apiResponse, err := utils.GetImageInfoAPIResponse(imageName)
+	if err != nil {
+		log.Printf("Warning: failed to get API response with node information: %v", err)
+		// Fallback to single node analysis
+		s.analyzeLocalLayersWithOffset(imageInfo, []utils.LayerInfo{})
+		return
+	}
+
+	var totalDownloaded int64
+	var totalDownloadedLayers int
+	var totalLayers int
+
+	// Process each node from the API response
+	for _, nodeImage := range apiResponse.Images {
+		nodeInfo := &types.NodeInfo{
+			NodeName:     nodeImage.Node,
+			Architecture: nodeImage.Architecture,
+			Variant:      nodeImage.Variant,
+			OS:           nodeImage.OS,
+			Layers:       make([]*types.LayerInfo, 0, len(nodeImage.LayersData)),
+			LayerCount:   len(nodeImage.LayersData),
+		}
+
+		var nodeDownloaded int64
+		var nodeDownloadedLayers int
+
+		for _, layer := range nodeImage.LayersData {
+			// Use offset-based progress calculation for production environment
+			if layerProgress, err := utils.GetLayerDownloadProgressByOffset(layer.Digest, layer.Offset, layer.Size); err == nil {
+				typesLayer := &types.LayerInfo{
+					Digest:     layer.Digest,
+					Size:       layer.Size,
+					MediaType:  layer.MediaType,
+					Offset:     layer.Offset,
+					Downloaded: layerProgress.Downloaded,
+					Progress:   layerProgress.Progress,
+					LocalPath:  layerProgress.LocalPath,
+				}
+
+				if layerProgress.Downloaded {
+					nodeDownloadedLayers++
+					nodeDownloaded += layer.Size
+				}
+
+				nodeInfo.Layers = append(nodeInfo.Layers, typesLayer)
+				log.Printf("Node %s, Layer %s: offset=%d, size=%d, progress=%d%%, downloaded=%v",
+					nodeImage.Node, layer.Digest, layer.Offset, layer.Size, layerProgress.Progress, layerProgress.Downloaded)
+			} else {
+				log.Printf("Warning: failed to calculate layer progress for %s: %v", layer.Digest, err)
+				// Create basic layer info even if progress calculation fails
+				typesLayer := &types.LayerInfo{
+					Digest:     layer.Digest,
+					Size:       layer.Size,
+					MediaType:  layer.MediaType,
+					Offset:     layer.Offset,
+					Downloaded: false,
+					Progress:   0,
+				}
+				nodeInfo.Layers = append(nodeInfo.Layers, typesLayer)
+			}
+		}
+
+		nodeInfo.DownloadedSize = nodeDownloaded
+		nodeInfo.DownloadedLayers = nodeDownloadedLayers
+		nodeInfo.TotalSize = nodeInfo.DownloadedSize // This will be updated with actual total size
+
+		// Calculate node total size
+		var nodeTotalSize int64
+		for _, layer := range nodeImage.LayersData {
+			nodeTotalSize += layer.Size
+		}
+		nodeInfo.TotalSize = nodeTotalSize
+
+		imageInfo.Nodes = append(imageInfo.Nodes, nodeInfo)
+		totalDownloaded += nodeDownloaded
+		totalDownloadedLayers += nodeDownloadedLayers
+		totalLayers += len(nodeImage.LayersData)
+	}
+
+	imageInfo.LayerCount = totalLayers
+	imageInfo.DownloadedSize = totalDownloaded
+	imageInfo.DownloadedLayers = totalDownloadedLayers
+
+	// Calculate download progress across all nodes
+	if imageInfo.TotalSize > 0 {
+		imageInfo.DownloadProgress = float64(totalDownloaded) / float64(imageInfo.TotalSize) * 100
+	}
+
+	// Determine overall status
+	if totalDownloadedLayers == totalLayers {
+		imageInfo.Status = "fully_downloaded"
+	} else if totalDownloadedLayers > 0 {
+		imageInfo.Status = "partially_downloaded"
+	} else {
+		imageInfo.Status = "not_downloaded"
+	}
+
+	log.Printf("Image %s analysis completed: %d/%d layers downloaded across %d nodes, %.2f%% progress",
+		imageInfo.Name, totalDownloadedLayers, totalLayers, len(imageInfo.Nodes), imageInfo.DownloadProgress)
 }
 
 // saveImageAnalysis saves the image analysis result to a JSON file
