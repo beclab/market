@@ -952,6 +952,9 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	// Copy RawData directly (same type: *ApplicationInfoEntry)
 	if pendingApp.RawData != nil {
 		latestApp.RawData = pendingApp.RawData
+
+		// Validate and fix AppLabels if needed
+		types.ValidateAndFixAppLabels(nil, latestApp.RawData)
 	}
 
 	// Copy package information

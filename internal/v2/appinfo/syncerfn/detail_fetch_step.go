@@ -112,12 +112,13 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		Version: d.Version,
 	}
 
-	var response types.AppsInfoResponse
+	// Use map[string]interface{} to avoid type mismatch with multi-language fields
+	var rawResponse map[string]interface{}
 
 	resp, err := data.Client.R().
 		SetContext(ctx).
 		SetBody(request).
-		SetResult(&response).
+		SetResult(&rawResponse).
 		Post(detailURL)
 
 	if err != nil {
@@ -133,91 +134,107 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		// Success - process the apps and replace simplified data with detailed data
 		data.mutex.Lock()
 
-		// Update the original LatestData with detailed information
-		if data.LatestData != nil && data.LatestData.Data.Apps != nil {
-			for appID, appInfo := range response.Apps {
-				// Replace the simplified app data with detailed data in LatestData
-				detailedAppData := map[string]interface{}{
-					// Basic fields
-					"id":          appInfo.ID,
-					"name":        appInfo.Name,
-					"cfgType":     appInfo.CfgType,
-					"chartName":   appInfo.ChartName,
-					"icon":        appInfo.Icon,
-					"description": appInfo.Description,
-					"appID":       appInfo.AppID,
-					"title":       appInfo.Title,
-					"version":     appInfo.Version,
-					"categories":  appInfo.Categories,
-					"versionName": appInfo.VersionName,
+		// Extract apps from raw response
+		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
+			// Update the original LatestData with detailed information
+			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
+				for appID, appData := range appsData {
+					if appInfoMap, ok := appData.(map[string]interface{}); ok {
+						// Replace the simplified app data with detailed data in LatestData
+						detailedAppData := map[string]interface{}{
+							// Basic fields
+							"id":        appInfoMap["id"],
+							"name":      appInfoMap["name"],
+							"cfgType":   appInfoMap["cfgType"],
+							"chartName": appInfoMap["chartName"],
+							"icon":      appInfoMap["icon"],
+							// Skip multi-language fields to avoid type mismatch
+							// "description": appInfoMap["description"],
+							"appID": appInfoMap["appID"],
+							// "title":       appInfoMap["title"],
+							"version":     appInfoMap["version"],
+							"categories":  appInfoMap["categories"],
+							"versionName": appInfoMap["versionName"],
 
-					// Extended fields
-					"fullDescription":    appInfo.FullDescription,
-					"upgradeDescription": appInfo.UpgradeDescription,
-					"promoteImage":       appInfo.PromoteImage,
-					"promoteVideo":       appInfo.PromoteVideo,
-					"subCategory":        appInfo.SubCategory,
-					"locale":             appInfo.Locale,
-					"developer":          appInfo.Developer,
-					"requiredMemory":     appInfo.RequiredMemory,
-					"requiredDisk":       appInfo.RequiredDisk,
-					"supportClient":      appInfo.SupportClient,
-					"supportArch":        appInfo.SupportArch,
-					"requiredGPU":        appInfo.RequiredGPU,
-					"requiredCPU":        appInfo.RequiredCPU,
-					"rating":             appInfo.Rating,
-					"target":             appInfo.Target,
-					"permission":         appInfo.Permission,
-					"entrances":          appInfo.Entrances,
-					"middleware":         appInfo.Middleware,
-					"options":            appInfo.Options,
+							// Extended fields - skip multi-language fields
+							// "fullDescription":    appInfoMap["fullDescription"],
+							// "upgradeDescription": appInfoMap["upgradeDescription"],
+							"promoteImage":   appInfoMap["promoteImage"],
+							"promoteVideo":   appInfoMap["promoteVideo"],
+							"subCategory":    appInfoMap["subCategory"],
+							"locale":         appInfoMap["locale"],
+							"developer":      appInfoMap["developer"],
+							"requiredMemory": appInfoMap["requiredMemory"],
+							"requiredDisk":   appInfoMap["requiredDisk"],
+							"supportClient":  appInfoMap["supportClient"],
+							"supportArch":    appInfoMap["supportArch"],
+							"requiredGPU":    appInfoMap["requiredGPU"],
+							"requiredCPU":    appInfoMap["requiredCPU"],
+							"rating":         appInfoMap["rating"],
+							"target":         appInfoMap["target"],
+							"permission":     appInfoMap["permission"],
+							"entrances":      appInfoMap["entrances"],
+							"middleware":     appInfoMap["middleware"],
+							"options":        appInfoMap["options"],
 
-					// Additional metadata fields
-					"submitter":     appInfo.Submitter,
-					"doc":           appInfo.Doc,
-					"website":       appInfo.Website,
-					"featuredImage": appInfo.FeaturedImage,
-					"sourceCode":    appInfo.SourceCode,
-					"license":       appInfo.License,
-					"legal":         appInfo.Legal,
-					"i18n":          appInfo.I18n,
+							// Additional metadata fields
+							"submitter":     appInfoMap["submitter"],
+							"doc":           appInfoMap["doc"],
+							"website":       appInfoMap["website"],
+							"featuredImage": appInfoMap["featuredImage"],
+							"sourceCode":    appInfoMap["sourceCode"],
+							"license":       appInfoMap["license"],
+							"legal":         appInfoMap["legal"],
+							"i18n":          appInfoMap["i18n"],
 
-					"modelSize": appInfo.ModelSize,
-					"namespace": appInfo.Namespace,
-					"onlyAdmin": appInfo.OnlyAdmin,
+							"modelSize": appInfoMap["modelSize"],
+							"namespace": appInfoMap["namespace"],
+							"onlyAdmin": appInfoMap["onlyAdmin"],
 
-					"lastCommitHash": appInfo.LastCommitHash,
-					"createTime":     appInfo.CreateTime,
-					"updateTime":     appInfo.UpdateTime,
-					"appLabels":      appInfo.AppLabels,
-					"count":          appInfo.Count,
-					"variants":       appInfo.Variants,
+							"lastCommitHash": appInfoMap["lastCommitHash"],
+							"createTime":     appInfoMap["createTime"],
+							"updateTime":     appInfoMap["updateTime"],
+							"appLabels":      appInfoMap["appLabels"],
+							"count":          appInfoMap["count"],
+							"variants":       appInfoMap["variants"],
 
-					// Legacy fields for backward compatibility
-					"screenshots": appInfo.Screenshots,
-					"tags":        appInfo.Tags,
-					"metadata":    appInfo.Metadata,
-					"updated_at":  appInfo.UpdatedAt,
+							// Legacy fields for backward compatibility
+							"screenshots": appInfoMap["screenshots"],
+							"tags":        appInfoMap["tags"],
+							"metadata":    appInfoMap["metadata"],
+							"updated_at":  appInfoMap["updated_at"],
+						}
+
+						data.LatestData.Data.Apps[appID] = detailedAppData
+
+						// Also store in DetailedApps for backward compatibility
+						data.DetailedApps[appID] = detailedAppData
+
+						// log.Printf("DetailedAppData: %v", detailedAppData)
+
+						// Log the main app information with more details
+						log.Printf("Replaced app data with details - ID: %s, Name: %s, Version: %s",
+							appInfoMap["id"], appInfoMap["name"], appInfoMap["version"])
+					}
 				}
-
-				data.LatestData.Data.Apps[appID] = detailedAppData
-
-				// Also store in DetailedApps for backward compatibility
-				data.DetailedApps[appID] = detailedAppData
-
-				// Log the main app information with more details
-				log.Printf("Replaced app data with details - ID: %s, Name: %s, Title: %s, Version: %s, Categories: %v, Developer: %s, UpdatedAt: %s",
-					appInfo.ID, appInfo.Name, appInfo.Title, appInfo.Version, appInfo.Categories, appInfo.Developer, appInfo.UpdatedAt)
 			}
 		}
 
 		data.mutex.Unlock()
 
-		successCount := len(response.Apps)
-		errorCount := len(response.NotFound)
+		// Count successful and failed apps
+		successCount := 0
+		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
+			successCount = len(appsData)
+		}
 
-		if len(response.NotFound) > 0 {
-			log.Printf("WARNING: Apps not found in batch: %v", response.NotFound)
+		errorCount := 0
+		if notFound, ok := rawResponse["not_found"].([]interface{}); ok {
+			errorCount = len(notFound)
+		}
+
+		if errorCount > 0 {
+			log.Printf("WARNING: Apps not found in batch: %v", rawResponse["not_found"])
 		}
 
 		log.Printf("Successfully fetched and replaced details for %d/%d apps in batch", successCount, len(appIDs))
@@ -225,7 +242,11 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 	case 202:
 		// Accepted - data is being loaded
-		errMsg := fmt.Errorf("data is being loaded for version %s, batch: %v - %s", d.Version, appIDs, response.Message)
+		message := ""
+		if msg, ok := rawResponse["message"].(string); ok {
+			message = msg
+		}
+		errMsg := fmt.Errorf("data is being loaded for version %s, batch: %v - %s", d.Version, appIDs, message)
 		data.AddError(errMsg)
 		log.Printf("WARNING: %v", errMsg)
 		return 0, len(appIDs)
