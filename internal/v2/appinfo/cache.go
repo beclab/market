@@ -264,9 +264,17 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		appData.Timestamp = time.Now().Unix()
 		sourceData.AppInfoHistory = append(sourceData.AppInfoHistory, appData)
 	case AppStateLatest:
-		appData := NewAppStateLatestData(data)
-		appData.Timestamp = time.Now().Unix()
-		sourceData.AppStateLatest = append(sourceData.AppStateLatest, appData)
+		// Check if this is a list of app states
+		if appStatesData, hasAppStates := data["app_states"].([]*types.AppStateLatestData); hasAppStates {
+			// Clear existing app state data and set new ones
+			sourceData.AppStateLatest = appStatesData
+			glog.Infof("Set %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
+		} else {
+			// Fallback to old logic for backward compatibility
+			appData := NewAppStateLatestData(data)
+			sourceData.AppStateLatest = append(sourceData.AppStateLatest, appData)
+			glog.Infof("Added single app state for user=%s, source=%s", userID, sourceID)
+		}
 	case AppInfoLatest:
 		appData := NewAppInfoLatestData(data)
 		if appData == nil {

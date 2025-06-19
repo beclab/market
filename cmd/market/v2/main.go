@@ -15,6 +15,7 @@ import (
 	"market/internal/v2/history"
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
+	"market/internal/v2/types"
 	"market/internal/v2/utils"
 	"market/pkg/v2/api"
 	"market/pkg/v2/helm"
@@ -37,6 +38,35 @@ func createAppInfoConfigWithUsers(users []string) *appinfo.ModuleConfig {
 	}
 
 	return config
+}
+
+// loadAppStateDataToUserSource loads app state data from pre-startup step into user's official source
+func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
+	// Get all user app state data from pre-startup step
+	allUserAppStateData := utils.GetAllUserAppStateData()
+
+	if len(allUserAppStateData) == 0 {
+		log.Println("No app state data found from pre-startup step")
+		return
+	}
+
+	log.Printf("Loading app state data for %d users", len(allUserAppStateData))
+
+	// For each user, load their app state data into the official source
+	for userID, appStateDataList := range allUserAppStateData {
+		log.Printf("Loading %d app states for user: %s", len(appStateDataList), userID)
+
+		// Set app state data for the user's official source
+		err := appInfoModule.SetAppData(userID, "Official-Market-Sources", types.AppStateLatest, map[string]interface{}{
+			"app_states": appStateDataList,
+		})
+
+		if err != nil {
+			log.Printf("Failed to load app state data for user %s: %v", userID, err)
+		} else {
+			log.Printf("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
+		}
+	}
 }
 
 func main() {
@@ -101,6 +131,11 @@ func main() {
 		log.Fatalf("Failed to start AppInfo module: %v", err)
 	}
 	log.Println("AppInfo module started successfully")
+
+	// Load app state data into user's official source
+	log.Println("Loading app state data into user's official source...")
+	loadAppStateDataToUserSource(appInfoModule)
+	log.Println("App state data loaded successfully")
 
 	// Get cacheManager for HTTP server
 	log.Printf("Getting cache manager for HTTP server...")

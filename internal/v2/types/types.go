@@ -108,10 +108,19 @@ type AppInfoHistoryData struct {
 
 // AppStateLatestData contains latest app state data
 type AppStateLatestData struct {
-	Type      AppDataType            `json:"type"`
-	Data      map[string]interface{} `json:"data"`
-	Timestamp int64                  `json:"timestamp"`
-	Version   string                 `json:"version,omitempty"`
+	Type   AppDataType `json:"type"`
+	Status struct {
+		State              string `json:"state"`
+		UpdateTime         string `json:"updateTime"`
+		StatusTime         string `json:"statusTime"`
+		LastTransitionTime string `json:"lastTransitionTime"`
+		EntranceStatuses   []struct {
+			Name       string `json:"name"`
+			State      string `json:"state"`
+			StatusTime string `json:"statusTime"`
+			Reason     string `json:"reason"`
+		} `json:"entranceStatuses"`
+	} `json:"status"`
 }
 
 // AppInfoLatestData contains latest app info data
@@ -405,10 +414,74 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 
 // NewAppStateLatestData creates a new app state latest data structure
 func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
+	// Extract status information from data
+	var state, updateTime, statusTime, lastTransitionTime string
+	var entranceStatuses []struct {
+		Name       string `json:"name"`
+		State      string `json:"state"`
+		StatusTime string `json:"statusTime"`
+		Reason     string `json:"reason"`
+	}
+
+	if stateVal, ok := data["state"].(string); ok {
+		state = stateVal
+	}
+	if updateTimeVal, ok := data["updateTime"].(string); ok {
+		updateTime = updateTimeVal
+	}
+	if statusTimeVal, ok := data["statusTime"].(string); ok {
+		statusTime = statusTimeVal
+	}
+	if lastTransitionTimeVal, ok := data["lastTransitionTime"].(string); ok {
+		lastTransitionTime = lastTransitionTimeVal
+	}
+
+	if entranceStatusesVal, ok := data["entranceStatuses"].([]interface{}); ok {
+		entranceStatuses = make([]struct {
+			Name       string `json:"name"`
+			State      string `json:"state"`
+			StatusTime string `json:"statusTime"`
+			Reason     string `json:"reason"`
+		}, len(entranceStatusesVal))
+
+		for i, entrance := range entranceStatusesVal {
+			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+				if name, ok := entranceMap["name"].(string); ok {
+					entranceStatuses[i].Name = name
+				}
+				if entranceState, ok := entranceMap["state"].(string); ok {
+					entranceStatuses[i].State = entranceState
+				}
+				if entranceStatusTime, ok := entranceMap["statusTime"].(string); ok {
+					entranceStatuses[i].StatusTime = entranceStatusTime
+				}
+				if reason, ok := entranceMap["reason"].(string); ok {
+					entranceStatuses[i].Reason = reason
+				}
+			}
+		}
+	}
+
 	return &AppStateLatestData{
-		Type:      AppStateLatest,
-		Data:      data,
-		Timestamp: getCurrentTimestamp(),
+		Type: AppStateLatest,
+		Status: struct {
+			State              string `json:"state"`
+			UpdateTime         string `json:"updateTime"`
+			StatusTime         string `json:"statusTime"`
+			LastTransitionTime string `json:"lastTransitionTime"`
+			EntranceStatuses   []struct {
+				Name       string `json:"name"`
+				State      string `json:"state"`
+				StatusTime string `json:"statusTime"`
+				Reason     string `json:"reason"`
+			} `json:"entranceStatuses"`
+		}{
+			State:              state,
+			UpdateTime:         updateTime,
+			StatusTime:         statusTime,
+			LastTransitionTime: lastTransitionTime,
+			EntranceStatuses:   entranceStatuses,
+		},
 	}
 }
 

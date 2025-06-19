@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"market/internal/v2/types"
 )
 
 // AppServiceResponse represents the response structure from app-service
@@ -27,10 +29,15 @@ type AppServiceResponse struct {
 		Source string `json:"source"`
 	} `json:"spec"`
 	Status struct {
-		State            string `json:"state"`
-		EntranceStatuses []struct {
-			Name  string `json:"name"`
-			State string `json:"state"`
+		State              string `json:"state"`
+		UpdateTime         string `json:"updateTime"`
+		StatusTime         string `json:"statusTime"`
+		LastTransitionTime string `json:"lastTransitionTime"`
+		EntranceStatuses   []struct {
+			Name       string `json:"name"`
+			State      string `json:"state"`
+			StatusTime string `json:"statusTime"`
+			Reason     string `json:"reason"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -40,10 +47,15 @@ type AppInfo struct {
 	User   string `json:"user"`
 	App    string `json:"app"`
 	Status struct {
-		State            string `json:"state"`
-		EntranceStatuses []struct {
-			Name  string `json:"name"`
-			State string `json:"state"`
+		State              string `json:"state"`
+		UpdateTime         string `json:"updateTime"`
+		StatusTime         string `json:"statusTime"`
+		LastTransitionTime string `json:"lastTransitionTime"`
+		EntranceStatuses   []struct {
+			Name       string `json:"name"`
+			State      string `json:"state"`
+			StatusTime string `json:"statusTime"`
+			Reason     string `json:"reason"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -51,9 +63,15 @@ type AppInfo struct {
 // Global variable to store extracted users
 var extractedUsers []string
 
+// Global variable to store app state data for each user
+var userAppStateData map[string][]*types.AppStateLatestData
+
 // SetupAppServiceData fetches app data from app-service or reads from local file in development
 func SetupAppServiceData() error {
 	log.Println("Starting app service data setup...")
+
+	// Initialize user app state data map
+	userAppStateData = make(map[string][]*types.AppStateLatestData)
 
 	// Check if we're in development environment
 	if isDevelopmentEnvironment() {
@@ -69,6 +87,19 @@ func SetupAppServiceData() error {
 // GetExtractedUsers returns the list of users extracted from app service data
 func GetExtractedUsers() []string {
 	return extractedUsers
+}
+
+// GetUserAppStateData returns the app state data for a specific user
+func GetUserAppStateData(userID string) []*types.AppStateLatestData {
+	if data, exists := userAppStateData[userID]; exists {
+		return data
+	}
+	return []*types.AppStateLatestData{}
+}
+
+// GetAllUserAppStateData returns all user app state data
+func GetAllUserAppStateData() map[string][]*types.AppStateLatestData {
+	return userAppStateData
 }
 
 // isDevelopmentEnvironment checks if we're in development environment
@@ -175,6 +206,15 @@ func processAppData(apps []AppServiceResponse) error {
 				log.Printf("  Entrance %d: Name=%s, State=%s", j+1, entrance.Name, entrance.State)
 			}
 		}
+
+		// Create AppStateLatestData for this app
+		appStateData := createAppStateLatestData(app)
+
+		// Add to user's app state data
+		if userAppStateData[user] == nil {
+			userAppStateData[user] = make([]*types.AppStateLatestData, 0)
+		}
+		userAppStateData[user] = append(userAppStateData[user], appStateData)
 	}
 
 	// Convert user set to slice
@@ -210,7 +250,44 @@ func processAppData(apps []AppServiceResponse) error {
 		log.Printf("  %s: %d apps", status, count)
 	}
 
+	// Print app state data summary
+	log.Println("App state data created:")
+	for user, appStates := range userAppStateData {
+		log.Printf("  User %s: %d app states", user, len(appStates))
+		for _, appState := range appStates {
+			log.Printf("    - App Status: %s", appState.Status.State)
+		}
+	}
+
 	log.Println("=== End App Service Data Summary ===")
 
 	return nil
+}
+
+// createAppStateLatestData creates AppStateLatestData from AppServiceResponse
+func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData {
+	// Create AppStateLatestData with simplified structure
+	appStateData := &types.AppStateLatestData{
+		Type: types.AppStateLatest,
+		Status: struct {
+			State              string `json:"state"`
+			UpdateTime         string `json:"updateTime"`
+			StatusTime         string `json:"statusTime"`
+			LastTransitionTime string `json:"lastTransitionTime"`
+			EntranceStatuses   []struct {
+				Name       string `json:"name"`
+				State      string `json:"state"`
+				StatusTime string `json:"statusTime"`
+				Reason     string `json:"reason"`
+			} `json:"entranceStatuses"`
+		}{
+			State:              app.Status.State,
+			UpdateTime:         app.Status.UpdateTime,
+			StatusTime:         app.Status.StatusTime,
+			LastTransitionTime: app.Status.LastTransitionTime,
+			EntranceStatuses:   app.Status.EntranceStatuses,
+		},
+	}
+
+	return appStateData
 }
