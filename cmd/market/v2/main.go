@@ -15,11 +15,29 @@ import (
 	"market/internal/v2/history"
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
+	"market/internal/v2/utils"
 	"market/pkg/v2/api"
 	"market/pkg/v2/helm"
 
 	"github.com/golang/glog"
 )
+
+// createAppInfoConfigWithUsers creates AppInfo module configuration with extracted users
+func createAppInfoConfigWithUsers(users []string) *appinfo.ModuleConfig {
+	// Get default config as base
+	config := appinfo.DefaultModuleConfig()
+
+	// If we have extracted users, use them; otherwise fall back to default
+	if len(users) > 0 {
+		log.Printf("Using extracted users: %v", users)
+		config.User.UserList = users
+	} else {
+		log.Printf("No extracted users found, using default user list")
+		// Keep the default user list from DefaultModuleConfig
+	}
+
+	return config
+}
 
 func main() {
 	log.Printf("Starting market application...")
@@ -32,6 +50,16 @@ func main() {
 
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
+
+	// Pre-startup step: Setup app service data
+	log.Println("=== Pre-startup: Setting up app service data ===")
+	if err := utils.SetupAppServiceData(); err != nil {
+		log.Printf("Warning: Failed to setup app service data: %v", err)
+		log.Println("Continuing with startup process...")
+	} else {
+		log.Println("App service data setup completed successfully")
+	}
+	log.Println("=== End pre-startup step ===")
 
 	// 0. Initialize Settings Module (Required for API)
 	redisHost := getEnvOrDefault("REDIS_HOST", "localhost")
@@ -58,7 +86,12 @@ func main() {
 	api.SetSettingsManager(settingsManager)
 
 	// 1. Initialize AppInfo Module (Required for cacheManager)
-	appInfoConfig := appinfo.DefaultModuleConfig()
+	// Get extracted users from pre-startup step
+	extractedUsers := utils.GetExtractedUsers()
+	log.Printf("Using extracted users for AppInfo module: %v", extractedUsers)
+
+	// Create custom config with extracted users
+	appInfoConfig := createAppInfoConfigWithUsers(extractedUsers)
 	appInfoModule, err := appinfo.NewAppInfoModule(appInfoConfig)
 	if err != nil {
 		log.Fatalf("Failed to create AppInfo module: %v", err)

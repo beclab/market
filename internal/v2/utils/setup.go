@@ -1,0 +1,216 @@
+package utils
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+// AppServiceResponse represents the response structure from app-service
+type AppServiceResponse struct {
+	Metadata struct {
+		Name      string `json:"name"`
+		UID       string `json:"uid"`
+		Namespace string `json:"namespace"`
+	} `json:"metadata"`
+	Spec struct {
+		Name   string `json:"name"`
+		AppID  string `json:"appid"`
+		Owner  string `json:"owner"`
+		Icon   string `json:"icon"`
+		Title  string `json:"title"`
+		Source string `json:"source"`
+	} `json:"spec"`
+	Status struct {
+		State            string `json:"state"`
+		EntranceStatuses []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"entranceStatuses"`
+	} `json:"status"`
+}
+
+// AppInfo represents the extracted app information
+type AppInfo struct {
+	User   string `json:"user"`
+	App    string `json:"app"`
+	Status struct {
+		State            string `json:"state"`
+		EntranceStatuses []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"entranceStatuses"`
+	} `json:"status"`
+}
+
+// Global variable to store extracted users
+var extractedUsers []string
+
+// SetupAppServiceData fetches app data from app-service or reads from local file in development
+func SetupAppServiceData() error {
+	log.Println("Starting app service data setup...")
+
+	// Check if we're in development environment
+	if isDevelopmentEnvironment() {
+		log.Println("Development environment detected, reading from local app-state.json")
+		return readLocalAppState()
+	}
+
+	// Production environment - fetch from app-service
+	log.Println("Production environment detected, fetching from app-service")
+	return fetchFromAppService()
+}
+
+// GetExtractedUsers returns the list of users extracted from app service data
+func GetExtractedUsers() []string {
+	return extractedUsers
+}
+
+// isDevelopmentEnvironment checks if we're in development environment
+func isDevelopmentEnvironment() bool {
+	env := strings.ToLower(os.Getenv("GO_ENV"))
+	return env == "dev" || env == "development" || env == ""
+}
+
+// readLocalAppState reads and processes the local app-state.json file
+func readLocalAppState() error {
+	log.Println("Reading local app-state.json file...")
+
+	file, err := os.Open("app-state.json")
+	if err != nil {
+		return fmt.Errorf("failed to open app-state.json: %v", err)
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return fmt.Errorf("failed to read app-state.json: %v", err)
+	}
+
+	var apps []AppServiceResponse
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return fmt.Errorf("failed to parse app-state.json: %v", err)
+	}
+
+	return processAppData(apps)
+}
+
+// fetchFromAppService fetches app data from the app-service
+func fetchFromAppService() error {
+	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
+
+	if host == "" {
+		host = "localhost" // Default fallback
+	}
+	if port == "" {
+		port = "80" // Default fallback
+	}
+
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
+	log.Printf("Fetching app data from: %s", url)
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to fetch from app-service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("app-service returned status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var apps []AppServiceResponse
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return fmt.Errorf("failed to parse app-service response: %v", err)
+	}
+
+	return processAppData(apps)
+}
+
+// processAppData processes the app data and prints the extracted information
+func processAppData(apps []AppServiceResponse) error {
+	log.Println("Processing app data...")
+	log.Printf("Found %d applications", len(apps))
+
+	var appInfos []AppInfo
+	userSet := make(map[string]bool) // Use map to avoid duplicates
+
+	for i, app := range apps {
+		// Extract user (owner), app (name), and status
+		user := app.Spec.Owner
+		appName := app.Spec.Name
+
+		// Add user to set to avoid duplicates
+		userSet[user] = true
+
+		appInfo := AppInfo{
+			User:   user,
+			App:    appName,
+			Status: app.Status,
+		}
+
+		appInfos = append(appInfos, appInfo)
+
+		// Print individual app info with full status structure
+		log.Printf("App %d: User=%s, App=%s, Status=%+v", i+1, user, appName, app.Status)
+
+		// Also print entrance statuses if available
+		if len(app.Status.EntranceStatuses) > 0 {
+			for j, entrance := range app.Status.EntranceStatuses {
+				log.Printf("  Entrance %d: Name=%s, State=%s", j+1, entrance.Name, entrance.State)
+			}
+		}
+	}
+
+	// Convert user set to slice
+	extractedUsers = make([]string, 0, len(userSet))
+	for user := range userSet {
+		extractedUsers = append(extractedUsers, user)
+	}
+
+	// Print summary
+	log.Println("=== App Service Data Summary ===")
+	log.Printf("Total applications: %d", len(appInfos))
+	log.Printf("Extracted users: %v", extractedUsers)
+
+	// Group by user
+	userStats := make(map[string]int)
+	for _, info := range appInfos {
+		userStats[info.User]++
+	}
+
+	log.Println("Applications per user:")
+	for user, count := range userStats {
+		log.Printf("  %s: %d apps", user, count)
+	}
+
+	// Group by status
+	statusStats := make(map[string]int)
+	for _, info := range appInfos {
+		statusStats[info.Status.State]++
+	}
+
+	log.Println("Applications by status:")
+	for status, count := range statusStats {
+		log.Printf("  %s: %d apps", status, count)
+	}
+
+	log.Println("=== End App Service Data Summary ===")
+
+	return nil
+}

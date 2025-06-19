@@ -210,7 +210,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Also store in DetailedApps for backward compatibility
 						data.DetailedApps[appID] = detailedAppData
 
-						// log.Printf("DetailedAppData: %v", detailedAppData)
+						log.Printf("DetailedAppData: %v", detailedAppData)
 
 						// Log the main app information with more details
 						log.Printf("Replaced app data with details - ID: %s, Name: %s, Version: %s",
