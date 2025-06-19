@@ -7,12 +7,17 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/types"
+
 	"github.com/nats-io/nats.go"
 )
 
 // AppInfoUpdate represents the data structure for app info updates
 type AppInfoUpdate struct {
-	// Fields to be added as needed
+	AppStateLatest *types.AppStateLatestData `json:"app_state_latest"`
+	AppInfoLatest  *types.AppInfoLatestData  `json:"app_info_latest"`
+	Timestamp      int64                     `json:"timestamp"`
+	User           string                    `json:"user"`
 }
 
 // DataSender handles NATS communication for app info updates
@@ -78,7 +83,7 @@ func loadConfig() Config {
 		Port:     getEnvOrDefault("NATS_PORT", "4222"),
 		Username: getEnvOrDefault("NATS_USERNAME", ""),
 		Password: getEnvOrDefault("NATS_PASSWORD", ""),
-		Subject:  getEnvOrDefault("NATS_SUBJECT_SYSTEM_MARKET_STATE", "system.market.state"),
+		Subject:  getEnvOrDefault("NATS_SUBJECT_SYSTEM_MARKET_STATE", "os.market"),
 	}
 }
 
@@ -99,11 +104,13 @@ func (ds *DataSender) SendAppInfoUpdate(update AppInfoUpdate) error {
 		return fmt.Errorf("failed to marshal app info update: %w", err)
 	}
 
+	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
+
 	// Log before sending
-	log.Printf("Sending app info update to NATS subject '%s': %s", ds.subject, string(data))
+	log.Printf("Sending app info update to NATS subject '%s': %s", subject, string(data))
 
 	// Send message to NATS
-	err = ds.conn.Publish(ds.subject, data)
+	err = ds.conn.Publish(subject, data)
 	if err != nil {
 		return fmt.Errorf("failed to publish message to NATS: %w", err)
 	}

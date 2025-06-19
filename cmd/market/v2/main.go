@@ -15,11 +15,59 @@ import (
 	"market/internal/v2/history"
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
+	"market/internal/v2/types"
+	"market/internal/v2/utils"
 	"market/pkg/v2/api"
 	"market/pkg/v2/helm"
 
 	"github.com/golang/glog"
 )
+
+// createAppInfoConfigWithUsers creates AppInfo module configuration with extracted users
+func createAppInfoConfigWithUsers(users []string) *appinfo.ModuleConfig {
+	// Get default config as base
+	config := appinfo.DefaultModuleConfig()
+
+	// If we have extracted users, use them; otherwise fall back to default
+	if len(users) > 0 {
+		log.Printf("Using extracted users: %v", users)
+		config.User.UserList = users
+	} else {
+		log.Printf("No extracted users found, using default user list")
+		// Keep the default user list from DefaultModuleConfig
+	}
+
+	return config
+}
+
+// loadAppStateDataToUserSource loads app state data from pre-startup step into user's official source
+func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
+	// Get all user app state data from pre-startup step
+	allUserAppStateData := utils.GetAllUserAppStateData()
+
+	if len(allUserAppStateData) == 0 {
+		log.Println("No app state data found from pre-startup step")
+		return
+	}
+
+	log.Printf("Loading app state data for %d users", len(allUserAppStateData))
+
+	// For each user, load their app state data into the official source
+	for userID, appStateDataList := range allUserAppStateData {
+		log.Printf("Loading %d app states for user: %s", len(appStateDataList), userID)
+
+		// Set app state data for the user's official source
+		err := appInfoModule.SetAppData(userID, "Official-Market-Sources", types.AppStateLatest, map[string]interface{}{
+			"app_states": appStateDataList,
+		})
+
+		if err != nil {
+			log.Printf("Failed to load app state data for user %s: %v", userID, err)
+		} else {
+			log.Printf("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
+		}
+	}
+}
 
 func main() {
 	log.Printf("Starting market application...")
@@ -32,6 +80,16 @@ func main() {
 
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
+
+	// Pre-startup step: Setup app service data
+	log.Println("=== Pre-startup: Setting up app service data ===")
+	if err := utils.SetupAppServiceData(); err != nil {
+		log.Printf("Warning: Failed to setup app service data: %v", err)
+		log.Println("Continuing with startup process...")
+	} else {
+		log.Println("App service data setup completed successfully")
+	}
+	log.Println("=== End pre-startup step ===")
 
 	// 0. Initialize Settings Module (Required for API)
 	redisHost := getEnvOrDefault("REDIS_HOST", "localhost")
@@ -58,7 +116,12 @@ func main() {
 	api.SetSettingsManager(settingsManager)
 
 	// 1. Initialize AppInfo Module (Required for cacheManager)
-	appInfoConfig := appinfo.DefaultModuleConfig()
+	// Get extracted users from pre-startup step
+	extractedUsers := utils.GetExtractedUsers()
+	log.Printf("Using extracted users for AppInfo module: %v", extractedUsers)
+
+	// Create custom config with extracted users
+	appInfoConfig := createAppInfoConfigWithUsers(extractedUsers)
 	appInfoModule, err := appinfo.NewAppInfoModule(appInfoConfig)
 	if err != nil {
 		log.Fatalf("Failed to create AppInfo module: %v", err)
@@ -68,6 +131,11 @@ func main() {
 		log.Fatalf("Failed to start AppInfo module: %v", err)
 	}
 	log.Println("AppInfo module started successfully")
+
+	// Load app state data into user's official source
+	log.Println("Loading app state data into user's official source...")
+	loadAppStateDataToUserSource(appInfoModule)
+	log.Println("App state data loaded successfully")
 
 	// Get cacheManager for HTTP server
 	log.Printf("Getting cache manager for HTTP server...")
@@ -132,6 +200,8 @@ func main() {
 
 	// 3. Initialize Task Module
 	taskModule := task.NewTaskModule()
+	// Set history module reference for task recording
+	taskModule.SetHistoryModule(historyModule)
 	log.Println("Task module started successfully")
 
 	// 4. Initialize Helm Repository Service
@@ -143,6 +213,23 @@ func main() {
 		}
 	}()
 	log.Println("Helm Repository service initialized successfully")
+
+	// Add history record for successful market setup
+	log.Println("Recording market setup completion in history...")
+	historyRecord := &history.HistoryRecord{
+		Type:     history.TypeSystem,
+		Message:  "market setup finished",
+		Time:     time.Now().Unix(),
+		App:      "market",
+		Account:  "system",
+		Extended: "",
+	}
+
+	if err := historyModule.StoreRecord(historyRecord); err != nil {
+		log.Printf("Warning: Failed to record market setup completion: %v", err)
+	} else {
+		log.Printf("Successfully recorded market setup completion with ID: %d", historyRecord.ID)
+	}
 
 	log.Println("")
 	log.Println("Helm Repository endpoints (port 82):")

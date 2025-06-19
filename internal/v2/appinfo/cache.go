@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/utils"
+
 	"github.com/golang/glog"
 )
 
@@ -19,7 +21,8 @@ type CacheManager struct {
 	cache             *CacheData
 	redisClient       *RedisClient
 	userConfig        *UserConfig
-	hydrationNotifier HydrationNotifier // Notifier for hydration updates
+	hydrationNotifier HydrationNotifier   // Notifier for hydration updates
+	stateMonitor      *utils.StateMonitor // State monitor for change detection
 	mutex             sync.RWMutex
 	syncChannel       chan SyncRequest
 	stopChannel       chan bool
@@ -44,13 +47,21 @@ const (
 
 // NewCacheManager creates a new cache manager
 func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheManager {
+	// Initialize state monitor
+	stateMonitor, err := utils.NewStateMonitor()
+	if err != nil {
+		glog.Warningf("Failed to initialize state monitor: %v", err)
+		// Continue without state monitor
+	}
+
 	return &CacheManager{
-		cache:       NewCacheData(),
-		redisClient: redisClient,
-		userConfig:  userConfig,
-		syncChannel: make(chan SyncRequest, 1000), // Buffer for async sync requests
-		stopChannel: make(chan bool, 1),
-		isRunning:   false,
+		cache:        NewCacheData(),
+		redisClient:  redisClient,
+		userConfig:   userConfig,
+		stateMonitor: stateMonitor,
+		syncChannel:  make(chan SyncRequest, 1000), // Buffer for async sync requests
+		stopChannel:  make(chan bool, 1),
+		isRunning:    false,
 	}
 }
 
@@ -119,6 +130,12 @@ func (cm *CacheManager) Stop() {
 		cm.stopChannel <- true
 	}
 	cm.mutex.Unlock()
+
+	// Close state monitor
+	if cm.stateMonitor != nil {
+		cm.stateMonitor.Close()
+		glog.Infof("State monitor closed")
+	}
 
 	glog.Infof("Cache manager stopped")
 }
@@ -264,9 +281,64 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		appData.Timestamp = time.Now().Unix()
 		sourceData.AppInfoHistory = append(sourceData.AppInfoHistory, appData)
 	case AppStateLatest:
-		appData := NewAppStateLatestData(data)
-		appData.Timestamp = time.Now().Unix()
-		sourceData.AppStateLatest = append(sourceData.AppStateLatest, appData)
+		// Check if this is a list of app states
+		if appStatesData, hasAppStates := data["app_states"].([]*types.AppStateLatestData); hasAppStates {
+			// Check for state changes and send notifications for each app state
+			if cm.stateMonitor != nil {
+				for _, appState := range appStatesData {
+					if appState != nil {
+						// Extract app name from data for state monitoring
+						appName := ""
+						if name, ok := data["name"].(string); ok {
+							appName = name
+						}
+
+						if appName != "" {
+							// Check state changes and send notifications
+							if err := cm.stateMonitor.CheckAndNotifyStateChange(
+								userID, sourceID, appName,
+								appState,
+								sourceData.AppStateLatest,
+								sourceData.AppInfoLatest,
+							); err != nil {
+								glog.Warningf("Failed to check and notify state change for app %s: %v", appName, err)
+							}
+						}
+					}
+				}
+			}
+
+			// Clear existing app state data and set new ones
+			sourceData.AppStateLatest = appStatesData
+			glog.Infof("Set %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
+		} else {
+			// Fallback to old logic for backward compatibility
+			appData := NewAppStateLatestData(data)
+
+			// Check for state changes and send notifications
+			if cm.stateMonitor != nil {
+				// Extract app name from data for state monitoring
+				appName := ""
+				if name, ok := data["name"].(string); ok {
+					appName = name
+				}
+
+				if appName != "" {
+					// Check state changes and send notifications
+					if err := cm.stateMonitor.CheckAndNotifyStateChange(
+						userID, sourceID, appName,
+						appData,
+						sourceData.AppStateLatest,
+						sourceData.AppInfoLatest,
+					); err != nil {
+						glog.Warningf("Failed to check and notify state change for app %s: %v", appName, err)
+					}
+				}
+			}
+
+			sourceData.AppStateLatest = append(sourceData.AppStateLatest, appData)
+			glog.Infof("Added single app state for user=%s, source=%s", userID, sourceID)
+		}
 	case AppInfoLatest:
 		appData := NewAppInfoLatestData(data)
 		if appData == nil {

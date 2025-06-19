@@ -115,7 +115,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"token":      r.Header.Get("Authorization"),
 	}
 
-	task := s.taskModule.AddTask(task.InstallApp, request.AppName, taskMetadata)
+	task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata)
 	if task == nil {
 		log.Printf("Failed to create installation task for app: %s", request.AppName)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create installation task", nil)
@@ -167,7 +167,7 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		"token":    r.Header.Get("Authorization"),
 	}
 
-	task := s.taskModule.AddTask(task.CancelAppInstall, appName, taskMetadata)
+	task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata)
 	if task == nil {
 		log.Printf("Failed to create cancel installation task for app: %s", appName)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create cancel installation task", nil)
@@ -219,7 +219,7 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		"token":    r.Header.Get("Authorization"),
 	}
 
-	task := s.taskModule.AddTask(task.UninstallApp, appName, taskMetadata)
+	task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata)
 	if task == nil {
 		log.Printf("Failed to create uninstallation task for app: %s", appName)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create uninstallation task", nil)
@@ -327,7 +327,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"token":      r.Header.Get("Authorization"),
 	}
 
-	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, taskMetadata)
+	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata)
 	if task == nil {
 		log.Printf("Failed to create upgrade task for app: %s", request.AppName)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create upgrade task", nil)

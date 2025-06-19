@@ -91,7 +91,12 @@ func (hr *HelmRepository) healthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if chart root directory exists
-	chartRoot := filepath.Join("CHART_ROOT", userCtx.UserID, userCtx.Source)
+	basePath := os.Getenv("CHART_ROOT")
+	if basePath == "" {
+		http.Error(w, "Internal server configuration error: CHART_ROOT is not set", http.StatusServiceUnavailable)
+		return
+	}
+	chartRoot := filepath.Join(basePath, userCtx.UserID, userCtx.Source)
 	if _, err := os.Stat(chartRoot); os.IsNotExist(err) {
 		http.Error(w, "Chart root directory not found", http.StatusServiceUnavailable)
 		return
