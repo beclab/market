@@ -248,15 +248,15 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 
 // updatePackageInformation updates RawPackage and RenderedPackage fields
 func (s *DatabaseUpdateStep) updatePackageInformation(task *HydrationTask) error {
-	task.Cache.Mutex.Lock()
-	defer task.Cache.Mutex.Unlock()
-
 	if task.Cache == nil {
 		return fmt.Errorf("cache reference is nil")
 	}
 
+	task.Cache.Mutex.Lock()
+	defer task.Cache.Mutex.Unlock()
+
 	// Get the specific pending data entry for this task
-	pendingDataRef, err := s.findPendingDataForTask(task)
+	pendingDataRef, err := s.findPendingDataForTaskLocked(task)
 	if err != nil {
 		return fmt.Errorf("failed to find pending data: %w", err)
 	}
@@ -290,8 +290,21 @@ func (s *DatabaseUpdateStep) updateAppInfoWithImages(task *HydrationTask, imageA
 		return fmt.Errorf("cache reference is nil")
 	}
 
+	// Step 1: Perform I/O-intensive operations (reading i18n data) outside the lock.
+	// We read the original RawData locale settings before locking.
+	locale := []string{"en-US", "zh-CN"} // Default languages
+	i18nData, err := s.readI18nData(task, locale)
+	if err != nil {
+		log.Printf("Warning: Failed to read i18n data for app %s: %v", task.AppID, err)
+		// Continue with other updates even if i18n update fails
+	}
+
+	// Step 2: Acquire the lock to safely update the shared cache data.
+	task.Cache.Mutex.Lock()
+	defer task.Cache.Mutex.Unlock()
+
 	// Get the specific pending data entry for this task
-	pendingDataRef, err := s.findPendingDataForTask(task)
+	pendingDataRef, err := s.findPendingDataForTaskLocked(task)
 	if err != nil {
 		return fmt.Errorf("failed to find pending data: %w", err)
 	}
@@ -311,10 +324,9 @@ func (s *DatabaseUpdateStep) updateAppInfoWithImages(task *HydrationTask, imageA
 		pendingDataRef.AppInfo.AppEntry = pendingDataRef.RawData
 	}
 
-	// Update i18n data from i18n directory
-	if err := s.updateI18nData(task, pendingDataRef); err != nil {
-		log.Printf("Warning: Failed to update i18n data for app %s: %v", task.AppID, err)
-		// Continue with other updates even if i18n update fails
+	// Step 3: Apply the i18n data that was read outside the lock.
+	if i18nData != nil {
+		s.applyI18nData(pendingDataRef, i18nData)
 	}
 
 	// Update image analysis in AppInfo
@@ -345,8 +357,8 @@ func (s *DatabaseUpdateStep) updateAppInfoWithImages(task *HydrationTask, imageA
 	return nil
 }
 
-// updateI18nData reads i18n data from i18n directory and updates the app info
-func (s *DatabaseUpdateStep) updateI18nData(task *HydrationTask, pendingDataRef *types.AppInfoLatestPendingData) error {
+// readI18nData reads i18n data from files and returns it without modifying any state.
+func (s *DatabaseUpdateStep) readI18nData(task *HydrationTask, supportedLanguages []string) (map[string]map[string]string, error) {
 	// Get the rendered chart directory path from task data
 	var chartDir string
 	if renderedChartDir, exists := task.ChartData["rendered_chart_dir"]; exists {
@@ -359,7 +371,7 @@ func (s *DatabaseUpdateStep) updateI18nData(task *HydrationTask, pendingDataRef 
 	if chartDir == "" {
 		if task.RenderedChartURL == "" {
 			log.Printf("No rendered chart directory or URL available for app: %s, skipping i18n update", task.AppID)
-			return nil
+			return nil, nil
 		}
 		chartDir = task.RenderedChartURL
 		if strings.HasPrefix(chartDir, "file://") {
@@ -367,16 +379,48 @@ func (s *DatabaseUpdateStep) updateI18nData(task *HydrationTask, pendingDataRef 
 		}
 	}
 
-	log.Printf("I18n update: Chart directory for app %s: %s", task.AppID, chartDir)
+	log.Printf("I18n read: Chart directory for app %s: %s", task.AppID, chartDir)
 
 	// Check if the directory exists
 	if _, err := os.Stat(chartDir); os.IsNotExist(err) {
 		log.Printf("Chart directory does not exist: %s", chartDir)
-		return nil
+		return nil, nil
 	}
 
-	// Look for i18n directory in multiple possible locations
-	var i18nDir string
+	i18nDir := s.findI18nDirectory(task, chartDir)
+	if i18nDir == "" {
+		log.Printf("No i18n directory found for app: %s", task.AppID)
+		return nil, nil
+	}
+
+	allI18nData := make(map[string]map[string]string)
+
+	// Read i18n data for each supported language
+	for _, lang := range supportedLanguages {
+		log.Printf("I18n read: Processing language: %s for app: %s", lang, task.AppID)
+		langDir := filepath.Join(i18nDir, lang)
+		if _, err := os.Stat(langDir); os.IsNotExist(err) {
+			log.Printf("Language directory does not exist: %s", langDir)
+			continue
+		}
+
+		log.Printf("I18n read: Found language directory: %s", langDir)
+
+		parsedData := s.parseI18nConfigFile(langDir)
+		if parsedData == nil {
+			log.Printf("No valid i18n config found for language: %s in directory: %s", lang, langDir)
+			continue
+		}
+
+		s.extractMultilingualFields(parsedData, lang, allI18nData)
+	}
+
+	log.Printf("Completed i18n data read for app: %s", task.AppID)
+	return allI18nData, nil
+}
+
+// findI18nDirectory searches for the i18n directory in several possible locations.
+func (s *DatabaseUpdateStep) findI18nDirectory(task *HydrationTask, chartDir string) string {
 	possibleI18nPaths := []string{
 		filepath.Join(chartDir, "i18n"),               // Direct i18n directory
 		filepath.Join(chartDir, task.AppName, "i18n"), // App-specific subdirectory
@@ -395,122 +439,146 @@ func (s *DatabaseUpdateStep) updateI18nData(task *HydrationTask, pendingDataRef 
 
 	for _, path := range possibleI18nPaths {
 		if _, err := os.Stat(path); err == nil {
-			i18nDir = path
-			log.Printf("I18n update: Found i18n directory: %s", i18nDir)
-			break
+			log.Printf("I18n update: Found i18n directory: %s", path)
+			return path
 		}
 	}
 
-	if i18nDir == "" {
-		log.Printf("No i18n directory found in any of the expected locations for app: %s", task.AppID)
-		log.Printf("Searched paths: %v", possibleI18nPaths)
-		return nil
-	}
+	log.Printf("No i18n directory found in any of the expected locations for app: %s", task.AppID)
+	log.Printf("Searched paths: %v", possibleI18nPaths)
+	return ""
+}
 
-	// Get supported languages from app locale or use default languages
-	supportedLanguages := []string{"en-US", "zh-CN"} // Default supported languages
-	if pendingDataRef.RawData != nil && len(pendingDataRef.RawData.Locale) > 0 {
-		supportedLanguages = pendingDataRef.RawData.Locale
+// parseI18nConfigFile finds and parses an i18n configuration file in a given directory.
+func (s *DatabaseUpdateStep) parseI18nConfigFile(langDir string) map[string]interface{} {
+	configFiles := []string{
+		"OlaresManifest.yaml", "OlaresManifest.yml", "app.cfg", "app.yaml", "app.yml",
+		"config.yaml", "config.yml", "manifest.yaml", "manifest.yml",
 	}
+	var i18nData map[string]interface{}
 
-	// Initialize multilingual fields if they don't exist for both RawData and AppInfo.AppEntry
-	if pendingDataRef.RawData != nil {
-		if pendingDataRef.RawData.Title == nil {
-			pendingDataRef.RawData.Title = make(map[string]string)
+	for _, configFile := range configFiles {
+		configPath := filepath.Join(langDir, configFile)
+		if _, err := os.Stat(configPath); err == nil {
+			log.Printf("I18n read: Found config file: %s", configPath)
+			data, err := ioutil.ReadFile(configPath)
+			if err != nil {
+				log.Printf("Failed to read i18n config file %s: %v", configPath, err)
+				continue
+			}
+
+			if err = yaml.Unmarshal(data, &i18nData); err == nil {
+				log.Printf("I18n read: Successfully parsed YAML config file: %s", configPath)
+				return i18nData
+			}
+			if err = json.Unmarshal(data, &i18nData); err == nil {
+				log.Printf("I18n read: Successfully parsed JSON config file: %s", configPath)
+				return i18nData
+			}
+			log.Printf("Failed to parse i18n config file %s as YAML or JSON", configPath)
 		}
-		if pendingDataRef.RawData.Description == nil {
-			pendingDataRef.RawData.Description = make(map[string]string)
-		}
-		if pendingDataRef.RawData.FullDescription == nil {
-			pendingDataRef.RawData.FullDescription = make(map[string]string)
-		}
-		if pendingDataRef.RawData.UpgradeDescription == nil {
-			pendingDataRef.RawData.UpgradeDescription = make(map[string]string)
-		}
 	}
+	return nil
+}
 
-	// Ensure AppInfo.AppEntry exists and initialize multilingual fields
-	if pendingDataRef.AppInfo == nil {
-		pendingDataRef.AppInfo = &types.AppInfo{}
-	}
-	if pendingDataRef.AppInfo.AppEntry == nil {
-		pendingDataRef.AppInfo.AppEntry = &types.ApplicationInfoEntry{}
-	}
-	if pendingDataRef.AppInfo.AppEntry.Title == nil {
-		pendingDataRef.AppInfo.AppEntry.Title = make(map[string]string)
-	}
-	if pendingDataRef.AppInfo.AppEntry.Description == nil {
-		pendingDataRef.AppInfo.AppEntry.Description = make(map[string]string)
-	}
-	if pendingDataRef.AppInfo.AppEntry.FullDescription == nil {
-		pendingDataRef.AppInfo.AppEntry.FullDescription = make(map[string]string)
-	}
-	if pendingDataRef.AppInfo.AppEntry.UpgradeDescription == nil {
-		pendingDataRef.AppInfo.AppEntry.UpgradeDescription = make(map[string]string)
-	}
+// extractMultilingualFields extracts internationalized strings from parsed data and puts them into a map.
+func (s *DatabaseUpdateStep) extractMultilingualFields(i18nData map[string]interface{}, lang string, allI18nData map[string]map[string]string) {
+	fields := []string{"title", "description", "fullDescription", "upgradeDescription"}
 
-	// Read i18n data for each supported language
-	for _, lang := range supportedLanguages {
-		log.Printf("I18n update: Processing language: %s for app: %s", lang, task.AppID)
-
-		langDir := filepath.Join(i18nDir, lang)
-		if _, err := os.Stat(langDir); os.IsNotExist(err) {
-			log.Printf("Language directory does not exist: %s", langDir)
-			continue
+	for _, field := range fields {
+		if allI18nData[field] == nil {
+			allI18nData[field] = make(map[string]string)
 		}
 
-		log.Printf("I18n update: Found language directory: %s", langDir)
-
-		// Try to read i18n config file (usually app.cfg or similar)
-		configFiles := []string{
-			"OlaresManifest.yaml", // Olares manifest file
-			"OlaresManifest.yml",
-			"app.cfg",
-			"app.yaml",
-			"app.yml",
-			"config.yaml",
-			"config.yml",
-			"manifest.yaml",
-			"manifest.yml",
+		var value string
+		// Try to get from metadata section
+		if metadata, ok := i18nData["metadata"].(map[string]interface{}); ok {
+			if v, ok := metadata[field].(string); ok && v != "" {
+				value = v
+			}
 		}
-		var i18nData map[string]interface{}
-
-		for _, configFile := range configFiles {
-			configPath := filepath.Join(langDir, configFile)
-			if _, err := os.Stat(configPath); err == nil {
-				log.Printf("I18n update: Found config file: %s", configPath)
-
-				data, err := ioutil.ReadFile(configPath)
-				if err != nil {
-					log.Printf("Failed to read i18n config file %s: %v", configPath, err)
-					continue
+		// Try to get from spec section
+		if value == "" {
+			if spec, ok := i18nData["spec"].(map[string]interface{}); ok {
+				if v, ok := spec[field].(string); ok && v != "" {
+					value = v
 				}
-
-				// Try to parse as YAML first, then JSON
-				err = yaml.Unmarshal(data, &i18nData)
-				if err != nil {
-					err = json.Unmarshal(data, &i18nData)
-					if err != nil {
-						log.Printf("Failed to parse i18n config file %s: %v", configPath, err)
-						continue
-					}
-				}
-				log.Printf("I18n update: Successfully parsed config file: %s", configPath)
-				break
+			}
+		}
+		// Try to get from top level (backward compatibility)
+		if value == "" {
+			if v, ok := i18nData[field].(string); ok && v != "" {
+				value = v
 			}
 		}
 
-		if i18nData == nil {
-			log.Printf("No valid i18n config found for language: %s in directory: %s", lang, langDir)
-			continue
+		if value != "" {
+			allI18nData[field][lang] = value
+			log.Printf("Extracted i18n field '%s' for lang '%s'", field, lang)
 		}
+	}
+}
 
-		// Extract and update multilingual fields in both RawData and AppInfo.AppEntry
-		s.updateMultilingualFields(i18nData, lang, pendingDataRef.RawData, "RawData")
-		s.updateMultilingualFields(i18nData, lang, pendingDataRef.AppInfo.AppEntry, "AppInfo.AppEntry")
+// applyI18nData takes the pre-read i18n data and applies it to the pending data entry.
+func (s *DatabaseUpdateStep) applyI18nData(pendingDataRef *types.AppInfoLatestPendingData, i18nData map[string]map[string]string) {
+	if pendingDataRef.RawData == nil || pendingDataRef.AppInfo == nil || pendingDataRef.AppInfo.AppEntry == nil {
+		log.Printf("Cannot apply i18n data, RawData or AppEntry is nil")
+		return
 	}
 
-	log.Printf("Completed i18n data update for app: %s", task.AppID)
+	// Initialize multilingual fields if they don't exist
+	if pendingDataRef.RawData.Title == nil {
+		pendingDataRef.RawData.Title = make(map[string]string)
+		pendingDataRef.AppInfo.AppEntry.Title = make(map[string]string)
+	}
+	if pendingDataRef.RawData.Description == nil {
+		pendingDataRef.RawData.Description = make(map[string]string)
+		pendingDataRef.AppInfo.AppEntry.Description = make(map[string]string)
+	}
+	if pendingDataRef.RawData.FullDescription == nil {
+		pendingDataRef.RawData.FullDescription = make(map[string]string)
+		pendingDataRef.AppInfo.AppEntry.FullDescription = make(map[string]string)
+	}
+	if pendingDataRef.RawData.UpgradeDescription == nil {
+		pendingDataRef.RawData.UpgradeDescription = make(map[string]string)
+		pendingDataRef.AppInfo.AppEntry.UpgradeDescription = make(map[string]string)
+	}
+
+	// Apply the extracted data
+	if titles, ok := i18nData["title"]; ok {
+		for lang, text := range titles {
+			pendingDataRef.RawData.Title[lang] = text
+			pendingDataRef.AppInfo.AppEntry.Title[lang] = text
+		}
+	}
+	if descriptions, ok := i18nData["description"]; ok {
+		for lang, text := range descriptions {
+			pendingDataRef.RawData.Description[lang] = text
+			pendingDataRef.AppInfo.AppEntry.Description[lang] = text
+		}
+	}
+	if fullDescriptions, ok := i18nData["fullDescription"]; ok {
+		for lang, text := range fullDescriptions {
+			pendingDataRef.RawData.FullDescription[lang] = text
+			pendingDataRef.AppInfo.AppEntry.FullDescription[lang] = text
+		}
+	}
+	if upgradeDescriptions, ok := i18nData["upgradeDescription"]; ok {
+		for lang, text := range upgradeDescriptions {
+			pendingDataRef.RawData.UpgradeDescription[lang] = text
+			pendingDataRef.AppInfo.AppEntry.UpgradeDescription[lang] = text
+		}
+	}
+
+	log.Printf("Successfully applied i18n data for app: %s", pendingDataRef.AppInfo.AppEntry.AppID)
+}
+
+// updateI18nData reads i18n data from i18n directory and updates the app info
+func (s *DatabaseUpdateStep) updateI18nData(task *HydrationTask, pendingDataRef *types.AppInfoLatestPendingData) error {
+	// THIS FUNCTION IS NOW DEPRECATED and its logic has been moved to
+	// readI18nData and applyI18nData to fix concurrency issues.
+	// It is kept here to avoid breaking any potential call sites, but it does nothing.
+	// Consider removing it in a future refactoring.
 	return nil
 }
 
@@ -567,15 +635,25 @@ func (s *DatabaseUpdateStep) updateMultilingualFields(i18nData map[string]interf
 	}
 }
 
-// findPendingDataForTask finds the pending data entry for a specific task
+// findPendingDataForTask finds the pending data entry for a specific task using a read lock.
 func (s *DatabaseUpdateStep) findPendingDataForTask(task *HydrationTask) (*types.AppInfoLatestPendingData, error) {
 	if task.Cache == nil {
 		return nil, fmt.Errorf("cache reference is nil")
 	}
 
-	// Access cache data using global lock
+	// Access cache data using global read lock
 	task.Cache.Mutex.RLock()
 	defer task.Cache.Mutex.RUnlock()
+
+	return s.findPendingDataForTaskLocked(task)
+}
+
+// findPendingDataForTaskLocked finds the pending data entry for a specific task without acquiring locks.
+// It assumes the caller is responsible for locking.
+func (s *DatabaseUpdateStep) findPendingDataForTaskLocked(task *HydrationTask) (*types.AppInfoLatestPendingData, error) {
+	if task.Cache == nil {
+		return nil, fmt.Errorf("cache reference is nil")
+	}
 
 	userData, userExists := task.Cache.Users[task.UserID]
 	if !userExists {
