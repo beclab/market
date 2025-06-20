@@ -276,11 +276,11 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 // cleanupTaskResources cleans up resources associated with a task
 func (h *Hydrator) cleanupTaskResources(task *hydrationfn.HydrationTask) {
 	// Clean up chart data
-	if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
-		if err := os.RemoveAll(renderedDir); err != nil {
-			log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
-		}
-	}
+	// if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
+	// 	if err := os.RemoveAll(renderedDir); err != nil {
+	// 		log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
+	// 	}
+	// }
 
 	// Clean up source chart
 	if sourceChartPath, exists := task.ChartData["source_chart_path"].(string); exists {
