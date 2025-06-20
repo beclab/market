@@ -916,7 +916,7 @@ func (s *RenderedChartStep) saveRenderedChart(task *HydrationTask, renderedChart
 		userID, sourceID, appName, appVersion)
 
 	// Get base storage path from environment variable, with a default for development
-	basePath := os.Getenv("CHART_STORAGE_PATH")
+	basePath := os.Getenv("CHART_ROOT")
 
 	// Build directory path: {basePath}/{username}/{source name}/{app name}-{version}/
 	chartDir := filepath.Join(basePath, userID, sourceID, fmt.Sprintf("%s-%s", appName, appVersion))
@@ -952,12 +952,8 @@ func (s *RenderedChartStep) saveRenderedChart(task *HydrationTask, renderedChart
 		}
 	}
 
-	// Store the rendered chart directory in task data, with file:// prefix for production
-	if os.Getenv("CHART_STORAGE_PATH") != "" {
-		task.ChartData["rendered_chart_dir"] = "file://" + chartDir
-	} else {
-		task.ChartData["rendered_chart_dir"] = chartDir
-	}
+	// Store the rendered chart directory in task data
+	task.ChartData["rendered_chart_dir"] = chartDir
 
 	log.Printf("Successfully saved %d rendered files to: %s", len(renderedChart), chartDir)
 	return nil
