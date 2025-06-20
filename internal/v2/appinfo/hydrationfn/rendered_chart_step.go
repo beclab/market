@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -24,27 +23,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RenderValuesCache holds cached rendering values
-type RenderValuesCache struct {
-	mutex     sync.Mutex
-	values    map[string]interface{}
-	lastFetch time.Time
-	cacheTTL  time.Duration
-}
-
 // RenderedChartStep represents the step to verify and fetch rendered chart package
 type RenderedChartStep struct {
-	client            *resty.Client
-	renderValuesCache *RenderValuesCache
+	client *resty.Client
 }
 
 // NewRenderedChartStep creates a new rendered chart step
 func NewRenderedChartStep() *RenderedChartStep {
 	return &RenderedChartStep{
 		client: resty.New(),
-		renderValuesCache: &RenderValuesCache{
-			cacheTTL: 5 * time.Minute, // Cache for 5 minutes
-		},
 	}
 }
 
@@ -391,26 +378,8 @@ func (s *RenderedChartStep) getAppServiceURL() (string, error) {
 	return fmt.Sprintf("http://%s:%s/app-service/v1/apps/oamvalues", host, port), nil
 }
 
-// deepCopyMap creates a shallow copy of a map to prevent mutation of cached data
-func deepCopyMap(originalMap map[string]interface{}) map[string]interface{} {
-	newMap := make(map[string]interface{}, len(originalMap))
-	for k, v := range originalMap {
-		newMap[k] = v
-	}
-	return newMap
-}
-
-// fetchRenderValues fetches rendering values from the app-service, with caching.
+// fetchRenderValues fetches rendering values from the app-service without caching
 func (s *RenderedChartStep) fetchRenderValues(ctx context.Context, task *HydrationTask) (map[string]interface{}, error) {
-	s.renderValuesCache.mutex.Lock()
-	if s.renderValuesCache.values != nil && time.Since(s.renderValuesCache.lastFetch) < s.renderValuesCache.cacheTTL {
-		log.Println("Using cached render values.")
-		values := deepCopyMap(s.renderValuesCache.values)
-		s.renderValuesCache.mutex.Unlock()
-		return values, nil
-	}
-	s.renderValuesCache.mutex.Unlock() // IMPORTANT: Unlock before the network call
-
 	appServiceURL, err := s.getAppServiceURL()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app service URL: %w", err)
@@ -430,26 +399,13 @@ func (s *RenderedChartStep) fetchRenderValues(ctx context.Context, task *Hydrati
 		return nil, fmt.Errorf("app-service returned non-2xx status: %d, body: %s", resp.StatusCode(), resp.String())
 	}
 
-	var fetchedValues map[string]interface{}
-	if err := json.Unmarshal(resp.Body(), &fetchedValues); err != nil {
+	var values map[string]interface{}
+	if err := json.Unmarshal(resp.Body(), &values); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal render values: %w", err)
 	}
 
-	// Now, lock again to update the cache.
-	s.renderValuesCache.mutex.Lock()
-	defer s.renderValuesCache.mutex.Unlock()
-
-	// Double-check if another goroutine has updated the cache while we were fetching.
-	if s.renderValuesCache.values != nil && time.Since(s.renderValuesCache.lastFetch) < s.renderValuesCache.cacheTTL {
-		log.Println("Using recently cached render values from another goroutine.")
-		return deepCopyMap(s.renderValuesCache.values), nil
-	}
-
-	s.renderValuesCache.values = fetchedValues
-	s.renderValuesCache.lastFetch = time.Now()
-	log.Println("Successfully fetched and cached render values.")
-
-	return deepCopyMap(fetchedValues), nil
+	log.Println("Successfully fetched render values from app-service.")
+	return values, nil
 }
 
 // extractTarGz extracts files from a tar.gz archive
