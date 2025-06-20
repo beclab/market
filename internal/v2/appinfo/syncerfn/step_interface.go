@@ -60,8 +60,10 @@ type SyncContext struct {
 
 // NewSyncContext creates a new sync context
 func NewSyncContext(cache *types.CacheData) *SyncContext {
+	client := resty.New().SetTimeout(30 * time.Second)
+
 	return &SyncContext{
-		Client:       resty.New(),
+		Client:       client,
 		Cache:        cache,
 		LatestData:   &AppStoreInfoResponse{},
 		DetailedApps: make(map[string]interface{}),
