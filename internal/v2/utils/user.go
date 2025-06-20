@@ -170,7 +170,7 @@ func GetAdminUsername(token string) (string, error) {
 	}
 
 	// Build admin username endpoint URL
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/admin/username", appServiceHost, appServicePort)
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/users/admin/username", appServiceHost, appServicePort)
 
 	// Create HTTP client with timeout
 	client := &http.Client{Timeout: 30 * time.Second}
