@@ -481,7 +481,7 @@ func (m *AppInfoModule) initDataWatcher() error {
 	}
 
 	// Create DataWatcher instance
-	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator)
+	m.dataWatcher = NewDataWatcherLegacy(m.cacheManager, m.hydrator)
 
 	// Start DataWatcher
 	if err := m.dataWatcher.Start(m.ctx); err != nil {
