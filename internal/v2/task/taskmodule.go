@@ -234,8 +234,13 @@ func (tm *TaskModule) executeTask(task *Task) {
 		}
 
 	case UninstallApp:
-		// TODO: Implement app uninstall logic
-		log.Printf("Uninstalling app: %s", task.AppName)
+		// Execute app uninstallation
+		_, err := tm.AppUninstall(task)
+		if err != nil {
+			task.Status = Failed
+			task.ErrorMsg = fmt.Sprintf("Uninstallation failed: %v", err)
+			return
+		}
 	case CancelAppInstall:
 		// TODO: Implement cancel installation logic
 		log.Printf("Canceling app installation: %s", task.AppName)
