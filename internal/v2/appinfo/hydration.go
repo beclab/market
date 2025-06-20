@@ -42,7 +42,6 @@ type Hydrator struct {
 	totalTasksProcessed int64
 	totalTasksSucceeded int64
 	totalTasksFailed    int64
-	metricsMutex        sync.RWMutex
 
 	// Memory monitoring
 	lastMemoryCheck     time.Time
@@ -581,10 +580,8 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
 
 	h.completedTasks[task.ID] = task
 
-	h.metricsMutex.Lock()
 	h.totalTasksProcessed++
 	h.totalTasksSucceeded++
-	h.metricsMutex.Unlock()
 
 	// Add to batch completion queue for processing
 	select {
@@ -623,10 +620,8 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 
 	h.failedTasks[task.ID] = task
 
-	h.metricsMutex.Lock()
 	h.totalTasksProcessed++
 	h.totalTasksFailed++
-	h.metricsMutex.Unlock()
 
 	// Clean up task resources
 	h.cleanupTaskResources(task)
@@ -636,9 +631,6 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 func (h *Hydrator) GetMetrics() HydratorMetrics {
 	h.taskMutex.RLock()
 	defer h.taskMutex.RUnlock()
-
-	h.metricsMutex.RLock()
-	defer h.metricsMutex.RUnlock()
 
 	return HydratorMetrics{
 		TotalTasksProcessed: h.totalTasksProcessed,
@@ -878,9 +870,9 @@ func (h *Hydrator) processCompletedTask(taskID string) {
 
 // processBatchCompletions processes completed tasks in batches
 func (h *Hydrator) processBatchCompletions() {
-	h.metricsMutex.RLock()
+	h.taskMutex.RLock()
 	currentCompleted := h.totalTasksSucceeded
-	h.metricsMutex.RUnlock()
+	h.taskMutex.RUnlock()
 
 	// Check if significant number of tasks completed since last sync
 	if currentCompleted > h.completedTaskCount+10 { // Trigger sync after 10 more completions
