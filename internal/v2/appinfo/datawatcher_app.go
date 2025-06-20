@@ -1335,35 +1335,3 @@ func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
 
 	return nil
 }
-
-/*
-DataWatcher 日志优化使用示例:
-
-1. 创建带配置的DataWatcher:
-   config := &DataWatcherConfig{
-       Interval:          30 * time.Second,
-       LogLevel:          1, // 只显示Warning和Error
-       SummaryInterval:   5 * time.Minute,
-       BatchSize:         5,
-       ProcessingTimeout: 25 * time.Second,
-   }
-   dataWatcher := NewDataWatcher(cacheManager, hydrator, config)
-
-2. 动态调整日志级别:
-   dataWatcher.SetLogLevel(0) // 只显示Error
-   dataWatcher.SetLogLevel(1) // 显示Warning和Error (默认)
-   dataWatcher.SetLogLevel(2) // 显示Info, Warning和Error
-   dataWatcher.SetLogLevel(3) // 显示所有日志 (Debug级别)
-
-3. 日志级别说明:
-   - 0 (Error): 只显示错误信息
-   - 1 (Warning): 显示警告和错误 (推荐生产环境)
-   - 2 (Info): 显示信息、警告和错误
-   - 3 (Debug): 显示所有日志 (开发调试用)
-
-4. 优化效果:
-   - 默认配置下，每30秒的检查周期只会在有活动时输出日志
-   - 无活动时，每5分钟输出一次汇总日志
-   - 大幅减少日志噪音，提高可读性
-   - 保持重要信息的可见性
-*/

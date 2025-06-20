@@ -305,6 +305,7 @@ func (h *Hydrator) pendingDataMonitor(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 30) // Check every 30 seconds
 	defer ticker.Stop()
 
+	checkCount := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -312,6 +313,8 @@ func (h *Hydrator) pendingDataMonitor(ctx context.Context) {
 		case <-h.stopChan:
 			return
 		case <-ticker.C:
+			checkCount++
+			log.Printf("Pending data monitor check #%d - scanning for new pending data", checkCount)
 			h.checkForPendingData()
 		}
 	}
@@ -334,9 +337,40 @@ func (h *Hydrator) checkForPendingData() {
 			if len(sourceData.AppInfoLatestPending) > 0 {
 				log.Printf("Found %d pending apps for user: %s, source: %s, type: %s",
 					len(sourceData.AppInfoLatestPending), userID, sourceID, sourceData.Type)
-				for _, pendingData := range sourceData.AppInfoLatestPending {
+
+				// Add detailed logging for each pending app
+				for i, pendingData := range sourceData.AppInfoLatestPending {
+					appID := "unknown"
+					if pendingData.RawData != nil {
+						appID = pendingData.RawData.AppID
+						if appID == "" {
+							appID = pendingData.RawData.ID
+						}
+					}
+
+					// Log hydration status for each app
+					isComplete := h.isAppHydrationComplete(pendingData)
+					log.Printf("Pending app %d/%d: %s, hydration complete: %v",
+						i+1, len(sourceData.AppInfoLatestPending), appID, isComplete)
+
+					// Log detailed status for debugging
+					if pendingData.RawData != nil {
+						log.Printf("  - RawPackage: %s", pendingData.RawPackage)
+						log.Printf("  - RenderedPackage: %s", pendingData.RenderedPackage)
+						log.Printf("  - AppInfo exists: %v", pendingData.AppInfo != nil)
+						if pendingData.AppInfo != nil {
+							log.Printf("  - ImageAnalysis exists: %v", pendingData.AppInfo.ImageAnalysis != nil)
+							if pendingData.AppInfo.ImageAnalysis != nil {
+								log.Printf("  - TotalImages: %d", pendingData.AppInfo.ImageAnalysis.TotalImages)
+								log.Printf("  - Images map exists: %v", pendingData.AppInfo.ImageAnalysis.Images != nil)
+							}
+						}
+					}
+
 					h.createTasksFromPendingData(userID, sourceID, pendingData)
 				}
+			} else {
+				log.Printf("No pending apps found for user: %s, source: %s", userID, sourceID)
 			}
 		}
 	}
@@ -380,8 +414,8 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 		if appID != "" {
 			// Check if app hydration is already complete before creating new task
 			if h.isAppHydrationComplete(pendingData) {
-				// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
-				// 	appID, userID, sourceID)
+				log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+					appID, userID, sourceID)
 				return
 			}
 
@@ -401,7 +435,12 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 					log.Printf("Created hydration task for structured app: %s (user: %s, source: %s)",
 						appID, userID, sourceID)
 				}
+			} else {
+				log.Printf("Task already exists for app: %s (user: %s, source: %s), skipping",
+					appID, userID, sourceID)
 			}
+		} else {
+			log.Printf("Warning: No valid appID found for app (user: %s, source: %s)", userID, sourceID)
 		}
 		return
 	}
@@ -741,8 +780,8 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
 				// Check if app hydration is already complete before creating new task
 				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
-					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
-					// 	appID, userID, sourceID)
+					log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+						appID, userID, sourceID)
 					continue
 				}
 
@@ -1020,8 +1059,8 @@ func (h *Hydrator) createTasksFromPendingDataLegacy(userID, sourceID string, pen
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
 				// Check if app hydration is already complete before creating new task
 				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
-					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
-					// 	appID, userID, sourceID)
+					log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+						appID, userID, sourceID)
 					continue
 				}
 
