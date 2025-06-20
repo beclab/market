@@ -634,11 +634,11 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 
 // GetMetrics returns hydrator metrics
 func (h *Hydrator) GetMetrics() HydratorMetrics {
-	h.metricsMutex.RLock()
-	defer h.metricsMutex.RUnlock()
-
 	h.taskMutex.RLock()
 	defer h.taskMutex.RUnlock()
+
+	h.metricsMutex.RLock()
+	defer h.metricsMutex.RUnlock()
 
 	return HydratorMetrics{
 		TotalTasksProcessed: h.totalTasksProcessed,
