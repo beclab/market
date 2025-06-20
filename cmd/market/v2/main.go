@@ -200,6 +200,8 @@ func main() {
 
 	// 3. Initialize Task Module
 	taskModule := task.NewTaskModule()
+	// Set history module reference for task recording
+	taskModule.SetHistoryModule(historyModule)
 	log.Println("Task module started successfully")
 
 	// 4. Initialize Helm Repository Service
@@ -211,6 +213,23 @@ func main() {
 		}
 	}()
 	log.Println("Helm Repository service initialized successfully")
+
+	// Add history record for successful market setup
+	log.Println("Recording market setup completion in history...")
+	historyRecord := &history.HistoryRecord{
+		Type:     history.TypeSystem,
+		Message:  "market setup finished",
+		Time:     time.Now().Unix(),
+		App:      "market",
+		Account:  "system",
+		Extended: "",
+	}
+
+	if err := historyModule.StoreRecord(historyRecord); err != nil {
+		log.Printf("Warning: Failed to record market setup completion: %v", err)
+	} else {
+		log.Printf("Successfully recorded market setup completion with ID: %d", historyRecord.ID)
+	}
 
 	log.Println("")
 	log.Println("Helm Repository endpoints (port 82):")

@@ -2,10 +2,13 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
 	"time"
+
+	"market/internal/v2/history"
 )
 
 // TaskType defines the type of task
@@ -42,6 +45,7 @@ type Task struct {
 	Type        TaskType               `json:"type"`
 	Status      TaskStatus             `json:"status"`
 	AppName     string                 `json:"app_name"`
+	User        string                 `json:"user,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 	StartedAt   *time.Time             `json:"started_at,omitempty"`
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
@@ -58,6 +62,7 @@ type TaskModule struct {
 	statusTicker   *time.Ticker     // ticker for status update (every 10 seconds)
 	ctx            context.Context
 	cancel         context.CancelFunc
+	historyModule  *history.HistoryModule // Add history module reference
 }
 
 // NewTaskModule creates a new task module instance
@@ -77,8 +82,15 @@ func NewTaskModule() *TaskModule {
 	return tm
 }
 
+// SetHistoryModule sets the history module for recording task events
+func (tm *TaskModule) SetHistoryModule(historyModule *history.HistoryModule) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.historyModule = historyModule
+}
+
 // AddTask adds a new task to the pending queue
-func (tm *TaskModule) AddTask(taskType TaskType, appName string, metadata map[string]interface{}) *Task {
+func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, metadata map[string]interface{}) *Task {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -87,15 +99,54 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, metadata map[st
 		Type:      taskType,
 		Status:    Pending,
 		AppName:   appName,
+		User:      user,
 		CreatedAt: time.Now(),
 		Metadata:  metadata,
 	}
 
 	tm.pendingTasks = append(tm.pendingTasks, task)
 
-	log.Printf("Task added: ID=%s, Type=%d, AppName=%s", task.ID, task.Type, task.AppName)
+	log.Printf("Task added: ID=%s, Type=%d, AppName=%s, User=%s", task.ID, task.Type, task.AppName, user)
+
+	// Record task addition in history
+	tm.recordTaskHistory(task, user)
 
 	return task
+}
+
+// recordTaskHistory records task information in history module
+func (tm *TaskModule) recordTaskHistory(task *Task, user string) {
+	if tm.historyModule == nil {
+		log.Printf("History module not available, skipping task history record")
+		return
+	}
+
+	// Convert task to JSON for extended field
+	taskJSON, err := json.Marshal(task)
+	if err != nil {
+		log.Printf("Failed to marshal task to JSON: %v", err)
+		return
+	}
+
+	// Create task type string for message
+	taskTypeStr := fmt.Sprintf("%d", task.Type)
+
+	// Create history record
+	historyRecord := &history.HistoryRecord{
+		Type:     history.TypeAction,
+		Message:  fmt.Sprintf("%s %s", taskTypeStr, task.AppName),
+		Time:     time.Now().Unix(),
+		App:      task.AppName,
+		Account:  user, // Use the provided user ID
+		Extended: string(taskJSON),
+	}
+
+	// Store the record
+	if err := tm.historyModule.StoreRecord(historyRecord); err != nil {
+		log.Printf("Failed to record task history: %v", err)
+	} else {
+		log.Printf("Recorded task history with ID: %d for task: %s, user: %s", historyRecord.ID, task.ID, user)
+	}
 }
 
 // GetPendingTasks returns all pending tasks
@@ -174,22 +225,8 @@ func (tm *TaskModule) executeNextTask() {
 func (tm *TaskModule) executeTask(task *Task) {
 	switch task.Type {
 	case InstallApp:
-		// Get token from metadata
-		token, ok := task.Metadata["token"].(string)
-		if !ok {
-			task.Status = Failed
-			task.ErrorMsg = "Missing token in task metadata"
-			return
-		}
-
-		// Get source from metadata
-		source, ok := task.Metadata["source"].(string)
-		if !ok {
-			source = "store" // Default source
-		}
-
 		// Execute app installation
-		_, err := tm.AppInstall(task.AppName, source, token)
+		_, err := tm.AppInstall(task)
 		if err != nil {
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Installation failed: %v", err)

@@ -15,14 +15,24 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// EntranceStatus represents the status of an entrance
+type EntranceStatus struct {
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	StatusTime string `json:"statusTime"`
+	Reason     string `json:"reason"`
+}
+
 // AppStateMessage represents the message structure from NATS
 type AppStateMessage struct {
-	AppId    string `json:"appId"`
-	State    string `json:"state"`
-	OpType   string `json:"opType"`
-	OpTaskId string `json:"opTaskId"`
-	EventId  string `json:"eventId"`
-	Account  string `json:"account"`
+	EventID          string           `json:"eventID"`
+	CreateTime       string           `json:"createTime"`
+	Name             string           `json:"name"`
+	OpID             string           `json:"opID"`
+	OpType           string           `json:"opType"`
+	State            string           `json:"state"`
+	User             string           `json:"user"`
+	EntranceStatuses []EntranceStatus `json:"entranceStatuses"`
 }
 
 // DataWatcherState handles app state messages from NATS
@@ -38,10 +48,11 @@ type DataWatcherState struct {
 	natsPass      string
 	subject       string
 	historyModule *history.HistoryModule // Add history module
+	cacheManager  *CacheManager          // Add cache manager reference
 }
 
 // NewDataWatcherState creates a new DataWatcherState instance
-func NewDataWatcherState() *DataWatcherState {
+func NewDataWatcherState(cacheManager *CacheManager) *DataWatcherState {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize history module
@@ -59,8 +70,9 @@ func NewDataWatcherState() *DataWatcherState {
 		natsPort:      getEnvOrDefault("NATS_PORT", "4222"),
 		natsUser:      getEnvOrDefault("NATS_USERNAME", ""),
 		natsPass:      getEnvOrDefault("NATS_PASSWORD", ""),
-		subject:       getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "system.app.state"),
+		subject:       getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
 		historyModule: historyModule,
+		cacheManager:  cacheManager, // Set cache manager reference
 	}
 
 	return dw
@@ -153,6 +165,9 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 	// Store as history record
 	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
 
+	// Store state data to cache
+	dw.storeStateToCache(appStateMsg)
+
 	// Print the parsed message
 	dw.printAppStateMessage(appStateMsg)
 }
@@ -181,16 +196,35 @@ func (dw *DataWatcherState) startDevMockData() {
 // generateMockMessage creates and processes a random mock message
 func (dw *DataWatcherState) generateMockMessage() {
 	appIds := []string{"app001", "app002", "app003", "app004", "app005"}
-	states := []string{"running", "stopped", "starting", "stopping", "error"}
-	opTypes := []string{"install", "uninstall", "update", "restart", "start", "stop"}
+	states := []string{"running", "stopped", "starting", "stopping", "error", "downloading"}
+	opTypes := []string{"install", "uninstall", "update", "restart", "start", "stop", "cancel"}
+	users := []string{"admin", "user1", "user2", "olaresid"}
+
+	// Create sample entrance statuses
+	entranceStatuses := []EntranceStatus{
+		{
+			Name:       "aa",
+			State:      "",
+			StatusTime: "",
+			Reason:     "",
+		},
+		{
+			Name:       "bb",
+			State:      "downloading",
+			StatusTime: time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"),
+			Reason:     "",
+		},
+	}
 
 	msg := AppStateMessage{
-		AppId:    appIds[rand.Intn(len(appIds))],
-		State:    states[rand.Intn(len(states))],
-		OpType:   opTypes[rand.Intn(len(opTypes))],
-		OpTaskId: fmt.Sprintf("task_%d", rand.Intn(10000)),
-		EventId:  fmt.Sprintf("event_%d_%d", time.Now().Unix(), rand.Intn(1000)),
-		Account:  "admin",
+		EventID:          fmt.Sprintf("event_%d_%d", time.Now().Unix(), rand.Intn(1000)),
+		CreateTime:       time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"),
+		Name:             appIds[rand.Intn(len(appIds))],
+		OpID:             fmt.Sprintf("task_%d", rand.Intn(10000)),
+		OpType:           opTypes[rand.Intn(len(opTypes))],
+		State:            states[rand.Intn(len(states))],
+		User:             users[rand.Intn(len(users))],
+		EntranceStatuses: entranceStatuses,
 	}
 
 	jsonData, _ := json.Marshal(msg)
@@ -198,6 +232,9 @@ func (dw *DataWatcherState) generateMockMessage() {
 
 	// Store as history record
 	dw.storeHistoryRecord(msg, string(jsonData))
+
+	// Store state data to cache
+	dw.storeStateToCache(msg)
 
 	dw.printAppStateMessage(msg)
 }
@@ -213,27 +250,69 @@ func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage s
 		Type:     history.TypeSystem, // Use system type
 		Message:  "",                 // Leave message empty as requested
 		Time:     time.Now().Unix(),  // Current timestamp
-		App:      msg.AppId,          // App field from message
-		Account:  msg.Account,        // Account field from message
+		App:      msg.Name,           // App field from message
+		Account:  msg.User,           // User field from message
 		Extended: rawMessage,         // Store complete message in Extended field
 	}
 
 	if err := dw.historyModule.StoreRecord(record); err != nil {
 		log.Printf("Failed to store history record: %v", err)
 	} else {
-		log.Printf("Stored history record for app %s with account %s and ID %d", msg.AppId, msg.Account, record.ID)
+		log.Printf("Stored history record for app %s with user %s and ID %d", msg.Name, msg.User, record.ID)
+	}
+}
+
+// storeStateToCache stores the app state message to cache as AppStateLatestData
+func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
+	if dw.cacheManager == nil {
+		log.Printf("Cache manager not available, skipping cache storage")
+		return
+	}
+
+	// Check if user exists and is valid
+	userID := msg.User
+	if userID == "" {
+		log.Printf("User ID is empty, skipping cache storage for app %s", msg.Name)
+		return
+	}
+
+	// Convert AppStateMessage to map[string]interface{} for cache storage
+	stateData := map[string]interface{}{
+		"state":              msg.State,
+		"updateTime":         "",
+		"statusTime":         msg.CreateTime,
+		"lastTransitionTime": "",
+		"entranceStatuses":   msg.EntranceStatuses,
+		"name":               msg.Name, // Add app name for state monitoring
+	}
+
+	// Use "Official-Market-Sources" as source ID for system app state data
+	sourceID := "Official-Market-Sources"
+
+	// Store to cache using AppStateLatest data type
+	if err := dw.cacheManager.SetAppData(userID, sourceID, AppStateLatest, stateData); err != nil {
+		log.Printf("Failed to store app state to cache: %v", err)
+	} else {
+		log.Printf("Successfully stored app state to cache for user=%s, source=%s, app=%s, state=%s",
+			userID, sourceID, msg.Name, msg.State)
 	}
 }
 
 // printAppStateMessage prints the app state message details
 func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	log.Printf("=== App State Message ===")
-	log.Printf("App ID: %s", msg.AppId)
+	log.Printf("Event ID: %s", msg.EventID)
+	log.Printf("Create Time: %s", msg.CreateTime)
+	log.Printf("Name: %s", msg.Name)
 	log.Printf("State: %s", msg.State)
 	log.Printf("Operation Type: %s", msg.OpType)
-	log.Printf("Operation Task ID: %s", msg.OpTaskId)
-	log.Printf("Event ID: %s", msg.EventId)
-	log.Printf("Account: %s", msg.Account)
+	log.Printf("Operation ID: %s", msg.OpID)
+	log.Printf("User: %s", msg.User)
+	log.Printf("Entrance Statuses:")
+	for i, status := range msg.EntranceStatuses {
+		log.Printf("  [%d] Name: %s, State: %s, Status Time: %s, Reason: %s",
+			i, status.Name, status.State, status.StatusTime, status.Reason)
+	}
 	log.Printf("========================")
 }
 

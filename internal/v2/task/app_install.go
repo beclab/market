@@ -17,17 +17,32 @@ type InstallOptions struct {
 	RepoUrl string `json:"repoUrl,omitempty"`
 	CfgUrl  string `json:"cfgUrl,omitempty"`
 	Version string `json:"version,omitempty"`
-	Source  string `json:"source,omitempty"`
+	User    string `json:"x_market_user,omitempty"`
+	Source  string `json:"x_market_source,omitempty"`
 }
 
 // AppInstall installs an application using the app service
-func (tm *TaskModule) AppInstall(appName, source, token string) (string, error) {
+func (tm *TaskModule) AppInstall(task *Task) (string, error) {
+	appName := task.AppName
+	user := task.User
+
+	token, ok := task.Metadata["token"].(string)
+	if !ok {
+		return "", fmt.Errorf("missing token in task metadata")
+	}
+
+	source, ok := task.Metadata["source"].(string)
+	if !ok {
+		source = "store" // Default source
+	}
+
 	appServiceHost := os.Getenv("APP_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_PORT")
 	urlStr := fmt.Sprintf("http://%s:%s/api/v1/apps/%s/install", appServiceHost, appServicePort, appName)
 
 	installInfo := &InstallOptions{
 		RepoUrl: getRepoUrl(),
+		User:    user,
 		Source:  source,
 	}
 	ms, err := json.Marshal(installInfo)
@@ -36,7 +51,12 @@ func (tm *TaskModule) AppInstall(appName, source, token string) (string, error) 
 	}
 	log.Printf("installUrl:%s, installInfo:%s, token:%s\n", urlStr, string(ms), token)
 
-	return sendHttpRequestWithToken(http.MethodPost, urlStr, token, strings.NewReader(string(ms)))
+	headers := map[string]string{
+		"Authorization": token,
+		"Content-Type":  "application/json",
+	}
+
+	return sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 }
 
 // getRepoUrl returns the repository URL
@@ -44,15 +64,16 @@ func getRepoUrl() string {
 	return os.Getenv("REPO_URL")
 }
 
-// sendHttpRequestWithToken sends an HTTP request with the given token
-func sendHttpRequestWithToken(method, url, token string, body *strings.Reader) (string, error) {
-	req, err := http.NewRequest(method, url, body)
+// sendHttpRequest sends an HTTP request with the given token
+func sendHttpRequest(method, urlStr string, headers map[string]string, body io.Reader) (string, error) {
+	req, err := http.NewRequest(method, urlStr, body)
 	if err != nil {
 		return "", err
 	}
 
-	req.Header.Set("Authorization", token)
-	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	client := &http.Client{}
 	resp, err := client.Do(req)

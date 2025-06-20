@@ -496,8 +496,8 @@ func (m *AppInfoModule) initDataWatcher() error {
 func (m *AppInfoModule) initDataWatcherState() error {
 	glog.Infof("Initializing DataWatcherState...")
 
-	// Create DataWatcherState instance
-	m.dataWatcherState = NewDataWatcherState()
+	// Create DataWatcherState instance with cache manager
+	m.dataWatcherState = NewDataWatcherState(m.cacheManager)
 
 	// Start DataWatcherState
 	if err := m.dataWatcherState.Start(); err != nil {
