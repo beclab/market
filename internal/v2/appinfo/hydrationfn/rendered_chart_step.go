@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -23,15 +24,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// RenderValuesCache holds cached rendering values
+type RenderValuesCache struct {
+	mutex     sync.Mutex
+	values    map[string]interface{}
+	lastFetch time.Time
+	cacheTTL  time.Duration
+}
+
 // RenderedChartStep represents the step to verify and fetch rendered chart package
 type RenderedChartStep struct {
-	client *resty.Client
+	client            *resty.Client
+	renderValuesCache *RenderValuesCache
 }
 
 // NewRenderedChartStep creates a new rendered chart step
 func NewRenderedChartStep() *RenderedChartStep {
 	return &RenderedChartStep{
 		client: resty.New(),
+		renderValuesCache: &RenderValuesCache{
+			cacheTTL: 5 * time.Minute, // Cache for 5 minutes
+		},
 	}
 }
 
@@ -363,6 +376,71 @@ func (s *RenderedChartStep) loadAndExtractChart(ctx context.Context, task *Hydra
 	return chartFiles, nil
 }
 
+// getAppServiceURL builds the app service URL from environment variables
+func (s *RenderedChartStep) getAppServiceURL() (string, error) {
+	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
+
+	if host == "" || port == "" {
+		// Fallback for local development if not set
+		log.Printf("APP_SERVICE_SERVICE_HOST or APP_SERVICE_SERVICE_PORT not set, using default localhost for development")
+		host = "localhost"
+		port = "6755"
+	}
+
+	return fmt.Sprintf("http://%s:%s/app-service/v1/apps/oamvalues", host, port), nil
+}
+
+// deepCopyMap creates a shallow copy of a map to prevent mutation of cached data
+func deepCopyMap(originalMap map[string]interface{}) map[string]interface{} {
+	newMap := make(map[string]interface{}, len(originalMap))
+	for k, v := range originalMap {
+		newMap[k] = v
+	}
+	return newMap
+}
+
+// fetchRenderValues fetches rendering values from the app-service, with caching.
+func (s *RenderedChartStep) fetchRenderValues(ctx context.Context, task *HydrationTask) (map[string]interface{}, error) {
+	s.renderValuesCache.mutex.Lock()
+	defer s.renderValuesCache.mutex.Unlock()
+
+	if s.renderValuesCache.values != nil && time.Since(s.renderValuesCache.lastFetch) < s.renderValuesCache.cacheTTL {
+		log.Println("Using cached render values.")
+		return deepCopyMap(s.renderValuesCache.values), nil
+	}
+
+	appServiceURL, err := s.getAppServiceURL()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get app service URL: %w", err)
+	}
+
+	log.Printf("Fetching render values from: %s", appServiceURL)
+	resp, err := s.client.R().
+		SetContext(ctx).
+		SetHeader("Content-Type", "application/json").
+		Get(appServiceURL)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch render values from app-service: %w", err)
+	}
+
+	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+		return nil, fmt.Errorf("app-service returned non-2xx status: %d, body: %s", resp.StatusCode(), resp.String())
+	}
+
+	var values map[string]interface{}
+	if err := json.Unmarshal(resp.Body(), &values); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal render values: %w", err)
+	}
+
+	s.renderValuesCache.values = values
+	s.renderValuesCache.lastFetch = time.Now()
+	log.Println("Successfully fetched and cached render values.")
+
+	return deepCopyMap(values), nil
+}
+
 // extractTarGz extracts files from a tar.gz archive
 func (s *RenderedChartStep) extractTarGz(data []byte) (map[string]*ChartFile, error) {
 	files := make(map[string]*ChartFile)
@@ -419,8 +497,12 @@ func (s *RenderedChartStep) extractTarGz(data []byte) (map[string]*ChartFile, er
 func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateData, error) {
 	templateData := &TemplateData{}
 
-	// Initialize Values map
-	templateData.Values = make(map[string]interface{})
+	// Fetch base values from app service, with caching
+	values, err := s.fetchRenderValues(context.Background(), task)
+	if err != nil {
+		return nil, fmt.Errorf("could not prepare template data, failed to fetch render values: %w", err)
+	}
+	templateData.Values = values
 
 	// Get admin username using utils function
 	adminUsername, err := utils.GetAdminUsername("")
@@ -429,67 +511,18 @@ func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateD
 		adminUsername = "admin" // fallback to default
 	}
 
-	// Set admin username and user info
+	// Set/Override task-specific values
 	templateData.Values["admin"] = adminUsername
 	templateData.Values["bfl"] = map[string]interface{}{
 		"username": task.UserID,
 	}
-
-	// Add userspace values (commonly used in templates)
-	templateData.Values["userspace"] = map[string]interface{}{
-		"appCache": "",
-		"userData": "",
-		"appData":  "",
-		"data":     "",
+	if userMap, ok := templateData.Values["user"].(map[string]interface{}); ok {
+		userMap["zone"] = fmt.Sprintf("user-space-%s", task.UserID)
+	} else {
+		templateData.Values["user"] = map[string]interface{}{
+			"zone": fmt.Sprintf("user-space-%s", task.UserID),
+		}
 	}
-
-	// Add user zone and scheduling info
-	templateData.Values["user"] = map[string]interface{}{
-		"zone": fmt.Sprintf("user-space-%s", task.UserID),
-	}
-
-	templateData.Values["schedule"] = map[string]interface{}{
-		"nodeName": "node",
-	}
-
-	// Add OS and application keys (for some apps that need them)
-	templateData.Values["os"] = map[string]interface{}{
-		"appKey":    "appKey",
-		"appSecret": "appSecret",
-	}
-
-	// Add domain entries (empty for now, can be populated from app config)
-	templateData.Values["domain"] = make(map[string]interface{})
-
-	// Add middleware configurations
-	templateData.Values["postgres"] = map[string]interface{}{
-		"databases": make(map[string]interface{}),
-	}
-	templateData.Values["redis"] = make(map[string]interface{})
-	templateData.Values["mongodb"] = map[string]interface{}{
-		"databases": make(map[string]interface{}),
-	}
-	templateData.Values["zinc"] = map[string]interface{}{
-		"indexes": make(map[string]interface{}),
-	}
-
-	// Add service and cluster configurations
-	templateData.Values["svcs"] = make(map[string]interface{})
-	templateData.Values["cluster"] = make(map[string]interface{})
-	templateData.Values["dep"] = make(map[string]interface{})
-
-	// Add OIDC and NATS configurations (for apps that use them)
-	templateData.Values["oidc"] = map[string]interface{}{
-		"client": make(map[string]interface{}),
-		"issuer": "issuer",
-	}
-	templateData.Values["nats"] = map[string]interface{}{
-		"subjects": make(map[string]interface{}),
-		"refs":     make(map[string]interface{}),
-	}
-
-	// Add GPU configuration
-	templateData.Values["GPU"] = make(map[string]interface{})
 
 	// Add Helm standard template variables
 	templateData.Release = map[string]interface{}{
