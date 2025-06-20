@@ -41,19 +41,30 @@ func (s *DatabaseUpdateStep) Execute(ctx context.Context, task *HydrationTask) e
 	log.Printf("Executing database update step for app: %s (user: %s, source: %s)",
 		task.AppID, task.UserID, task.SourceID)
 
+	var err error
+	// Defer cleanup of rendered directory in case of any failure in this step
+	defer func() {
+		// Only cleanup if the step failed
+		if err != nil {
+			s.cleanupRenderedDirectory(task)
+		}
+	}()
+
 	// Validate that previous steps completed successfully
-	if err := s.validatePreviousSteps(task); err != nil {
+	if err = s.validatePreviousSteps(task); err != nil {
 		return fmt.Errorf("previous steps validation failed: %w", err)
 	}
 
 	// Prepare update data with image analysis integration
-	updateData, imageAnalysis, err := s.prepareUpdateDataWithImages(task)
+	var updateData map[string]interface{}
+	var imageAnalysis *types.AppImageAnalysis
+	updateData, imageAnalysis, err = s.prepareUpdateDataWithImages(task)
 	if err != nil {
 		return fmt.Errorf("failed to prepare update data: %w", err)
 	}
 
 	// Update memory cache with image analysis
-	if err := s.updateMemoryCacheWithImages(task, updateData, imageAnalysis); err != nil {
+	if err = s.updateMemoryCacheWithImages(task, updateData, imageAnalysis); err != nil {
 		return fmt.Errorf("failed to update memory cache: %w", err)
 	}
 
@@ -221,24 +232,12 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 	log.Printf("Updating package information for app: %s", task.AppID)
 	if err := s.updatePackageInformation(task); err != nil {
 		log.Printf("Warning: Failed to update package information for app %s: %v", task.AppID, err)
-		// Clean up resources on failure
-		if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
-			if err := os.RemoveAll(renderedDir); err != nil {
-				log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
-			}
-		}
 		return fmt.Errorf("failed to update package information: %w", err)
 	}
 
 	// Step 3: Update AppInfo with image analysis
 	log.Printf("Updating AppInfo with image analysis for app: %s", task.AppID)
 	if err := s.updateAppInfoWithImages(task, imageAnalysis, hydrationMetadata); err != nil {
-		// Clean up resources on failure
-		if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
-			if err := os.RemoveAll(renderedDir); err != nil {
-				log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
-			}
-		}
 		return fmt.Errorf("failed to update AppInfo with images: %w", err)
 	}
 
@@ -249,6 +248,9 @@ func (s *DatabaseUpdateStep) updateMemoryCacheWithImages(task *HydrationTask, up
 
 // updatePackageInformation updates RawPackage and RenderedPackage fields
 func (s *DatabaseUpdateStep) updatePackageInformation(task *HydrationTask) error {
+	task.Cache.Mutex.Lock()
+	defer task.Cache.Mutex.Unlock()
+
 	if task.Cache == nil {
 		return fmt.Errorf("cache reference is nil")
 	}
@@ -714,4 +716,14 @@ func (s *DatabaseUpdateStep) updateDatabase(task *HydrationTask, updateData map[
 	log.Printf("Database update (simulated) for app: %s, data: %s", task.AppID, string(dataJSON))
 
 	return nil
+}
+
+// cleanupRenderedDirectory removes the rendered chart directory if it exists
+func (s *DatabaseUpdateStep) cleanupRenderedDirectory(task *HydrationTask) {
+	if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists && renderedDir != "" {
+		log.Printf("Executing cleanup, removing rendered chart directory: %s", renderedDir)
+		if err := os.RemoveAll(renderedDir); err != nil {
+			log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
+		}
+	}
 }
