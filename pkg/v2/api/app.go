@@ -687,10 +687,24 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 		return nil
 	}
 
+	var filteredOthers *types.Others
+	if sourceData.Others != nil {
+		filteredOthers = &types.Others{
+			Hash:       sourceData.Others.Hash,
+			Version:    sourceData.Others.Version,
+			Topics:     sourceData.Others.Topics,
+			TopicLists: sourceData.Others.TopicLists,
+			Recommends: sourceData.Others.Recommends,
+			Pages:      sourceData.Others.Pages,
+			Tops:       sourceData.Others.Tops,
+			Latest:     sourceData.Others.Latest,
+		}
+	}
+
 	filteredSourceData := &FilteredSourceData{
 		Type:           sourceData.Type,
 		AppStateLatest: sourceData.AppStateLatest,
-		Others:         sourceData.Others,
+		Others:         filteredOthers,
 		AppInfoLatest:  make([]*FilteredAppInfoLatestData, 0),
 	}
 
@@ -710,4 +724,84 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 	}
 
 	return filteredSourceData
+}
+
+// 5. Diagnostic endpoint for cache and Redis analysis
+func (s *Server) getDiagnostic(w http.ResponseWriter, r *http.Request) {
+	log.Println("GET /api/v2/diagnostic - Getting cache and Redis diagnostic information")
+
+	// Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Println("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Perform diagnostic analysis
+	err := s.cacheManager.DiagnoseCacheAndRedis()
+	if err != nil {
+		log.Printf("Diagnostic failed: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Diagnostic failed", nil)
+		return
+	}
+
+	// Get cache stats
+	cacheStats := s.cacheManager.GetCacheStats()
+
+	// Get all users data for detailed analysis
+	allUsersData := s.cacheManager.GetAllUsersData()
+
+	diagnosticInfo := map[string]interface{}{
+		"cache_stats":   cacheStats,
+		"users_data":    allUsersData,
+		"total_users":   len(allUsersData),
+		"total_sources": cacheStats["total_sources"],
+		"is_running":    cacheStats["is_running"],
+	}
+
+	log.Println("Diagnostic information retrieved successfully")
+	s.sendResponse(w, http.StatusOK, true, "Diagnostic information retrieved successfully", diagnosticInfo)
+}
+
+// 6. Force reload from Redis endpoint
+func (s *Server) forceReloadFromRedis(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/reload - Force reloading cache data from Redis")
+
+	// Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Println("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Force reload from Redis
+	err := s.cacheManager.ForceReloadFromRedis()
+	if err != nil {
+		log.Printf("Force reload failed: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Force reload failed", nil)
+		return
+	}
+
+	log.Println("Cache data reloaded successfully from Redis")
+	s.sendResponse(w, http.StatusOK, true, "Cache data reloaded successfully from Redis", nil)
+}
+
+// 7. Cleanup invalid pending data endpoint
+func (s *Server) cleanupInvalidPendingData(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/cleanup - Cleaning up invalid pending data")
+
+	// Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Println("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Cleanup invalid pending data
+	cleanedCount := s.cacheManager.CleanupInvalidPendingData()
+
+	log.Printf("Cleanup completed: removed %d invalid pending data entries", cleanedCount)
+	s.sendResponse(w, http.StatusOK, true, "Cleanup completed successfully", map[string]interface{}{
+		"cleaned_count": cleanedCount,
+	})
 }

@@ -112,7 +112,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"app_name":   request.AppName,
 		"version":    request.Version,
 		"chart_path": chartPath,
-		"token":      r.Header.Get("Authorization"),
+		"token":      utils.GetTokenFromRequest(restfulReq),
 	}
 
 	task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata)
@@ -164,7 +164,7 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 	taskMetadata := map[string]interface{}{
 		"user_id":  userID,
 		"app_name": appName,
-		"token":    r.Header.Get("Authorization"),
+		"token":    utils.GetTokenFromRequest(restfulReq),
 	}
 
 	task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata)
@@ -216,7 +216,7 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	taskMetadata := map[string]interface{}{
 		"user_id":  userID,
 		"app_name": appName,
-		"token":    r.Header.Get("Authorization"),
+		"token":    utils.GetTokenFromRequest(restfulReq),
 	}
 
 	task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata)
@@ -324,7 +324,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"app_name":   request.AppName,
 		"version":    request.Version,
 		"chart_path": chartPath,
-		"token":      r.Header.Get("Authorization"),
+		"token":      utils.GetTokenFromRequest(restfulReq),
 	}
 
 	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata)

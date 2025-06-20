@@ -47,6 +47,15 @@ func NewServer(port string, cacheManager *appinfo.CacheManager) *Server {
 		historyModule: historyModule,
 		taskModule:    task.NewTaskModule(),
 	}
+
+	// Set history module reference for task recording
+	if historyModule != nil {
+		s.taskModule.SetHistoryModule(historyModule)
+		log.Printf("History module reference set for task module")
+	} else {
+		log.Printf("Warning: History module is nil, task history recording will be skipped")
+	}
+
 	log.Printf("Server struct created successfully")
 
 	log.Printf("Setting up routes...")
@@ -118,6 +127,19 @@ func (s *Server) setupRoutes() {
 	// 12. Set market source configuration
 	api.HandleFunc("/settings/market-source", s.setMarketSource).Methods("PUT")
 	log.Printf("Route configured: PUT /app-store/api/v2/settings/market-source")
+
+	// Diagnostic endpoints
+	// 13. Get cache and Redis diagnostic information
+	api.HandleFunc("/diagnostic", s.getDiagnostic).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/diagnostic")
+
+	// 14. Force reload cache data from Redis
+	api.HandleFunc("/reload", s.forceReloadFromRedis).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/reload")
+
+	// 15. Cleanup invalid pending data
+	api.HandleFunc("/cleanup", s.cleanupInvalidPendingData).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/cleanup")
 
 	log.Printf("All routes configured successfully")
 }

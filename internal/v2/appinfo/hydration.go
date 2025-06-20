@@ -42,7 +42,6 @@ type Hydrator struct {
 	totalTasksProcessed int64
 	totalTasksSucceeded int64
 	totalTasksFailed    int64
-	metricsMutex        sync.RWMutex
 
 	// Memory monitoring
 	lastMemoryCheck     time.Time
@@ -228,36 +227,52 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			log.Printf("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.SetError(err)
 
-			// Clean up resources before retry or failure
+			// Clean up resources before failure
 			h.cleanupTaskResources(task)
 
-			// Set failure time for cooldown period
+			// Set failure time
 			now := time.Now()
 			task.LastFailureTime = &now
 
-			// Check if task can be retried
-			if task.CanRetry() {
-				log.Printf("Task %s failed, will retry after cooldown period (5 minutes). Next retry available at: %v",
-					task.ID, task.LastFailureTime.Add(5*time.Minute))
-				task.ResetForRetry()
+			// Comment out retry logic - instead move to render failed list
+			/*
+				// Check if task can be retried
+				if task.CanRetry() {
+					log.Printf("Task %s failed, will retry after cooldown period (5 minutes). Next retry available at: %v",
+						task.ID, task.LastFailureTime.Add(5*time.Minute))
+					task.ResetForRetry()
 
-				// Re-enqueue for retry after cooldown
-				go func() {
-					time.Sleep(5 * time.Minute) // Wait for cooldown period
-					if err := h.EnqueueTask(task); err != nil {
-						log.Printf("Failed to re-enqueue task for retry: %s, error: %v", task.ID, err)
-						h.markTaskFailed(task)
-					}
-				}()
-				log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY AFTER COOLDOWN ====================")
-				return
-			} else {
-				// Max retries exceeded
-				log.Printf("Task failed after max retries: %s", task.ID)
-				h.markTaskFailed(task)
-				log.Printf("==================== HYDRATION TASK FAILED ====================")
-				return
-			}
+					// Re-enqueue for retry after cooldown
+					go func() {
+						time.Sleep(5 * time.Minute) // Wait for cooldown period
+						if err := h.EnqueueTask(task); err != nil {
+							log.Printf("Failed to re-enqueue task for retry: %s, error: %v", task.ID, err)
+							h.markTaskFailed(task)
+						}
+					}()
+					log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY AFTER COOLDOWN ====================")
+					return
+				} else {
+					// Max retries exceeded
+					log.Printf("Task failed after max retries: %s", task.ID)
+					h.markTaskFailed(task)
+					log.Printf("==================== HYDRATION TASK FAILED ====================")
+					return
+				}
+			*/
+
+			// Move failed task to render failed list instead of retrying
+			failureReason := err.Error()
+			failureStep := step.GetStepName()
+
+			log.Printf("Task %s failed at step %s, moving to render failed list with reason: %s",
+				task.ID, failureStep, failureReason)
+
+			h.moveTaskToRenderFailed(task, failureReason, failureStep)
+			h.markTaskFailed(task)
+
+			log.Printf("==================== HYDRATION TASK MOVED TO RENDER FAILED LIST ====================")
+			return
 		}
 
 		task.IncrementStep()
@@ -350,34 +365,20 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 
 	// For the new structure, we can work with RawData if it exists
 	if pendingData.RawData != nil {
-		// Check if this is legacy data with metadata containing the real app data
-		if pendingData.RawData.Metadata != nil {
-			// Handle legacy data stored in metadata
-			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
-				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
-					log.Printf("Processing legacy data from metadata for user: %s, source: %s", userID, sourceID)
-					h.createTasksFromPendingDataLegacy(userID, sourceID, legacyDataMap)
-					return
-				}
-			}
-
-			// Handle legacy raw data stored in metadata
-			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
-				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
-					log.Printf("Processing legacy raw data from metadata for user: %s, source: %s", userID, sourceID)
-					h.createTasksFromPendingDataLegacy(userID, sourceID, legacyRawDataMap)
-					return
-				}
-			}
-		}
-
-		// Handle regular structured RawData (not legacy)
+		// Handle regular structured RawData
 		appID := pendingData.RawData.AppID
 		if appID == "" {
 			appID = pendingData.RawData.ID
 		}
 
 		if appID != "" {
+			// Check if app is already in render failed list
+			if h.isAppInRenderFailedList(userID, sourceID, appID) {
+				log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
+					appID, userID, sourceID)
+				return
+			}
+
 			// Check if app hydration is already complete before creating new task
 			if h.isAppHydrationComplete(pendingData) {
 				// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
@@ -385,9 +386,22 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 				return
 			}
 
+			// Check if app already exists in latest queue before creating new task
+			if h.isAppInLatestQueue(userID, sourceID, appID) {
+				// log.Printf("App already exists in latest queue for app: %s (user: %s, source: %s), skipping task creation",
+				// 	appID, userID, sourceID)
+				return
+			}
+
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
 				// Convert ApplicationInfoEntry to map for task creation
 				appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
+
+				if len(appDataMap) == 0 {
+					log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+						appID, userID, sourceID)
+					return
+				}
 
 				task := hydrationfn.NewHydrationTask(
 					userID, sourceID, appID,
@@ -405,9 +419,6 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 		}
 		return
 	}
-
-	// Legacy handling: This should be deprecated but kept for backward compatibility
-	log.Printf("Warning: createTasksFromPendingData called with legacy data structure")
 }
 
 // isAppHydrationComplete checks if an app has completed all hydration steps
@@ -571,20 +582,25 @@ func (h *Hydrator) trackTask(task *hydrationfn.HydrationTask) {
 
 // markTaskCompleted moves task from active to completed
 func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
-	h.taskMutex.Lock()
-	defer h.taskMutex.Unlock()
+	// Extract file path for cleanup before the lock
+	var sourceChartPath string
+	if path, ok := task.ChartData["source_chart_path"].(string); ok {
+		sourceChartPath = path
+	}
 
+	h.taskMutex.Lock()
 	delete(h.activeTasks, task.ID)
 
-	// Clean up task resources before storing in completed tasks
-	h.cleanupTaskResources(task)
+	// Clean up in-memory data under lock
+	task.ChartData = make(map[string]interface{})
+	task.DatabaseUpdateData = make(map[string]interface{})
+	task.AppData = make(map[string]interface{})
 
 	h.completedTasks[task.ID] = task
 
-	h.metricsMutex.Lock()
 	h.totalTasksProcessed++
 	h.totalTasksSucceeded++
-	h.metricsMutex.Unlock()
+	h.taskMutex.Unlock() // Unlock before channel send and I/O
 
 	// Add to batch completion queue for processing
 	select {
@@ -594,12 +610,24 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
 		// Queue is full, log warning but don't block
 		log.Printf("Warning: batch completion queue is full, task %s not queued for processing", task.ID)
 	}
+
+	// Clean up file resources after releasing the lock
+	if sourceChartPath != "" {
+		if err := os.Remove(sourceChartPath); err != nil {
+			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
+		}
+	}
 }
 
 // markTaskFailed moves task from active to failed
 func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
+	// Extract file path for cleanup before the lock
+	var sourceChartPath string
+	if path, ok := task.ChartData["source_chart_path"].(string); ok {
+		sourceChartPath = path
+	}
+
 	h.taskMutex.Lock()
-	defer h.taskMutex.Unlock()
 
 	task.SetStatus(hydrationfn.TaskStatusFailed)
 	delete(h.activeTasks, task.ID)
@@ -621,22 +649,111 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 		}
 	}
 
+	// Clean up in-memory data under lock
+	task.ChartData = make(map[string]interface{})
+	task.DatabaseUpdateData = make(map[string]interface{})
+	task.AppData = make(map[string]interface{})
+
 	h.failedTasks[task.ID] = task
 
-	h.metricsMutex.Lock()
 	h.totalTasksProcessed++
 	h.totalTasksFailed++
-	h.metricsMutex.Unlock()
+	h.taskMutex.Unlock() // Unlock before I/O
 
-	// Clean up task resources
-	h.cleanupTaskResources(task)
+	// Clean up file resources after releasing the lock
+	if sourceChartPath != "" {
+		if err := os.Remove(sourceChartPath); err != nil {
+			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
+		}
+	}
+}
+
+// moveTaskToRenderFailed moves a failed task to the render failed list in cache
+func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failureReason string, failureStep string) {
+	if h.cacheManager == nil {
+		log.Printf("Warning: Cache manager not set, cannot move task to render failed list")
+		return
+	}
+
+	// Find the pending data for this task
+	h.cache.Mutex.RLock()
+	userData, userExists := h.cache.Users[task.UserID]
+	if !userExists {
+		h.cache.Mutex.RUnlock()
+		log.Printf("Warning: User data not found for task: %s, user: %s", task.ID, task.UserID)
+		return
+	}
+
+	sourceData, sourceExists := userData.Sources[task.SourceID]
+	if !sourceExists {
+		h.cache.Mutex.RUnlock()
+		log.Printf("Warning: Source data not found for task: %s, user: %s, source: %s", task.ID, task.UserID, task.SourceID)
+		return
+	}
+
+	// Find the pending data for this app
+	var pendingData *types.AppInfoLatestPendingData
+	for _, pending := range sourceData.AppInfoLatestPending {
+		if pending.RawData != nil &&
+			(pending.RawData.ID == task.AppID || pending.RawData.AppID == task.AppID || pending.RawData.Name == task.AppID) {
+			pendingData = pending
+			break
+		}
+	}
+	h.cache.Mutex.RUnlock()
+
+	if pendingData == nil {
+		log.Printf("Warning: Pending data not found for task: %s, app: %s", task.ID, task.AppID)
+		return
+	}
+
+	// Create render failed data from pending data
+	failedData := types.NewAppRenderFailedDataFromPending(pendingData, failureReason, failureStep, task.RetryCount)
+
+	// Add to render failed list in cache
+	if err := h.cacheManager.SetAppData(task.UserID, task.SourceID, types.AppRenderFailed, map[string]interface{}{
+		"failed_app": failedData,
+	}); err != nil {
+		log.Printf("Failed to add task to render failed list: %s, error: %v", task.ID, err)
+		return
+	}
+
+	log.Printf("Successfully moved task %s (app: %s) to render failed list with reason: %s, step: %s",
+		task.ID, task.AppID, failureReason, failureStep)
+
+	// Remove from pending list
+	h.removeFromPendingList(task.UserID, task.SourceID, task.AppID)
+}
+
+// removeFromPendingList removes an app from the pending list
+func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
+	h.cache.Mutex.Lock()
+	defer h.cache.Mutex.Unlock()
+
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		return
+	}
+
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return
+	}
+
+	// Find and remove the app from pending list
+	for i, pending := range sourceData.AppInfoLatestPending {
+		if pending.RawData != nil &&
+			(pending.RawData.ID == appID || pending.RawData.AppID == appID || pending.RawData.Name == appID) {
+			// Remove from slice
+			sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending[:i], sourceData.AppInfoLatestPending[i+1:]...)
+			log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
+			break
+		}
+	}
 }
 
 // GetMetrics returns hydrator metrics
 func (h *Hydrator) GetMetrics() HydratorMetrics {
-	h.metricsMutex.RLock()
-	defer h.metricsMutex.RUnlock()
-
 	h.taskMutex.RLock()
 	defer h.taskMutex.RUnlock()
 
@@ -739,10 +856,23 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 		if appMap, ok := appData.(map[string]interface{}); ok {
 			// Check if task already exists for this app to avoid duplicates
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				// Check if app is already in render failed list
+				if h.isAppInRenderFailedList(userID, sourceID, appID) {
+					log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
+						appID, userID, sourceID)
+					continue
+				}
+
 				// Check if app hydration is already complete before creating new task
-				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
+				if h.isAppInLatestQueue(userID, sourceID, appID) {
 					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
 					// 	appID, userID, sourceID)
+					continue
+				}
+
+				if len(appMap) == 0 {
+					log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+						appID, userID, sourceID)
 					continue
 				}
 
@@ -878,9 +1008,9 @@ func (h *Hydrator) processCompletedTask(taskID string) {
 
 // processBatchCompletions processes completed tasks in batches
 func (h *Hydrator) processBatchCompletions() {
-	h.metricsMutex.RLock()
+	h.taskMutex.RLock()
 	currentCompleted := h.totalTasksSucceeded
-	h.metricsMutex.RUnlock()
+	h.taskMutex.RUnlock()
 
 	// Check if significant number of tasks completed since last sync
 	if currentCompleted > h.completedTaskCount+10 { // Trigger sync after 10 more completions
@@ -964,92 +1094,6 @@ func (h *Hydrator) cleanupOldCompletedTasks() {
 
 		log.Printf("Cleaned up %d old completed tasks from memory", removed)
 	}
-}
-
-// createTasksFromPendingDataLegacy creates hydration tasks from legacy pending data format
-func (h *Hydrator) createTasksFromPendingDataLegacy(userID, sourceID string, pendingData map[string]interface{}) {
-	log.Printf("Creating tasks from pending data for user: %s, source: %s", userID, sourceID)
-
-	// Extract data section from pendingData
-	dataSection, ok := pendingData["data"]
-	if !ok {
-		log.Printf("No data section found in pending data for user: %s, source: %s", userID, sourceID)
-		return
-	}
-
-	// Handle different data section formats
-	var appsMap map[string]interface{}
-
-	// First, try to handle the case where dataSection is an AppStoreDataSection struct
-	log.Printf("Data section type: %T for user: %s, source: %s", dataSection, userID, sourceID)
-
-	// Check if it's an AppStoreDataSection by checking if it has Apps field
-	if dataStruct := dataSection; dataStruct != nil {
-		// Use reflection or type assertion to access the Apps field
-
-		// Try to access as map first (for backwards compatibility)
-		if dataMap, ok := dataSection.(map[string]interface{}); ok {
-			// Check if it's in the expected format with "apps" key
-			if apps, hasApps := dataMap["apps"]; hasApps {
-				if appsMapValue, ok := apps.(map[string]interface{}); ok {
-					appsMap = appsMapValue
-					log.Printf("Found apps data in standard map format for user: %s, source: %s", userID, sourceID)
-				}
-			} else {
-				// Check if the dataMap itself contains app entries
-				if h.looksLikeAppsMap(dataMap) {
-					appsMap = dataMap
-					log.Printf("Data section appears to contain apps directly for user: %s, source: %s", userID, sourceID)
-				}
-			}
-		} else {
-			// Try to handle AppStoreDataSection struct using interface conversion
-			log.Printf("Unsupported data format for user: %s, source: %s. Expected map[string]interface{} but got %T", userID, sourceID, dataSection)
-			log.Printf("Data section content: %+v", dataSection)
-			return
-		}
-	}
-
-	log.Printf("Found %d apps in pending data for user: %s, source: %s", len(appsMap), userID, sourceID)
-
-	// Create hydration tasks for each app
-	tasksCreated := 0
-	for appID, appDataInterface := range appsMap {
-		if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
-			// Check if task already exists for this app
-			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
-				// Check if app hydration is already complete before creating new task
-				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
-					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
-					// 	appID, userID, sourceID)
-					continue
-				}
-
-				task := hydrationfn.NewHydrationTask(
-					userID, sourceID, appID,
-					appDataMap, h.cache, h.settingsManager,
-				)
-
-				if err := h.EnqueueTask(task); err != nil {
-					log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
-						appID, userID, sourceID, err)
-				} else {
-					log.Printf("Created hydration task for app: %s (user: %s, source: %s)",
-						appID, userID, sourceID)
-					tasksCreated++
-				}
-			} else {
-				log.Printf("Task already exists for app: %s (user: %s, source: %s)",
-					appID, userID, sourceID)
-			}
-		} else {
-			log.Printf("Warning: app data is not a map for app: %s (user: %s, source: %s)",
-				appID, userID, sourceID)
-		}
-	}
-
-	log.Printf("Created %d hydration tasks from pending data for user: %s, source: %s",
-		tasksCreated, userID, sourceID)
 }
 
 // monitorMemoryUsage monitors memory usage and logs warnings if it's too high
@@ -1148,4 +1192,222 @@ func (h *Hydrator) cleanupOldTasks() {
 
 		log.Printf("Cleaned up %d old failed tasks", removed)
 	}
+}
+
+// isAppInLatestQueue checks if an app already exists in the AppInfoLatest queue
+func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID string) bool {
+	// Get the source data from cache using global lock
+	h.cache.Mutex.RLock()
+	defer h.cache.Mutex.RUnlock()
+
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		return false
+	}
+
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return false
+	}
+
+	// Check if app exists in AppInfoLatest queue
+	for _, latestData := range sourceData.AppInfoLatest {
+		if latestData == nil {
+			continue
+		}
+
+		// Check RawData first
+		if latestData.RawData != nil {
+			if latestData.RawData.ID == appID ||
+				latestData.RawData.AppID == appID ||
+				latestData.RawData.Name == appID {
+				return true
+			}
+		}
+
+		// Check AppInfo.AppEntry
+		if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+			if latestData.AppInfo.AppEntry.ID == appID ||
+				latestData.AppInfo.AppEntry.AppID == appID ||
+				latestData.AppInfo.AppEntry.Name == appID {
+				return true
+			}
+		}
+
+		// Check AppSimpleInfo
+		if latestData.AppSimpleInfo != nil {
+			if latestData.AppSimpleInfo.AppID == appID ||
+				latestData.AppSimpleInfo.AppName == appID {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// ForceAddTaskFromLatestData forces creation of hydration task from latest app data, skipping isAppInLatestQueue check
+// This method is exposed for external use when you need to force add a task regardless of existing state
+func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestData *types.AppInfoLatestData) error {
+	if !h.IsRunning() {
+		return fmt.Errorf("hydrator is not running")
+	}
+
+	if latestData == nil {
+		return fmt.Errorf("latest data is nil")
+	}
+
+	// Extract app ID from latest data
+	var appID string
+	if latestData.RawData != nil {
+		appID = latestData.RawData.AppID
+		if appID == "" {
+			appID = latestData.RawData.ID
+		}
+	} else if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+		appID = latestData.AppInfo.AppEntry.AppID
+		if appID == "" {
+			appID = latestData.AppInfo.AppEntry.ID
+		}
+	} else if latestData.AppSimpleInfo != nil {
+		appID = latestData.AppSimpleInfo.AppID
+	}
+
+	if appID == "" {
+		return fmt.Errorf("cannot extract app ID from latest data")
+	}
+
+	// Check if task already exists for this app to avoid duplicates
+	if h.hasActiveTaskForApp(userID, sourceID, appID) {
+		log.Printf("Task already exists for app: %s (user: %s, source: %s), skipping force add", appID, userID, sourceID)
+		return nil
+	}
+
+	// Check if app is already in render failed list
+	if h.isAppInRenderFailedList(userID, sourceID, appID) {
+		log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping force add",
+			appID, userID, sourceID)
+		return nil
+	}
+
+	// Convert latest data to map for task creation
+	appDataMap := h.convertLatestDataToMap(latestData)
+
+	if len(appDataMap) == 0 {
+		log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+			appID, userID, sourceID)
+		return nil
+	}
+
+	// Create and submit task
+	task := hydrationfn.NewHydrationTask(
+		userID, sourceID, appID,
+		appDataMap, h.cache, h.settingsManager,
+	)
+
+	if err := h.EnqueueTask(task); err != nil {
+		log.Printf("Failed to enqueue force task for app: %s (user: %s, source: %s), error: %v",
+			appID, userID, sourceID, err)
+		return err
+	}
+
+	log.Printf("Successfully force added hydration task for app: %s (user: %s, source: %s)",
+		appID, userID, sourceID)
+	return nil
+}
+
+// convertLatestDataToMap converts AppInfoLatestData to map for task creation
+func (h *Hydrator) convertLatestDataToMap(latestData *types.AppInfoLatestData) map[string]interface{} {
+	if latestData == nil {
+		return make(map[string]interface{})
+	}
+
+	// Start with basic data
+	data := map[string]interface{}{
+		"type":      string(latestData.Type),
+		"timestamp": latestData.Timestamp,
+		"version":   latestData.Version,
+	}
+
+	// Add RawData if available
+	if latestData.RawData != nil {
+		rawDataMap := h.convertApplicationInfoEntryToMap(latestData.RawData)
+		// Merge raw data into main data map
+		for key, value := range rawDataMap {
+			data[key] = value
+		}
+	}
+
+	// Add package information
+	if latestData.RawPackage != "" {
+		data["raw_package"] = latestData.RawPackage
+	}
+	if latestData.RenderedPackage != "" {
+		data["rendered_package"] = latestData.RenderedPackage
+	}
+
+	// Add Values if available
+	if latestData.Values != nil && len(latestData.Values) > 0 {
+		valuesData := make([]map[string]interface{}, 0, len(latestData.Values))
+		for _, value := range latestData.Values {
+			if value != nil {
+				valueMap := map[string]interface{}{
+					"file_name":    value.FileName,
+					"modify_type":  string(value.ModifyType),
+					"modify_key":   value.ModifyKey,
+					"modify_value": value.ModifyValue,
+				}
+				valuesData = append(valuesData, valueMap)
+			}
+		}
+		data["values"] = valuesData
+	}
+
+	// Add AppInfo if available
+	if latestData.AppInfo != nil {
+		if latestData.AppInfo.AppEntry != nil {
+			appEntryMap := h.convertApplicationInfoEntryToMap(latestData.AppInfo.AppEntry)
+			// Merge app entry data
+			for key, value := range appEntryMap {
+				data[key] = value
+			}
+		}
+		if latestData.AppInfo.ImageAnalysis != nil {
+			data["image_analysis"] = latestData.AppInfo.ImageAnalysis
+		}
+	}
+
+	// Add AppSimpleInfo if available
+	if latestData.AppSimpleInfo != nil {
+		data["app_simple_info"] = latestData.AppSimpleInfo
+	}
+
+	return data
+}
+
+// isAppInRenderFailedList checks if an app already exists in the render failed list
+func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool {
+	// Get the source data from cache using global lock
+	h.cache.Mutex.RLock()
+	defer h.cache.Mutex.RUnlock()
+
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		return false
+	}
+
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return false
+	}
+
+	// Check if app exists in render failed list
+	for _, failedData := range sourceData.AppRenderFailed {
+		if failedData.RawData != nil &&
+			(failedData.RawData.ID == appID || failedData.RawData.AppID == appID || failedData.RawData.Name == appID) {
+			return true
+		}
+	}
+
+	return false
 }

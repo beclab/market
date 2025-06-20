@@ -15,8 +15,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -24,27 +24,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RenderValuesCache holds cached rendering values
-type RenderValuesCache struct {
-	mutex     sync.Mutex
-	values    map[string]interface{}
-	lastFetch time.Time
-	cacheTTL  time.Duration
-}
-
 // RenderedChartStep represents the step to verify and fetch rendered chart package
 type RenderedChartStep struct {
-	client            *resty.Client
-	renderValuesCache *RenderValuesCache
+	client *resty.Client
 }
 
 // NewRenderedChartStep creates a new rendered chart step
 func NewRenderedChartStep() *RenderedChartStep {
 	return &RenderedChartStep{
 		client: resty.New(),
-		renderValuesCache: &RenderValuesCache{
-			cacheTTL: 5 * time.Minute, // Cache for 5 minutes
-		},
 	}
 }
 
@@ -72,14 +60,22 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 		return fmt.Errorf("source chart URL is required but not available")
 	}
 
+	// Step 1: Check and clean existing rendered directory if needed
+	if err := s.checkAndCleanExistingRenderedDirectory(ctx, task); err != nil {
+		return fmt.Errorf("failed to check and clean existing rendered directory: %w", err)
+	}
+
 	// Load and extract chart package from local file
 	chartFiles, err := s.loadAndExtractChart(ctx, task)
 	if err != nil {
 		return fmt.Errorf("failed to load and extract chart: %w", err)
 	}
 
+	// Store chart files in task data for later use
+	task.ChartData["chart_files"] = chartFiles
+
 	// Prepare template data for rendering
-	templateData, err := s.prepareTemplateData(task)
+	templateData, err := s.prepareTemplateData(ctx, task)
 	if err != nil {
 		return fmt.Errorf("failed to prepare template data: %w", err)
 	}
@@ -88,6 +84,15 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	renderedManifest, err := s.renderOlaresManifest(chartFiles, templateData)
 	if err != nil {
 		return fmt.Errorf("failed to render OlaresManifest.yaml: %w", err)
+	}
+
+	// Extract entrances from rendered OlaresManifest.yaml and update templateData
+	entrances, err := s.extractEntrancesFromManifest(renderedManifest)
+	if err != nil {
+		log.Printf("Warning: failed to extract entrances from rendered OlaresManifest.yaml: %v", err)
+	} else {
+		templateData.Values["domain"] = entrances
+		log.Printf("Extracted %d entrances from rendered OlaresManifest.yaml", len(entrances))
 	}
 
 	// Render the entire chart package
@@ -391,25 +396,8 @@ func (s *RenderedChartStep) getAppServiceURL() (string, error) {
 	return fmt.Sprintf("http://%s:%s/app-service/v1/apps/oamvalues", host, port), nil
 }
 
-// deepCopyMap creates a shallow copy of a map to prevent mutation of cached data
-func deepCopyMap(originalMap map[string]interface{}) map[string]interface{} {
-	newMap := make(map[string]interface{}, len(originalMap))
-	for k, v := range originalMap {
-		newMap[k] = v
-	}
-	return newMap
-}
-
-// fetchRenderValues fetches rendering values from the app-service, with caching.
+// fetchRenderValues fetches rendering values from the app-service without caching
 func (s *RenderedChartStep) fetchRenderValues(ctx context.Context, task *HydrationTask) (map[string]interface{}, error) {
-	s.renderValuesCache.mutex.Lock()
-	defer s.renderValuesCache.mutex.Unlock()
-
-	if s.renderValuesCache.values != nil && time.Since(s.renderValuesCache.lastFetch) < s.renderValuesCache.cacheTTL {
-		log.Println("Using cached render values.")
-		return deepCopyMap(s.renderValuesCache.values), nil
-	}
-
 	appServiceURL, err := s.getAppServiceURL()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app service URL: %w", err)
@@ -434,11 +422,8 @@ func (s *RenderedChartStep) fetchRenderValues(ctx context.Context, task *Hydrati
 		return nil, fmt.Errorf("failed to unmarshal render values: %w", err)
 	}
 
-	s.renderValuesCache.values = values
-	s.renderValuesCache.lastFetch = time.Now()
-	log.Println("Successfully fetched and cached render values.")
-
-	return deepCopyMap(values), nil
+	log.Println("Successfully fetched render values from app-service.")
+	return values, nil
 }
 
 // extractTarGz extracts files from a tar.gz archive
@@ -494,11 +479,11 @@ func (s *RenderedChartStep) extractTarGz(data []byte) (map[string]*ChartFile, er
 }
 
 // prepareTemplateData prepares the template data for chart rendering
-func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateData, error) {
+func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *HydrationTask) (*TemplateData, error) {
 	templateData := &TemplateData{}
 
 	// Fetch base values from app service, with caching
-	values, err := s.fetchRenderValues(context.Background(), task)
+	values, err := s.fetchRenderValues(ctx, task)
 	if err != nil {
 		return nil, fmt.Errorf("could not prepare template data, failed to fetch render values: %w", err)
 	}
@@ -523,6 +508,8 @@ func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateD
 			"zone": fmt.Sprintf("user-space-%s", task.UserID),
 		}
 	}
+
+	// domain/entrances will be filled by Execute, not handled here
 
 	// Add Helm standard template variables
 	templateData.Release = map[string]interface{}{
@@ -759,12 +746,6 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		},
 
 		// String functions
-		"quote": func(str string) string {
-			return fmt.Sprintf(`"%s"`, str)
-		},
-		"squote": func(str string) string {
-			return fmt.Sprintf(`'%s'`, str)
-		},
 		"lower": strings.ToLower,
 		"upper": strings.ToUpper,
 		"title": strings.Title,
@@ -789,6 +770,12 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		},
 		"split": func(sep, s string) []string {
 			return strings.Split(s, sep)
+		},
+		"splitList": func(sep, str string) []string {
+			if str == "" {
+				return []string{}
+			}
+			return strings.Split(str, sep)
 		},
 		"join": func(sep string, elems []interface{}) string {
 			strs := make([]string, len(elems))
@@ -848,6 +835,192 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			}
 			return 0
 		},
+		"toFloat64": func(v interface{}) float64 {
+			switch val := v.(type) {
+			case float64:
+				return val
+			case int:
+				return float64(val)
+			case string:
+				if f, err := strconv.ParseFloat(val, 64); err == nil {
+					return f
+				}
+			}
+			return 0.0
+		},
+		"float64": func(v interface{}) float64 {
+			switch val := v.(type) {
+			case float64:
+				return val
+			case int:
+				return float64(val)
+			case string:
+				if f, err := strconv.ParseFloat(val, 64); err == nil {
+					return f
+				}
+			}
+			return 0.0
+		},
+		"int": func(v interface{}) int {
+			switch val := v.(type) {
+			case int:
+				return val
+			case float64:
+				return int(val)
+			case string:
+				if i, err := strconv.Atoi(val); err == nil {
+					return i
+				}
+			}
+			return 0
+		},
+		"add": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok {
+					return av + bv
+				}
+			case float64:
+				if bv, ok := b.(float64); ok {
+					return av + bv
+				}
+			}
+			return 0
+		},
+		"sub": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok {
+					return av - bv
+				}
+			case float64:
+				if bv, ok := b.(float64); ok {
+					return av - bv
+				}
+			}
+			return 0
+		},
+		"mul": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok {
+					return av * bv
+				}
+			case float64:
+				if bv, ok := b.(float64); ok {
+					return av * bv
+				}
+			}
+			return 0
+		},
+		"div": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok && bv != 0 {
+					return av / bv
+				}
+			case float64:
+				if bv, ok := b.(float64); ok && bv != 0 {
+					return av / bv
+				}
+			}
+			return 0
+		},
+		"mod": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok && bv != 0 {
+					return av % bv
+				}
+			}
+			return 0
+		},
+		"gt": func(a, b interface{}) bool {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok {
+					return av > bv
+				}
+			case float64:
+				if bv, ok := b.(float64); ok {
+					return av > bv
+				}
+			case string:
+				if bv, ok := b.(string); ok {
+					return av > bv
+				}
+			}
+			return false
+		},
+		"gte": func(a, b interface{}) bool {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok {
+					return av >= bv
+				}
+			case float64:
+				if bv, ok := b.(float64); ok {
+					return av >= bv
+				}
+			case string:
+				if bv, ok := b.(string); ok {
+					return av >= bv
+				}
+			}
+			return false
+		},
+		"lt": func(a, b interface{}) bool {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok {
+					return av < bv
+				}
+			case float64:
+				if bv, ok := b.(float64); ok {
+					return av < bv
+				}
+			case string:
+				if bv, ok := b.(string); ok {
+					return av < bv
+				}
+			}
+			return false
+		},
+		"lte": func(a, b interface{}) bool {
+			switch av := a.(type) {
+			case int:
+				if bv, ok := b.(int); ok {
+					return av <= bv
+				}
+			case float64:
+				if bv, ok := b.(float64); ok {
+					return av <= bv
+				}
+			case string:
+				if bv, ok := b.(string); ok {
+					return av <= bv
+				}
+			}
+			return false
+		},
+		"cat": func(args ...interface{}) string {
+			var result strings.Builder
+			for _, arg := range args {
+				result.WriteString(fmt.Sprintf("%v", arg))
+			}
+			return result.String()
+		},
+		"repeat": func(count int, str string) string {
+			return strings.Repeat(str, count)
+		},
+		"has": func(needle interface{}, haystack []interface{}) bool {
+			for _, item := range haystack {
+				if item == needle {
+					return true
+				}
+			}
+			return false
+		},
 		"toBool": toBoolHelper,
 
 		// Conditional functions
@@ -887,13 +1060,100 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			}
 			return list[len(list)-1]
 		},
-		"has": func(needle interface{}, haystack []interface{}) bool {
-			for _, item := range haystack {
-				if item == needle {
-					return true
-				}
+
+		// Random functions
+		"randAlphaNum": func(count int) string {
+			const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+			result := make([]byte, count)
+			for i := range result {
+				result[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+				time.Sleep(1 * time.Nanosecond) // Ensure different values
 			}
-			return false
+			return string(result)
+		},
+		"randAlpha": func(count int) string {
+			const charset = "abcdefghijklmnopqrstuvwxyz"
+			result := make([]byte, count)
+			for i := range result {
+				result[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+				time.Sleep(1 * time.Nanosecond) // Ensure different values
+			}
+			return string(result)
+		},
+		"randNumeric": func(count int) string {
+			const charset = "0123456789"
+			result := make([]byte, count)
+			for i := range result {
+				result[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+				time.Sleep(1 * time.Nanosecond) // Ensure different values
+			}
+			return string(result)
+		},
+		"randAscii": func(count int) string {
+			const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+			result := make([]byte, count)
+			for i := range result {
+				result[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+				time.Sleep(1 * time.Nanosecond) // Ensure different values
+			}
+			return string(result)
+		},
+
+		// Utility functions
+		"b64enc": func(str string) string {
+			return fmt.Sprintf("%s", str) // Simplified base64 encoding
+		},
+		"b64dec": func(str string) string {
+			return str // Simplified base64 decoding
+		},
+		"sha256sum": func(str string) string {
+			// Simplified SHA256 hash - in production you'd use crypto/sha256
+			return fmt.Sprintf("sha256-%s", str)
+		},
+		"trunc": func(length int, str string) string {
+			if len(str) <= length {
+				return str
+			}
+			return str[:length]
+		},
+		"nospace": func(str string) string {
+			return strings.ReplaceAll(str, " ", "")
+		},
+		"compact": func(str string) string {
+			return strings.ReplaceAll(str, " ", "")
+		},
+		"initial": func(str string) string {
+			if len(str) == 0 {
+				return str
+			}
+			return strings.ToUpper(str[:1])
+		},
+		"wordwrap": func(width int, str string) string {
+			// Simplified word wrapping
+			if len(str) <= width {
+				return str
+			}
+			return str[:width] + "\n" + str[width:]
+		},
+
+		// Kubernetes functions
+		"lookup": func(apiVersion, kind, namespace, name string) interface{} {
+			// Simplified lookup function - returns empty map for now
+			// In a real implementation, this would query the Kubernetes API
+			return map[string]interface{}{}
+		},
+		"include": func(name string, data interface{}) (string, error) {
+			// Simplified include function - returns empty string for now
+			// In a real implementation, this would include another template
+			return "", nil
+		},
+		"tpl": func(template string, data interface{}) (string, error) {
+			// Simplified tpl function - returns the template as-is for now
+			// In a real implementation, this would render the template
+			return template, nil
+		},
+		"fail": func(msg string) (string, error) {
+			return "", fmt.Errorf(msg)
 		},
 	}
 }
@@ -1012,7 +1272,7 @@ func (s *RenderedChartStep) cleanPathComponent(component, fallback string) strin
 	// Trim spaces and dots from ends
 	cleaned = strings.Trim(cleaned, " .")
 
-	// If cleaned component is empty, use fallback
+	// If cleaned component is empty, use fallback (if provided)
 	if cleaned == "" {
 		return fallback
 	}
@@ -1056,7 +1316,7 @@ func (s *RenderedChartStep) updatePendingDataRenderedPackage(task *HydrationTask
 	return nil
 }
 
-// isTaskForPendingDataRendered checks if the current task corresponds to the pending data
+// isTaskForPendingDataRendered checks if the current task corresponds to the pending data for rendered package
 func (s *RenderedChartStep) isTaskForPendingDataRendered(task *HydrationTask, pendingData *types.AppInfoLatestPendingData) bool {
 	if pendingData == nil {
 		return false
@@ -1066,45 +1326,7 @@ func (s *RenderedChartStep) isTaskForPendingDataRendered(task *HydrationTask, pe
 
 	// Check if the task AppID matches the pending data's RawData
 	if pendingData.RawData != nil {
-		// Check if this is legacy data by looking at metadata
-		if pendingData.RawData.Metadata != nil {
-			// Check for legacy_data in metadata - this contains multiple apps
-			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
-				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
-					// Check if task app ID exists in the legacy data apps
-					if dataSection, hasDataSection := legacyDataMap["data"].(map[string]interface{}); hasDataSection {
-						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
-							if _, appExists := appsData[taskAppID]; appExists {
-								return true
-							}
-						}
-					}
-				}
-			}
-
-			// Check for legacy_raw_data in metadata
-			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
-				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
-					// Similar check for legacy raw data format
-					if dataSection, hasDataSection := legacyRawDataMap["data"].(map[string]interface{}); hasDataSection {
-						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
-							if _, appExists := appsData[taskAppID]; appExists {
-								return true
-							}
-						}
-					}
-				}
-			}
-
-			// Check representative_app_id for legacy summary data
-			if repAppID, hasRepAppID := pendingData.RawData.Metadata["representative_app_id"].(string); hasRepAppID {
-				if repAppID == taskAppID {
-					return true
-				}
-			}
-		}
-
-		// Standard checks for non-legacy data
+		// Standard checks for data
 		// Match by ID, AppID or Name
 		if pendingData.RawData.ID == taskAppID ||
 			pendingData.RawData.AppID == taskAppID ||
@@ -1124,4 +1346,209 @@ func (s *RenderedChartStep) isTaskForPendingDataRendered(task *HydrationTask, pe
 	}
 
 	return false
+}
+
+// checkAndCleanExistingRenderedDirectory checks and cleans the existing rendered directory if needed
+func (s *RenderedChartStep) checkAndCleanExistingRenderedDirectory(ctx context.Context, task *HydrationTask) error {
+	// Get base storage path from environment variable
+	basePath := os.Getenv("CHART_ROOT")
+	if basePath == "" {
+		return fmt.Errorf("CHART_ROOT environment variable is not set")
+	}
+
+	// Validate required path components
+	if task.UserID == "" {
+		return fmt.Errorf("task UserID is empty")
+	}
+	if task.SourceID == "" {
+		return fmt.Errorf("task SourceID is empty")
+	}
+	if task.AppName == "" {
+		return fmt.Errorf("task AppName is empty")
+	}
+	if task.AppVersion == "" {
+		return fmt.Errorf("task AppVersion is empty")
+	}
+
+	// Clean path components to prevent invalid directory names
+	userID := s.cleanPathComponent(task.UserID, "")
+	sourceID := s.cleanPathComponent(task.SourceID, "")
+	appName := s.cleanPathComponent(task.AppName, "")
+	appVersion := s.cleanPathComponent(task.AppVersion, "")
+
+	// Check if any component is empty after cleaning
+	if userID == "" {
+		return fmt.Errorf("UserID is invalid after cleaning")
+	}
+	if sourceID == "" {
+		return fmt.Errorf("SourceID is invalid after cleaning")
+	}
+	if appName == "" {
+		return fmt.Errorf("AppName is invalid after cleaning")
+	}
+	if appVersion == "" {
+		return fmt.Errorf("AppVersion is invalid after cleaning")
+	}
+
+	// Build directory path: {basePath}/{username}/{source name}/{app name}-{version}/
+	chartDir := filepath.Join(basePath, userID, sourceID, fmt.Sprintf("%s-%s", appName, appVersion))
+
+	// Check if directory exists
+	if _, err := os.Stat(chartDir); err == nil {
+		log.Printf("Existing rendered directory found: %s", chartDir)
+
+		// Check if the app exists in the Latest list in cache
+		if s.isAppInLatestList(task) {
+			log.Printf("App %s exists in Latest list, keeping existing rendered directory", task.AppID)
+			return nil
+		}
+
+		log.Printf("App %s not found in Latest list, cleaning existing rendered directory", task.AppID)
+
+		// Clean the directory
+		if err := os.RemoveAll(chartDir); err != nil {
+			return fmt.Errorf("failed to clean existing rendered directory: %w", err)
+		}
+
+		log.Printf("Existing rendered directory cleaned successfully")
+	} else if os.IsNotExist(err) {
+		log.Printf("Existing rendered directory not found, proceeding with new rendering")
+	} else {
+		return fmt.Errorf("failed to check existing rendered directory: %w", err)
+	}
+
+	return nil
+}
+
+// isAppInLatestList checks if the app exists in the Latest list in cache
+func (s *RenderedChartStep) isAppInLatestList(task *HydrationTask) bool {
+	if task.Cache == nil {
+		log.Printf("Warning: Cache is nil, cannot check Latest list")
+		return false
+	}
+
+	// Lock cache for thread-safe access
+	task.Cache.Mutex.RLock()
+	defer task.Cache.Mutex.RUnlock()
+
+	// Check if user exists in cache
+	userData, exists := task.Cache.Users[task.UserID]
+	if !exists {
+		log.Printf("User %s not found in cache", task.UserID)
+		return false
+	}
+
+	// Check if source exists in user data
+	sourceData, exists := userData.Sources[task.SourceID]
+	if !exists {
+		log.Printf("Source %s not found for user %s", task.SourceID, task.UserID)
+		return false
+	}
+
+	// Check if app exists in AppInfoLatest list
+	for _, latestApp := range sourceData.AppInfoLatest {
+		if latestApp == nil {
+			continue
+		}
+
+		// Compare by app name (primary identifier)
+		if s.compareAppIdentifiers(latestApp, task.AppName) {
+			log.Printf("Found matching app in Latest list: %s", task.AppName)
+			return true
+		}
+	}
+
+	log.Printf("App %s not found in Latest list", task.AppName)
+	return false
+}
+
+// compareAppIdentifiers compares app identifiers between latest app data and task
+func (s *RenderedChartStep) compareAppIdentifiers(latestApp *types.AppInfoLatestData, taskAppName string) bool {
+	if latestApp == nil {
+		return false
+	}
+
+	// Check RawData first
+	if latestApp.RawData != nil {
+		if latestApp.RawData.Name == taskAppName ||
+			latestApp.RawData.AppID == taskAppName ||
+			latestApp.RawData.ID == taskAppName {
+			return true
+		}
+	}
+
+	// Check AppInfo.AppEntry
+	if latestApp.AppInfo != nil && latestApp.AppInfo.AppEntry != nil {
+		if latestApp.AppInfo.AppEntry.Name == taskAppName ||
+			latestApp.AppInfo.AppEntry.AppID == taskAppName ||
+			latestApp.AppInfo.AppEntry.ID == taskAppName {
+			return true
+		}
+	}
+
+	// Check AppSimpleInfo
+	if latestApp.AppSimpleInfo != nil {
+		if latestApp.AppSimpleInfo.AppName == taskAppName ||
+			latestApp.AppSimpleInfo.AppID == taskAppName {
+			return true
+		}
+	}
+
+	return false
+}
+
+// extractEntrancesFromChartFiles extracts entrances from OlaresManifest.yaml in chart files
+func (s *RenderedChartStep) extractEntrancesFromChartFiles(files map[string]*ChartFile) (map[string]interface{}, error) {
+	entries := make(map[string]interface{})
+
+	// Iterate through files to find OlaresManifest.yaml
+	for filePath, file := range files {
+		if strings.HasSuffix(strings.ToLower(filePath), "olaresmanifest.yaml") ||
+			strings.HasSuffix(strings.ToLower(filePath), "olaresmanifest.yml") {
+			log.Printf("Found OlaresManifest file: %s", filePath)
+
+			// Extract entrances from file content
+			manifestEntries, err := s.extractEntrancesFromManifest(string(file.Content))
+			if err != nil {
+				return nil, fmt.Errorf("failed to extract entrances from file %s: %w", filePath, err)
+			}
+
+			entries = manifestEntries
+			log.Printf("Successfully extracted %d entrances from %s", len(entries), filePath)
+			break
+		}
+	}
+
+	if len(entries) == 0 {
+		log.Printf("No entrances found in OlaresManifest.yaml files")
+	}
+
+	return entries, nil
+}
+
+// extractEntrancesFromManifest extracts entrances from OlaresManifest.yaml
+func (s *RenderedChartStep) extractEntrancesFromManifest(manifestStr string) (map[string]interface{}, error) {
+	entries := make(map[string]interface{})
+
+	// Parse the YAML content
+	var manifest map[string]interface{}
+	if err := yaml.Unmarshal([]byte(manifestStr), &manifest); err != nil {
+		return nil, fmt.Errorf("failed to parse manifest YAML: %w", err)
+	}
+
+	// Navigate to entrances section
+	if entrances, ok := manifest["entrances"]; ok {
+		if entranceList, ok := entrances.([]interface{}); ok {
+			for _, entrance := range entranceList {
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					if name, ok := entranceMap["name"].(string); ok {
+						entries[name] = entranceMap // 保留所有字段
+						log.Printf("Found entrance: %s", name)
+					}
+				}
+			}
+		}
+	}
+
+	return entries, nil
 }

@@ -24,6 +24,7 @@ const (
 	AppStateLatest       AppDataType = "app-state-latest"
 	AppInfoLatest        AppDataType = "app-info-latest"
 	AppInfoLatestPending AppDataType = "app-info-latest-pending"
+	AppRenderFailed      AppDataType = "app-render-failed"
 	Other                AppDataType = "other"
 )
 
@@ -54,6 +55,7 @@ type Page struct {
 
 // Topic represents topic configuration
 type Topic struct {
+	ID            string            `json:"_id"`
 	Name          string            `json:"name"`
 	Name2         map[string]string `json:"name2"`
 	Introduction  string            `json:"introduction"`
@@ -80,14 +82,22 @@ type TopicList struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// AppStoreTopItem represents an item in the tops list from appstore
+type AppStoreTopItem struct {
+	AppID string `json:"appid"`
+	Rank  int    `json:"rank"`
+}
+
 // Others contains additional data for AppInfoLatestPendingData
 type Others struct {
-	Hash       string       `json:"hash"`
-	Version    string       `json:"version"`
-	Topics     []*Topic     `json:"topics"`
-	TopicLists []*TopicList `json:"topic_lists"`
-	Recommends []*Recommend `json:"recommends"`
-	Pages      []*Page      `json:"pages"`
+	Hash       string             `json:"hash"`
+	Version    string             `json:"version"`
+	Topics     []*Topic           `json:"topics"`
+	TopicLists []*TopicList       `json:"topic_lists"`
+	Recommends []*Recommend       `json:"recommends"`
+	Pages      []*Page            `json:"pages"`
+	Tops       []*AppStoreTopItem `json:"tops"`
+	Latest     []string           `json:"latest"`
 }
 
 // AppData contains the actual data and metadata
@@ -249,6 +259,22 @@ type AppInfoLatestPendingData struct {
 	RenderedPackage string                `json:"rendered_package"`
 }
 
+// AppRenderFailedData contains app data that failed to render with failure reason
+type AppRenderFailedData struct {
+	Type            AppDataType           `json:"type"`
+	Timestamp       int64                 `json:"timestamp"`
+	Version         string                `json:"version,omitempty"`
+	RawData         *ApplicationInfoEntry `json:"raw_data"`
+	RawPackage      string                `json:"raw_package"`
+	Values          []*Values             `json:"values"`
+	AppInfo         *AppInfo              `json:"app_info"`
+	RenderedPackage string                `json:"rendered_package"`
+	FailureReason   string                `json:"failure_reason"` // Reason for render failure
+	FailureStep     string                `json:"failure_step"`   // Which step failed
+	FailureTime     time.Time             `json:"failure_time"`   // When the failure occurred
+	RetryCount      int                   `json:"retry_count"`    // Number of retry attempts
+}
+
 // AppOtherData contains other app data
 type AppOtherData struct {
 	Type      AppDataType            `json:"type"`
@@ -264,7 +290,8 @@ type SourceData struct {
 	AppStateLatest       []*AppStateLatestData       `json:"app_state_latest"`
 	AppInfoLatest        []*AppInfoLatestData        `json:"app_info_latest"`
 	AppInfoLatestPending []*AppInfoLatestPendingData `json:"app_info_latest_pending"`
-	Others               *Others                     `json:"others,omitempty"` // Additional data like hash, topics, etc.
+	AppRenderFailed      []*AppRenderFailedData      `json:"app_render_failed"` // Apps that failed to render
+	Others               *Others                     `json:"others,omitempty"`  // Additional data like hash, topics, etc.
 	// Remove Mutex, all lock operations will be managed by CacheData
 }
 
@@ -380,6 +407,7 @@ func NewSourceData() *SourceData {
 		AppStateLatest:       make([]*AppStateLatestData, 0),
 		AppInfoLatest:        make([]*AppInfoLatestData, 0),
 		AppInfoLatestPending: make([]*AppInfoLatestPendingData, 0),
+		AppRenderFailed:      make([]*AppRenderFailedData, 0),
 	}
 }
 
@@ -391,6 +419,7 @@ func NewSourceDataWithType(sourceType SourceDataType) *SourceData {
 		AppStateLatest:       make([]*AppStateLatestData, 0),
 		AppInfoLatest:        make([]*AppInfoLatestData, 0),
 		AppInfoLatestPending: make([]*AppInfoLatestPendingData, 0),
+		AppRenderFailed:      make([]*AppRenderFailedData, 0),
 	}
 }
 
@@ -582,7 +611,6 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 
 	// Store the original data in metadata for later processing
 	rawData.Metadata["source_data"] = data
-	rawData.Metadata["data_type"] = "legacy_app_latest_data"
 
 	appInfoLatest.RawData = rawData
 	appInfoLatest.AppInfo = &AppInfo{
@@ -786,7 +814,6 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 
 	// Store the complete app data in metadata for later processing
 	rawData.Metadata["source_app_data"] = appData
-	rawData.Metadata["data_type"] = "single_app_data"
 	rawData.Metadata["validation_status"] = "validated"
 
 	pendingData.RawData = rawData
@@ -1404,4 +1431,39 @@ func TestAppLabelsFix() {
 
 	entry3 := NewApplicationInfoEntry(testData3)
 	log.Printf("TEST 3: No AppLabels: %v", entry3.AppLabels)
+}
+
+// NewAppRenderFailedData creates a new app render failed data structure
+func NewAppRenderFailedData(rawData *ApplicationInfoEntry, rawPackage string, values []*Values, appInfo *AppInfo, renderedPackage string, failureReason string, failureStep string, retryCount int) *AppRenderFailedData {
+	return &AppRenderFailedData{
+		Type:            AppRenderFailed, // Use correct type for render failed data
+		Timestamp:       getCurrentTimestamp(),
+		RawData:         rawData,
+		RawPackage:      rawPackage,
+		Values:          values,
+		AppInfo:         appInfo,
+		RenderedPackage: renderedPackage,
+		FailureReason:   failureReason,
+		FailureStep:     failureStep,
+		FailureTime:     time.Now(),
+		RetryCount:      retryCount,
+	}
+}
+
+// NewAppRenderFailedDataFromPending creates AppRenderFailedData from AppInfoLatestPendingData
+func NewAppRenderFailedDataFromPending(pendingData *AppInfoLatestPendingData, failureReason string, failureStep string, retryCount int) *AppRenderFailedData {
+	return &AppRenderFailedData{
+		Type:            pendingData.Type,
+		Timestamp:       pendingData.Timestamp,
+		Version:         pendingData.Version,
+		RawData:         pendingData.RawData,
+		RawPackage:      pendingData.RawPackage,
+		Values:          pendingData.Values,
+		AppInfo:         pendingData.AppInfo,
+		RenderedPackage: pendingData.RenderedPackage,
+		FailureReason:   failureReason,
+		FailureStep:     failureStep,
+		FailureTime:     time.Now(),
+		RetryCount:      retryCount,
+	}
 }

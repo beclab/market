@@ -32,7 +32,7 @@ func GetUserInfoFromRequest(req *restful.Request) (string, error) {
 	}
 
 	// Get token from request
-	token := getTokenFromRequest(req)
+	token := GetTokenFromRequest(req)
 	if token == "" {
 		return "", errors.New("access token not found")
 	}
@@ -125,8 +125,8 @@ func sendHttpRequest(req *http.Request) (string, error) {
 	return string(body), nil
 }
 
-// getTokenFromRequest extracts token from request (same logic as handler.go)
-func getTokenFromRequest(req *restful.Request) string {
+// GetTokenFromRequest extracts token from request (same logic as handler.go)
+func GetTokenFromRequest(req *restful.Request) string {
 	if conf.GetIsPublic() {
 		return "public"
 	}

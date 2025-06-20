@@ -20,6 +20,8 @@ const (
 	// Action types
 	TypeActionInstall   HistoryType = "ACTION_INSTALL"
 	TypeActionUninstall HistoryType = "ACTION_UNINSTALL"
+	TypeActionCancel    HistoryType = "ACTION_CANCEL"
+	TypeActionUpgrade   HistoryType = "ACTION_UPGRADE"
 
 	// System types
 	TypeSystemInstallSucceed HistoryType = "SYSTEM_INSTALL_SUCCEED"

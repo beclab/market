@@ -114,6 +114,38 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, me
 	return task
 }
 
+// getHistoryType converts TaskType to appropriate HistoryType
+func getHistoryType(taskType TaskType) history.HistoryType {
+	switch taskType {
+	case InstallApp:
+		return history.TypeActionInstall
+	case UninstallApp:
+		return history.TypeActionUninstall
+	case CancelAppInstall:
+		return history.TypeActionCancel
+	case UpgradeApp:
+		return history.TypeActionUpgrade
+	default:
+		return history.TypeAction
+	}
+}
+
+// getTaskTypeString converts TaskType to a meaningful string representation
+func getTaskTypeString(taskType TaskType) string {
+	switch taskType {
+	case InstallApp:
+		return "install"
+	case UninstallApp:
+		return "uninstall"
+	case CancelAppInstall:
+		return "cancel"
+	case UpgradeApp:
+		return "upgrade"
+	default:
+		return fmt.Sprintf("unknown(%d)", taskType)
+	}
+}
+
 // recordTaskHistory records task information in history module
 func (tm *TaskModule) recordTaskHistory(task *Task, user string) {
 	if tm.historyModule == nil {
@@ -128,12 +160,13 @@ func (tm *TaskModule) recordTaskHistory(task *Task, user string) {
 		return
 	}
 
-	// Create task type string for message
-	taskTypeStr := fmt.Sprintf("%d", task.Type)
+	// Get meaningful task type string and history type
+	taskTypeStr := getTaskTypeString(task.Type)
+	historyType := getHistoryType(task.Type)
 
 	// Create history record
 	historyRecord := &history.HistoryRecord{
-		Type:     history.TypeAction,
+		Type:     historyType,
 		Message:  fmt.Sprintf("%s %s", taskTypeStr, task.AppName),
 		Time:     time.Now().Unix(),
 		App:      task.AppName,
@@ -223,32 +256,77 @@ func (tm *TaskModule) executeNextTask() {
 
 // executeTask executes the actual task logic
 func (tm *TaskModule) executeTask(task *Task) {
+	var result string
+	var err error
+
+	log.Printf("Starting task execution: ID=%s, Type=%s, AppName=%s, User=%s",
+		task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
+
 	switch task.Type {
 	case InstallApp:
 		// Execute app installation
-		_, err := tm.AppInstall(task)
+		log.Printf("Executing app installation for task: %s, app: %s", task.ID, task.AppName)
+		result, err = tm.AppInstall(task)
 		if err != nil {
+			log.Printf("App installation failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Installation failed: %v", err)
+			tm.recordTaskResult(task, result, err)
 			return
 		}
+		log.Printf("App installation completed successfully for task: %s, app: %s", task.ID, task.AppName)
 
 	case UninstallApp:
-		// TODO: Implement app uninstall logic
-		log.Printf("Uninstalling app: %s", task.AppName)
-	case CancelAppInstall:
-		// TODO: Implement cancel installation logic
-		log.Printf("Canceling app installation: %s", task.AppName)
-	case UpgradeApp:
-		// Get source from metadata
-		source, ok := task.Metadata["source"].(string)
-		if !ok {
-			source = "store" // Default source
+		// Execute app uninstallation
+		log.Printf("Executing app uninstallation for task: %s, app: %s", task.ID, task.AppName)
+		result, err = tm.AppUninstall(task)
+		if err != nil {
+			log.Printf("App uninstallation failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
+			task.Status = Failed
+			task.ErrorMsg = fmt.Sprintf("Uninstallation failed: %v", err)
+			tm.recordTaskResult(task, result, err)
+			return
 		}
+		log.Printf("App uninstallation completed successfully for task: %s, app: %s", task.ID, task.AppName)
 
-		// TODO: Implement app upgrade logic
-		log.Printf("Upgrading app: %s from source: %s", task.AppName, source)
+	case CancelAppInstall:
+		// Execute app cancel
+		log.Printf("Executing app cancel for task: %s, app: %s", task.ID, task.AppName)
+		result, err = tm.AppCancel(task)
+		if err != nil {
+			log.Printf("App cancel failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
+			task.Status = Failed
+			task.ErrorMsg = fmt.Sprintf("Cancel failed: %v", err)
+			tm.recordTaskResult(task, result, err)
+			return
+		}
+		log.Printf("App cancel completed successfully for task: %s, app: %s", task.ID, task.AppName)
+
+	case UpgradeApp:
+		// Execute app upgrade
+		log.Printf("Executing app upgrade for task: %s, app: %s", task.ID, task.AppName)
+		result, err = tm.AppUpgrade(task)
+		if err != nil {
+			log.Printf("App upgrade failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
+			task.Status = Failed
+			task.ErrorMsg = fmt.Sprintf("Upgrade failed: %v", err)
+			tm.recordTaskResult(task, result, err)
+			return
+		}
+		log.Printf("App upgrade completed successfully for task: %s, app: %s", task.ID, task.AppName)
 	}
+
+	// Task completed successfully
+	task.Status = Completed
+	now := time.Now()
+	task.CompletedAt = &now
+	log.Printf("Task completed successfully: ID=%s, Type=%s, AppName=%s, User=%s, Duration=%v",
+		task.ID, getTaskTypeString(task.Type), task.AppName, task.User, now.Sub(*task.StartedAt))
+
+	// Log the result summary
+	log.Printf("Task result summary: ID=%s, Result length=%d bytes", task.ID, len(result))
+
+	tm.recordTaskResult(task, result, nil)
 }
 
 // statusUpdater runs every 10 seconds to update running task status
@@ -308,4 +386,62 @@ func randomString(length int) string {
 		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
 	}
 	return string(b)
+}
+
+// recordTaskResult records task result in history module
+func (tm *TaskModule) recordTaskResult(task *Task, result string, err error) {
+	if tm.historyModule == nil {
+		log.Printf("History module not available, skipping task result record for task: %s", task.ID)
+		return
+	}
+
+	log.Printf("Recording task result for task: %s, type: %s, app: %s, user: %s",
+		task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
+
+	// Create result data structure
+	resultData := map[string]interface{}{
+		"task_id":   task.ID,
+		"task_type": getTaskTypeString(task.Type),
+		"app_name":  task.AppName,
+		"user":      task.User,
+		"status":    task.Status,
+		"result":    result,
+		"error":     nil,
+		"timestamp": time.Now().Unix(),
+	}
+
+	if err != nil {
+		resultData["error"] = err.Error()
+		log.Printf("Task failed with error: %v", err)
+	} else {
+		log.Printf("Task completed successfully, result length: %d bytes", len(result))
+	}
+
+	// Convert result data to JSON for extended field
+	resultJSON, err := json.Marshal(resultData)
+	if err != nil {
+		log.Printf("Failed to marshal result data to JSON for task %s: %v", task.ID, err)
+		return
+	}
+
+	// Get appropriate history type based on task type
+	historyType := getHistoryType(task.Type)
+
+	// Create history record
+	historyRecord := &history.HistoryRecord{
+		Type:     historyType,
+		Message:  fmt.Sprintf("%s %s completed", getTaskTypeString(task.Type), task.AppName),
+		Time:     time.Now().Unix(),
+		App:      task.AppName,
+		Account:  task.User,
+		Extended: string(resultJSON),
+	}
+
+	// Store the record
+	if err := tm.historyModule.StoreRecord(historyRecord); err != nil {
+		log.Printf("Failed to record task result in history for task %s: %v", task.ID, err)
+	} else {
+		log.Printf("Successfully recorded task result in history: task=%s, history_id=%d, user=%s, extended_length=%d bytes",
+			task.ID, historyRecord.ID, task.User, len(resultJSON))
+	}
 }
