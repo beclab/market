@@ -242,17 +242,21 @@ func (tm *TaskModule) executeTask(task *Task) {
 			return
 		}
 	case CancelAppInstall:
-		// TODO: Implement cancel installation logic
-		log.Printf("Canceling app installation: %s", task.AppName)
-	case UpgradeApp:
-		// Get source from metadata
-		source, ok := task.Metadata["source"].(string)
-		if !ok {
-			source = "store" // Default source
+		// Execute app cancel
+		_, err := tm.AppCancel(task)
+		if err != nil {
+			task.Status = Failed
+			task.ErrorMsg = fmt.Sprintf("Cancel failed: %v", err)
+			return
 		}
-
-		// TODO: Implement app upgrade logic
-		log.Printf("Upgrading app: %s from source: %s", task.AppName, source)
+	case UpgradeApp:
+		// Execute app upgrade
+		_, err := tm.AppUpgrade(task)
+		if err != nil {
+			task.Status = Failed
+			task.ErrorMsg = fmt.Sprintf("Upgrade failed: %v", err)
+			return
+		}
 	}
 }
 
