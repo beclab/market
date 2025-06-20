@@ -79,7 +79,7 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	}
 
 	// Prepare template data for rendering
-	templateData, err := s.prepareTemplateData(task)
+	templateData, err := s.prepareTemplateData(ctx, task)
 	if err != nil {
 		return fmt.Errorf("failed to prepare template data: %w", err)
 	}
@@ -403,12 +403,13 @@ func deepCopyMap(originalMap map[string]interface{}) map[string]interface{} {
 // fetchRenderValues fetches rendering values from the app-service, with caching.
 func (s *RenderedChartStep) fetchRenderValues(ctx context.Context, task *HydrationTask) (map[string]interface{}, error) {
 	s.renderValuesCache.mutex.Lock()
-	defer s.renderValuesCache.mutex.Unlock()
-
 	if s.renderValuesCache.values != nil && time.Since(s.renderValuesCache.lastFetch) < s.renderValuesCache.cacheTTL {
 		log.Println("Using cached render values.")
-		return deepCopyMap(s.renderValuesCache.values), nil
+		values := deepCopyMap(s.renderValuesCache.values)
+		s.renderValuesCache.mutex.Unlock()
+		return values, nil
 	}
+	s.renderValuesCache.mutex.Unlock() // IMPORTANT: Unlock before the network call
 
 	appServiceURL, err := s.getAppServiceURL()
 	if err != nil {
@@ -429,16 +430,26 @@ func (s *RenderedChartStep) fetchRenderValues(ctx context.Context, task *Hydrati
 		return nil, fmt.Errorf("app-service returned non-2xx status: %d, body: %s", resp.StatusCode(), resp.String())
 	}
 
-	var values map[string]interface{}
-	if err := json.Unmarshal(resp.Body(), &values); err != nil {
+	var fetchedValues map[string]interface{}
+	if err := json.Unmarshal(resp.Body(), &fetchedValues); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal render values: %w", err)
 	}
 
-	s.renderValuesCache.values = values
+	// Now, lock again to update the cache.
+	s.renderValuesCache.mutex.Lock()
+	defer s.renderValuesCache.mutex.Unlock()
+
+	// Double-check if another goroutine has updated the cache while we were fetching.
+	if s.renderValuesCache.values != nil && time.Since(s.renderValuesCache.lastFetch) < s.renderValuesCache.cacheTTL {
+		log.Println("Using recently cached render values from another goroutine.")
+		return deepCopyMap(s.renderValuesCache.values), nil
+	}
+
+	s.renderValuesCache.values = fetchedValues
 	s.renderValuesCache.lastFetch = time.Now()
 	log.Println("Successfully fetched and cached render values.")
 
-	return deepCopyMap(values), nil
+	return deepCopyMap(fetchedValues), nil
 }
 
 // extractTarGz extracts files from a tar.gz archive
@@ -494,11 +505,11 @@ func (s *RenderedChartStep) extractTarGz(data []byte) (map[string]*ChartFile, er
 }
 
 // prepareTemplateData prepares the template data for chart rendering
-func (s *RenderedChartStep) prepareTemplateData(task *HydrationTask) (*TemplateData, error) {
+func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *HydrationTask) (*TemplateData, error) {
 	templateData := &TemplateData{}
 
 	// Fetch base values from app service, with caching
-	values, err := s.fetchRenderValues(context.Background(), task)
+	values, err := s.fetchRenderValues(ctx, task)
 	if err != nil {
 		return nil, fmt.Errorf("could not prepare template data, failed to fetch render values: %w", err)
 	}
