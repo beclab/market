@@ -570,18 +570,25 @@ func (h *Hydrator) trackTask(task *hydrationfn.HydrationTask) {
 
 // markTaskCompleted moves task from active to completed
 func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
-	h.taskMutex.Lock()
-	defer h.taskMutex.Unlock()
+	// Extract file path for cleanup before the lock
+	var sourceChartPath string
+	if path, ok := task.ChartData["source_chart_path"].(string); ok {
+		sourceChartPath = path
+	}
 
+	h.taskMutex.Lock()
 	delete(h.activeTasks, task.ID)
 
-	// Clean up task resources before storing in completed tasks
-	h.cleanupTaskResources(task)
+	// Clean up in-memory data under lock
+	task.ChartData = make(map[string]interface{})
+	task.DatabaseUpdateData = make(map[string]interface{})
+	task.AppData = make(map[string]interface{})
 
 	h.completedTasks[task.ID] = task
 
 	h.totalTasksProcessed++
 	h.totalTasksSucceeded++
+	h.taskMutex.Unlock() // Unlock before channel send and I/O
 
 	// Add to batch completion queue for processing
 	select {
@@ -591,12 +598,24 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
 		// Queue is full, log warning but don't block
 		log.Printf("Warning: batch completion queue is full, task %s not queued for processing", task.ID)
 	}
+
+	// Clean up file resources after releasing the lock
+	if sourceChartPath != "" {
+		if err := os.Remove(sourceChartPath); err != nil {
+			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
+		}
+	}
 }
 
 // markTaskFailed moves task from active to failed
 func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
+	// Extract file path for cleanup before the lock
+	var sourceChartPath string
+	if path, ok := task.ChartData["source_chart_path"].(string); ok {
+		sourceChartPath = path
+	}
+
 	h.taskMutex.Lock()
-	defer h.taskMutex.Unlock()
 
 	task.SetStatus(hydrationfn.TaskStatusFailed)
 	delete(h.activeTasks, task.ID)
@@ -618,13 +637,23 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 		}
 	}
 
+	// Clean up in-memory data under lock
+	task.ChartData = make(map[string]interface{})
+	task.DatabaseUpdateData = make(map[string]interface{})
+	task.AppData = make(map[string]interface{})
+
 	h.failedTasks[task.ID] = task
 
 	h.totalTasksProcessed++
 	h.totalTasksFailed++
+	h.taskMutex.Unlock() // Unlock before I/O
 
-	// Clean up task resources
-	h.cleanupTaskResources(task)
+	// Clean up file resources after releasing the lock
+	if sourceChartPath != "" {
+		if err := os.Remove(sourceChartPath); err != nil {
+			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
+		}
+	}
 }
 
 // GetMetrics returns hydrator metrics
