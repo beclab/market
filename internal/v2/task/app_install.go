@@ -59,7 +59,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	log.Printf("Install request prepared: url=%s, installInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
 
 	headers := map[string]string{
-		"Authorization":   token,
+		"X-Authorization": token,
 		"Content-Type":    "application/json",
 		"X-Market-User":   user,
 		"X-Market-Source": source,

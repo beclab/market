@@ -62,7 +62,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	log.Printf("Upgrade request prepared: url=%s, upgradeInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
 
 	headers := map[string]string{
-		"Authorization":   token,
+		"X-Authorization": token,
 		"Content-Type":    "application/json",
 		"X-Market-User":   user,
 		"X-Market-Source": source,

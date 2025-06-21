@@ -27,7 +27,7 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
 
 	headers := map[string]string{
-		"Authorization": token,
+		"X-Authorization": token,
 		// Content-Type is not strictly necessary for a request with no body,
 		// but we include it for consistency.
 		"Content-Type": "application/json",

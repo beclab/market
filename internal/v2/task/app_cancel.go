@@ -44,8 +44,8 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 	log.Printf("App service URL: %s for task: %s, uid: %s, task_type: %s", urlStr, task.ID, uid, taskType)
 
 	headers := map[string]string{
-		"Authorization": token,
-		"Content-Type":  "application/json",
+		"X-Authorization": token,
+		"Content-Type":    "application/json",
 	}
 
 	// Send HTTP request and get response
