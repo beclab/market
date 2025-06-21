@@ -93,58 +93,36 @@ func (cm *CacheManager) DiagnoseCacheAndRedis() error {
 
 // PrintDiagnosticInfo prints diagnostic information in a readable format
 func (cm *CacheManager) PrintDiagnosticInfo() error {
-	diagnostic, err := cm.DiagnoseCacheAndRedis()
+	err := cm.DiagnoseCacheAndRedis()
 	if err != nil {
 		return err
 	}
 
 	glog.Infof("=== CACHE AND REDIS DIAGNOSTIC REPORT ===")
-
-	glog.Infof("Redis Keys Found: %d", len(diagnostic.RedisKeys))
-	glog.Infof("Cache Users: %d", len(diagnostic.CacheUsers))
-	glog.Infof("Sources Analyzed: %d", len(diagnostic.SourceAnalysis))
-
-	if len(diagnostic.Issues) > 0 {
-		glog.Warningf("Issues Found (%d):", len(diagnostic.Issues))
-		for i, issue := range diagnostic.Issues {
-			glog.Warningf("  %d. %s", i+1, issue)
-		}
-	}
-
-	if len(diagnostic.Recommendations) > 0 {
-		glog.Infof("Recommendations (%d):", len(diagnostic.Recommendations))
-		for i, rec := range diagnostic.Recommendations {
-			glog.Infof("  %d. %s", i+1, rec)
-		}
-	}
-
-	glog.Infof("=== SOURCE ANALYSIS ===")
-	for sourceKey, analysis := range diagnostic.SourceAnalysis {
-		glog.Infof("Source: %s", sourceKey)
-		glog.Infof("  AppInfoLatest: %d items", analysis.AppInfoLatestCount)
-		glog.Infof("  AppInfoPending: %d items", analysis.AppInfoPendingCount)
-		glog.Infof("  AppStateLatest: %d items", analysis.AppStateLatestCount)
-		glog.Infof("  AppInfoHistory: %d items", analysis.AppInfoHistoryCount)
-
-		if len(analysis.Issues) > 0 {
-			glog.Warningf("  Issues:")
-			for _, issue := range analysis.Issues {
-				glog.Warningf("    - %s", issue)
-			}
-		}
-	}
-
+	glog.Infof("Diagnostic completed successfully")
 	return nil
 }
 
 // GetDiagnosticJSON returns diagnostic information as JSON
 func (cm *CacheManager) GetDiagnosticJSON() (string, error) {
-	diagnostic, err := cm.DiagnoseCacheAndRedis()
+	err := cm.DiagnoseCacheAndRedis()
 	if err != nil {
 		return "", err
 	}
 
-	jsonData, err := json.MarshalIndent(diagnostic, "", "  ")
+	// Get cache stats and users data for JSON response
+	cacheStats := cm.GetCacheStats()
+	allUsersData := cm.GetAllUsersData()
+
+	diagnosticInfo := map[string]interface{}{
+		"cache_stats":   cacheStats,
+		"users_data":    allUsersData,
+		"total_users":   len(allUsersData),
+		"total_sources": cacheStats["total_sources"],
+		"is_running":    cacheStats["is_running"],
+	}
+
+	jsonData, err := json.MarshalIndent(diagnosticInfo, "", "  ")
 	if err != nil {
 		return "", err
 	}
