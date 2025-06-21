@@ -37,8 +37,8 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		return "", fmt.Errorf("missing version in task metadata for upgrade")
 	}
 
-	appServiceHost := os.Getenv("APP_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_PORT")
+	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
 	urlStr := fmt.Sprintf("http://%s:%s/api/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
 
 	upgradeInfo := &UpgradeOptions{
@@ -54,8 +54,10 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	log.Printf("upgradeUrl:%s, upgradeInfo:%s, token:%s\n", urlStr, string(ms), token)
 
 	headers := map[string]string{
-		"Authorization": token,
-		"Content-Type":  "application/json",
+		"Authorization":   token,
+		"Content-Type":    "application/json",
+		"X-Market-User":   user,
+		"X-Market-Source": source,
 	}
 
 	return sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))

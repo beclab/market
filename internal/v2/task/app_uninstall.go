@@ -15,8 +15,8 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
-	appServiceHost := os.Getenv("APP_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_PORT")
+	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
 	urlStr := fmt.Sprintf("http://%s:%s/api/v1/apps/%s/uninstall", appServiceHost, appServicePort, appName)
 
 	headers := map[string]string{

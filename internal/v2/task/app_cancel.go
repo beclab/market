@@ -27,8 +27,8 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
-	appServiceHost := os.Getenv("APP_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_PORT")
+	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
 
 	// The URL format is based on the legacy AppCancel function's parameters (uid, t)
 	// and adapted to the v2 API style. The original function signature was AppCancel(uid, t, token).
