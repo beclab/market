@@ -47,6 +47,15 @@ func NewServer(port string, cacheManager *appinfo.CacheManager) *Server {
 		historyModule: historyModule,
 		taskModule:    task.NewTaskModule(),
 	}
+
+	// Set history module reference for task recording
+	if historyModule != nil {
+		s.taskModule.SetHistoryModule(historyModule)
+		log.Printf("History module reference set for task module")
+	} else {
+		log.Printf("Warning: History module is nil, task history recording will be skipped")
+	}
+
 	log.Printf("Server struct created successfully")
 
 	log.Printf("Setting up routes...")
