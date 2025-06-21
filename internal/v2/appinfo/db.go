@@ -173,15 +173,44 @@ func (r *RedisClient) loadUserData(userID string) (*UserData, error) {
 		return userData, err
 	}
 
+	// Group keys by source ID to handle data types properly
+	sourceGroups := make(map[string][]string)
+	expectedPrefix := fmt.Sprintf("appinfo:user:%s:source:", userID)
+
 	for _, sourceKey := range sourceKeys {
-		// Extract source ID from key
-		// Use strings.SplitN to handle sourceIDs that contain colons
-		expectedPrefix := fmt.Sprintf("appinfo:user:%s:source:", userID)
 		if !strings.HasPrefix(sourceKey, expectedPrefix) {
 			glog.Errorf("Invalid source key format: %s", sourceKey)
 			continue
 		}
-		sourceID := sourceKey[len(expectedPrefix):]
+
+		// Extract the part after the prefix
+		suffix := sourceKey[len(expectedPrefix):]
+
+		// Split by colon to separate sourceID from data type
+		parts := strings.SplitN(suffix, ":", 2)
+		if len(parts) == 0 {
+			glog.Errorf("Invalid source key suffix: %s", suffix)
+			continue
+		}
+
+		sourceID := parts[0]
+
+		// Skip if this looks like a data type key (contains common data type patterns)
+		if strings.Contains(sourceID, "app-info") || strings.Contains(sourceID, "app-state") {
+			glog.Warningf("Skipping data type key that was incorrectly parsed as sourceID: %s", sourceKey)
+			continue
+		}
+
+		// Group keys by sourceID
+		if sourceGroups[sourceID] == nil {
+			sourceGroups[sourceID] = make([]string, 0)
+		}
+		sourceGroups[sourceID] = append(sourceGroups[sourceID], sourceKey)
+	}
+
+	// Load data for each source
+	for sourceID, keys := range sourceGroups {
+		glog.Infof("Loading data for source: %s with %d keys", sourceID, len(keys))
 
 		// Load source data
 		sourceData, err := r.loadSourceData(userID, sourceID)
