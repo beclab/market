@@ -59,6 +59,11 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 		return fmt.Errorf("source chart URL is required but not available")
 	}
 
+	// Step 1: Check and clean existing rendered directory if needed
+	if err := s.checkAndCleanExistingRenderedDirectory(ctx, task); err != nil {
+		return fmt.Errorf("failed to check and clean existing rendered directory: %w", err)
+	}
+
 	// Load and extract chart package from local file
 	chartFiles, err := s.loadAndExtractChart(ctx, task)
 	if err != nil {
@@ -979,7 +984,7 @@ func (s *RenderedChartStep) cleanPathComponent(component, fallback string) strin
 	// Trim spaces and dots from ends
 	cleaned = strings.Trim(cleaned, " .")
 
-	// If cleaned component is empty, use fallback
+	// If cleaned component is empty, use fallback (if provided)
 	if cleaned == "" {
 		return fallback
 	}
@@ -1086,6 +1091,155 @@ func (s *RenderedChartStep) isTaskForPendingDataRendered(task *HydrationTask, pe
 		if pendingData.AppInfo.AppEntry.ID == taskAppID ||
 			pendingData.AppInfo.AppEntry.AppID == taskAppID ||
 			pendingData.AppInfo.AppEntry.Name == taskAppID {
+			return true
+		}
+	}
+
+	return false
+}
+
+// checkAndCleanExistingRenderedDirectory checks and cleans the existing rendered directory if needed
+func (s *RenderedChartStep) checkAndCleanExistingRenderedDirectory(ctx context.Context, task *HydrationTask) error {
+	// Get base storage path from environment variable
+	basePath := os.Getenv("CHART_ROOT")
+	if basePath == "" {
+		return fmt.Errorf("CHART_ROOT environment variable is not set")
+	}
+
+	// Validate required path components
+	if task.UserID == "" {
+		return fmt.Errorf("task UserID is empty")
+	}
+	if task.SourceID == "" {
+		return fmt.Errorf("task SourceID is empty")
+	}
+	if task.AppName == "" {
+		return fmt.Errorf("task AppName is empty")
+	}
+	if task.AppVersion == "" {
+		return fmt.Errorf("task AppVersion is empty")
+	}
+
+	// Clean path components to prevent invalid directory names
+	userID := s.cleanPathComponent(task.UserID, "")
+	sourceID := s.cleanPathComponent(task.SourceID, "")
+	appName := s.cleanPathComponent(task.AppName, "")
+	appVersion := s.cleanPathComponent(task.AppVersion, "")
+
+	// Check if any component is empty after cleaning
+	if userID == "" {
+		return fmt.Errorf("UserID is invalid after cleaning")
+	}
+	if sourceID == "" {
+		return fmt.Errorf("SourceID is invalid after cleaning")
+	}
+	if appName == "" {
+		return fmt.Errorf("AppName is invalid after cleaning")
+	}
+	if appVersion == "" {
+		return fmt.Errorf("AppVersion is invalid after cleaning")
+	}
+
+	// Build directory path: {basePath}/{username}/{source name}/{app name}-{version}/
+	chartDir := filepath.Join(basePath, userID, sourceID, fmt.Sprintf("%s-%s", appName, appVersion))
+
+	// Check if directory exists
+	if _, err := os.Stat(chartDir); err == nil {
+		log.Printf("Existing rendered directory found: %s", chartDir)
+
+		// Check if the app exists in the Latest list in cache
+		if s.isAppInLatestList(task) {
+			log.Printf("App %s exists in Latest list, keeping existing rendered directory", task.AppID)
+			return nil
+		}
+
+		log.Printf("App %s not found in Latest list, cleaning existing rendered directory", task.AppID)
+
+		// Clean the directory
+		if err := os.RemoveAll(chartDir); err != nil {
+			return fmt.Errorf("failed to clean existing rendered directory: %w", err)
+		}
+
+		log.Printf("Existing rendered directory cleaned successfully")
+	} else if os.IsNotExist(err) {
+		log.Printf("Existing rendered directory not found, proceeding with new rendering")
+	} else {
+		return fmt.Errorf("failed to check existing rendered directory: %w", err)
+	}
+
+	return nil
+}
+
+// isAppInLatestList checks if the app exists in the Latest list in cache
+func (s *RenderedChartStep) isAppInLatestList(task *HydrationTask) bool {
+	if task.Cache == nil {
+		log.Printf("Warning: Cache is nil, cannot check Latest list")
+		return false
+	}
+
+	// Lock cache for thread-safe access
+	task.Cache.Mutex.RLock()
+	defer task.Cache.Mutex.RUnlock()
+
+	// Check if user exists in cache
+	userData, exists := task.Cache.Users[task.UserID]
+	if !exists {
+		log.Printf("User %s not found in cache", task.UserID)
+		return false
+	}
+
+	// Check if source exists in user data
+	sourceData, exists := userData.Sources[task.SourceID]
+	if !exists {
+		log.Printf("Source %s not found for user %s", task.SourceID, task.UserID)
+		return false
+	}
+
+	// Check if app exists in AppInfoLatest list
+	for _, latestApp := range sourceData.AppInfoLatest {
+		if latestApp == nil {
+			continue
+		}
+
+		// Compare by app name (primary identifier)
+		if s.compareAppIdentifiers(latestApp, task.AppName) {
+			log.Printf("Found matching app in Latest list: %s", task.AppName)
+			return true
+		}
+	}
+
+	log.Printf("App %s not found in Latest list", task.AppName)
+	return false
+}
+
+// compareAppIdentifiers compares app identifiers between latest app data and task
+func (s *RenderedChartStep) compareAppIdentifiers(latestApp *types.AppInfoLatestData, taskAppName string) bool {
+	if latestApp == nil {
+		return false
+	}
+
+	// Check RawData first
+	if latestApp.RawData != nil {
+		if latestApp.RawData.Name == taskAppName ||
+			latestApp.RawData.AppID == taskAppName ||
+			latestApp.RawData.ID == taskAppName {
+			return true
+		}
+	}
+
+	// Check AppInfo.AppEntry
+	if latestApp.AppInfo != nil && latestApp.AppInfo.AppEntry != nil {
+		if latestApp.AppInfo.AppEntry.Name == taskAppName ||
+			latestApp.AppInfo.AppEntry.AppID == taskAppName ||
+			latestApp.AppInfo.AppEntry.ID == taskAppName {
+			return true
+		}
+	}
+
+	// Check AppSimpleInfo
+	if latestApp.AppSimpleInfo != nil {
+		if latestApp.AppSimpleInfo.AppName == taskAppName ||
+			latestApp.AppSimpleInfo.AppID == taskAppName {
 			return true
 		}
 	}
