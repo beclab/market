@@ -38,7 +38,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-	urlStr := fmt.Sprintf("http://%s:%s/api/v1/apps/%s/install", appServiceHost, appServicePort, appName)
+	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)
 
 	installInfo := &InstallOptions{
 		RepoUrl: getRepoUrl(),
