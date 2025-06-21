@@ -26,19 +26,25 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	appName := task.AppName
 	user := task.User
 
+	log.Printf("Starting app installation: app=%s, user=%s, task_id=%s", appName, user, task.ID)
+
 	token, ok := task.Metadata["token"].(string)
 	if !ok {
+		log.Printf("Missing token in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
 	source, ok := task.Metadata["source"].(string)
 	if !ok {
 		source = "store" // Default source
+		log.Printf("Using default source 'store' for task: %s", task.ID)
 	}
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
 	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)
+
+	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
 
 	installInfo := &InstallOptions{
 		RepoUrl: getRepoUrl(),
@@ -47,9 +53,10 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 	ms, err := json.Marshal(installInfo)
 	if err != nil {
+		log.Printf("Failed to marshal install info for task %s: %v", task.ID, err)
 		return "", err
 	}
-	log.Printf("installUrl:%s, installInfo:%s, token:%s\n", urlStr, string(ms), token)
+	log.Printf("Install request prepared: url=%s, installInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
 
 	headers := map[string]string{
 		"Authorization":   token,
@@ -58,7 +65,40 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		"X-Market-Source": source,
 	}
 
-	return sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
+	// Send HTTP request and get response
+	log.Printf("Sending HTTP request for app installation: task=%s", task.ID)
+	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
+	if err != nil {
+		log.Printf("HTTP request failed for app installation: task=%s, error=%v", task.ID, err)
+		// Create detailed error result
+		errorResult := map[string]interface{}{
+			"operation": "install",
+			"app_name":  appName,
+			"user":      user,
+			"source":    source,
+			"url":       urlStr,
+			"error":     err.Error(),
+			"status":    "failed",
+		}
+		errorJSON, _ := json.Marshal(errorResult)
+		return string(errorJSON), err
+	}
+
+	log.Printf("HTTP request completed successfully for app installation: task=%s, response_length=%d", task.ID, len(response))
+
+	// Create success result
+	successResult := map[string]interface{}{
+		"operation": "install",
+		"app_name":  appName,
+		"user":      user,
+		"source":    source,
+		"url":       urlStr,
+		"response":  response,
+		"status":    "success",
+	}
+	successJSON, _ := json.Marshal(successResult)
+	log.Printf("App installation completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
+	return string(successJSON), nil
 }
 
 // getRepoUrl returns the repository URL
