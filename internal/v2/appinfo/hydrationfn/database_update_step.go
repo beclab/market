@@ -690,59 +690,7 @@ func (s *DatabaseUpdateStep) isTaskForPendingData(task *HydrationTask, pendingDa
 		log.Printf("isTaskForPendingData: Checking RawData - ID: %s, AppID: %s, Name: %s",
 			pendingData.RawData.ID, pendingData.RawData.AppID, pendingData.RawData.Name)
 
-		// Check if this is legacy data by looking at metadata
-		if pendingData.RawData.Metadata != nil {
-			// Check for legacy_data in metadata - this contains multiple apps
-			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
-				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
-					// Check if task app ID exists in the legacy data apps
-					if dataSection, hasDataSection := legacyDataMap["data"].(map[string]interface{}); hasDataSection {
-						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
-							if _, appExists := appsData[taskAppID]; appExists {
-								log.Printf("isTaskForPendingData: Found task appID %s in legacy_data apps", taskAppID)
-								return true
-							}
-						}
-					}
-				}
-			}
-
-			// Check for legacy_raw_data in metadata
-			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
-				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
-					// Similar check for legacy raw data format
-					if dataSection, hasDataSection := legacyRawDataMap["data"].(map[string]interface{}); hasDataSection {
-						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
-							if _, appExists := appsData[taskAppID]; appExists {
-								log.Printf("isTaskForPendingData: Found task appID %s in legacy_raw_data apps", taskAppID)
-								return true
-							}
-						}
-					}
-				}
-			}
-
-			// Check representative_app_id for legacy summary data
-			if repAppID, hasRepAppID := pendingData.RawData.Metadata["representative_app_id"].(string); hasRepAppID {
-				if repAppID == taskAppID {
-					log.Printf("isTaskForPendingData: Found task appID %s as representative_app_id", taskAppID)
-					return true
-				}
-			}
-
-			// Check data_type to identify legacy data types
-			if dataType, hasDataType := pendingData.RawData.Metadata["data_type"].(string); hasDataType {
-				log.Printf("isTaskForPendingData: Pending data type: %s", dataType)
-
-				// For legacy data types, we need to check the stored legacy data
-				if dataType == "legacy_complete_data" || dataType == "legacy_unstructured_data" {
-					// Already checked above, but log for debugging
-					log.Printf("isTaskForPendingData: This is legacy data type: %s", dataType)
-				}
-			}
-		}
-
-		// Standard checks for non-legacy data
+		// Standard checks for data
 		// Match by ID, AppID or Name
 		if pendingData.RawData.ID == taskAppID ||
 			pendingData.RawData.AppID == taskAppID ||

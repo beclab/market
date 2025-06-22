@@ -1028,7 +1028,7 @@ func (s *RenderedChartStep) updatePendingDataRenderedPackage(task *HydrationTask
 	return nil
 }
 
-// isTaskForPendingDataRendered checks if the current task corresponds to the pending data
+// isTaskForPendingDataRendered checks if the current task corresponds to the pending data for rendered package
 func (s *RenderedChartStep) isTaskForPendingDataRendered(task *HydrationTask, pendingData *types.AppInfoLatestPendingData) bool {
 	if pendingData == nil {
 		return false
@@ -1038,45 +1038,7 @@ func (s *RenderedChartStep) isTaskForPendingDataRendered(task *HydrationTask, pe
 
 	// Check if the task AppID matches the pending data's RawData
 	if pendingData.RawData != nil {
-		// Check if this is legacy data by looking at metadata
-		if pendingData.RawData.Metadata != nil {
-			// Check for legacy_data in metadata - this contains multiple apps
-			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
-				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
-					// Check if task app ID exists in the legacy data apps
-					if dataSection, hasDataSection := legacyDataMap["data"].(map[string]interface{}); hasDataSection {
-						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
-							if _, appExists := appsData[taskAppID]; appExists {
-								return true
-							}
-						}
-					}
-				}
-			}
-
-			// Check for legacy_raw_data in metadata
-			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
-				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
-					// Similar check for legacy raw data format
-					if dataSection, hasDataSection := legacyRawDataMap["data"].(map[string]interface{}); hasDataSection {
-						if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
-							if _, appExists := appsData[taskAppID]; appExists {
-								return true
-							}
-						}
-					}
-				}
-			}
-
-			// Check representative_app_id for legacy summary data
-			if repAppID, hasRepAppID := pendingData.RawData.Metadata["representative_app_id"].(string); hasRepAppID {
-				if repAppID == taskAppID {
-					return true
-				}
-			}
-		}
-
-		// Standard checks for non-legacy data
+		// Standard checks for data
 		// Match by ID, AppID or Name
 		if pendingData.RawData.ID == taskAppID ||
 			pendingData.RawData.AppID == taskAppID ||

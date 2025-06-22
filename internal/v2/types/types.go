@@ -582,7 +582,6 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 
 	// Store the original data in metadata for later processing
 	rawData.Metadata["source_data"] = data
-	rawData.Metadata["data_type"] = "legacy_app_latest_data"
 
 	appInfoLatest.RawData = rawData
 	appInfoLatest.AppInfo = &AppInfo{
@@ -786,7 +785,6 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 
 	// Store the complete app data in metadata for later processing
 	rawData.Metadata["source_app_data"] = appData
-	rawData.Metadata["data_type"] = "single_app_data"
 	rawData.Metadata["validation_status"] = "validated"
 
 	pendingData.RawData = rawData

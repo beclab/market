@@ -349,28 +349,7 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 
 	// For the new structure, we can work with RawData if it exists
 	if pendingData.RawData != nil {
-		// Check if this is legacy data with metadata containing the real app data
-		if pendingData.RawData.Metadata != nil {
-			// Handle legacy data stored in metadata
-			if legacyData, hasLegacyData := pendingData.RawData.Metadata["legacy_data"]; hasLegacyData {
-				if legacyDataMap, ok := legacyData.(map[string]interface{}); ok {
-					log.Printf("Processing legacy data from metadata for user: %s, source: %s", userID, sourceID)
-					h.createTasksFromPendingDataLegacy(userID, sourceID, legacyDataMap)
-					return
-				}
-			}
-
-			// Handle legacy raw data stored in metadata
-			if legacyRawData, hasLegacyRawData := pendingData.RawData.Metadata["legacy_raw_data"]; hasLegacyRawData {
-				if legacyRawDataMap, ok := legacyRawData.(map[string]interface{}); ok {
-					log.Printf("Processing legacy raw data from metadata for user: %s, source: %s", userID, sourceID)
-					h.createTasksFromPendingDataLegacy(userID, sourceID, legacyRawDataMap)
-					return
-				}
-			}
-		}
-
-		// Handle regular structured RawData (not legacy)
+		// Handle regular structured RawData
 		appID := pendingData.RawData.AppID
 		if appID == "" {
 			appID = pendingData.RawData.ID
@@ -404,9 +383,6 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 		}
 		return
 	}
-
-	// Legacy handling: This should be deprecated but kept for backward compatibility
-	log.Printf("Warning: createTasksFromPendingData called with legacy data structure")
 }
 
 // isAppHydrationComplete checks if an app has completed all hydration steps
@@ -985,92 +961,6 @@ func (h *Hydrator) cleanupOldCompletedTasks() {
 
 		log.Printf("Cleaned up %d old completed tasks from memory", removed)
 	}
-}
-
-// createTasksFromPendingDataLegacy creates hydration tasks from legacy pending data format
-func (h *Hydrator) createTasksFromPendingDataLegacy(userID, sourceID string, pendingData map[string]interface{}) {
-	log.Printf("Creating tasks from pending data for user: %s, source: %s", userID, sourceID)
-
-	// Extract data section from pendingData
-	dataSection, ok := pendingData["data"]
-	if !ok {
-		log.Printf("No data section found in pending data for user: %s, source: %s", userID, sourceID)
-		return
-	}
-
-	// Handle different data section formats
-	var appsMap map[string]interface{}
-
-	// First, try to handle the case where dataSection is an AppStoreDataSection struct
-	log.Printf("Data section type: %T for user: %s, source: %s", dataSection, userID, sourceID)
-
-	// Check if it's an AppStoreDataSection by checking if it has Apps field
-	if dataStruct := dataSection; dataStruct != nil {
-		// Use reflection or type assertion to access the Apps field
-
-		// Try to access as map first (for backwards compatibility)
-		if dataMap, ok := dataSection.(map[string]interface{}); ok {
-			// Check if it's in the expected format with "apps" key
-			if apps, hasApps := dataMap["apps"]; hasApps {
-				if appsMapValue, ok := apps.(map[string]interface{}); ok {
-					appsMap = appsMapValue
-					log.Printf("Found apps data in standard map format for user: %s, source: %s", userID, sourceID)
-				}
-			} else {
-				// Check if the dataMap itself contains app entries
-				if h.looksLikeAppsMap(dataMap) {
-					appsMap = dataMap
-					log.Printf("Data section appears to contain apps directly for user: %s, source: %s", userID, sourceID)
-				}
-			}
-		} else {
-			// Try to handle AppStoreDataSection struct using interface conversion
-			log.Printf("Unsupported data format for user: %s, source: %s. Expected map[string]interface{} but got %T", userID, sourceID, dataSection)
-			log.Printf("Data section content: %+v", dataSection)
-			return
-		}
-	}
-
-	log.Printf("Found %d apps in pending data for user: %s, source: %s", len(appsMap), userID, sourceID)
-
-	// Create hydration tasks for each app
-	tasksCreated := 0
-	for appID, appDataInterface := range appsMap {
-		if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
-			// Check if task already exists for this app
-			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
-				// Check if app hydration is already complete before creating new task
-				if h.isAppInLatestQueue(userID, sourceID, appID) {
-					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
-					// 	appID, userID, sourceID)
-					continue
-				}
-
-				task := hydrationfn.NewHydrationTask(
-					userID, sourceID, appID,
-					appDataMap, h.cache, h.settingsManager,
-				)
-
-				if err := h.EnqueueTask(task); err != nil {
-					log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
-						appID, userID, sourceID, err)
-				} else {
-					log.Printf("Created hydration task for app: %s (user: %s, source: %s)",
-						appID, userID, sourceID)
-					tasksCreated++
-				}
-			} else {
-				log.Printf("Task already exists for app: %s (user: %s, source: %s)",
-					appID, userID, sourceID)
-			}
-		} else {
-			log.Printf("Warning: app data is not a map for app: %s (user: %s, source: %s)",
-				appID, userID, sourceID)
-		}
-	}
-
-	log.Printf("Created %d hydration tasks from pending data for user: %s, source: %s",
-		tasksCreated, userID, sourceID)
 }
 
 // monitorMemoryUsage monitors memory usage and logs warnings if it's too high
