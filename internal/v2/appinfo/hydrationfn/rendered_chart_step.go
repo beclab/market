@@ -70,6 +70,9 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 		return fmt.Errorf("failed to load and extract chart: %w", err)
 	}
 
+	// Store chart files in task data for later use
+	task.ChartData["chart_files"] = chartFiles
+
 	// Prepare template data for rendering
 	templateData, err := s.prepareTemplateData(ctx, task)
 	if err != nil {
@@ -495,6 +498,40 @@ func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *Hydra
 			"zone": fmt.Sprintf("user-space-%s", task.UserID),
 		}
 	}
+
+	// Add domain configuration - create entries for app entrances from OlaresManifest.yaml
+	entries := make(map[string]interface{})
+
+	// Try to get entrances from original OlaresManifest.yaml in chart files
+	if chartFiles, exists := task.ChartData["chart_files"]; exists {
+		if files, ok := chartFiles.(map[string]*ChartFile); ok {
+			manifestEntries, err := s.extractEntrancesFromChartFiles(files)
+			if err != nil {
+				log.Printf("Warning: failed to extract entrances from chart files: %v", err)
+			} else {
+				entries = manifestEntries
+				log.Printf("Extracted %d entrances from OlaresManifest.yaml in chart files", len(entries))
+			}
+		}
+	}
+
+	// Fallback to task.AppData if no entrances found in manifest
+	if len(entries) == 0 {
+		if appData, ok := task.AppData["entrances"]; ok {
+			if entrances, ok := appData.([]interface{}); ok {
+				for _, entrance := range entrances {
+					if entranceMap, ok := entrance.(map[string]interface{}); ok {
+						if name, ok := entranceMap["name"].(string); ok {
+							entries[name] = "random-string"
+						}
+					}
+				}
+			}
+		}
+		log.Printf("Using fallback entrances from task.AppData: %d entries", len(entries))
+	}
+
+	templateData.Values["domain"] = entries
 
 	// Add Helm standard template variables
 	templateData.Release = map[string]interface{}{
@@ -1207,4 +1244,60 @@ func (s *RenderedChartStep) compareAppIdentifiers(latestApp *types.AppInfoLatest
 	}
 
 	return false
+}
+
+// extractEntrancesFromChartFiles extracts entrances from OlaresManifest.yaml in chart files
+func (s *RenderedChartStep) extractEntrancesFromChartFiles(files map[string]*ChartFile) (map[string]interface{}, error) {
+	entries := make(map[string]interface{})
+
+	// Iterate through files to find OlaresManifest.yaml
+	for filePath, file := range files {
+		if strings.HasSuffix(strings.ToLower(filePath), "olaresmanifest.yaml") ||
+			strings.HasSuffix(strings.ToLower(filePath), "olaresmanifest.yml") {
+			log.Printf("Found OlaresManifest file: %s", filePath)
+
+			// Extract entrances from file content
+			manifestEntries, err := s.extractEntrancesFromManifest(string(file.Content))
+			if err != nil {
+				return nil, fmt.Errorf("failed to extract entrances from file %s: %w", filePath, err)
+			}
+
+			entries = manifestEntries
+			log.Printf("Successfully extracted %d entrances from %s", len(entries), filePath)
+			break
+		}
+	}
+
+	if len(entries) == 0 {
+		log.Printf("No entrances found in OlaresManifest.yaml files")
+	}
+
+	return entries, nil
+}
+
+// extractEntrancesFromManifest extracts entrances from OlaresManifest.yaml
+func (s *RenderedChartStep) extractEntrancesFromManifest(manifestStr string) (map[string]interface{}, error) {
+	entries := make(map[string]interface{})
+
+	// Parse the YAML content
+	var manifest map[string]interface{}
+	if err := yaml.Unmarshal([]byte(manifestStr), &manifest); err != nil {
+		return nil, fmt.Errorf("failed to parse manifest YAML: %w", err)
+	}
+
+	// Navigate to entrances section
+	if entrances, ok := manifest["entrances"]; ok {
+		if entranceList, ok := entrances.([]interface{}); ok {
+			for _, entrance := range entranceList {
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					if name, ok := entranceMap["name"].(string); ok {
+						entries[name] = "random-string"
+						log.Printf("Found entrance: %s", name)
+					}
+				}
+			}
+		}
+	}
+
+	return entries, nil
 }
