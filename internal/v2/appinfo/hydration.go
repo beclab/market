@@ -363,6 +363,13 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 				return
 			}
 
+			// Check if app already exists in latest queue before creating new task
+			if h.isAppInLatestQueue(userID, sourceID, appID) {
+				// log.Printf("App already exists in latest queue for app: %s (user: %s, source: %s), skipping task creation",
+				// 	appID, userID, sourceID)
+				return
+			}
+
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
 				// Convert ApplicationInfoEntry to map for task creation
 				appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
@@ -1111,4 +1118,130 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID string) bool {
 	}
 
 	return false
+}
+
+// ForceAddTaskFromLatestData forces creation of hydration task from latest app data, skipping isAppInLatestQueue check
+// This method is exposed for external use when you need to force add a task regardless of existing state
+func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestData *types.AppInfoLatestData) error {
+	if !h.IsRunning() {
+		return fmt.Errorf("hydrator is not running")
+	}
+
+	if latestData == nil {
+		return fmt.Errorf("latest data is nil")
+	}
+
+	// Extract app ID from latest data
+	var appID string
+	if latestData.RawData != nil {
+		appID = latestData.RawData.AppID
+		if appID == "" {
+			appID = latestData.RawData.ID
+		}
+	} else if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+		appID = latestData.AppInfo.AppEntry.AppID
+		if appID == "" {
+			appID = latestData.AppInfo.AppEntry.ID
+		}
+	} else if latestData.AppSimpleInfo != nil {
+		appID = latestData.AppSimpleInfo.AppID
+	}
+
+	if appID == "" {
+		return fmt.Errorf("cannot extract app ID from latest data")
+	}
+
+	// Check if task already exists for this app to avoid duplicates
+	if h.hasActiveTaskForApp(userID, sourceID, appID) {
+		log.Printf("Task already exists for app: %s (user: %s, source: %s), skipping force add", appID, userID, sourceID)
+		return nil
+	}
+
+	// Convert latest data to map for task creation
+	appDataMap := h.convertLatestDataToMap(latestData)
+
+	// Create and submit task
+	task := hydrationfn.NewHydrationTask(
+		userID, sourceID, appID,
+		appDataMap, h.cache, h.settingsManager,
+	)
+
+	if err := h.EnqueueTask(task); err != nil {
+		log.Printf("Failed to enqueue force task for app: %s (user: %s, source: %s), error: %v",
+			appID, userID, sourceID, err)
+		return err
+	}
+
+	log.Printf("Successfully force added hydration task for app: %s (user: %s, source: %s)",
+		appID, userID, sourceID)
+	return nil
+}
+
+// convertLatestDataToMap converts AppInfoLatestData to map for task creation
+func (h *Hydrator) convertLatestDataToMap(latestData *types.AppInfoLatestData) map[string]interface{} {
+	if latestData == nil {
+		return make(map[string]interface{})
+	}
+
+	// Start with basic data
+	data := map[string]interface{}{
+		"type":      string(latestData.Type),
+		"timestamp": latestData.Timestamp,
+		"version":   latestData.Version,
+	}
+
+	// Add RawData if available
+	if latestData.RawData != nil {
+		rawDataMap := h.convertApplicationInfoEntryToMap(latestData.RawData)
+		// Merge raw data into main data map
+		for key, value := range rawDataMap {
+			data[key] = value
+		}
+	}
+
+	// Add package information
+	if latestData.RawPackage != "" {
+		data["raw_package"] = latestData.RawPackage
+	}
+	if latestData.RenderedPackage != "" {
+		data["rendered_package"] = latestData.RenderedPackage
+	}
+
+	// Add Values if available
+	if latestData.Values != nil && len(latestData.Values) > 0 {
+		valuesData := make([]map[string]interface{}, 0, len(latestData.Values))
+		for _, value := range latestData.Values {
+			if value != nil {
+				valueMap := map[string]interface{}{
+					"file_name":    value.FileName,
+					"modify_type":  string(value.ModifyType),
+					"modify_key":   value.ModifyKey,
+					"modify_value": value.ModifyValue,
+				}
+				valuesData = append(valuesData, valueMap)
+			}
+		}
+		data["values"] = valuesData
+	}
+
+	// Add AppInfo if available
+	if latestData.AppInfo != nil {
+		if latestData.AppInfo.AppEntry != nil {
+			appEntryMap := h.convertApplicationInfoEntryToMap(latestData.AppInfo.AppEntry)
+			// Merge app entry data
+			for key, value := range appEntryMap {
+				data[key] = value
+			}
+		}
+		if latestData.AppInfo.ImageAnalysis != nil {
+			data["image_analysis"] = latestData.AppInfo.ImageAnalysis
+		}
+	}
+
+	// Add AppSimpleInfo if available
+	if latestData.AppSimpleInfo != nil {
+		data["app_simple_info"] = latestData.AppSimpleInfo
+	}
+
+	return data
 }
