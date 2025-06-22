@@ -122,7 +122,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 func getRepoUrl() string {
 	repoServiceHost := os.Getenv("REPO_URL_HOST")
 	repoStoreServicePort := os.Getenv("REPO_URL_PORT")
-	return fmt.Sprintf("http://%s:%s/charts", repoServiceHost, repoStoreServicePort)
+	return fmt.Sprintf("http://%s:%s", repoServiceHost, repoStoreServicePort)
 }
 
 // sendHttpRequest sends an HTTP request with the given token
