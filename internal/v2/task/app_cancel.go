@@ -39,7 +39,7 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 
 	// The URL format is based on the legacy AppCancel function's parameters (uid, t)
 	// and adapted to the v2 API style. The original function signature was AppCancel(uid, t, token).
-	urlStr := fmt.Sprintf("http://%s:%s/api/v1/tasks/cancel/%s/%s", appServiceHost, appServicePort, uid, taskType)
+	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/cancel?type=operate", appServiceHost, appServicePort, uid)
 
 	log.Printf("App service URL: %s for task: %s, uid: %s, task_type: %s", urlStr, task.ID, uid, taskType)
 

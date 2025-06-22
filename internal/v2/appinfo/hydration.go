@@ -761,7 +761,7 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 			// Check if task already exists for this app to avoid duplicates
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
 				// Check if app hydration is already complete before creating new task
-				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
+				if h.isAppInLatestQueue(userID, sourceID, appID) {
 					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
 					// 	appID, userID, sourceID)
 					continue
@@ -1040,7 +1040,7 @@ func (h *Hydrator) createTasksFromPendingDataLegacy(userID, sourceID string, pen
 			// Check if task already exists for this app
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
 				// Check if app hydration is already complete before creating new task
-				if h.isAppDataHydrationComplete(userID, sourceID, appID) {
+				if h.isAppInLatestQueue(userID, sourceID, appID) {
 					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
 					// 	appID, userID, sourceID)
 					continue
@@ -1169,4 +1169,56 @@ func (h *Hydrator) cleanupOldTasks() {
 
 		log.Printf("Cleaned up %d old failed tasks", removed)
 	}
+}
+
+// isAppInLatestQueue checks if an app already exists in the AppInfoLatest queue
+func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID string) bool {
+	// Get the source data from cache using global lock
+	h.cache.Mutex.RLock()
+	defer h.cache.Mutex.RUnlock()
+
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		return false
+	}
+
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return false
+	}
+
+	// Check if app exists in AppInfoLatest queue
+	for _, latestData := range sourceData.AppInfoLatest {
+		if latestData == nil {
+			continue
+		}
+
+		// Check RawData first
+		if latestData.RawData != nil {
+			if latestData.RawData.ID == appID ||
+				latestData.RawData.AppID == appID ||
+				latestData.RawData.Name == appID {
+				return true
+			}
+		}
+
+		// Check AppInfo.AppEntry
+		if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+			if latestData.AppInfo.AppEntry.ID == appID ||
+				latestData.AppInfo.AppEntry.AppID == appID ||
+				latestData.AppInfo.AppEntry.Name == appID {
+				return true
+			}
+		}
+
+		// Check AppSimpleInfo
+		if latestData.AppSimpleInfo != nil {
+			if latestData.AppSimpleInfo.AppID == appID ||
+				latestData.AppSimpleInfo.AppName == appID {
+				return true
+			}
+		}
+	}
+
+	return false
 }
