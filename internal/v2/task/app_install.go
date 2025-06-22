@@ -12,13 +12,14 @@ import (
 
 // InstallOptions represents the options for app installation
 type InstallOptions struct {
-	App     string `json:"appName,omitempty"`
-	Dev     bool   `json:"devMode,omitempty"`
-	RepoUrl string `json:"repoUrl,omitempty"`
-	CfgUrl  string `json:"cfgUrl,omitempty"`
-	Version string `json:"version,omitempty"`
-	User    string `json:"x_market_user,omitempty"`
-	Source  string `json:"x_market_source,omitempty"`
+	App          string `json:"appName,omitempty"`
+	Dev          bool   `json:"devMode,omitempty"`
+	RepoUrl      string `json:"repoUrl,omitempty"`
+	CfgUrl       string `json:"cfgUrl,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Source       string `json:"source,omitempty"`
+	User         string `json:"x_market_user,omitempty"`
+	MarketSource string `json:"x_market_source,omitempty"`
 }
 
 // AppInstall installs an application using the app service
@@ -34,11 +35,24 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
-	source, ok := task.Metadata["source"].(string)
+	// Get app source from metadata
+	appSource, ok := task.Metadata["source"].(string)
 	if !ok {
-		source = "store" // Default source
-		log.Printf("Using default source 'store' for task: %s", task.ID)
+		log.Printf("Missing source in task metadata for task: %s", task.ID)
+		return "", fmt.Errorf("missing source in task metadata")
 	}
+
+	// Convert app source to API source parameter
+	// If app source is "local", use "custom" for API
+	// Otherwise, use "market" for API
+	var apiSource string
+	if appSource == "local" {
+		apiSource = "custom"
+	} else {
+		apiSource = "market"
+	}
+
+	log.Printf("App source: %s, API source: %s for task: %s", appSource, apiSource, task.ID)
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
@@ -47,9 +61,10 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
 
 	installInfo := &InstallOptions{
-		RepoUrl: getRepoUrl(),
-		User:    user,
-		Source:  source,
+		RepoUrl:      getRepoUrl(),
+		Source:       apiSource, // Use converted API source
+		User:         user,
+		MarketSource: appSource,
 	}
 	ms, err := json.Marshal(installInfo)
 	if err != nil {
@@ -62,7 +77,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		"X-Authorization": token,
 		"Content-Type":    "application/json",
 		"X-Market-User":   user,
-		"X-Market-Source": source,
+		"X-Market-Source": appSource,
 	}
 
 	// Send HTTP request and get response
@@ -72,13 +87,14 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		log.Printf("HTTP request failed for app installation: task=%s, error=%v", task.ID, err)
 		// Create detailed error result
 		errorResult := map[string]interface{}{
-			"operation": "install",
-			"app_name":  appName,
-			"user":      user,
-			"source":    source,
-			"url":       urlStr,
-			"error":     err.Error(),
-			"status":    "failed",
+			"operation":  "install",
+			"app_name":   appName,
+			"user":       user,
+			"app_source": appSource, // Log original app source
+			"api_source": apiSource, // Log converted API source
+			"url":        urlStr,
+			"error":      err.Error(),
+			"status":     "failed",
 		}
 		errorJSON, _ := json.Marshal(errorResult)
 		return string(errorJSON), err
@@ -88,13 +104,14 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	// Create success result
 	successResult := map[string]interface{}{
-		"operation": "install",
-		"app_name":  appName,
-		"user":      user,
-		"source":    source,
-		"url":       urlStr,
-		"response":  response,
-		"status":    "success",
+		"operation":  "install",
+		"app_name":   appName,
+		"user":       user,
+		"app_source": appSource, // Log original app source
+		"api_source": apiSource, // Log converted API source
+		"url":        urlStr,
+		"response":   response,
+		"status":     "success",
 	}
 	successJSON, _ := json.Marshal(successResult)
 	log.Printf("App installation completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
