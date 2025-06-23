@@ -687,10 +687,24 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 		return nil
 	}
 
+	var filteredOthers *types.Others
+	if sourceData.Others != nil {
+		filteredOthers = &types.Others{
+			Hash:       sourceData.Others.Hash,
+			Version:    sourceData.Others.Version,
+			Topics:     sourceData.Others.Topics,
+			TopicLists: sourceData.Others.TopicLists,
+			Recommends: sourceData.Others.Recommends,
+			Pages:      sourceData.Others.Pages,
+			Tops:       sourceData.Others.Tops,
+			Latest:     sourceData.Others.Latest,
+		}
+	}
+
 	filteredSourceData := &FilteredSourceData{
 		Type:           sourceData.Type,
 		AppStateLatest: sourceData.AppStateLatest,
-		Others:         sourceData.Others,
+		Others:         filteredOthers,
 		AppInfoLatest:  make([]*FilteredAppInfoLatestData, 0),
 	}
 
