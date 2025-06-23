@@ -374,6 +374,12 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 				// Convert ApplicationInfoEntry to map for task creation
 				appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
 
+				if len(appDataMap) == 0 {
+					log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+						appID, userID, sourceID)
+					return
+				}
+
 				task := hydrationfn.NewHydrationTask(
 					userID, sourceID, appID,
 					appDataMap, h.cache, h.settingsManager,
@@ -747,6 +753,12 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 				if h.isAppInLatestQueue(userID, sourceID, appID) {
 					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
 					// 	appID, userID, sourceID)
+					continue
+				}
+
+				if len(appMap) == 0 {
+					log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+						appID, userID, sourceID)
 					continue
 				}
 
@@ -1159,6 +1171,12 @@ func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestDat
 
 	// Convert latest data to map for task creation
 	appDataMap := h.convertLatestDataToMap(latestData)
+
+	if len(appDataMap) == 0 {
+		log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+			appID, userID, sourceID)
+		return nil
+	}
 
 	// Create and submit task
 	task := hydrationfn.NewHydrationTask(
