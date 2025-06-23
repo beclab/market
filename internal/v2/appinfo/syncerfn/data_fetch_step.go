@@ -219,6 +219,8 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 		TopicLists: make([]*types.TopicList, 0),
 		Recommends: make([]*types.Recommend, 0),
 		Pages:      make([]*types.Page, 0),
+		Tops:       make([]*types.AppStoreTopItem, 0),
+		Latest:     make([]string, 0),
 	}
 
 	// Extract topics data
@@ -269,13 +271,30 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 		}
 	}
 
+	// Extract tops data
+	if data.LatestData.Data.Tops != nil {
+		for _, topData := range data.LatestData.Data.Tops {
+			if topMap, ok := topData.(map[string]interface{}); ok {
+				topItem := d.mapToTopItem(topMap)
+				if topItem != nil {
+					others.Tops = append(others.Tops, topItem)
+				}
+			}
+		}
+	}
+
+	// Extract latest data
+	if data.LatestData.Data.Latest != nil {
+		others.Latest = data.LatestData.Data.Latest
+	}
+
 	// Update Others in the cache for current source
 	if data.Cache != nil && data.MarketSource != nil {
 		d.updateOthersInCache(data, others)
 	}
 
-	log.Printf("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages",
-		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages))
+	log.Printf("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest",
+		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages), len(others.Tops), len(others.Latest))
 }
 
 // mapToTopic converts a map to Topic struct
@@ -431,6 +450,20 @@ func (d *DataFetchStep) mapToPage(m map[string]interface{}) *types.Page {
 	}
 
 	return page
+}
+
+// mapToTopItem converts a map to AppStoreTopItem struct
+func (d *DataFetchStep) mapToTopItem(m map[string]interface{}) *types.AppStoreTopItem {
+	topItem := &types.AppStoreTopItem{}
+
+	if appid, ok := m["appId"].(string); ok {
+		topItem.AppID = appid
+	}
+	if rank, ok := m["rank"].(float64); ok {
+		topItem.Rank = int(rank)
+	}
+
+	return topItem
 }
 
 // updateOthersInCache updates Others data in the cache for the current source

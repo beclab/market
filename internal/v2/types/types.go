@@ -81,14 +81,22 @@ type TopicList struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// AppStoreTopItem represents an item in the tops list from appstore
+type AppStoreTopItem struct {
+	AppID string `json:"appid"`
+	Rank  int    `json:"rank"`
+}
+
 // Others contains additional data for AppInfoLatestPendingData
 type Others struct {
-	Hash       string       `json:"hash"`
-	Version    string       `json:"version"`
-	Topics     []*Topic     `json:"topics"`
-	TopicLists []*TopicList `json:"topic_lists"`
-	Recommends []*Recommend `json:"recommends"`
-	Pages      []*Page      `json:"pages"`
+	Hash       string             `json:"hash"`
+	Version    string             `json:"version"`
+	Topics     []*Topic           `json:"topics"`
+	TopicLists []*TopicList       `json:"topic_lists"`
+	Recommends []*Recommend       `json:"recommends"`
+	Pages      []*Page            `json:"pages"`
+	Tops       []*AppStoreTopItem `json:"tops"`
+	Latest     []string           `json:"latest"`
 }
 
 // AppData contains the actual data and metadata
