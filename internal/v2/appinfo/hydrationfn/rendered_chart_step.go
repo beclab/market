@@ -1228,6 +1228,28 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			// Simplified SHA256 hash - in production you'd use crypto/sha256
 			return fmt.Sprintf("sha256-%s", str)
 		},
+		"genCA": func(cn string, days int) map[string]string {
+			// Simplified certificate generation for templating.
+			// In a real implementation, this would generate a real CA certificate.
+			return map[string]string{
+				"Cert": fmt.Sprintf("-----BEGIN CERTIFICATE-----\n# CA Cert for %s, valid for %d days\n-----END CERTIFICATE-----\n", cn, days),
+				"Key":  fmt.Sprintf("-----BEGIN PRIVATE KEY-----\n# CA Key for %s\n-----END PRIVATE KEY-----\n", cn),
+			}
+		},
+		"genSelfSignedCert": func(cn string, ips, sans interface{}, days int) map[string]string {
+			// Simplified self-signed certificate generation for templating.
+			return map[string]string{
+				"Cert": fmt.Sprintf("-----BEGIN CERTIFICATE-----\n# Self-signed Cert for %s, valid for %d days\n-----END CERTIFICATE-----\n", cn, days),
+				"Key":  fmt.Sprintf("-----BEGIN PRIVATE KEY-----\n# Self-signed Key for %s\n-----END PRIVATE KEY-----\n", cn),
+			}
+		},
+		"genSignedCert": func(cn string, ips, sans interface{}, days int, ca interface{}) map[string]string {
+			// Simplified signed certificate generation for templating.
+			return map[string]string{
+				"Cert": fmt.Sprintf("-----BEGIN CERTIFICATE-----\n# Signed Cert for %s, valid for %d days\n-----END CERTIFICATE-----\n", cn, days),
+				"Key":  fmt.Sprintf("-----BEGIN PRIVATE KEY-----\n# Signed Key for %s\n-----END PRIVATE KEY-----\n", cn),
+			}
+		},
 		"trunc": func(length int, str string) string {
 			if len(str) <= length {
 				return str
@@ -1774,13 +1796,27 @@ func (s *RenderedChartStep) extractEntrancesFromManifest(manifestStr string) (ma
 
 	// Navigate to entrances section
 	if entrances, ok := manifest["entrances"]; ok {
-		if entranceList, ok := entrances.([]interface{}); ok {
-			for _, entrance := range entranceList {
+		switch entrances := entrances.(type) {
+		case []interface{}:
+			// Handle case where entrances is a list of maps
+			for _, entrance := range entrances {
 				if entranceMap, ok := entrance.(map[string]interface{}); ok {
 					if name, ok := entranceMap["name"].(string); ok {
-						entries[name] = entranceMap // 保留所有字段
-						log.Printf("Found entrance: %s", name)
+						entries[name] = entranceMap
+						log.Printf("Found entrance (from list): %s", name)
 					}
+				}
+			}
+		case map[string]interface{}:
+			// Handle case where entrances is a map
+			for name, entrance := range entrances {
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					// Ensure the name from the key is added to the map if not present
+					if _, hasName := entranceMap["name"]; !hasName {
+						entranceMap["name"] = name
+					}
+					entries[name] = entranceMap
+					log.Printf("Found entrance (from map): %s", name)
 				}
 			}
 		}
