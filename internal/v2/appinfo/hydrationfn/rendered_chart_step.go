@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
@@ -876,6 +877,12 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		"trimSuffix": func(suffix, s string) string {
 			return strings.TrimSuffix(s, suffix)
 		},
+		"quote": func(str string) string {
+			return fmt.Sprintf("%q", str)
+		},
+		"squote": func(str string) string {
+			return fmt.Sprintf("'%s'", str)
+		},
 		"replace": func(old, new, src string) string {
 			return strings.ReplaceAll(src, old, new)
 		},
@@ -1274,6 +1281,20 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			return ok
 		},
 		"index": s.customIndexFunc,
+
+		// Regex functions (implementing some common Sprig functions)
+		"regexMatch": func(regex string, s string) bool {
+			return regexp.MustCompile(regex).MatchString(s)
+		},
+		"regexFindAll": func(regex string, s string, n int) []string {
+			return regexp.MustCompile(regex).FindAllString(s, n)
+		},
+		"regexReplaceAll": func(regex, replacement, src string) string {
+			return regexp.MustCompile(regex).ReplaceAllString(src, replacement)
+		},
+		"regexSplit": func(regex string, s string, n int) []string {
+			return regexp.MustCompile(regex).Split(s, n)
+		},
 	}
 }
 
