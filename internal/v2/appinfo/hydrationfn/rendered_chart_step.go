@@ -487,16 +487,95 @@ func (s *RenderedChartStep) extractTarGz(data []byte) (map[string]*ChartFile, er
 	return files, nil
 }
 
+// mergeValues performs a deep merge of two maps.
+// Keys in the overlay map take precedence.
+func (s *RenderedChartStep) mergeValues(base, overlay map[string]interface{}) map[string]interface{} {
+	if base == nil {
+		base = make(map[string]interface{})
+	}
+
+	for key, overlayValue := range overlay {
+		baseValue, ok := base[key]
+		if ok {
+			baseMap, baseIsMap := baseValue.(map[string]interface{})
+			overlayMap, overlayIsMap := overlayValue.(map[string]interface{})
+			if baseIsMap && overlayIsMap {
+				base[key] = s.mergeValues(baseMap, overlayMap)
+				continue
+			}
+		}
+		base[key] = overlayValue
+	}
+	return base
+}
+
+// extractChartValues extracts default values from the chart's values.yaml file.
+func (s *RenderedChartStep) extractChartValues(task *HydrationTask) (map[string]interface{}, error) {
+	chartFilesVal, ok := task.ChartData["chart_files"]
+	if !ok {
+		log.Println("No chart files found in task data, cannot extract values.yaml.")
+		return make(map[string]interface{}), nil
+	}
+
+	chartFiles, ok := chartFilesVal.(map[string]*ChartFile)
+	if !ok {
+		return nil, fmt.Errorf("chart_files in task data is not of expected type map[string]*ChartFile")
+	}
+
+	var valuesFile *ChartFile
+	minDepth := -1
+
+	// Find values.yaml at the lowest depth (root of the chart)
+	for path, file := range chartFiles {
+		if file.IsDir {
+			continue
+		}
+
+		baseName := filepath.Base(path)
+		if baseName == "values.yaml" || baseName == "values.yml" {
+			depth := strings.Count(path, "/")
+			if valuesFile == nil || depth < minDepth {
+				valuesFile = file
+				minDepth = depth
+			}
+		}
+	}
+
+	if valuesFile == nil {
+		log.Println("values.yaml not found in chart package. Proceeding without default values.")
+		return make(map[string]interface{}), nil
+	}
+
+	log.Printf("Loading default values from: %s", valuesFile.Name)
+	var values map[string]interface{}
+	if err := yaml.Unmarshal(valuesFile.Content, &values); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", valuesFile.Name, err)
+	}
+
+	return values, nil
+}
+
 // prepareTemplateData prepares the template data for chart rendering
 func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *HydrationTask) (*TemplateData, error) {
 	templateData := &TemplateData{}
 
-	// Fetch base values from app service, with caching
-	values, err := s.fetchRenderValues(ctx, task)
+	// Load default values from chart's values.yaml
+	defaultValues, err := s.extractChartValues(task)
+	if err != nil {
+		// Log as a warning and continue with empty defaults
+		log.Printf("Warning: failed to extract chart values: %v", err)
+		defaultValues = make(map[string]interface{})
+	}
+
+	// Fetch override values from app service, which act as overrides
+	overrideValues, err := s.fetchRenderValues(ctx, task)
 	if err != nil {
 		return nil, fmt.Errorf("could not prepare template data, failed to fetch render values: %w", err)
 	}
-	templateData.Values = values
+
+	// Merge override values into default values
+	mergedValues := s.mergeValues(defaultValues, overrideValues)
+	templateData.Values = mergedValues
 
 	// Get admin username using utils function
 	adminUsername, err := utils.GetAdminUsername("")
