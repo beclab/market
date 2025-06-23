@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"text/template"
@@ -1177,7 +1178,111 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		"fail": func(msg string) (string, error) {
 			return "", fmt.Errorf(msg)
 		},
+		"hasKey": func(m map[string]interface{}, key string) bool {
+			if m == nil {
+				return false
+			}
+			_, ok := m[key]
+			return ok
+		},
+		"index": s.customIndexFunc,
 	}
+}
+
+// indirect is a helper function to get the value from a pointer.
+func indirect(v reflect.Value) (rv reflect.Value, isNil bool) {
+	for ; v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface; v = v.Elem() {
+		if v.IsNil() {
+			return v, true
+		}
+	}
+	return v, false
+}
+
+// intValue is a helper function to convert a reflect.Value to an int.
+func intValue(v reflect.Value) (int, error) {
+	if v, isNil := indirect(v); isNil || !v.IsValid() {
+		return 0, fmt.Errorf("index of nil pointer")
+	}
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return int(v.Int()), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return int(v.Uint()), nil
+	case reflect.Invalid:
+		return 0, fmt.Errorf("index of invalid value")
+	default:
+		return 0, fmt.Errorf("can't index item with %s", v.Type())
+	}
+}
+
+// customIndexFunc is a custom implementation of the 'index' template function.
+// It supports indexing slices/arrays with string representations of integers (e.g., "_0", "1").
+func (s *RenderedChartStep) customIndexFunc(item interface{}, indices ...interface{}) (interface{}, error) {
+	v := reflect.ValueOf(item)
+	if !v.IsValid() {
+		return nil, fmt.Errorf("index of untyped nil")
+	}
+
+	for _, i := range indices {
+		index := reflect.ValueOf(i)
+		if !index.IsValid() {
+			return nil, fmt.Errorf("index of untyped nil")
+		}
+
+		var isNil bool
+		if v, isNil = indirect(v); isNil {
+			return nil, fmt.Errorf("index of nil pointer")
+		}
+
+		switch v.Kind() {
+		case reflect.Array, reflect.Slice, reflect.String:
+			var x int
+			var err error
+
+			if index.Kind() == reflect.String {
+				strIndex := index.String()
+				// Handle string indices like "_0", "1", etc. for slices
+				cleanIndex := strings.TrimPrefix(strIndex, "_")
+				x, err = strconv.Atoi(cleanIndex)
+				if err != nil {
+					// Fallback to default behavior if parsing fails
+					x, err = intValue(index)
+				}
+			} else {
+				x, err = intValue(index)
+			}
+
+			if err != nil {
+				return nil, err
+			}
+			if x < 0 || x >= v.Len() {
+				// To be more forgiving, return nil instead of error for out-of-bounds access.
+				// This mimics behavior of some other template systems.
+				log.Printf("Warning: index out of range [%d] with length %d, returning nil", x, v.Len())
+				return nil, nil
+			}
+			v = v.Index(x)
+
+		case reflect.Map:
+			if !index.Type().AssignableTo(v.Type().Key()) {
+				return nil, fmt.Errorf("%s is not a key type for %s", index.Type(), v.Type())
+			}
+			v = v.MapIndex(index)
+		case reflect.Invalid:
+			return nil, fmt.Errorf("index of invalid value")
+		default:
+			return nil, fmt.Errorf("can't index item of type %s", v.Type())
+		}
+	}
+
+	if !v.IsValid() {
+		// This can happen if a map lookup returned the zero value.
+		// For example, indexing a map with a key that doesn't exist.
+		return nil, nil
+	}
+
+	return v.Interface(), nil
 }
 
 // getMapKeys returns the keys of a map for debugging purposes
