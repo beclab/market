@@ -547,13 +547,27 @@ func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *Hydra
 
 // renderOlaresManifest finds and renders the OlaresManifest.yaml file
 func (s *RenderedChartStep) renderOlaresManifest(chartFiles map[string]*ChartFile, templateData *TemplateData) (string, error) {
-	// Find OlaresManifest.yaml file
+	// Find OlaresManifest.yaml file at the lowest depth
 	var manifestFile *ChartFile
+	var minDepth = -1
+
 	for path, file := range chartFiles {
+		if file.IsDir {
+			continue
+		}
+
+		// Check if the file is an Olares manifest file.
 		if strings.HasSuffix(strings.ToLower(path), "olaresmanifest.yaml") ||
 			strings.HasSuffix(strings.ToLower(path), "olaresmanifest.yml") {
-			manifestFile = file
-			break
+
+			// Calculate the directory depth of the file.
+			depth := strings.Count(path, "/")
+
+			// If it's the first one found, or has a shallower depth, select it.
+			if manifestFile == nil || depth < minDepth {
+				manifestFile = file
+				minDepth = depth
+			}
 		}
 	}
 
