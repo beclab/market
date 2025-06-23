@@ -301,6 +301,9 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 func (d *DataFetchStep) mapToTopic(m map[string]interface{}) *types.Topic {
 	topic := &types.Topic{}
 
+	if id, ok := m["_id"].(string); ok {
+		topic.ID = id
+	}
 	if name, ok := m["name"].(string); ok {
 		topic.Name = name
 	}

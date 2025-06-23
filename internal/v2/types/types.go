@@ -55,6 +55,7 @@ type Page struct {
 
 // Topic represents topic configuration
 type Topic struct {
+	ID            string            `json:"_id"`
 	Name          string            `json:"name"`
 	Name2         map[string]string `json:"name2"`
 	Introduction  string            `json:"introduction"`
