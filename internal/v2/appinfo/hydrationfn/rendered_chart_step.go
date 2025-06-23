@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
@@ -382,6 +385,14 @@ func (s *RenderedChartStep) loadAndExtractChart(ctx context.Context, task *Hydra
 	// Extract chart files from tar.gz
 	chartFiles, err := s.extractTarGz(data)
 	if err != nil {
+		// Check for the specific gzip header error and delete the corrupted file
+		if errors.Is(err, gzip.ErrHeader) {
+			log.Printf("Invalid gzip header for file %s. Deleting it to allow re-download.", localPath)
+			if removeErr := os.Remove(localPath); removeErr != nil {
+				// Log failure to delete, but still return the original extraction error
+				log.Printf("Warning: failed to delete corrupted chart file %s: %v", localPath, removeErr)
+			}
+		}
 		return nil, fmt.Errorf("failed to extract chart: %w", err)
 	}
 
@@ -486,16 +497,95 @@ func (s *RenderedChartStep) extractTarGz(data []byte) (map[string]*ChartFile, er
 	return files, nil
 }
 
+// mergeValues performs a deep merge of two maps.
+// Keys in the overlay map take precedence.
+func (s *RenderedChartStep) mergeValues(base, overlay map[string]interface{}) map[string]interface{} {
+	if base == nil {
+		base = make(map[string]interface{})
+	}
+
+	for key, overlayValue := range overlay {
+		baseValue, ok := base[key]
+		if ok {
+			baseMap, baseIsMap := baseValue.(map[string]interface{})
+			overlayMap, overlayIsMap := overlayValue.(map[string]interface{})
+			if baseIsMap && overlayIsMap {
+				base[key] = s.mergeValues(baseMap, overlayMap)
+				continue
+			}
+		}
+		base[key] = overlayValue
+	}
+	return base
+}
+
+// extractChartValues extracts default values from the chart's values.yaml file.
+func (s *RenderedChartStep) extractChartValues(task *HydrationTask) (map[string]interface{}, error) {
+	chartFilesVal, ok := task.ChartData["chart_files"]
+	if !ok {
+		log.Println("No chart files found in task data, cannot extract values.yaml.")
+		return make(map[string]interface{}), nil
+	}
+
+	chartFiles, ok := chartFilesVal.(map[string]*ChartFile)
+	if !ok {
+		return nil, fmt.Errorf("chart_files in task data is not of expected type map[string]*ChartFile")
+	}
+
+	var valuesFile *ChartFile
+	minDepth := -1
+
+	// Find values.yaml at the lowest depth (root of the chart)
+	for path, file := range chartFiles {
+		if file.IsDir {
+			continue
+		}
+
+		baseName := filepath.Base(path)
+		if baseName == "values.yaml" || baseName == "values.yml" {
+			depth := strings.Count(path, "/")
+			if valuesFile == nil || depth < minDepth {
+				valuesFile = file
+				minDepth = depth
+			}
+		}
+	}
+
+	if valuesFile == nil {
+		log.Println("values.yaml not found in chart package. Proceeding without default values.")
+		return make(map[string]interface{}), nil
+	}
+
+	log.Printf("Loading default values from: %s", valuesFile.Name)
+	var values map[string]interface{}
+	if err := yaml.Unmarshal(valuesFile.Content, &values); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", valuesFile.Name, err)
+	}
+
+	return values, nil
+}
+
 // prepareTemplateData prepares the template data for chart rendering
 func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *HydrationTask) (*TemplateData, error) {
 	templateData := &TemplateData{}
 
-	// Fetch base values from app service, with caching
-	values, err := s.fetchRenderValues(ctx, task)
+	// Load default values from chart's values.yaml
+	defaultValues, err := s.extractChartValues(task)
+	if err != nil {
+		// Log as a warning and continue with empty defaults
+		log.Printf("Warning: failed to extract chart values: %v", err)
+		defaultValues = make(map[string]interface{})
+	}
+
+	// Fetch override values from app service, which act as overrides
+	overrideValues, err := s.fetchRenderValues(ctx, task)
 	if err != nil {
 		return nil, fmt.Errorf("could not prepare template data, failed to fetch render values: %w", err)
 	}
-	templateData.Values = values
+
+	// Merge override values into default values
+	mergedValues := s.mergeValues(defaultValues, overrideValues)
+	templateData.Values = mergedValues
 
 	// Get admin username using utils function
 	adminUsername, err := utils.GetAdminUsername("")
@@ -787,6 +877,12 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		"trimSuffix": func(suffix, s string) string {
 			return strings.TrimSuffix(s, suffix)
 		},
+		"quote": func(str string) string {
+			return fmt.Sprintf("%q", str)
+		},
+		"squote": func(str string) string {
+			return fmt.Sprintf("'%s'", str)
+		},
 		"replace": func(old, new, src string) string {
 			return strings.ReplaceAll(src, old, new)
 		},
@@ -799,12 +895,25 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			}
 			return strings.Split(str, sep)
 		},
-		"join": func(sep string, elems []interface{}) string {
-			strs := make([]string, len(elems))
-			for i, elem := range elems {
-				strs[i] = fmt.Sprintf("%v", elem)
+		"join": func(sep string, a interface{}) string {
+			if a == nil {
+				return ""
 			}
-			return strings.Join(strs, sep)
+			v := reflect.ValueOf(a)
+			if v.Kind() != reflect.Slice {
+				return fmt.Sprintf("%v", a)
+			}
+			if v.Len() == 0 {
+				return ""
+			}
+			var b strings.Builder
+			for i := 0; i < v.Len(); i++ {
+				if i > 0 {
+					b.WriteString(sep)
+				}
+				b.WriteString(fmt.Sprintf("%v", v.Index(i).Interface()))
+			}
+			return b.String()
 		},
 		"contains": func(substr, str string) bool {
 			return strings.Contains(str, substr)
@@ -1035,9 +1144,16 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		"repeat": func(count int, str string) string {
 			return strings.Repeat(str, count)
 		},
-		"has": func(needle interface{}, haystack []interface{}) bool {
-			for _, item := range haystack {
-				if item == needle {
+		"has": func(needle interface{}, haystack interface{}) bool {
+			if haystack == nil {
+				return false
+			}
+			v := reflect.ValueOf(haystack)
+			if v.Kind() != reflect.Slice {
+				return false
+			}
+			for i := 0; i < v.Len(); i++ {
+				if reflect.DeepEqual(needle, v.Index(i).Interface()) {
 					return true
 				}
 			}
@@ -1065,22 +1181,42 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			return false
 		},
 		"not": func(a interface{}) bool { return !toBoolHelper(a) },
+		"ternary": func(condition, ifTrue, ifFalse interface{}) interface{} {
+			if toBoolHelper(condition) {
+				return ifTrue
+			}
+			return ifFalse
+		},
 
 		// List functions
 		"list": func(items ...interface{}) []interface{} {
 			return items
 		},
-		"first": func(list []interface{}) interface{} {
-			if len(list) == 0 {
+		"first": func(a interface{}) interface{} {
+			if a == nil {
 				return nil
 			}
-			return list[0]
+			v := reflect.ValueOf(a)
+			if v.Kind() != reflect.Slice {
+				return v.Interface() // or nil, or error
+			}
+			if v.Len() == 0 {
+				return nil
+			}
+			return v.Index(0).Interface()
 		},
-		"last": func(list []interface{}) interface{} {
-			if len(list) == 0 {
+		"last": func(a interface{}) interface{} {
+			if a == nil {
 				return nil
 			}
-			return list[len(list)-1]
+			v := reflect.ValueOf(a)
+			if v.Kind() != reflect.Slice {
+				return v.Interface() // or nil, or error
+			}
+			if v.Len() == 0 {
+				return nil
+			}
+			return v.Index(v.Len() - 1).Interface()
 		},
 
 		// Random functions
@@ -1132,6 +1268,28 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			// Simplified SHA256 hash - in production you'd use crypto/sha256
 			return fmt.Sprintf("sha256-%s", str)
 		},
+		"genCA": func(cn string, days int) map[string]string {
+			// Simplified certificate generation for templating.
+			// In a real implementation, this would generate a real CA certificate.
+			return map[string]string{
+				"Cert": fmt.Sprintf("-----BEGIN CERTIFICATE-----\n# CA Cert for %s, valid for %d days\n-----END CERTIFICATE-----\n", cn, days),
+				"Key":  fmt.Sprintf("-----BEGIN PRIVATE KEY-----\n# CA Key for %s\n-----END PRIVATE KEY-----\n", cn),
+			}
+		},
+		"genSelfSignedCert": func(cn string, ips, sans interface{}, days int) map[string]string {
+			// Simplified self-signed certificate generation for templating.
+			return map[string]string{
+				"Cert": fmt.Sprintf("-----BEGIN CERTIFICATE-----\n# Self-signed Cert for %s, valid for %d days\n-----END CERTIFICATE-----\n", cn, days),
+				"Key":  fmt.Sprintf("-----BEGIN PRIVATE KEY-----\n# Self-signed Key for %s\n-----END PRIVATE KEY-----\n", cn),
+			}
+		},
+		"genSignedCert": func(cn string, ips, sans interface{}, days int, ca interface{}) map[string]string {
+			// Simplified signed certificate generation for templating.
+			return map[string]string{
+				"Cert": fmt.Sprintf("-----BEGIN CERTIFICATE-----\n# Signed Cert for %s, valid for %d days\n-----END CERTIFICATE-----\n", cn, days),
+				"Key":  fmt.Sprintf("-----BEGIN PRIVATE KEY-----\n# Signed Key for %s\n-----END PRIVATE KEY-----\n", cn),
+			}
+		},
 		"trunc": func(length int, str string) string {
 			if len(str) <= length {
 				return str
@@ -1177,7 +1335,125 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		"fail": func(msg string) (string, error) {
 			return "", fmt.Errorf(msg)
 		},
+		"hasKey": func(m map[string]interface{}, key string) bool {
+			if m == nil {
+				return false
+			}
+			_, ok := m[key]
+			return ok
+		},
+		"index": s.customIndexFunc,
+
+		// Regex functions (implementing some common Sprig functions)
+		"regexMatch": func(regex string, s string) bool {
+			return regexp.MustCompile(regex).MatchString(s)
+		},
+		"regexFindAll": func(regex string, s string, n int) []string {
+			return regexp.MustCompile(regex).FindAllString(s, n)
+		},
+		"regexReplaceAll": func(regex, replacement, src string) string {
+			return regexp.MustCompile(regex).ReplaceAllString(src, replacement)
+		},
+		"regexSplit": func(regex string, s string, n int) []string {
+			return regexp.MustCompile(regex).Split(s, n)
+		},
 	}
+}
+
+// indirect is a helper function to get the value from a pointer.
+func indirect(v reflect.Value) (rv reflect.Value, isNil bool) {
+	for ; v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface; v = v.Elem() {
+		if v.IsNil() {
+			return v, true
+		}
+	}
+	return v, false
+}
+
+// intValue is a helper function to convert a reflect.Value to an int.
+func intValue(v reflect.Value) (int, error) {
+	if v, isNil := indirect(v); isNil || !v.IsValid() {
+		return 0, fmt.Errorf("index of nil pointer")
+	}
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return int(v.Int()), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return int(v.Uint()), nil
+	case reflect.Invalid:
+		return 0, fmt.Errorf("index of invalid value")
+	default:
+		return 0, fmt.Errorf("can't index item with %s", v.Type())
+	}
+}
+
+// customIndexFunc is a custom implementation of the 'index' template function.
+// It supports indexing slices/arrays with string representations of integers (e.g., "_0", "1").
+func (s *RenderedChartStep) customIndexFunc(item interface{}, indices ...interface{}) (interface{}, error) {
+	v := reflect.ValueOf(item)
+	if !v.IsValid() {
+		return nil, fmt.Errorf("index of untyped nil")
+	}
+
+	for _, i := range indices {
+		index := reflect.ValueOf(i)
+		if !index.IsValid() {
+			return nil, fmt.Errorf("index of untyped nil")
+		}
+
+		var isNil bool
+		if v, isNil = indirect(v); isNil {
+			return nil, fmt.Errorf("index of nil pointer")
+		}
+
+		switch v.Kind() {
+		case reflect.Array, reflect.Slice, reflect.String:
+			var x int
+			var err error
+
+			if index.Kind() == reflect.String {
+				strIndex := index.String()
+				// Handle string indices like "_0", "1", etc. for slices
+				cleanIndex := strings.TrimPrefix(strIndex, "_")
+				x, err = strconv.Atoi(cleanIndex)
+				if err != nil {
+					// Fallback to default behavior if parsing fails
+					x, err = intValue(index)
+				}
+			} else {
+				x, err = intValue(index)
+			}
+
+			if err != nil {
+				return nil, err
+			}
+			if x < 0 || x >= v.Len() {
+				// To be more forgiving, return nil instead of error for out-of-bounds access.
+				// This mimics behavior of some other template systems.
+				log.Printf("Warning: index out of range [%d] with length %d, returning nil", x, v.Len())
+				return nil, nil
+			}
+			v = v.Index(x)
+
+		case reflect.Map:
+			if !index.Type().AssignableTo(v.Type().Key()) {
+				return nil, fmt.Errorf("%s is not a key type for %s", index.Type(), v.Type())
+			}
+			v = v.MapIndex(index)
+		case reflect.Invalid:
+			return nil, fmt.Errorf("index of invalid value")
+		default:
+			return nil, fmt.Errorf("can't index item of type %s", v.Type())
+		}
+	}
+
+	if !v.IsValid() {
+		// This can happen if a map lookup returned the zero value.
+		// For example, indexing a map with a key that doesn't exist.
+		return nil, nil
+	}
+
+	return v.Interface(), nil
 }
 
 // getMapKeys returns the keys of a map for debugging purposes
@@ -1560,13 +1836,27 @@ func (s *RenderedChartStep) extractEntrancesFromManifest(manifestStr string) (ma
 
 	// Navigate to entrances section
 	if entrances, ok := manifest["entrances"]; ok {
-		if entranceList, ok := entrances.([]interface{}); ok {
-			for _, entrance := range entranceList {
+		switch entrances := entrances.(type) {
+		case []interface{}:
+			// Handle case where entrances is a list of maps
+			for _, entrance := range entrances {
 				if entranceMap, ok := entrance.(map[string]interface{}); ok {
 					if name, ok := entranceMap["name"].(string); ok {
-						entries[name] = entranceMap // 保留所有字段
-						log.Printf("Found entrance: %s", name)
+						entries[name] = entranceMap
+						log.Printf("Found entrance (from list): %s", name)
 					}
+				}
+			}
+		case map[string]interface{}:
+			// Handle case where entrances is a map
+			for name, entrance := range entrances {
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					// Ensure the name from the key is added to the map if not present
+					if _, hasName := entranceMap["name"]; !hasName {
+						entranceMap["name"] = name
+					}
+					entries[name] = entranceMap
+					log.Printf("Found entrance (from map): %s", name)
 				}
 			}
 		}
