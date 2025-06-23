@@ -86,6 +86,15 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 		return fmt.Errorf("failed to render OlaresManifest.yaml: %w", err)
 	}
 
+	// Extract entrances from rendered OlaresManifest.yaml and update templateData
+	entrances, err := s.extractEntrancesFromManifest(renderedManifest)
+	if err != nil {
+		log.Printf("Warning: failed to extract entrances from rendered OlaresManifest.yaml: %v", err)
+	} else {
+		templateData.Values["domain"] = entrances
+		log.Printf("Extracted %d entrances from rendered OlaresManifest.yaml", len(entrances))
+	}
+
 	// Render the entire chart package
 	renderedChart, err := s.renderChartPackage(chartFiles, templateData)
 	if err != nil {
@@ -500,39 +509,7 @@ func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *Hydra
 		}
 	}
 
-	// Add domain configuration - create entries for app entrances from OlaresManifest.yaml
-	entries := make(map[string]interface{})
-
-	// Try to get entrances from original OlaresManifest.yaml in chart files
-	if chartFiles, exists := task.ChartData["chart_files"]; exists {
-		if files, ok := chartFiles.(map[string]*ChartFile); ok {
-			manifestEntries, err := s.extractEntrancesFromChartFiles(files)
-			if err != nil {
-				log.Printf("Warning: failed to extract entrances from chart files: %v", err)
-			} else {
-				entries = manifestEntries
-				log.Printf("Extracted %d entrances from OlaresManifest.yaml in chart files", len(entries))
-			}
-		}
-	}
-
-	// Fallback to task.AppData if no entrances found in manifest
-	if len(entries) == 0 {
-		if appData, ok := task.AppData["entrances"]; ok {
-			if entrances, ok := appData.([]interface{}); ok {
-				for _, entrance := range entrances {
-					if entranceMap, ok := entrance.(map[string]interface{}); ok {
-						if name, ok := entranceMap["name"].(string); ok {
-							entries[name] = "random-string"
-						}
-					}
-				}
-			}
-		}
-		log.Printf("Using fallback entrances from task.AppData: %d entries", len(entries))
-	}
-
-	templateData.Values["domain"] = entries
+	// domain/entrances will be filled by Execute, not handled here
 
 	// Add Helm standard template variables
 	templateData.Release = map[string]interface{}{
@@ -1565,7 +1542,7 @@ func (s *RenderedChartStep) extractEntrancesFromManifest(manifestStr string) (ma
 			for _, entrance := range entranceList {
 				if entranceMap, ok := entrance.(map[string]interface{}); ok {
 					if name, ok := entranceMap["name"].(string); ok {
-						entries[name] = "random-string"
+						entries[name] = entranceMap // 保留所有字段
 						log.Printf("Found entrance: %s", name)
 					}
 				}
