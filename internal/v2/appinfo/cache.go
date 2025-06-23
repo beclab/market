@@ -455,6 +455,16 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			glog.Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
 			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
 		}
+	case types.AppRenderFailed:
+		// Handle render failed data - this is typically set by the hydrator when tasks fail
+		if failedAppData, hasFailedApp := data["failed_app"].(*types.AppRenderFailedData); hasFailedApp {
+			sourceData.AppRenderFailed = append(sourceData.AppRenderFailed, failedAppData)
+			glog.Infof("Added render failed app for user=%s, source=%s, app=%s, reason=%s",
+				userID, sourceID, failedAppData.RawData.AppID, failedAppData.FailureReason)
+		} else {
+			glog.Warningf("Invalid render failed data format for user=%s, source=%s", userID, sourceID)
+			return fmt.Errorf("invalid render failed data: missing failed_app field")
+		}
 	}
 
 	// Trigger async sync to Redis
@@ -485,6 +495,8 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 				return sourceData.AppInfoLatest
 			case AppInfoLatestPending:
 				return sourceData.AppInfoLatestPending
+			case types.AppRenderFailed:
+				return sourceData.AppRenderFailed
 			}
 		}
 	}

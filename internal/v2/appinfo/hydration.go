@@ -227,36 +227,52 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			log.Printf("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.SetError(err)
 
-			// Clean up resources before retry or failure
+			// Clean up resources before failure
 			h.cleanupTaskResources(task)
 
-			// Set failure time for cooldown period
+			// Set failure time
 			now := time.Now()
 			task.LastFailureTime = &now
 
-			// Check if task can be retried
-			if task.CanRetry() {
-				log.Printf("Task %s failed, will retry after cooldown period (5 minutes). Next retry available at: %v",
-					task.ID, task.LastFailureTime.Add(5*time.Minute))
-				task.ResetForRetry()
+			// Comment out retry logic - instead move to render failed list
+			/*
+				// Check if task can be retried
+				if task.CanRetry() {
+					log.Printf("Task %s failed, will retry after cooldown period (5 minutes). Next retry available at: %v",
+						task.ID, task.LastFailureTime.Add(5*time.Minute))
+					task.ResetForRetry()
 
-				// Re-enqueue for retry after cooldown
-				go func() {
-					time.Sleep(5 * time.Minute) // Wait for cooldown period
-					if err := h.EnqueueTask(task); err != nil {
-						log.Printf("Failed to re-enqueue task for retry: %s, error: %v", task.ID, err)
-						h.markTaskFailed(task)
-					}
-				}()
-				log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY AFTER COOLDOWN ====================")
-				return
-			} else {
-				// Max retries exceeded
-				log.Printf("Task failed after max retries: %s", task.ID)
-				h.markTaskFailed(task)
-				log.Printf("==================== HYDRATION TASK FAILED ====================")
-				return
-			}
+					// Re-enqueue for retry after cooldown
+					go func() {
+						time.Sleep(5 * time.Minute) // Wait for cooldown period
+						if err := h.EnqueueTask(task); err != nil {
+							log.Printf("Failed to re-enqueue task for retry: %s, error: %v", task.ID, err)
+							h.markTaskFailed(task)
+						}
+					}()
+					log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY AFTER COOLDOWN ====================")
+					return
+				} else {
+					// Max retries exceeded
+					log.Printf("Task failed after max retries: %s", task.ID)
+					h.markTaskFailed(task)
+					log.Printf("==================== HYDRATION TASK FAILED ====================")
+					return
+				}
+			*/
+
+			// Move failed task to render failed list instead of retrying
+			failureReason := err.Error()
+			failureStep := step.GetStepName()
+
+			log.Printf("Task %s failed at step %s, moving to render failed list with reason: %s",
+				task.ID, failureStep, failureReason)
+
+			h.moveTaskToRenderFailed(task, failureReason, failureStep)
+			h.markTaskFailed(task)
+
+			log.Printf("==================== HYDRATION TASK MOVED TO RENDER FAILED LIST ====================")
+			return
 		}
 
 		task.IncrementStep()
@@ -356,6 +372,13 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 		}
 
 		if appID != "" {
+			// Check if app is already in render failed list
+			if h.isAppInRenderFailedList(userID, sourceID, appID) {
+				log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
+					appID, userID, sourceID)
+				return
+			}
+
 			// Check if app hydration is already complete before creating new task
 			if h.isAppHydrationComplete(pendingData) {
 				// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
@@ -645,6 +668,90 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 	}
 }
 
+// moveTaskToRenderFailed moves a failed task to the render failed list in cache
+func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failureReason string, failureStep string) {
+	if h.cacheManager == nil {
+		log.Printf("Warning: Cache manager not set, cannot move task to render failed list")
+		return
+	}
+
+	// Find the pending data for this task
+	h.cache.Mutex.RLock()
+	userData, userExists := h.cache.Users[task.UserID]
+	if !userExists {
+		h.cache.Mutex.RUnlock()
+		log.Printf("Warning: User data not found for task: %s, user: %s", task.ID, task.UserID)
+		return
+	}
+
+	sourceData, sourceExists := userData.Sources[task.SourceID]
+	if !sourceExists {
+		h.cache.Mutex.RUnlock()
+		log.Printf("Warning: Source data not found for task: %s, user: %s, source: %s", task.ID, task.UserID, task.SourceID)
+		return
+	}
+
+	// Find the pending data for this app
+	var pendingData *types.AppInfoLatestPendingData
+	for _, pending := range sourceData.AppInfoLatestPending {
+		if pending.RawData != nil &&
+			(pending.RawData.ID == task.AppID || pending.RawData.AppID == task.AppID || pending.RawData.Name == task.AppID) {
+			pendingData = pending
+			break
+		}
+	}
+	h.cache.Mutex.RUnlock()
+
+	if pendingData == nil {
+		log.Printf("Warning: Pending data not found for task: %s, app: %s", task.ID, task.AppID)
+		return
+	}
+
+	// Create render failed data from pending data
+	failedData := types.NewAppRenderFailedDataFromPending(pendingData, failureReason, failureStep, task.RetryCount)
+
+	// Add to render failed list in cache
+	if err := h.cacheManager.SetAppData(task.UserID, task.SourceID, types.AppRenderFailed, map[string]interface{}{
+		"failed_app": failedData,
+	}); err != nil {
+		log.Printf("Failed to add task to render failed list: %s, error: %v", task.ID, err)
+		return
+	}
+
+	log.Printf("Successfully moved task %s (app: %s) to render failed list with reason: %s, step: %s",
+		task.ID, task.AppID, failureReason, failureStep)
+
+	// Remove from pending list
+	h.removeFromPendingList(task.UserID, task.SourceID, task.AppID)
+}
+
+// removeFromPendingList removes an app from the pending list
+func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
+	h.cache.Mutex.Lock()
+	defer h.cache.Mutex.Unlock()
+
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		return
+	}
+
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return
+	}
+
+	// Find and remove the app from pending list
+	for i, pending := range sourceData.AppInfoLatestPending {
+		if pending.RawData != nil &&
+			(pending.RawData.ID == appID || pending.RawData.AppID == appID || pending.RawData.Name == appID) {
+			// Remove from slice
+			sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending[:i], sourceData.AppInfoLatestPending[i+1:]...)
+			log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
+			break
+		}
+	}
+}
+
 // GetMetrics returns hydrator metrics
 func (h *Hydrator) GetMetrics() HydratorMetrics {
 	h.taskMutex.RLock()
@@ -749,6 +856,13 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 		if appMap, ok := appData.(map[string]interface{}); ok {
 			// Check if task already exists for this app to avoid duplicates
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				// Check if app is already in render failed list
+				if h.isAppInRenderFailedList(userID, sourceID, appID) {
+					log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
+						appID, userID, sourceID)
+					continue
+				}
+
 				// Check if app hydration is already complete before creating new task
 				if h.isAppInLatestQueue(userID, sourceID, appID) {
 					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
@@ -1169,6 +1283,13 @@ func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestDat
 		return nil
 	}
 
+	// Check if app is already in render failed list
+	if h.isAppInRenderFailedList(userID, sourceID, appID) {
+		log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping force add",
+			appID, userID, sourceID)
+		return nil
+	}
+
 	// Convert latest data to map for task creation
 	appDataMap := h.convertLatestDataToMap(latestData)
 
@@ -1262,4 +1383,31 @@ func (h *Hydrator) convertLatestDataToMap(latestData *types.AppInfoLatestData) m
 	}
 
 	return data
+}
+
+// isAppInRenderFailedList checks if an app already exists in the render failed list
+func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool {
+	// Get the source data from cache using global lock
+	h.cache.Mutex.RLock()
+	defer h.cache.Mutex.RUnlock()
+
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		return false
+	}
+
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return false
+	}
+
+	// Check if app exists in render failed list
+	for _, failedData := range sourceData.AppRenderFailed {
+		if failedData.RawData != nil &&
+			(failedData.RawData.ID == appID || failedData.RawData.AppID == appID || failedData.RawData.Name == appID) {
+			return true
+		}
+	}
+
+	return false
 }
