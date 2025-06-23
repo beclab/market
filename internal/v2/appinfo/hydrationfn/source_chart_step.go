@@ -225,6 +225,7 @@ func (s *SourceChartStep) extractChartInfo(appData map[string]interface{}) (map[
 	}
 
 	if len(chartInfo) == 0 {
+		log.Printf("No chart information found in app data: %v", appData)
 		return nil, fmt.Errorf("no chart information found in app data")
 	}
 
