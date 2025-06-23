@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -383,6 +384,14 @@ func (s *RenderedChartStep) loadAndExtractChart(ctx context.Context, task *Hydra
 	// Extract chart files from tar.gz
 	chartFiles, err := s.extractTarGz(data)
 	if err != nil {
+		// Check for the specific gzip header error and delete the corrupted file
+		if errors.Is(err, gzip.ErrHeader) {
+			log.Printf("Invalid gzip header for file %s. Deleting it to allow re-download.", localPath)
+			if removeErr := os.Remove(localPath); removeErr != nil {
+				// Log failure to delete, but still return the original extraction error
+				log.Printf("Warning: failed to delete corrupted chart file %s: %v", localPath, removeErr)
+			}
+		}
 		return nil, fmt.Errorf("failed to extract chart: %w", err)
 	}
 
