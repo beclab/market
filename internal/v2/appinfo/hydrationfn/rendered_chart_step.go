@@ -91,7 +91,15 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	if err != nil {
 		log.Printf("Warning: failed to extract entrances from rendered OlaresManifest.yaml: %v", err)
 	} else {
-		templateData.Values["domain"] = entrances
+		domainMap := map[string]string{}
+		for name, entrance := range entrances {
+			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+				if domain, ok := entranceMap["domain"].(string); ok {
+					domainMap[name] = domain
+				}
+			}
+		}
+		templateData.Values["domain"] = domainMap
 		log.Printf("Extracted %d entrances from rendered OlaresManifest.yaml", len(entrances))
 	}
 
