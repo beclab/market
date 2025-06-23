@@ -1058,6 +1058,11 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 
 		// Use Version for AppVersion
 		appSimpleInfo.AppVersion = pendingApp.RawData.Version
+
+		// Use Categories for App Categories
+		if len(pendingApp.RawData.Categories) > 0 {
+			appSimpleInfo.Categories = pendingApp.RawData.Categories
+		}
 	}
 
 	// Fallback to AppInfo data if RawData is insufficient
@@ -1100,6 +1105,11 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 		// Fill missing AppVersion
 		if appSimpleInfo.AppVersion == "" {
 			appSimpleInfo.AppVersion = entry.Version
+		}
+
+		// Fill missing Categories
+		if len(appSimpleInfo.Categories) == 0 && len(entry.Categories) > 0 {
+			appSimpleInfo.Categories = entry.Categories
 		}
 	}
 

@@ -245,6 +245,7 @@ type AppSimpleInfo struct {
 	AppDescription map[string]string `json:"app_description"`
 	AppVersion     string            `json:"app_version"`
 	AppTitle       map[string]string `json:"app_title"`
+	Categories     []string          `json:"categories"`
 }
 
 // AppInfoLatestPendingData contains pending app info data with extended structure
