@@ -895,12 +895,25 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			}
 			return strings.Split(str, sep)
 		},
-		"join": func(sep string, elems []interface{}) string {
-			strs := make([]string, len(elems))
-			for i, elem := range elems {
-				strs[i] = fmt.Sprintf("%v", elem)
+		"join": func(sep string, a interface{}) string {
+			if a == nil {
+				return ""
 			}
-			return strings.Join(strs, sep)
+			v := reflect.ValueOf(a)
+			if v.Kind() != reflect.Slice {
+				return fmt.Sprintf("%v", a)
+			}
+			if v.Len() == 0 {
+				return ""
+			}
+			var b strings.Builder
+			for i := 0; i < v.Len(); i++ {
+				if i > 0 {
+					b.WriteString(sep)
+				}
+				b.WriteString(fmt.Sprintf("%v", v.Index(i).Interface()))
+			}
+			return b.String()
 		},
 		"contains": func(substr, str string) bool {
 			return strings.Contains(str, substr)
@@ -1131,9 +1144,16 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		"repeat": func(count int, str string) string {
 			return strings.Repeat(str, count)
 		},
-		"has": func(needle interface{}, haystack []interface{}) bool {
-			for _, item := range haystack {
-				if item == needle {
+		"has": func(needle interface{}, haystack interface{}) bool {
+			if haystack == nil {
+				return false
+			}
+			v := reflect.ValueOf(haystack)
+			if v.Kind() != reflect.Slice {
+				return false
+			}
+			for i := 0; i < v.Len(); i++ {
+				if reflect.DeepEqual(needle, v.Index(i).Interface()) {
 					return true
 				}
 			}
@@ -1161,22 +1181,42 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 			return false
 		},
 		"not": func(a interface{}) bool { return !toBoolHelper(a) },
+		"ternary": func(condition, ifTrue, ifFalse interface{}) interface{} {
+			if toBoolHelper(condition) {
+				return ifTrue
+			}
+			return ifFalse
+		},
 
 		// List functions
 		"list": func(items ...interface{}) []interface{} {
 			return items
 		},
-		"first": func(list []interface{}) interface{} {
-			if len(list) == 0 {
+		"first": func(a interface{}) interface{} {
+			if a == nil {
 				return nil
 			}
-			return list[0]
+			v := reflect.ValueOf(a)
+			if v.Kind() != reflect.Slice {
+				return v.Interface() // or nil, or error
+			}
+			if v.Len() == 0 {
+				return nil
+			}
+			return v.Index(0).Interface()
 		},
-		"last": func(list []interface{}) interface{} {
-			if len(list) == 0 {
+		"last": func(a interface{}) interface{} {
+			if a == nil {
 				return nil
 			}
-			return list[len(list)-1]
+			v := reflect.ValueOf(a)
+			if v.Kind() != reflect.Slice {
+				return v.Interface() // or nil, or error
+			}
+			if v.Len() == 0 {
+				return nil
+			}
+			return v.Index(v.Len() - 1).Interface()
 		},
 
 		// Random functions
