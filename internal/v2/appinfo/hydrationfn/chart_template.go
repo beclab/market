@@ -793,6 +793,25 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		},
 		"index": s.customIndexFunc,
 
+		// Variable manipulation functions
+		"set": func(dot interface{}, key string, value interface{}) interface{} {
+			// set function allows setting variables in template scope
+			// This implementation creates a map to store variables
+			if dot == nil {
+				dot = make(map[string]interface{})
+			}
+
+			// Try to convert dot to a map if it's not already
+			if dotMap, ok := dot.(map[string]interface{}); ok {
+				dotMap[key] = value
+				return value
+			}
+
+			// If dot is not a map, return the value directly
+			// This is a fallback for cases where we can't modify the context
+			return value
+		},
+
 		// Regex functions (implementing some common Sprig functions)
 		"regexMatch": func(regex string, s string) bool {
 			return regexp.MustCompile(regex).MatchString(s)
@@ -805,6 +824,53 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		},
 		"regexSplit": func(regex string, s string, n int) []string {
 			return regexp.MustCompile(regex).Split(s, n)
+		},
+
+		// Additional common Helm/Sprig functions
+		"printf": fmt.Sprintf,
+		"kindOf": func(v interface{}) string {
+			if v == nil {
+				return "nil"
+			}
+			return reflect.TypeOf(v).Kind().String()
+		},
+		"typeOf": func(v interface{}) string {
+			if v == nil {
+				return "nil"
+			}
+			return reflect.TypeOf(v).String()
+		},
+		"len": func(v interface{}) int {
+			if v == nil {
+				return 0
+			}
+			val := reflect.ValueOf(v)
+			switch val.Kind() {
+			case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
+				return val.Len()
+			default:
+				return 0
+			}
+		},
+		"keys": func(m map[string]interface{}) []string {
+			if m == nil {
+				return []string{}
+			}
+			keys := make([]string, 0, len(m))
+			for k := range m {
+				keys = append(keys, k)
+			}
+			return keys
+		},
+		"values": func(m map[string]interface{}) []interface{} {
+			if m == nil {
+				return []interface{}{}
+			}
+			values := make([]interface{}, 0, len(m))
+			for _, v := range m {
+				values = append(values, v)
+			}
+			return values
 		},
 	}
 }
