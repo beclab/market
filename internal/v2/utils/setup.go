@@ -270,6 +270,7 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 	appStateData := &types.AppStateLatestData{
 		Type: types.AppStateLatest,
 		Status: struct {
+			Name               string `json:"name"`
 			State              string `json:"state"`
 			UpdateTime         string `json:"updateTime"`
 			StatusTime         string `json:"statusTime"`
@@ -281,6 +282,7 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 				Reason     string `json:"reason"`
 			} `json:"entranceStatuses"`
 		}{
+			Name:               app.Spec.Name,
 			State:              app.Status.State,
 			UpdateTime:         app.Status.UpdateTime,
 			StatusTime:         app.Status.StatusTime,

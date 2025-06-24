@@ -858,6 +858,8 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		},
 
 		// String functions
+		"base":  filepath.Base,
+		"dir":   filepath.Dir,
 		"lower": strings.ToLower,
 		"upper": strings.ToUpper,
 		"title": strings.Title,
@@ -877,11 +879,17 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 		"trimSuffix": func(suffix, s string) string {
 			return strings.TrimSuffix(s, suffix)
 		},
-		"quote": func(str string) string {
-			return fmt.Sprintf("%q", str)
+		"quote": func(v interface{}) string {
+			if v == nil {
+				return `""`
+			}
+			return fmt.Sprintf("%q", fmt.Sprintf("%v", v))
 		},
-		"squote": func(str string) string {
-			return fmt.Sprintf("'%s'", str)
+		"squote": func(v interface{}) string {
+			if v == nil {
+				return "''"
+			}
+			return fmt.Sprintf("'%v'", v)
 		},
 		"replace": func(old, new, src string) string {
 			return strings.ReplaceAll(src, old, new)
