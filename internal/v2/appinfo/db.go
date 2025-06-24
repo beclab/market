@@ -248,7 +248,21 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 	if err == nil {
 		var state []*AppStateLatestData
 		if err := json.Unmarshal([]byte(stateData), &state); err == nil {
-			sourceData.AppStateLatest = state
+			// Filter out app states that are missing the name field
+			var validStates []*AppStateLatestData
+			removedCount := 0
+			for _, appState := range state {
+				if appState != nil && appState.Status.Name != "" {
+					validStates = append(validStates, appState)
+				} else {
+					removedCount++
+					glog.V(2).Infof("Removed app state with missing name field for user=%s, source=%s", userID, sourceID)
+				}
+			}
+			sourceData.AppStateLatest = validStates
+			if removedCount > 0 {
+				glog.Infof("Removed %d app states with missing name field for user=%s, source=%s", removedCount, userID, sourceID)
+			}
 		}
 	}
 

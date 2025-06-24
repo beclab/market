@@ -854,6 +854,13 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 	for appID, appData := range appsMap {
 		// Validate app data
 		if appMap, ok := appData.(map[string]interface{}); ok {
+			// Check if app data contains necessary raw data fields before creating task
+			if !h.hasRequiredRawDataFields(appMap) {
+				log.Printf("App %s (user: %s, source: %s) missing required raw data fields, skipping task creation",
+					appID, userID, sourceID)
+				continue
+			}
+
 			// Check if task already exists for this app to avoid duplicates
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
 				// Check if app is already in render failed list
@@ -898,6 +905,47 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 	}
 }
 
+// hasRequiredRawDataFields checks if app data contains the minimum required fields for hydration
+func (h *Hydrator) hasRequiredRawDataFields(appMap map[string]interface{}) bool {
+	if appMap == nil {
+		return false
+	}
+
+	// Required fields that must be present for hydration to succeed
+	requiredFields := []string{"id", "name", "appID"}
+
+	// Check if at least one of the required fields exists
+	hasRequiredField := false
+	for _, field := range requiredFields {
+		if value, exists := appMap[field]; exists && value != nil && value != "" {
+			hasRequiredField = true
+			break
+		}
+	}
+
+	if !hasRequiredField {
+		return false
+	}
+
+	// Additional recommended fields that indicate this is valid app data
+	recommendedFields := []string{"title", "version", "description", "chartName"}
+	hasRecommendedField := false
+
+	for _, field := range recommendedFields {
+		if value, exists := appMap[field]; exists && value != nil && value != "" {
+			hasRecommendedField = true
+			break
+		}
+	}
+
+	// Log warning if missing recommended fields but still proceed
+	if !hasRecommendedField {
+		log.Printf("Warning: App data missing recommended fields (title, version, description, chartName), but proceeding with required fields")
+	}
+
+	return hasRequiredField
+}
+
 // looksLikeAppsMap checks if a map looks like it contains app entries
 func (h *Hydrator) looksLikeAppsMap(data map[string]interface{}) bool {
 	// Sample a few entries to see if they look like app data
@@ -910,21 +958,11 @@ func (h *Hydrator) looksLikeAppsMap(data map[string]interface{}) bool {
 		}
 
 		if appMap, ok := value.(map[string]interface{}); ok {
-			// Check for common app fields
-			hasAppFields := false
-			appFields := []string{"id", "name", "title", "version", "description", "icon"}
-
-			for _, field := range appFields {
-				if _, hasField := appMap[field]; hasField {
-					hasAppFields = true
-					break
-				}
-			}
-
-			if hasAppFields {
+			// Check if this app data has required raw data fields
+			if h.hasRequiredRawDataFields(appMap) {
 				sampleCount++
 			} else {
-				// If this entry doesn't look like an app, it's probably not an apps map
+				// If this entry doesn't have required fields, it's probably not valid app data
 				return false
 			}
 		} else {

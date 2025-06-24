@@ -217,6 +217,37 @@ func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
 	glog.Infof("Hydration notifier set successfully")
 }
 
+// updateAppStateLatest updates or adds a single app state based on name matching
+func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState *types.AppStateLatestData) {
+	if newAppState == nil {
+		glog.Errorf("Invalid app state data: app state is nil")
+		return
+	}
+
+	if newAppState.Status.Name == "" {
+		glog.Errorf("Invalid app state data: missing name field - app state will be rejected")
+		return
+	}
+
+	// Try to find existing app state with the same name
+	found := false
+	for i, existingAppState := range sourceData.AppStateLatest {
+		if existingAppState != nil && existingAppState.Status.Name == newAppState.Status.Name {
+			// Update existing app state
+			sourceData.AppStateLatest[i] = newAppState
+			glog.V(2).Infof("Updated existing app state for app: %s", newAppState.Status.Name)
+			found = true
+			break
+		}
+	}
+
+	// If not found, add new app state
+	if !found {
+		sourceData.AppStateLatest = append(sourceData.AppStateLatest, newAppState)
+		glog.V(2).Infof("Added new app state for app: %s", newAppState.Status.Name)
+	}
+}
+
 // SetAppData sets app data in cache using single global lock
 func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 	cm.mutex.Lock()
@@ -287,11 +318,8 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			if cm.stateMonitor != nil {
 				for _, appState := range appStatesData {
 					if appState != nil {
-						// Extract app name from data for state monitoring
-						appName := ""
-						if name, ok := data["name"].(string); ok {
-							appName = name
-						}
+						// Extract app name from app state for state monitoring
+						appName := appState.Status.Name
 
 						if appName != "" {
 							// Check state changes and send notifications
@@ -308,20 +336,32 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 				}
 			}
 
-			// Clear existing app state data and set new ones
-			sourceData.AppStateLatest = appStatesData
-			glog.Infof("Set %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
+			// Update each app state individually using name matching
+			for _, appState := range appStatesData {
+				if appState != nil {
+					cm.updateAppStateLatest(sourceData, appState)
+				}
+			}
+			glog.Infof("Updated %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
 		} else {
 			// Fallback to old logic for backward compatibility
 			appData := NewAppStateLatestData(data)
 
+			// Validate that the created app state has a name field
+			if appData == nil {
+				glog.Errorf("Failed to create AppStateLatestData from data for user=%s, source=%s - data may be invalid", userID, sourceID)
+				return fmt.Errorf("invalid app state data: NewAppStateLatestData returned nil")
+			}
+
+			if appData.Status.Name == "" {
+				glog.Errorf("Invalid app state data: missing name field for user=%s, source=%s - app state will be rejected", userID, sourceID)
+				return fmt.Errorf("invalid app state data: missing name field")
+			}
+
 			// Check for state changes and send notifications
 			if cm.stateMonitor != nil {
-				// Extract app name from data for state monitoring
-				appName := ""
-				if name, ok := data["name"].(string); ok {
-					appName = name
-				}
+				// Extract app name from app state for state monitoring
+				appName := appData.Status.Name
 
 				if appName != "" {
 					// Check state changes and send notifications
@@ -336,8 +376,9 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 				}
 			}
 
-			sourceData.AppStateLatest = append(sourceData.AppStateLatest, appData)
-			glog.Infof("Added single app state for user=%s, source=%s", userID, sourceID)
+			// Update or add the app state using name matching
+			cm.updateAppStateLatest(sourceData, appData)
+			glog.Infof("Updated single app state for user=%s, source=%s", userID, sourceID)
 		}
 	case AppInfoLatest:
 		appData := NewAppInfoLatestData(data)

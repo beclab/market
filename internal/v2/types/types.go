@@ -120,6 +120,7 @@ type AppInfoHistoryData struct {
 type AppStateLatestData struct {
 	Type   AppDataType `json:"type"`
 	Status struct {
+		Name               string `json:"name"`
 		State              string `json:"state"`
 		UpdateTime         string `json:"updateTime"`
 		StatusTime         string `json:"statusTime"`
@@ -445,12 +446,30 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 // NewAppStateLatestData creates a new app state latest data structure
 func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 	// Extract status information from data
-	var state, updateTime, statusTime, lastTransitionTime string
+	var name, state, updateTime, statusTime, lastTransitionTime string
 	var entranceStatuses []struct {
 		Name       string `json:"name"`
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
 		Reason     string `json:"reason"`
+	}
+
+	// Extract name from various possible fields
+	if nameVal, ok := data["name"].(string); ok && nameVal != "" {
+		name = nameVal
+	} else if appNameVal, ok := data["appName"].(string); ok && appNameVal != "" {
+		name = appNameVal
+	} else if appIDVal, ok := data["appID"].(string); ok && appIDVal != "" {
+		name = appIDVal
+	} else if idVal, ok := data["id"].(string); ok && idVal != "" {
+		name = idVal
+	}
+
+	// If no valid name found, return nil
+	if name == "" {
+		log.Printf("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field")
+		log.Printf("ERROR: Available fields in data: %v", getMapKeys(data))
+		return nil
 	}
 
 	if stateVal, ok := data["state"].(string); ok {
@@ -495,6 +514,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 	return &AppStateLatestData{
 		Type: AppStateLatest,
 		Status: struct {
+			Name               string `json:"name"`
 			State              string `json:"state"`
 			UpdateTime         string `json:"updateTime"`
 			StatusTime         string `json:"statusTime"`
@@ -506,6 +526,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 				Reason     string `json:"reason"`
 			} `json:"entranceStatuses"`
 		}{
+			Name:               name,
 			State:              state,
 			UpdateTime:         updateTime,
 			StatusTime:         statusTime,

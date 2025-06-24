@@ -266,28 +266,25 @@ func processAppData(apps []AppServiceResponse) error {
 
 // createAppStateLatestData creates AppStateLatestData from AppServiceResponse
 func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData {
-	// Create AppStateLatestData with simplified structure
-	appStateData := &types.AppStateLatestData{
-		Type: types.AppStateLatest,
-		Status: struct {
-			State              string `json:"state"`
-			UpdateTime         string `json:"updateTime"`
-			StatusTime         string `json:"statusTime"`
-			LastTransitionTime string `json:"lastTransitionTime"`
-			EntranceStatuses   []struct {
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-			} `json:"entranceStatuses"`
-		}{
-			State:              app.Status.State,
-			UpdateTime:         app.Status.UpdateTime,
-			StatusTime:         app.Status.StatusTime,
-			LastTransitionTime: app.Status.LastTransitionTime,
-			EntranceStatuses:   app.Status.EntranceStatuses,
-		},
+	// 将 AppServiceResponse 转成 map[string]interface{}
+	data := map[string]interface{}{
+		"name":               app.Spec.Name,
+		"state":              app.Status.State,
+		"updateTime":         app.Status.UpdateTime,
+		"statusTime":         app.Status.StatusTime,
+		"lastTransitionTime": app.Status.LastTransitionTime,
 	}
+	// entranceStatuses 需要转成 []interface{}
+	entrances := make([]interface{}, len(app.Status.EntranceStatuses))
+	for i, e := range app.Status.EntranceStatuses {
+		entrances[i] = map[string]interface{}{
+			"name":       e.Name,
+			"state":      e.State,
+			"statusTime": e.StatusTime,
+			"reason":     e.Reason,
+		}
+	}
+	data["entranceStatuses"] = entrances
 
-	return appStateData
+	return types.NewAppStateLatestData(data)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
@@ -12,12 +11,6 @@ import (
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
-)
-
-// Label constants for filtering apps
-const (
-	RemoveLabel  = "remove"
-	SuspendLabel = "suspend"
 )
 
 // Syncer manages the synchronization process with multiple steps
@@ -478,27 +471,9 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 					}
 					appData.Version = others.Version
 
-					// Filter out apps with Suspend or Remove labels
-					shouldSkip := false
-					if appData.RawData != nil && len(appData.RawData.AppLabels) > 0 {
-						for _, label := range appData.RawData.AppLabels {
-							if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
-								shouldSkip = true
-								log.Printf("Warning: Skipping app %s for user %s, source %s - contains label: %s", appID, userID, sourceID, label)
-
-								// Remove the same app from latest list if it exists
-								s.removeAppFromLatestList(userID, sourceID, appData.RawData)
-								s.removeAppFromPendingList(userID, sourceID, appData.RawData)
-
-								break
-							}
-						}
-					}
-
-					if !shouldSkip {
-						sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
-						log.Printf("Successfully stored app data for app: %s, user: %s, source: %s", appID, userID, sourceID)
-					}
+					// Store app data directly without label filtering (moved to detail_fetch_step.go)
+					sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+					log.Printf("Successfully stored app data for app: %s, user: %s, source: %s", appID, userID, sourceID)
 				}
 			}
 
@@ -603,76 +578,4 @@ func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.cacheManager = cacheManager
-}
-
-// removeAppFromLatestList removes an app from the latest list
-func (s *Syncer) removeAppFromLatestList(userID, sourceID string, appData *types.ApplicationInfoEntry) {
-	s.cache.Mutex.Lock()
-	defer s.cache.Mutex.Unlock()
-
-	userData, userExists := s.cache.Users[userID]
-	if !userExists {
-		return
-	}
-
-	sourceData, sourceExists := userData.Sources[sourceID]
-	if !sourceExists {
-		return
-	}
-
-	// Get the app name to match
-	appName := appData.Name
-	if appName == "" {
-		log.Printf("Warning: Cannot remove app from latest list - app name is empty for user: %s, source: %s", userID, sourceID)
-		return
-	}
-
-	originalCount := len(sourceData.AppInfoLatest)
-	for i := len(sourceData.AppInfoLatest) - 1; i >= 0; i-- {
-		latestApp := sourceData.AppInfoLatest[i]
-		if latestApp.RawData != nil && latestApp.RawData.Name == appName {
-			// Remove this app from the list
-			sourceData.AppInfoLatest = append(sourceData.AppInfoLatest[:i], sourceData.AppInfoLatest[i+1:]...)
-			log.Printf("Removed app %s from latest list for user: %s, source: %s", appName, userID, sourceID)
-		}
-	}
-
-	log.Printf("Latest list cleanup completed for user: %s, source: %s (removed %d apps, remaining: %d)",
-		userID, sourceID, originalCount-len(sourceData.AppInfoLatest), len(sourceData.AppInfoLatest))
-}
-
-// removeAppFromPendingList removes an app from the pending list
-func (s *Syncer) removeAppFromPendingList(userID, sourceID string, appData *types.ApplicationInfoEntry) {
-	s.cache.Mutex.Lock()
-	defer s.cache.Mutex.Unlock()
-
-	userData, userExists := s.cache.Users[userID]
-	if !userExists {
-		return
-	}
-
-	sourceData, sourceExists := userData.Sources[sourceID]
-	if !sourceExists {
-		return
-	}
-
-	// Get the app name to match
-	appName := appData.Name
-	if appName == "" {
-		log.Printf("Warning: Cannot remove app from pending list - app name is empty for user: %s, source: %s", userID, sourceID)
-		return
-	}
-
-	originalCount := len(sourceData.AppInfoLatestPending)
-	for i := len(sourceData.AppInfoLatestPending) - 1; i >= 0; i-- {
-		pendingApp := sourceData.AppInfoLatestPending[i]
-		if pendingApp.RawData != nil && pendingApp.RawData.Name == appName {
-			// Remove this app from the list
-			sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending[:i], sourceData.AppInfoLatestPending[i+1:]...)
-			log.Printf("Removed app %s from pending list for user: %s, source: %s", appName, userID, sourceID)
-		}
-	}
-
-	log.Printf("Pending list cleanup completed for user: %s, source: %s (removed %d apps, remaining: %d)",
-		userID, sourceID, originalCount-len(sourceData.AppInfoLatestPending), len(sourceData.AppInfoLatestPending))
 }
