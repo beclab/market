@@ -219,8 +219,13 @@ func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
 
 // updateAppStateLatest updates or adds a single app state based on name matching
 func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState *types.AppStateLatestData) {
-	if newAppState == nil || newAppState.Status.Name == "" {
-		glog.Warningf("Invalid app state data: missing name")
+	if newAppState == nil {
+		glog.Errorf("Invalid app state data: app state is nil")
+		return
+	}
+
+	if newAppState.Status.Name == "" {
+		glog.Errorf("Invalid app state data: missing name field - app state will be rejected")
 		return
 	}
 
@@ -341,6 +346,17 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		} else {
 			// Fallback to old logic for backward compatibility
 			appData := NewAppStateLatestData(data)
+
+			// Validate that the created app state has a name field
+			if appData == nil {
+				glog.Errorf("Failed to create AppStateLatestData from data for user=%s, source=%s - data may be invalid", userID, sourceID)
+				return fmt.Errorf("invalid app state data: NewAppStateLatestData returned nil")
+			}
+
+			if appData.Status.Name == "" {
+				glog.Errorf("Invalid app state data: missing name field for user=%s, source=%s - app state will be rejected", userID, sourceID)
+				return fmt.Errorf("invalid app state data: missing name field")
+			}
 
 			// Check for state changes and send notifications
 			if cm.stateMonitor != nil {
