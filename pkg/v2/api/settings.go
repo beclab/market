@@ -109,7 +109,16 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 		appServicePort = port
 	}
 
-	token := r.Header.Get("X-Authorization")
+	token := ""
+	if cookie, err := r.Cookie("X-Authorization"); err == nil {
+		token = cookie.Value
+	} else if cookie, err := r.Cookie("Authorization"); err == nil {
+		token = cookie.Value
+	} else if h := r.Header.Get("X-Authorization"); h != "" {
+		token = h
+	} else if h := r.Header.Get("Authorization"); h != "" {
+		token = h
+	}
 
 	userInfoURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/user-info"
 	curUserResourceURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/user/resource"
