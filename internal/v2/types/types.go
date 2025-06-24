@@ -455,14 +455,21 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 	}
 
 	// Extract name from various possible fields
-	if nameVal, ok := data["name"].(string); ok {
+	if nameVal, ok := data["name"].(string); ok && nameVal != "" {
 		name = nameVal
-	} else if appNameVal, ok := data["appName"].(string); ok {
+	} else if appNameVal, ok := data["appName"].(string); ok && appNameVal != "" {
 		name = appNameVal
-	} else if appIDVal, ok := data["appID"].(string); ok {
+	} else if appIDVal, ok := data["appID"].(string); ok && appIDVal != "" {
 		name = appIDVal
-	} else if idVal, ok := data["id"].(string); ok {
+	} else if idVal, ok := data["id"].(string); ok && idVal != "" {
 		name = idVal
+	}
+
+	// If no valid name found, return nil
+	if name == "" {
+		log.Printf("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field")
+		log.Printf("ERROR: Available fields in data: %v", getMapKeys(data))
+		return nil
 	}
 
 	if stateVal, ok := data["state"].(string); ok {
