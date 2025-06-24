@@ -68,13 +68,13 @@ func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *Hydra
 	// Add Chart information if available
 	if sourceInfo, ok := task.ChartData["source_info"].(map[string]interface{}); ok {
 		templateData.Chart = map[string]interface{}{
-			"Name":    sourceInfo["chart_name"],
-			"Version": sourceInfo["chart_version"],
+			"Name":    fmt.Sprintf("%v", sourceInfo["chart_name"]),
+			"Version": fmt.Sprintf("%v", sourceInfo["chart_version"]),
 		}
 	} else {
 		templateData.Chart = map[string]interface{}{
-			"Name":    task.AppName,
-			"Version": task.AppVersion,
+			"Name":    fmt.Sprintf("%v", task.AppName),
+			"Version": fmt.Sprintf("%v", task.AppVersion),
 		}
 	}
 
@@ -117,6 +117,10 @@ func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *Hydra
 	// Log summary of available template data
 	log.Printf("Template data summary - Values keys: %v, Release keys: %v, Chart keys: %v, Capabilities keys: %v",
 		getMapKeys(templateData.Values), getMapKeys(templateData.Release), getMapKeys(templateData.Chart), getMapKeys(templateData.Capabilities))
+
+	if v, ok := mergedValues["nameOverride"]; ok {
+		mergedValues["nameOverride"] = fmt.Sprintf("%v", v)
+	}
 
 	return templateData, nil
 }
