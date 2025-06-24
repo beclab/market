@@ -697,6 +697,11 @@ func (s *RenderedChartStep) renderChartPackage(chartFiles map[string]*ChartFile,
 	}
 	defer cleanup()
 
+	// First pass: collect all .tpl files and create a combined template
+	var tplTemplates []string
+	var templateFiles []string
+
+	// Separate .tpl templates from regular templates
 	for filePath, file := range chartFiles {
 		if file.IsDir {
 			continue
@@ -707,12 +712,82 @@ func (s *RenderedChartStep) renderChartPackage(chartFiles map[string]*ChartFile,
 			continue
 		}
 
-		rendered, err := s.renderTemplate(string(file.Content), templateData)
+		// Check if this is a .tpl file (all .tpl files contain template definitions)
+		if strings.HasSuffix(strings.ToLower(filePath), ".tpl") {
+			tplTemplates = append(tplTemplates, string(file.Content))
+			log.Printf("Found template definition file: %s", filePath)
+		} else {
+			templateFiles = append(templateFiles, filePath)
+		}
+	}
+
+	// Create a combined template with all template definitions
+	var combinedTemplate *template.Template
+	if len(tplTemplates) > 0 {
+		// Start with the first template definition
+		combinedTemplate, err := template.New("chart").
+			Option("missingkey=zero").
+			Funcs(s.getTemplateFunctions()).
+			Parse(tplTemplates[0])
 		if err != nil {
-			return nil, fmt.Errorf("failed to render file %s: %w", filePath, err)
+			return nil, fmt.Errorf("failed to parse first template definition: %w", err)
 		}
 
-		renderedFiles[filePath] = rendered
+		// Add remaining template definitions
+		for i := 1; i < len(tplTemplates); i++ {
+			combinedTemplate, err = combinedTemplate.Parse(tplTemplates[i])
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse template definition %d: %w", i, err)
+			}
+		}
+
+		log.Printf("Successfully parsed %d template definition files", len(tplTemplates))
+	} else {
+		// Create empty template if no .tpl files
+		combinedTemplate = template.New("chart").
+			Option("missingkey=zero").
+			Funcs(s.getTemplateFunctions())
+	}
+
+	// Second pass: render regular template files using the combined template
+	for _, filePath := range templateFiles {
+		file := chartFiles[filePath]
+
+		// Clone the combined template for this file to avoid conflicts
+		fileTemplate, err := combinedTemplate.Clone()
+		if err != nil {
+			return nil, fmt.Errorf("failed to clone template for file %s: %w", filePath, err)
+		}
+
+		// Parse the current file's content
+		fileTemplate, err = fileTemplate.Parse(string(file.Content))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse file %s: %w", filePath, err)
+		}
+
+		// Execute the template
+		var buf bytes.Buffer
+		if err := fileTemplate.Execute(&buf, templateData); err != nil {
+			log.Printf("Template execution failed for file %s - Error: %v", filePath, err)
+			log.Printf("Template execution failed - Available data keys: Values=%v, Release=%v, Chart=%v",
+				getMapKeys(templateData.Values), getMapKeys(templateData.Release), getMapKeys(templateData.Chart))
+
+			// Try with missing key as zero value to provide more helpful error info
+			tmplZero, _ := template.New("chart-zero").
+				Option("missingkey=zero").
+				Funcs(s.getTemplateFunctions()).
+				Parse(string(file.Content))
+
+			var bufZero bytes.Buffer
+			if errZero := tmplZero.Execute(&bufZero, templateData); errZero == nil {
+				log.Printf("Template would succeed with missing keys as zero values")
+			}
+
+			return nil, fmt.Errorf("failed to execute template for file %s: %w", filePath, err)
+		}
+
+		renderedFiles[filePath] = buf.String()
+		log.Printf("Successfully rendered template file: %s", filePath)
 	}
 
 	return renderedFiles, nil
