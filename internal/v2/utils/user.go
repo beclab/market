@@ -9,9 +9,6 @@ import (
 	"os"
 	"time"
 
-	"market/internal/bk/conf"
-	"market/internal/bk/constants"
-
 	"github.com/emicklei/go-restful/v3"
 	"github.com/golang/glog"
 )
@@ -21,6 +18,19 @@ type UserInfo struct {
 	Username string `json:"username"`
 	Role     string `json:"role"`
 	Email    string `json:"email"`
+}
+
+const (
+	AuthorizationTokenCookieKey = "auth_token"
+	AuthorizationTokenKey       = "X-Authorization"
+	AppServiceHostEnv           = "APP_SERVICE_SERVICE_HOST"
+	AppServicePortEnv           = "APP_SERVICE_SERVICE_PORT"
+	AppServiceUserInfoTempl     = "http://%s:%s/app-service/v1/user-info"
+	isPublicEnvKey              = "isPublic"
+)
+
+func isPublicEnv() bool {
+	return os.Getenv(isPublicEnvKey) == "true"
 }
 
 // GetUserInfoFromRequest extracts username from request
@@ -63,14 +73,14 @@ func GetUserInfoFromRequest(req *restful.Request) (string, error) {
 // getUserInfo gets user information from app service (copied from appservice.GetUserInfo)
 func getUserInfo(token string) (string, error) {
 	appServiceHost, appServicePort := getAppServiceHostAndPort()
-	url := fmt.Sprintf(constants.AppServiceUserInfoTempl, appServiceHost, appServicePort)
+	url := fmt.Sprintf(AppServiceUserInfoTempl, appServiceHost, appServicePort)
 
 	return sendHttpRequestWithToken(http.MethodGet, url, token, nil)
 }
 
 // getAppServiceHostAndPort gets app service host and port (copied from constants.GetAppServiceHostAndPort)
 func getAppServiceHostAndPort() (string, string) {
-	return os.Getenv(constants.AppServiceHostEnv), os.Getenv(constants.AppServicePortEnv)
+	return os.Getenv(AppServiceHostEnv), os.Getenv(AppServicePortEnv)
 }
 
 // sendHttpRequestWithToken sends HTTP request with token (copied from utils.SendHttpRequestWithToken)
@@ -81,7 +91,7 @@ func sendHttpRequestWithToken(method, url, token string, reader io.Reader) (stri
 		return "", err
 	}
 
-	httpReq.Header.Set(constants.AuthorizationTokenKey, token)
+	httpReq.Header.Set(AuthorizationTokenKey, token)
 	httpReq.Header.Set("Accept", "*/*")
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -127,15 +137,15 @@ func sendHttpRequest(req *http.Request) (string, error) {
 
 // GetTokenFromRequest extracts token from request (same logic as handler.go)
 func GetTokenFromRequest(req *restful.Request) string {
-	if conf.GetIsPublic() {
+	if isPublicEnv() {
 		return "public"
 	}
 
 	// Try to get token from cookie first
-	cookie, err := req.Request.Cookie(constants.AuthorizationTokenCookieKey)
+	cookie, err := req.Request.Cookie(AuthorizationTokenCookieKey)
 	if err != nil {
 		// If cookie not found, try to get from header
-		token := req.Request.Header.Get(constants.AuthorizationTokenKey)
+		token := req.Request.Header.Get(AuthorizationTokenKey)
 		if token == "" {
 			glog.Warningf("req.Request.Cookie err:%s", err)
 		}

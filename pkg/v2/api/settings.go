@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"market/internal/v2/settings"
+	"market/internal/v2/utils"
+
+	"github.com/emicklei/go-restful/v3"
 )
 
 // settingsManager holds the global settings manager instance
@@ -109,16 +112,9 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 		appServicePort = port
 	}
 
-	token := ""
-	if cookie, err := r.Cookie("X-Authorization"); err == nil {
-		token = cookie.Value
-	} else if cookie, err := r.Cookie("Authorization"); err == nil {
-		token = cookie.Value
-	} else if h := r.Header.Get("X-Authorization"); h != "" {
-		token = h
-	} else if h := r.Header.Get("Authorization"); h != "" {
-		token = h
-	}
+	// 使用 utils.GetTokenFromRequest 获取 token
+	restfulReq := &restful.Request{Request: r}
+	token := utils.GetTokenFromRequest(restfulReq)
 
 	userInfoURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/user-info"
 	curUserResourceURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/user/resource"
