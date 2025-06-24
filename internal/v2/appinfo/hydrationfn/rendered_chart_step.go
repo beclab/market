@@ -127,9 +127,10 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 
 // TemplateData holds data for rendering templates
 type TemplateData struct {
-	Values  map[string]interface{} `yaml:"Values" json:"Values"`
-	Release map[string]interface{} `yaml:"Release" json:"Release"`
-	Chart   map[string]interface{} `yaml:"Chart" json:"Chart"`
+	Values       map[string]interface{} `yaml:"Values" json:"Values"`
+	Release      map[string]interface{} `yaml:"Release" json:"Release"`
+	Chart        map[string]interface{} `yaml:"Chart" json:"Chart"`
+	Capabilities map[string]interface{} `yaml:"Capabilities" json:"Capabilities"`
 }
 
 // ChartFile represents a file within the chart package

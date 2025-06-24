@@ -11,7 +11,12 @@ import (
 
 // prepareTemplateData prepares the template data for chart rendering
 func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *HydrationTask) (*TemplateData, error) {
-	templateData := &TemplateData{}
+	templateData := &TemplateData{
+		Values:       make(map[string]interface{}),
+		Release:      make(map[string]interface{}),
+		Chart:        make(map[string]interface{}),
+		Capabilities: make(map[string]interface{}),
+	}
 
 	// Load default values from chart's values.yaml
 	defaultValues, err := s.extractChartValues(task)
@@ -73,8 +78,33 @@ func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *Hydra
 		}
 	}
 
+	// Add Capabilities information for Helm template compatibility
+	templateData.Capabilities = map[string]interface{}{
+		"KubeVersion": map[string]interface{}{
+			"Major": "1",
+			"Minor": "28",
+		},
+		"APIVersions": map[string]interface{}{
+			"Has": func(apiVersion string) bool {
+				// Simplified version check - in production this would check actual API versions
+				return true
+			},
+		},
+		"Supports": map[string]interface{}{
+			"CRD": func(apiVersion string) bool {
+				// Simplified CRD support check
+				return true
+			},
+		},
+	}
+
 	log.Printf("Template data prepared - Admin: %s, User: %s, Release.Namespace: %s",
 		adminUsername, task.UserID, templateData.Release["Namespace"])
+
+	// Log Capabilities information for debugging
+	if kubeVersion, ok := templateData.Capabilities["KubeVersion"].(map[string]interface{}); ok {
+		log.Printf("Template data - KubeVersion: %s.%s", kubeVersion["Major"], kubeVersion["Minor"])
+	}
 
 	// Debug the condition used in OlaresManifest.yaml
 	if bflMap, ok := templateData.Values["bfl"].(map[string]interface{}); ok {
@@ -83,6 +113,10 @@ func (s *RenderedChartStep) prepareTemplateData(ctx context.Context, task *Hydra
 				adminUsername, username, adminUsername == username)
 		}
 	}
+
+	// Log summary of available template data
+	log.Printf("Template data summary - Values keys: %v, Release keys: %v, Chart keys: %v, Capabilities keys: %v",
+		getMapKeys(templateData.Values), getMapKeys(templateData.Release), getMapKeys(templateData.Chart), getMapKeys(templateData.Capabilities))
 
 	return templateData, nil
 }

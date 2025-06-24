@@ -37,6 +37,9 @@ func (s *RenderedChartStep) renderTemplate(templateContent string, data *Templat
 	if data.Chart != nil {
 		log.Printf("Template rendering - Chart: %+v", data.Chart)
 	}
+	if data.Capabilities != nil {
+		log.Printf("Template rendering - Capabilities: %+v", data.Capabilities)
+	}
 
 	// Create template with custom functions (similar to Helm)
 	tmpl, err := template.New("chart").
@@ -52,8 +55,8 @@ func (s *RenderedChartStep) renderTemplate(templateContent string, data *Templat
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		log.Printf("Template execution failed - Error: %v", err)
-		log.Printf("Template execution failed - Available data keys: Values=%v, Release=%v, Chart=%v",
-			getMapKeys(data.Values), getMapKeys(data.Release), getMapKeys(data.Chart))
+		log.Printf("Template execution failed - Available data keys: Values=%v, Release=%v, Chart=%v, Capabilities=%v",
+			getMapKeys(data.Values), getMapKeys(data.Release), getMapKeys(data.Chart), getMapKeys(data.Capabilities))
 
 		// Try with missing key as zero value to provide more helpful error info
 		tmplZero, _ := template.New("chart-zero").
@@ -204,8 +207,8 @@ func (s *RenderedChartStep) renderChartPackage(chartFiles map[string]*ChartFile,
 		var buf bytes.Buffer
 		if err := fileTemplate.Execute(&buf, templateData); err != nil {
 			log.Printf("Template execution failed for file %s - Error: %v", filePath, err)
-			log.Printf("Template execution failed - Available data keys: Values=%v, Release=%v, Chart=%v",
-				getMapKeys(templateData.Values), getMapKeys(templateData.Release), getMapKeys(templateData.Chart))
+			log.Printf("Template execution failed - Available data keys: Values=%v, Release=%v, Chart=%v, Capabilities=%v",
+				getMapKeys(templateData.Values), getMapKeys(templateData.Release), getMapKeys(templateData.Chart), getMapKeys(templateData.Capabilities))
 
 			// Try with missing key as zero value to provide more helpful error info
 			tmplZero, _ := template.New("chart-zero").
@@ -285,9 +288,35 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 	return template.FuncMap{
 		// Basic functions
 		"default": func(defaultValue interface{}, value interface{}) interface{} {
-			if value == nil || value == "" {
+			if value == nil {
 				return defaultValue
 			}
+
+			// Check for empty string
+			if str, ok := value.(string); ok && str == "" {
+				return defaultValue
+			}
+
+			// Check for zero values
+			switch v := value.(type) {
+			case int, int8, int16, int32, int64:
+				if v == 0 {
+					return defaultValue
+				}
+			case uint, uint8, uint16, uint32, uint64:
+				if v == 0 {
+					return defaultValue
+				}
+			case float32, float64:
+				if v == 0.0 {
+					return defaultValue
+				}
+			case bool:
+				if !v {
+					return defaultValue
+				}
+			}
+
 			return value
 		},
 		"empty": func(value interface{}) bool {
@@ -298,6 +327,72 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 				return val, fmt.Errorf(warn)
 			}
 			return val, nil
+		},
+		"coalesce": func(values ...interface{}) interface{} {
+			for _, value := range values {
+				if value == nil {
+					continue
+				}
+
+				// Check for empty string
+				if str, ok := value.(string); ok && str == "" {
+					continue
+				}
+
+				// Check for zero values
+				switch v := value.(type) {
+				case int, int8, int16, int32, int64:
+					if v == 0 {
+						continue
+					}
+				case uint, uint8, uint16, uint32, uint64:
+					if v == 0 {
+						continue
+					}
+				case float32, float64:
+					if v == 0.0 {
+						continue
+					}
+				case bool:
+					if !v {
+						continue
+					}
+				}
+
+				return value
+			}
+			return nil
+		},
+		"dig": func(data interface{}, keys ...string) interface{} {
+			if data == nil {
+				return nil
+			}
+
+			current := data
+			for _, key := range keys {
+				if current == nil {
+					return nil
+				}
+
+				switch v := current.(type) {
+				case map[string]interface{}:
+					if val, exists := v[key]; exists {
+						current = val
+					} else {
+						return nil
+					}
+				case map[interface{}]interface{}:
+					if val, exists := v[key]; exists {
+						current = val
+					} else {
+						return nil
+					}
+				default:
+					return nil
+				}
+			}
+
+			return current
 		},
 
 		// String functions
@@ -409,7 +504,25 @@ func (s *RenderedChartStep) getTemplateFunctions() template.FuncMap {
 
 		// Type conversion functions
 		"toString": func(v interface{}) string {
-			return fmt.Sprintf("%v", v)
+			if v == nil {
+				return ""
+			}
+			switch val := v.(type) {
+			case string:
+				return val
+			case int, int8, int16, int32, int64:
+				return fmt.Sprintf("%d", val)
+			case uint, uint8, uint16, uint32, uint64:
+				return fmt.Sprintf("%d", val)
+			case float32, float64:
+				return fmt.Sprintf("%g", val)
+			case bool:
+				return fmt.Sprintf("%t", val)
+			case []byte:
+				return string(val)
+			default:
+				return fmt.Sprintf("%v", val)
+			}
 		},
 		"toInt": func(v interface{}) int {
 			if i, ok := v.(int); ok {
