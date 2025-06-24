@@ -116,10 +116,47 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 	clusterResourceURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/cluster/resource"
 	terminusVersionURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/terminus/version"
 
-	userInfo, _ := doGetWithToken(userInfoURL, token)
-	curUserResource, _ := doGetWithToken(curUserResourceURL, token)
-	clusterResource, _ := doGetWithToken(clusterResourceURL, token)
-	terminusVersion, _ := doGetWithToken(terminusVersionURL, token)
+	log.Printf("Requesting userInfo from %s", userInfoURL)
+	userInfo, err1 := doGetWithToken(userInfoURL, token)
+	if err1 != nil {
+		log.Printf("Failed to get userInfo: %v", err1)
+	}
+	log.Printf("userInfo: %v", userInfo)
+
+	log.Printf("Requesting curUserResource from %s", curUserResourceURL)
+	curUserResource, err2 := doGetWithToken(curUserResourceURL, token)
+	if err2 != nil {
+		log.Printf("Failed to get curUserResource: %v", err2)
+	}
+	log.Printf("curUserResource: %v", curUserResource)
+
+	log.Printf("Requesting clusterResource from %s", clusterResourceURL)
+	clusterResource, err3 := doGetWithToken(clusterResourceURL, token)
+	if err3 != nil {
+		log.Printf("Failed to get clusterResource: %v", err3)
+	}
+	log.Printf("clusterResource: %v", clusterResource)
+
+	log.Printf("Requesting terminusVersion from %s", terminusVersionURL)
+	terminusVersion, err4 := doGetWithToken(terminusVersionURL, token)
+	if err4 != nil {
+		log.Printf("Failed to get terminusVersion: %v", err4)
+	}
+	log.Printf("terminusVersion: %v", terminusVersion)
+
+	// null 兜底
+	if userInfo == nil {
+		userInfo = map[string]interface{}{}
+	}
+	if curUserResource == nil {
+		curUserResource = map[string]interface{}{}
+	}
+	if clusterResource == nil {
+		clusterResource = map[string]interface{}{}
+	}
+	if terminusVersion == nil {
+		terminusVersion = map[string]interface{}{}
+	}
 
 	resp := SystemStatusResponse{
 		UserInfo:        userInfo,
@@ -128,28 +165,36 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 		TerminusVersion: terminusVersion,
 	}
 
-	log.Println("System status aggregation complete")
+	log.Printf("System status aggregation complete, resp: %+v", resp)
 	s.sendResponse(w, http.StatusOK, true, "System status aggregation complete", resp)
 }
 
 // Simple GET with token, returns parsed JSON or raw string
 func doGetWithToken(url, token string) (interface{}, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
+	log.Printf("doGetWithToken: url=%s, token=%s", url, token)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		log.Printf("doGetWithToken: failed to create request: %v", err)
+		return map[string]interface{}{}, err
 	}
 	if token != "" {
 		req.Header.Set("X-Authorization", token)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		log.Printf("doGetWithToken: request failed: %v", err)
+		return map[string]interface{}{}, err
 	}
 	defer resp.Body.Close()
 	var result interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		log.Printf("doGetWithToken: decode failed: %v", err)
+		return map[string]interface{}{}, err
+	}
+	if result == nil {
+		log.Printf("doGetWithToken: result is nil, return empty map")
+		return map[string]interface{}{}, nil
 	}
 	return result, nil
 }
