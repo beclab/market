@@ -4,9 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
+)
+
+// Label constants for filtering apps
+const (
+	RemoveLabel  = "remove"
+	SuspendLabel = "suspend"
 )
 
 // DetailFetchStep implements the third step: fetch detailed info for each app
@@ -140,6 +147,28 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
 				for appID, appData := range appsData {
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
+						// Check for Suspend or Remove labels before processing the app
+						shouldSkip := false
+						if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
+							for _, labelInterface := range appLabels {
+								if label, ok := labelInterface.(string); ok {
+									if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
+										shouldSkip = true
+										log.Printf("Warning: Skipping app %s - contains label: %s", appID, label)
+
+										// Remove the app from cache for all users
+										d.removeAppFromCache(appID, appInfoMap, data)
+										break
+									}
+								}
+							}
+						}
+
+						// Skip processing if app should be removed
+						if shouldSkip {
+							continue
+						}
+
 						// Replace the simplified app data with detailed data in LatestData
 						detailedAppData := map[string]interface{}{
 							// Basic fields
@@ -264,5 +293,54 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		data.AddError(errMsg)
 		log.Printf("ERROR: %v", errMsg)
 		return 0, len(appIDs)
+	}
+}
+
+// removeAppFromCache removes an app from cache for all users
+func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string]interface{}, data *SyncContext) {
+	// Get app name for matching
+	appName, ok := appInfoMap["name"].(string)
+	if !ok || appName == "" {
+		log.Printf("Warning: Cannot remove app from cache - app name is empty for app: %s", appID)
+		return
+	}
+
+	// Get source ID from market source
+	sourceID := data.GetMarketSource().Name
+
+	// Remove app from cache for all users
+	data.Cache.Mutex.Lock()
+	defer data.Cache.Mutex.Unlock()
+
+	for userID, userData := range data.Cache.Users {
+		sourceData, sourceExists := userData.Sources[sourceID]
+		if !sourceExists {
+			continue
+		}
+
+		// Remove from latest list
+		originalLatestCount := len(sourceData.AppInfoLatest)
+		for i := len(sourceData.AppInfoLatest) - 1; i >= 0; i-- {
+			latestApp := sourceData.AppInfoLatest[i]
+			if latestApp.RawData != nil && latestApp.RawData.Name == appName {
+				sourceData.AppInfoLatest = append(sourceData.AppInfoLatest[:i], sourceData.AppInfoLatest[i+1:]...)
+				log.Printf("Removed app %s from latest list for user: %s, source: %s", appName, userID, sourceID)
+			}
+		}
+
+		// Remove from pending list
+		originalPendingCount := len(sourceData.AppInfoLatestPending)
+		for i := len(sourceData.AppInfoLatestPending) - 1; i >= 0; i-- {
+			pendingApp := sourceData.AppInfoLatestPending[i]
+			if pendingApp.RawData != nil && pendingApp.RawData.Name == appName {
+				sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending[:i], sourceData.AppInfoLatestPending[i+1:]...)
+				log.Printf("Removed app %s from pending list for user: %s, source: %s", appName, userID, sourceID)
+			}
+		}
+
+		log.Printf("Cache cleanup completed for user: %s, source: %s, app: %s (latest: %d->%d, pending: %d->%d)",
+			userID, sourceID, appName,
+			originalLatestCount, len(sourceData.AppInfoLatest),
+			originalPendingCount, len(sourceData.AppInfoLatestPending))
 	}
 }
