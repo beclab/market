@@ -156,9 +156,11 @@ func (s *RenderedChartStep) renderChartPackage(chartFiles map[string]*ChartFile,
 
 	// Create a combined template with all template definitions
 	var combinedTemplate *template.Template
+	var err error
+
 	if len(tplTemplates) > 0 {
 		// Start with the first template definition
-		combinedTemplate, err := template.New("chart").
+		combinedTemplate, err = template.New("chart").
 			Option("missingkey=zero").
 			Funcs(s.getTemplateFunctions()).
 			Parse(tplTemplates[0])
