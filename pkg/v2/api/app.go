@@ -270,8 +270,8 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 					appID = appInfoData.AppSimpleInfo.AppID
 				}
 
-				// Match the requested app ID
-				if appID == appQuery.AppID {
+				// Match the requested app ID or name
+				if appID == appQuery.AppID || (appInfoData.RawData != nil && appInfoData.RawData.Name == appQuery.AppID) {
 					log.Printf("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
 
 					// Convert AppInfoLatestData to AppInfoLatestDataResponse (without raw_data)

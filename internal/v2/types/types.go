@@ -130,6 +130,7 @@ type AppStateLatestData struct {
 			State      string `json:"state"`
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
+			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -452,6 +453,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
 		Reason     string `json:"reason"`
+		Url        string `json:"url"`
 	}
 
 	// Extract name from various possible fields
@@ -491,6 +493,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 			State      string `json:"state"`
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
+			Url        string `json:"url"`
 		}, len(entranceStatusesVal))
 
 		for i, entrance := range entranceStatusesVal {
@@ -506,6 +509,9 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 				}
 				if reason, ok := entranceMap["reason"].(string); ok {
 					entranceStatuses[i].Reason = reason
+				}
+				if url, ok := entranceMap["url"].(string); ok {
+					entranceStatuses[i].Url = url
 				}
 			}
 		}
@@ -524,6 +530,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 				State      string `json:"state"`
 				StatusTime string `json:"statusTime"`
 				Reason     string `json:"reason"`
+				Url        string `json:"url"`
 			} `json:"entranceStatuses"`
 		}{
 			Name:               name,

@@ -229,6 +229,20 @@ func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState
 		return
 	}
 
+	// Check if any entrance status has empty URL
+	hasEmptyUrl := false
+	for _, entrance := range newAppState.Status.EntranceStatuses {
+		if entrance.Url == "" {
+			hasEmptyUrl = true
+			break
+		}
+	}
+
+	if hasEmptyUrl {
+		glog.Warningf("App state data has entrance with empty URL for app %s - app state will be rejected", newAppState.Status.Name)
+		return
+	}
+
 	// Try to find existing app state with the same name
 	found := false
 	for i, existingAppState := range sourceData.AppStateLatest {
@@ -345,7 +359,10 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			glog.Infof("Updated %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
 		} else {
 			// Fallback to old logic for backward compatibility
-			appData := NewAppStateLatestData(data)
+			// Check if entrance URLs are missing and fetch them if needed
+			enhancedData := cm.enhanceAppStateDataWithUrls(data)
+
+			appData := NewAppStateLatestData(enhancedData)
 
 			// Validate that the created app state has a name field
 			if appData == nil {
@@ -796,4 +813,100 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 	}
 
 	return totalCleaned
+}
+
+// enhanceAppStateDataWithUrls enhances app state data with entrance URLs
+func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{}) map[string]interface{} {
+	// Create a copy of the data to avoid modifying the original
+	enhancedData := make(map[string]interface{})
+	for k, v := range data {
+		enhancedData[k] = v
+	}
+
+	// Extract app name for URL fetching
+	var appName string
+	if name, ok := data["name"].(string); ok && name != "" {
+		appName = name
+	} else if appNameVal, ok := data["appName"].(string); ok && appNameVal != "" {
+		appName = appNameVal
+	} else if appIDVal, ok := data["appID"].(string); ok && appIDVal != "" {
+		appName = appIDVal
+	} else if idVal, ok := data["id"].(string); ok && idVal != "" {
+		appName = idVal
+	}
+
+	if appName == "" {
+		glog.Warningf("Cannot enhance app state data: no app name found")
+		return enhancedData
+	}
+
+	// Check if entranceStatuses exist and if any are missing URLs
+	if entranceStatusesVal, ok := data["entranceStatuses"].([]interface{}); ok {
+		entranceStatuses := make([]interface{}, 0, len(entranceStatusesVal))
+		needsUrlEnhancement := false
+		hasEmptyUrl := false
+
+		// First pass: check if any entrance is missing URL
+		for _, entrance := range entranceStatusesVal {
+			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+				if url, ok := entranceMap["url"].(string); !ok || url == "" {
+					needsUrlEnhancement = true
+					hasEmptyUrl = true
+					break // If any entrance has empty URL, mark the whole entry as invalid
+				}
+				// Only add entrances with valid URLs
+				entranceStatuses = append(entranceStatuses, entrance)
+			}
+		}
+
+		// If any entrance has empty URL, return empty entrance statuses
+		if hasEmptyUrl {
+			glog.V(2).Infof("App state data has entrance with empty URL for app %s - returning empty entrance statuses", appName)
+			enhancedData["entranceStatuses"] = []interface{}{}
+			return enhancedData
+		}
+
+		// If URLs are missing but no empty URLs found, fetch them from app-service
+		if needsUrlEnhancement {
+			glog.Infof("Some entrance URLs are missing for app %s, fetching from app-service", appName)
+
+			entranceUrls, err := utils.FetchAppEntranceUrls(appName)
+			if err != nil {
+				glog.Warningf("Failed to fetch entrance URLs for app %s: %v", appName, err)
+				// If we can't fetch URLs, return empty entrance statuses
+				enhancedData["entranceStatuses"] = []interface{}{}
+				return enhancedData
+			}
+
+			// Re-process entrance statuses with fetched URLs
+			entranceStatuses = make([]interface{}, 0, len(entranceStatusesVal))
+			hasEmptyUrlAfterFetch := false
+			for _, entrance := range entranceStatusesVal {
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					if entranceName, ok := entranceMap["name"].(string); ok {
+						if url, exists := entranceUrls[entranceName]; exists && url != "" {
+							entranceMap["url"] = url
+							entranceStatuses = append(entranceStatuses, entranceMap)
+							glog.V(2).Infof("Enhanced entrance %s with URL: %s", entranceName, url)
+						} else {
+							hasEmptyUrlAfterFetch = true
+							glog.V(2).Infof("Entrance %s has missing or empty URL after fetch", entranceName)
+							break // If any entrance has empty URL after fetch, mark the whole entry as invalid
+						}
+					}
+				}
+			}
+
+			// If any entrance has empty URL after fetch, return empty entrance statuses
+			if hasEmptyUrlAfterFetch {
+				glog.V(2).Infof("App state data has entrance with empty URL after fetch for app %s - returning empty entrance statuses", appName)
+				enhancedData["entranceStatuses"] = []interface{}{}
+				return enhancedData
+			}
+		}
+
+		enhancedData["entranceStatuses"] = entranceStatuses
+	}
+
+	return enhancedData
 }

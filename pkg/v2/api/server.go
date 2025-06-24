@@ -128,6 +128,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/settings/market-source", s.setMarketSource).Methods("PUT")
 	log.Printf("Route configured: PUT /app-store/api/v2/settings/market-source")
 
+	// 16. Get system status aggregation
+	api.HandleFunc("/settings/system-status", s.getSystemStatus).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/settings/system-status")
+
 	// Diagnostic endpoints
 	// 13. Get cache and Redis diagnostic information
 	api.HandleFunc("/diagnostic", s.getDiagnostic).Methods("GET")

@@ -21,12 +21,16 @@ type AppServiceResponse struct {
 		Namespace string `json:"namespace"`
 	} `json:"metadata"`
 	Spec struct {
-		Name   string `json:"name"`
-		AppID  string `json:"appid"`
-		Owner  string `json:"owner"`
-		Icon   string `json:"icon"`
-		Title  string `json:"title"`
-		Source string `json:"source"`
+		Name      string `json:"name"`
+		AppID     string `json:"appid"`
+		Owner     string `json:"owner"`
+		Icon      string `json:"icon"`
+		Title     string `json:"title"`
+		Source    string `json:"source"`
+		Entrances []struct {
+			Name string `json:"name"`
+			Url  string `json:"url"`
+		} `json:"entrances"`
 	} `json:"spec"`
 	Status struct {
 		State              string `json:"state"`
@@ -210,11 +214,13 @@ func processAppData(apps []AppServiceResponse) error {
 		// Create AppStateLatestData for this app
 		appStateData := createAppStateLatestData(app)
 
-		// Add to user's app state data
-		if userAppStateData[user] == nil {
-			userAppStateData[user] = make([]*types.AppStateLatestData, 0)
+		// Add to user's app state data only if creation was successful
+		if appStateData != nil {
+			if userAppStateData[user] == nil {
+				userAppStateData[user] = make([]*types.AppStateLatestData, 0)
+			}
+			userAppStateData[user] = append(userAppStateData[user], appStateData)
 		}
-		userAppStateData[user] = append(userAppStateData[user], appStateData)
 	}
 
 	// Convert user set to slice
@@ -264,9 +270,64 @@ func processAppData(apps []AppServiceResponse) error {
 	return nil
 }
 
+// FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service
+func FetchAppEntranceUrls(appName string) (map[string]string, error) {
+	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
+
+	if host == "" {
+		host = "localhost" // Default fallback
+	}
+	if port == "" {
+		port = "80" // Default fallback
+	}
+
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
+	log.Printf("Fetching app entrance URLs from: %s for app: %s", url, appName)
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from app-service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("app-service returned status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var apps []AppServiceResponse
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return nil, fmt.Errorf("failed to parse app-service response: %v", err)
+	}
+
+	// Find the specific app and extract entrance URLs
+	entranceUrls := make(map[string]string)
+	for _, app := range apps {
+		if app.Spec.Name == appName {
+			for _, entrance := range app.Spec.Entrances {
+				if entrance.Url != "" {
+					entranceUrls[entrance.Name] = entrance.Url
+				}
+			}
+			break
+		}
+	}
+
+	log.Printf("Found %d entrance URLs for app %s", len(entranceUrls), appName)
+	return entranceUrls, nil
+}
+
 // createAppStateLatestData creates AppStateLatestData from AppServiceResponse
 func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData {
-	// 将 AppServiceResponse 转成 map[string]interface{}
 	data := map[string]interface{}{
 		"name":               app.Spec.Name,
 		"state":              app.Status.State,
@@ -274,14 +335,41 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 		"statusTime":         app.Status.StatusTime,
 		"lastTransitionTime": app.Status.LastTransitionTime,
 	}
-	// entranceStatuses 需要转成 []interface{}
-	entrances := make([]interface{}, len(app.Status.EntranceStatuses))
-	for i, e := range app.Status.EntranceStatuses {
-		entrances[i] = map[string]interface{}{
-			"name":       e.Name,
-			"state":      e.State,
-			"statusTime": e.StatusTime,
-			"reason":     e.Reason,
+
+	// Create a map of entrance URLs from spec.entrances
+	entranceUrls := make(map[string]string)
+	for _, entrance := range app.Spec.Entrances {
+		entranceUrls[entrance.Name] = entrance.Url
+	}
+
+	// Check if any entrance status has empty URL
+	hasEmptyUrl := false
+	for _, entranceStatus := range app.Status.EntranceStatuses {
+		if url, exists := entranceUrls[entranceStatus.Name]; !exists || url == "" {
+			hasEmptyUrl = true
+			break
+		}
+	}
+
+	// If any entrance has empty URL, ignore the entire app state data
+	if hasEmptyUrl {
+		log.Printf("Skipping app %s due to empty URL in entrance statuses", app.Spec.Name)
+		return nil
+	}
+
+	// Combine entrance statuses with URLs from spec.entrances
+	entrances := make([]interface{}, 0, len(app.Status.EntranceStatuses))
+	for _, entranceStatus := range app.Status.EntranceStatuses {
+		if url, exists := entranceUrls[entranceStatus.Name]; exists && url != "" {
+			entrances = append(entrances, map[string]interface{}{
+				"name":       entranceStatus.Name,
+				"state":      entranceStatus.State,
+				"statusTime": entranceStatus.StatusTime,
+				"reason":     entranceStatus.Reason,
+				"url":        url,
+			})
+		} else {
+			log.Printf("Skipping entrance %s for app %s due to missing URL", entranceStatus.Name, app.Spec.Name)
 		}
 	}
 	data["entranceStatuses"] = entrances

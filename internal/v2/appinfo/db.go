@@ -248,12 +248,26 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 	if err == nil {
 		var state []*AppStateLatestData
 		if err := json.Unmarshal([]byte(stateData), &state); err == nil {
-			// Filter out app states that are missing the name field
+			// Filter out app states that are missing the name field or have any empty URLs
 			var validStates []*AppStateLatestData
 			removedCount := 0
 			for _, appState := range state {
 				if appState != nil && appState.Status.Name != "" {
-					validStates = append(validStates, appState)
+					// Check if any entrance status has empty URL
+					hasEmptyUrl := false
+					for _, entrance := range appState.Status.EntranceStatuses {
+						if entrance.Url == "" {
+							hasEmptyUrl = true
+							break
+						}
+					}
+
+					if !hasEmptyUrl {
+						validStates = append(validStates, appState)
+					} else {
+						removedCount++
+						glog.V(2).Infof("Removed app state with empty URL for user=%s, source=%s, app=%s", userID, sourceID, appState.Status.Name)
+					}
 				} else {
 					removedCount++
 					glog.V(2).Infof("Removed app state with missing name field for user=%s, source=%s", userID, sourceID)
@@ -261,7 +275,7 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 			}
 			sourceData.AppStateLatest = validStates
 			if removedCount > 0 {
-				glog.Infof("Removed %d app states with missing name field for user=%s, source=%s", removedCount, userID, sourceID)
+				glog.Infof("Removed %d app states with missing name field or empty URLs for user=%s, source=%s", removedCount, userID, sourceID)
 			}
 		}
 	}
