@@ -212,11 +212,13 @@ func processAppData(apps []AppServiceResponse) error {
 		// Create AppStateLatestData for this app
 		appStateData := createAppStateLatestData(app)
 
-		// Add to user's app state data
-		if userAppStateData[user] == nil {
-			userAppStateData[user] = make([]*types.AppStateLatestData, 0)
+		// Add to user's app state data only if creation was successful
+		if appStateData != nil {
+			if userAppStateData[user] == nil {
+				userAppStateData[user] = make([]*types.AppStateLatestData, 0)
+			}
+			userAppStateData[user] = append(userAppStateData[user], appStateData)
 		}
-		userAppStateData[user] = append(userAppStateData[user], appStateData)
 	}
 
 	// Convert user set to slice
@@ -324,7 +326,6 @@ func FetchAppEntranceUrls(appName string) (map[string]string, error) {
 
 // createAppStateLatestData creates AppStateLatestData from AppServiceResponse
 func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData {
-	// 将 AppServiceResponse 转成 map[string]interface{}
 	data := map[string]interface{}{
 		"name":               app.Spec.Name,
 		"state":              app.Status.State,
@@ -332,15 +333,36 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 		"statusTime":         app.Status.StatusTime,
 		"lastTransitionTime": app.Status.LastTransitionTime,
 	}
+
+	// Check if any entrance has empty URL
+	hasEmptyUrl := false
+	for _, e := range app.Status.EntranceStatuses {
+		if e.Url == "" {
+			hasEmptyUrl = true
+			break
+		}
+	}
+
+	// If any entrance has empty URL, ignore the entire app state data
+	if hasEmptyUrl {
+		log.Printf("Skipping app %s due to empty URL in entrance statuses", app.Spec.Name)
+		return nil
+	}
+
 	// entranceStatuses 需要转成 []interface{}
-	entrances := make([]interface{}, len(app.Status.EntranceStatuses))
-	for i, e := range app.Status.EntranceStatuses {
-		entrances[i] = map[string]interface{}{
-			"name":       e.Name,
-			"state":      e.State,
-			"statusTime": e.StatusTime,
-			"reason":     e.Reason,
-			"url":        e.Url,
+	entrances := make([]interface{}, 0, len(app.Status.EntranceStatuses))
+	for _, e := range app.Status.EntranceStatuses {
+		// Only include entrances with valid URLs
+		if e.Url != "" {
+			entrances = append(entrances, map[string]interface{}{
+				"name":       e.Name,
+				"state":      e.State,
+				"statusTime": e.StatusTime,
+				"reason":     e.Reason,
+				"url":        e.Url,
+			})
+		} else {
+			log.Printf("Skipping entrance %s for app %s due to empty URL", e.Name, app.Spec.Name)
 		}
 	}
 	data["entranceStatuses"] = entrances
