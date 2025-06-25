@@ -119,29 +119,33 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps/upload", s.uploadAppPackage).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/apps/upload")
 
+	// 11. Open application
+	api.HandleFunc("/apps/open", s.openApp).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/apps/open")
+
 	// Settings endpoints
-	// 11. Get market source configuration
+	// 12. Get market source configuration
 	api.HandleFunc("/settings/market-source", s.getMarketSource).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/market-source")
 
-	// 12. Set market source configuration
+	// 13. Set market source configuration
 	api.HandleFunc("/settings/market-source", s.setMarketSource).Methods("PUT")
 	log.Printf("Route configured: PUT /app-store/api/v2/settings/market-source")
 
-	// 16. Get system status aggregation
+	// 17. Get system status aggregation
 	api.HandleFunc("/settings/system-status", s.getSystemStatus).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/system-status")
 
 	// Diagnostic endpoints
-	// 13. Get cache and Redis diagnostic information
+	// 14. Get cache and Redis diagnostic information
 	api.HandleFunc("/diagnostic", s.getDiagnostic).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/diagnostic")
 
-	// 14. Force reload cache data from Redis
+	// 15. Force reload cache data from Redis
 	api.HandleFunc("/reload", s.forceReloadFromRedis).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/reload")
 
-	// 15. Cleanup invalid pending data
+	// 16. Cleanup invalid pending data
 	api.HandleFunc("/cleanup", s.cleanupInvalidPendingData).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/cleanup")
 
