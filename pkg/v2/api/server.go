@@ -149,6 +149,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/cleanup", s.cleanupInvalidPendingData).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/cleanup")
 
+	// 18. Get application version history
+	api.HandleFunc("/apps/version-history", s.getAppVersionHistory).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/apps/version-history")
+
 	log.Printf("All routes configured successfully")
 }
 
@@ -225,4 +229,9 @@ func (s *Server) sendResponse(w http.ResponseWriter, statusCode int, success boo
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+// getAppVersionHistory handles POST /api/v2/apps/version-history
+func (s *Server) getAppVersionHistory(w http.ResponseWriter, r *http.Request) {
+	getAppVersionHistoryHandler(w, r)
 }

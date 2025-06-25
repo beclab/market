@@ -43,6 +43,22 @@ type OpenAppRequest struct {
 	ID string `json:"id"`
 }
 
+// ListVersionResponse for version history response
+// VersionInfo struct definition
+
+type VersionInfo struct {
+	ID                 string     `json:"-"`
+	AppName            string     `json:"appName"`
+	Version            string     `json:"version"`
+	VersionName        string     `json:"versionName"`
+	MergedAt           *time.Time `json:"mergedAt"`
+	UpgradeDescription string     `json:"upgradeDescription"`
+}
+
+type ListVersionResponse struct {
+	Data []*VersionInfo `json:"data"`
+}
+
 // getMarketSource handles GET /api/v2/settings/market-source
 func (s *Server) getMarketSource(w http.ResponseWriter, r *http.Request) {
 	log.Println("GET /api/v2/settings/market-source - Getting market source configuration")
@@ -298,4 +314,89 @@ func (s *Server) openApp(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to open application, status: %s, body: %s", response.Status, string(body))
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to open application", nil)
 	}
+}
+
+// getAppVersionHistoryHandler handles POST /api/v2/apps/version-history
+func getAppVersionHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	// Log
+	log.Println("POST /api/v2/apps/version-history - Getting app version history")
+
+	// Parse request body
+	var req struct {
+		AppName string `json:"appName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Invalid request body",
+		})
+		return
+	}
+	if req.AppName == "" {
+		log.Println("appName is empty")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "appName cannot be empty",
+		})
+		return
+	}
+
+	// Query version history
+	versionList, err := getAppVersionHistory(req.AppName)
+	if err != nil {
+		log.Printf("Failed to get version history: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Failed to get version history",
+		})
+		return
+	}
+
+	resp := ListVersionResponse{
+		Data: versionList,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Version history retrieved successfully",
+		"data":    resp,
+	})
+}
+
+// getAppVersionHistory queries app version history
+func getAppVersionHistory(appName string) ([]*VersionInfo, error) {
+	// Use appService address like getSystemStatus
+	appServiceHost := "127.0.0.1"
+	appServicePort := "8080"
+	if host := getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+		appServiceHost = host
+	}
+	if port := getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+		appServicePort = port
+	}
+
+	url := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/applications/version-history/" + appName
+	log.Printf("Requesting version history from %s", url)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Printf("Failed to request version history: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Version history API returned status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("version history api status: %d", resp.StatusCode)
+	}
+	var result ListVersionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("Failed to decode version history response: %v", err)
+		return nil, err
+	}
+	return result.Data, nil
 }
