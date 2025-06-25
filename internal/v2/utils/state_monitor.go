@@ -132,18 +132,22 @@ func (sm *StateMonitor) hasStateChanged(
 // compareEntranceStatuses compares two arrays of entrance statuses
 func (sm *StateMonitor) compareEntranceStatuses(
 	newStatuses []struct {
+		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 		Name       string `json:"name"`
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
 		Reason     string `json:"reason"`
 		Url        string `json:"url"`
+		Invisible  bool   `json:"invisible"`
 	},
 	existingStatuses []struct {
+		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 		Name       string `json:"name"`
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
 		Reason     string `json:"reason"`
 		Url        string `json:"url"`
+		Invisible  bool   `json:"invisible"`
 	},
 ) bool {
 	// If lengths are different, statuses have changed
@@ -153,31 +157,37 @@ func (sm *StateMonitor) compareEntranceStatuses(
 
 	// Create maps for easier comparison
 	newStatusMap := make(map[string]struct {
-		State string
-		Url   string
+		State     string
+		Url       string
+		Invisible bool
 	})
 	existingStatusMap := make(map[string]struct {
-		State string
-		Url   string
+		State     string
+		Url       string
+		Invisible bool
 	})
 
 	for _, status := range newStatuses {
 		newStatusMap[status.Name] = struct {
-			State string
-			Url   string
+			State     string
+			Url       string
+			Invisible bool
 		}{
-			State: status.State,
-			Url:   status.Url,
+			State:     status.State,
+			Url:       status.Url,
+			Invisible: status.Invisible,
 		}
 	}
 
 	for _, status := range existingStatuses {
 		existingStatusMap[status.Name] = struct {
-			State string
-			Url   string
+			State     string
+			Url       string
+			Invisible bool
 		}{
-			State: status.State,
-			Url:   status.Url,
+			State:     status.State,
+			Url:       status.Url,
+			Invisible: status.Invisible,
 		}
 	}
 
@@ -185,7 +195,8 @@ func (sm *StateMonitor) compareEntranceStatuses(
 	for name, newStatus := range newStatusMap {
 		if existingStatus, exists := existingStatusMap[name]; !exists ||
 			existingStatus.State != newStatus.State ||
-			existingStatus.Url != newStatus.Url {
+			existingStatus.Url != newStatus.Url ||
+			existingStatus.Invisible != newStatus.Invisible {
 			return false
 		}
 	}

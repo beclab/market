@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -33,6 +36,11 @@ type SystemStatusResponse struct {
 	CurUserResource interface{} `json:"cur_user_resource"`
 	ClusterResource interface{} `json:"cluster_resource"`
 	TerminusVersion interface{} `json:"terminus_version"`
+}
+
+// OpenAppRequest represents the request body for opening an application
+type OpenAppRequest struct {
+	ID string `json:"id"`
 }
 
 // getMarketSource handles GET /api/v2/settings/market-source
@@ -206,4 +214,88 @@ func doGetWithToken(url, token string) (interface{}, error) {
 
 func getenv(key string) string {
 	return os.Getenv(key)
+}
+
+// openApp handles POST /api/v2/apps/open
+func (s *Server) openApp(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/apps/open - Opening application")
+
+	var req OpenAppRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	if req.ID == "" {
+		log.Println("Application ID is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "Application ID cannot be empty", nil)
+		return
+	}
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for open app request: %s", userID)
+
+	// Step 2: Construct the system server address using user information
+	systemServer := fmt.Sprintf("system-server.user-system-%s", userID)
+	log.Printf("Using system server: %s", systemServer)
+
+	// Step 3: Construct the intent URL
+	intentURL := fmt.Sprintf("http://%s/legacy/v1alpha1/api.intent/v1/server/intent/send", systemServer)
+	log.Printf("Sending intent to: %s", intentURL)
+
+	// Step 4: Prepare the JSON payload
+	jsonData := fmt.Sprintf(`{
+		"action": "view",
+		"category": "launcher",
+		"data": {
+			"appid": "%s"
+		}
+	}`, req.ID)
+
+	// Step 5: Create HTTP request
+	request, err := http.NewRequest(http.MethodPost, intentURL, bytes.NewBuffer([]byte(jsonData)))
+	if err != nil {
+		log.Printf("Failed to create HTTP request: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create request", nil)
+		return
+	}
+	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	// Step 6: Send the request
+	client := &http.Client{Timeout: 10 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		log.Printf("Failed to send request: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to send request to system server", nil)
+		return
+	}
+	defer response.Body.Close()
+
+	// Step 7: Read response body
+	body, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Printf("Failed to read response body: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to read response", nil)
+		return
+	}
+
+	log.Printf("System server response status: %s", response.Status)
+	log.Printf("System server response body: %s", string(body))
+
+	// Step 8: Check if the request was successful
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		log.Printf("Application opened successfully: %s for user: %s", req.ID, userID)
+		s.sendResponse(w, http.StatusOK, true, "Application opened successfully", nil)
+	} else {
+		log.Printf("Failed to open application, status: %s, body: %s", response.Status, string(body))
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to open application", nil)
+	}
 }

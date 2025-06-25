@@ -17,6 +17,7 @@ import (
 
 // EntranceStatus represents the status of an entrance
 type EntranceStatus struct {
+	ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 	Name       string `json:"name"`
 	State      string `json:"state"`
 	StatusTime string `json:"statusTime"`
@@ -204,6 +205,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 	// Create sample entrance statuses
 	entranceStatuses := []EntranceStatus{
 		{
+			ID:         "http", // ID extracted from "http://localhost:8080/aa"
 			Name:       "aa",
 			State:      "",
 			StatusTime: "",
@@ -211,6 +213,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 			Url:        "http://localhost:8080/aa",
 		},
 		{
+			ID:         "http", // ID extracted from "http://localhost:8080/bb"
 			Name:       "bb",
 			State:      "downloading",
 			StatusTime: time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"),
