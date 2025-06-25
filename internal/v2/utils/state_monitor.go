@@ -37,6 +37,7 @@ func (sm *StateMonitor) CheckAndNotifyStateChange(
 	hasChanged, changeReason := sm.hasStateChanged(appName, newStateData, existingStateData)
 
 	if !hasChanged {
+		// Only log at debug level for no changes to reduce log noise
 		log.Printf("No state change detected for app %s (user=%s, source=%s), reason: %s",
 			appName, userID, sourceID, changeReason)
 		return nil
@@ -75,22 +76,13 @@ func (sm *StateMonitor) hasStateChanged(
 		return false, "new state data is nil"
 	}
 
-	// Find existing state for this app
-	// Since AppStateLatestData doesn't have a direct app name field,
-	// we'll need to rely on the context or metadata
-	// For now, we'll check if there are any existing states
-	// This is a simplified approach - in a real implementation,
-	// you might want to store app identification in metadata or use a different approach
-
+	// Find existing state for this specific app by name
 	var existingState *types.AppStateLatestData
-	if len(existingStateData) > 0 {
-		// For now, we'll compare with the first existing state
-		// This assumes that the state data is for the same app
-		// In a more sophisticated implementation, you might want to:
-		// 1. Store app name in metadata
-		// 2. Use a different data structure that includes app identification
-		// 3. Use external context to identify which app the state belongs to
-		existingState = existingStateData[0]
+	for _, state := range existingStateData {
+		if state != nil && state.Status.Name == appName {
+			existingState = state
+			break
+		}
 	}
 
 	// If no existing state found, this is a new app state
