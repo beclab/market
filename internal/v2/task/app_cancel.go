@@ -27,13 +27,29 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
+	// Get cfgType from metadata
+	cfgType, ok := task.Metadata["cfgType"].(string)
+	if !ok {
+		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
+		cfgType = "app" // Default to app type
+	}
+
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
 
-	// The URL format uses app_name as the uid parameter
-	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
+	// Choose API endpoint based on cfgType
+	var urlStr string
+	if cfgType == "middleware" {
+		// Use middleware API for middleware type
+		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
+		log.Printf("Using middleware API for cancel: %s", urlStr)
+	} else {
+		// Use regular app API for other types
+		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
+		log.Printf("Using regular app API for cancel: %s", urlStr)
+	}
 
-	log.Printf("App service URL: %s for task: %s, app_name: %s", urlStr, task.ID, appName)
+	log.Printf("App service URL: %s for task: %s, app_name: %s, cfgType: %s", urlStr, task.ID, appName, cfgType)
 
 	headers := map[string]string{
 		"X-Authorization": token,
@@ -51,6 +67,7 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 			"app_name":  task.AppName,
 			"user":      task.User,
 			"uid":       appName,
+			"cfgType":   cfgType,
 			"url":       urlStr,
 			"error":     err.Error(),
 			"status":    "failed",
@@ -67,6 +84,7 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 		"app_name":  task.AppName,
 		"user":      task.User,
 		"uid":       appName,
+		"cfgType":   cfgType,
 		"url":       urlStr,
 		"response":  response,
 		"status":    "success",

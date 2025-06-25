@@ -42,6 +42,13 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		return "", fmt.Errorf("missing source in task metadata")
 	}
 
+	// Get cfgType from metadata
+	cfgType, ok := task.Metadata["cfgType"].(string)
+	if !ok {
+		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
+		cfgType = "app" // Default to app type
+	}
+
 	// Convert app source to API source parameter
 	// If app source is "local", use "custom" for API
 	// Otherwise, use "market" for API
@@ -52,11 +59,22 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		apiSource = "market"
 	}
 
-	log.Printf("App source: %s, API source: %s for task: %s", appSource, apiSource, task.ID)
+	log.Printf("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)
+
+	// Choose API endpoint based on cfgType
+	var urlStr string
+	if cfgType == "middleware" {
+		// Use middleware API for middleware type
+		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/install", appServiceHost, appServicePort, appName)
+		log.Printf("Using middleware API for installation: %s", urlStr)
+	} else {
+		// Use regular app API for other types
+		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)
+		log.Printf("Using regular app API for installation: %s", urlStr)
+	}
 
 	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
 
@@ -92,6 +110,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 			"user":       user,
 			"app_source": appSource, // Log original app source
 			"api_source": apiSource, // Log converted API source
+			"cfgType":    cfgType,   // Log cfgType
 			"url":        urlStr,
 			"error":      err.Error(),
 			"status":     "failed",
@@ -109,6 +128,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		"user":       user,
 		"app_source": appSource, // Log original app source
 		"api_source": apiSource, // Log converted API source
+		"cfgType":    cfgType,   // Log cfgType
 		"url":        urlStr,
 		"response":   response,
 		"status":     "success",
