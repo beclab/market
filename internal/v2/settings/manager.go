@@ -115,8 +115,19 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
 	log.Printf("Created default market source with BaseURL: %s", defaultSource.BaseURL)
 
+	// 添加本地源配置
+	localSource := &MarketSource{
+		ID:          "local",
+		Name:        "local",
+		BaseURL:     "file://", // 本地文件系统
+		Priority:    50,
+		IsActive:    true,
+		UpdatedAt:   time.Now(),
+		Description: "Local market source for uploaded apps",
+	}
+
 	return &MarketSourcesConfig{
-		Sources:       []*MarketSource{defaultSource},
+		Sources:       []*MarketSource{defaultSource, localSource},
 		DefaultSource: "default",
 		UpdatedAt:     time.Now(),
 	}
