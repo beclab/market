@@ -136,12 +136,14 @@ func (sm *StateMonitor) compareEntranceStatuses(
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
 		Reason     string `json:"reason"`
+		Url        string `json:"url"`
 	},
 	existingStatuses []struct {
 		Name       string `json:"name"`
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
 		Reason     string `json:"reason"`
+		Url        string `json:"url"`
 	},
 ) bool {
 	// If lengths are different, statuses have changed
@@ -150,20 +152,40 @@ func (sm *StateMonitor) compareEntranceStatuses(
 	}
 
 	// Create maps for easier comparison
-	newStatusMap := make(map[string]string)
-	existingStatusMap := make(map[string]string)
+	newStatusMap := make(map[string]struct {
+		State string
+		Url   string
+	})
+	existingStatusMap := make(map[string]struct {
+		State string
+		Url   string
+	})
 
 	for _, status := range newStatuses {
-		newStatusMap[status.Name] = status.State
+		newStatusMap[status.Name] = struct {
+			State string
+			Url   string
+		}{
+			State: status.State,
+			Url:   status.Url,
+		}
 	}
 
 	for _, status := range existingStatuses {
-		existingStatusMap[status.Name] = status.State
+		existingStatusMap[status.Name] = struct {
+			State string
+			Url   string
+		}{
+			State: status.State,
+			Url:   status.Url,
+		}
 	}
 
 	// Compare each entrance status
-	for name, newState := range newStatusMap {
-		if existingState, exists := existingStatusMap[name]; !exists || existingState != newState {
+	for name, newStatus := range newStatusMap {
+		if existingStatus, exists := existingStatusMap[name]; !exists ||
+			existingStatus.State != newStatus.State ||
+			existingStatus.Url != newStatus.Url {
 			return false
 		}
 	}

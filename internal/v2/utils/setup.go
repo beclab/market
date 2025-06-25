@@ -38,6 +38,7 @@ type AppServiceResponse struct {
 			State      string `json:"state"`
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
+			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -56,6 +57,7 @@ type AppInfo struct {
 			State      string `json:"state"`
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
+			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -264,6 +266,62 @@ func processAppData(apps []AppServiceResponse) error {
 	return nil
 }
 
+// FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service
+func FetchAppEntranceUrls(appName string) (map[string]string, error) {
+	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
+
+	if host == "" {
+		host = "localhost" // Default fallback
+	}
+	if port == "" {
+		port = "80" // Default fallback
+	}
+
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
+	log.Printf("Fetching app entrance URLs from: %s for app: %s", url, appName)
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from app-service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("app-service returned status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var apps []AppServiceResponse
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return nil, fmt.Errorf("failed to parse app-service response: %v", err)
+	}
+
+	// Find the specific app and extract entrance URLs
+	entranceUrls := make(map[string]string)
+	for _, app := range apps {
+		if app.Spec.Name == appName {
+			for _, entrance := range app.Status.EntranceStatuses {
+				if entrance.Url != "" {
+					entranceUrls[entrance.Name] = entrance.Url
+				}
+			}
+			break
+		}
+	}
+
+	log.Printf("Found %d entrance URLs for app %s", len(entranceUrls), appName)
+	return entranceUrls, nil
+}
+
 // createAppStateLatestData creates AppStateLatestData from AppServiceResponse
 func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData {
 	// 将 AppServiceResponse 转成 map[string]interface{}
@@ -282,6 +340,7 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 			"state":      e.State,
 			"statusTime": e.StatusTime,
 			"reason":     e.Reason,
+			"url":        e.Url,
 		}
 	}
 	data["entranceStatuses"] = entrances

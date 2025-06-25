@@ -21,6 +21,7 @@ type EntranceStatus struct {
 	State      string `json:"state"`
 	StatusTime string `json:"statusTime"`
 	Reason     string `json:"reason"`
+	Url        string `json:"url"`
 }
 
 // AppStateMessage represents the message structure from NATS
@@ -207,12 +208,14 @@ func (dw *DataWatcherState) generateMockMessage() {
 			State:      "",
 			StatusTime: "",
 			Reason:     "",
+			Url:        "http://localhost:8080/aa",
 		},
 		{
 			Name:       "bb",
 			State:      "downloading",
 			StatusTime: time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"),
 			Reason:     "",
+			Url:        "http://localhost:8080/bb",
 		},
 	}
 

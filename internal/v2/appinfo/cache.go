@@ -345,7 +345,10 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			glog.Infof("Updated %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
 		} else {
 			// Fallback to old logic for backward compatibility
-			appData := NewAppStateLatestData(data)
+			// Check if entrance URLs are missing and fetch them if needed
+			enhancedData := cm.enhanceAppStateDataWithUrls(data)
+
+			appData := NewAppStateLatestData(enhancedData)
 
 			// Validate that the created app state has a name field
 			if appData == nil {
@@ -796,4 +799,74 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 	}
 
 	return totalCleaned
+}
+
+// enhanceAppStateDataWithUrls enhances app state data with entrance URLs
+func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{}) map[string]interface{} {
+	// Create a copy of the data to avoid modifying the original
+	enhancedData := make(map[string]interface{})
+	for k, v := range data {
+		enhancedData[k] = v
+	}
+
+	// Extract app name for URL fetching
+	var appName string
+	if name, ok := data["name"].(string); ok && name != "" {
+		appName = name
+	} else if appNameVal, ok := data["appName"].(string); ok && appNameVal != "" {
+		appName = appNameVal
+	} else if appIDVal, ok := data["appID"].(string); ok && appIDVal != "" {
+		appName = appIDVal
+	} else if idVal, ok := data["id"].(string); ok && idVal != "" {
+		appName = idVal
+	}
+
+	if appName == "" {
+		glog.Warningf("Cannot enhance app state data: no app name found")
+		return enhancedData
+	}
+
+	// Check if entranceStatuses exist and if any are missing URLs
+	if entranceStatusesVal, ok := data["entranceStatuses"].([]interface{}); ok {
+		entranceStatuses := make([]interface{}, len(entranceStatusesVal))
+		needsUrlEnhancement := false
+
+		// Check if any entrance is missing URL
+		for i, entrance := range entranceStatusesVal {
+			entranceStatuses[i] = entrance
+			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+				if url, ok := entranceMap["url"].(string); !ok || url == "" {
+					needsUrlEnhancement = true
+				}
+			}
+		}
+
+		// If URLs are missing, fetch them from app-service
+		if needsUrlEnhancement {
+			glog.Infof("Some entrance URLs are missing for app %s, fetching from app-service", appName)
+
+			entranceUrls, err := utils.FetchAppEntranceUrls(appName)
+			if err != nil {
+				glog.Warningf("Failed to fetch entrance URLs for app %s: %v", appName, err)
+				return enhancedData
+			}
+
+			// Enhance entrance statuses with URLs
+			for i, entrance := range entranceStatuses {
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					if entranceName, ok := entranceMap["name"].(string); ok {
+						if url, exists := entranceUrls[entranceName]; exists {
+							entranceMap["url"] = url
+							entranceStatuses[i] = entranceMap
+							glog.V(2).Infof("Enhanced entrance %s with URL: %s", entranceName, url)
+						}
+					}
+				}
+			}
+		}
+
+		enhancedData["entranceStatuses"] = entranceStatuses
+	}
+
+	return enhancedData
 }
