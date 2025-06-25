@@ -6,6 +6,7 @@ import (
 	"log"
 	"market/internal/v2/settings"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -203,12 +204,36 @@ func (s *RenderedChartStep) isValidChartURL(chartURL string) bool {
 		return false
 	}
 
-	// Check scheme
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+	// Check scheme - support http, https, and file protocols
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" && parsedURL.Scheme != "file" {
 		return false
 	}
 
-	// Check if it looks like a chart package
+	// For file:// URLs, check if the file exists
+	if parsedURL.Scheme == "file" {
+		filePath := parsedURL.Path
+		// On Windows, file:// URLs might start with /C:/, so we need to handle that
+		if len(filePath) > 2 && filePath[0] == '/' && filePath[2] == ':' {
+			filePath = filePath[1:] // Remove leading slash
+		}
+
+		// Check if file exists and is a directory (for rendered chart directories)
+		if info, err := os.Stat(filePath); err == nil && info.IsDir() {
+			return true
+		}
+
+		// Also accept .tgz files
+		if strings.HasSuffix(strings.ToLower(filePath), ".tgz") ||
+			strings.HasSuffix(strings.ToLower(filePath), ".tar.gz") {
+			if _, err := os.Stat(filePath); err == nil {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	// Check if it looks like a chart package for http/https URLs
 	return strings.HasSuffix(strings.ToLower(parsedURL.Path), ".tgz") ||
 		strings.HasSuffix(strings.ToLower(parsedURL.Path), ".tar.gz")
 }

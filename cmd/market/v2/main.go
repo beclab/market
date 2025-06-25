@@ -92,10 +92,10 @@ func main() {
 	log.Println("=== End pre-startup step ===")
 
 	// 0. Initialize Settings Module (Required for API)
-	redisHost := getEnvOrDefault("REDIS_HOST", "localhost")
-	redisPort := getEnvOrDefault("REDIS_PORT", "6379")
-	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
-	redisDBStr := getEnvOrDefault("REDIS_DB", "0")
+	redisHost := utils.GetEnvOrDefault("REDIS_HOST", "localhost")
+	redisPort := utils.GetEnvOrDefault("REDIS_PORT", "6379")
+	redisPassword := utils.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDBStr := utils.GetEnvOrDefault("REDIS_DB", "0")
 	redisDB, err := strconv.Atoi(redisDBStr)
 	if err != nil {
 		log.Fatalf("Invalid REDIS_DB value: %v", err)
@@ -303,12 +303,4 @@ func main() {
 	case <-shutdownComplete:
 		log.Println("All modules stopped. Goodbye!")
 	}
-}
-
-// getEnvOrDefault gets environment variable or returns default value
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -31,6 +33,22 @@ func (s *RenderedChartStep) GetStepName() string {
 func (s *RenderedChartStep) CanSkip(ctx context.Context, task *HydrationTask) bool {
 	// Skip if we already have the rendered chart URL and it's valid
 	if task.RenderedChartURL != "" {
+		// For file:// URLs, we need to check if the directory exists
+		if strings.HasPrefix(task.RenderedChartURL, "file://") {
+			filePath := strings.TrimPrefix(task.RenderedChartURL, "file://")
+			// On Windows, file:// URLs might start with /C:/, so we need to handle that
+			if len(filePath) > 2 && filePath[0] == '/' && filePath[2] == ':' {
+				filePath = filePath[1:] // Remove leading slash
+			}
+
+			if info, err := os.Stat(filePath); err == nil && info.IsDir() {
+				log.Printf("Rendered chart directory exists, skipping step: %s", filePath)
+				return true
+			}
+			return false
+		}
+
+		// For http/https URLs, use the existing validation
 		return s.isValidChartURL(task.RenderedChartURL)
 	}
 	return false
@@ -106,12 +124,28 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	task.ChartData["template_data"] = templateData
 
 	// Build rendered chart URL (optional, for compatibility)
-	renderConfig, _ := s.extractRenderConfig(task.AppData)
-	renderedChartURL, err := s.buildRenderedChartURL(task, renderConfig)
-	if err != nil {
-		log.Printf("Warning: failed to build rendered chart URL: %v", err)
+	// For local sources, use local file path instead of remote URL
+	if task.SettingsManager != nil {
+		renderConfig, _ := s.extractRenderConfig(task.AppData)
+		renderedChartURL, err := s.buildRenderedChartURL(task, renderConfig)
+		if err != nil {
+			log.Printf("Warning: failed to build rendered chart URL: %v", err)
+		} else {
+			task.RenderedChartURL = renderedChartURL
+		}
 	} else {
-		task.RenderedChartURL = renderedChartURL
+		// For local sources, use the rendered chart directory path as file:// URL
+		if renderedChartDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
+			absPath, err := filepath.Abs(renderedChartDir)
+			if err != nil {
+				log.Printf("Warning: failed to get absolute path for rendered chart directory: %v", err)
+			} else {
+				task.RenderedChartURL = "file://" + absPath
+				log.Printf("Set local rendered chart URL: %s", task.RenderedChartURL)
+			}
+		} else {
+			log.Printf("Warning: rendered chart directory not found in task data")
+		}
 	}
 
 	// Update AppInfoLatestPendingData with rendered chart directory path
