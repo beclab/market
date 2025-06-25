@@ -21,12 +21,16 @@ type AppServiceResponse struct {
 		Namespace string `json:"namespace"`
 	} `json:"metadata"`
 	Spec struct {
-		Name   string `json:"name"`
-		AppID  string `json:"appid"`
-		Owner  string `json:"owner"`
-		Icon   string `json:"icon"`
-		Title  string `json:"title"`
-		Source string `json:"source"`
+		Name      string `json:"name"`
+		AppID     string `json:"appid"`
+		Owner     string `json:"owner"`
+		Icon      string `json:"icon"`
+		Title     string `json:"title"`
+		Source    string `json:"source"`
+		Entrances []struct {
+			Name string `json:"name"`
+			Url  string `json:"url"`
+		} `json:"entrances"`
 	} `json:"spec"`
 	Status struct {
 		State              string `json:"state"`
@@ -38,7 +42,6 @@ type AppServiceResponse struct {
 			State      string `json:"state"`
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
-			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -57,7 +60,6 @@ type AppInfo struct {
 			State      string `json:"state"`
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
-			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -311,7 +313,7 @@ func FetchAppEntranceUrls(appName string) (map[string]string, error) {
 	entranceUrls := make(map[string]string)
 	for _, app := range apps {
 		if app.Spec.Name == appName {
-			for _, entrance := range app.Status.EntranceStatuses {
+			for _, entrance := range app.Spec.Entrances {
 				if entrance.Url != "" {
 					entranceUrls[entrance.Name] = entrance.Url
 				}
@@ -334,10 +336,16 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 		"lastTransitionTime": app.Status.LastTransitionTime,
 	}
 
-	// Check if any entrance has empty URL
+	// Create a map of entrance URLs from spec.entrances
+	entranceUrls := make(map[string]string)
+	for _, entrance := range app.Spec.Entrances {
+		entranceUrls[entrance.Name] = entrance.Url
+	}
+
+	// Check if any entrance status has empty URL
 	hasEmptyUrl := false
-	for _, e := range app.Status.EntranceStatuses {
-		if e.Url == "" {
+	for _, entranceStatus := range app.Status.EntranceStatuses {
+		if url, exists := entranceUrls[entranceStatus.Name]; !exists || url == "" {
 			hasEmptyUrl = true
 			break
 		}
@@ -349,20 +357,19 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 		return nil
 	}
 
-	// entranceStatuses 需要转成 []interface{}
+	// Combine entrance statuses with URLs from spec.entrances
 	entrances := make([]interface{}, 0, len(app.Status.EntranceStatuses))
-	for _, e := range app.Status.EntranceStatuses {
-		// Only include entrances with valid URLs
-		if e.Url != "" {
+	for _, entranceStatus := range app.Status.EntranceStatuses {
+		if url, exists := entranceUrls[entranceStatus.Name]; exists && url != "" {
 			entrances = append(entrances, map[string]interface{}{
-				"name":       e.Name,
-				"state":      e.State,
-				"statusTime": e.StatusTime,
-				"reason":     e.Reason,
-				"url":        e.Url,
+				"name":       entranceStatus.Name,
+				"state":      entranceStatus.State,
+				"statusTime": entranceStatus.StatusTime,
+				"reason":     entranceStatus.Reason,
+				"url":        url,
 			})
 		} else {
-			log.Printf("Skipping entrance %s for app %s due to empty URL", e.Name, app.Spec.Name)
+			log.Printf("Skipping entrance %s for app %s due to missing URL", entranceStatus.Name, app.Spec.Name)
 		}
 	}
 	data["entranceStatuses"] = entrances
