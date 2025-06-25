@@ -28,8 +28,9 @@ type AppServiceResponse struct {
 		Title     string `json:"title"`
 		Source    string `json:"source"`
 		Entrances []struct {
-			Name string `json:"name"`
-			Url  string `json:"url"`
+			Name      string `json:"name"`
+			Url       string `json:"url"`
+			Invisible bool   `json:"invisible"`
 		} `json:"entrances"`
 	} `json:"spec"`
 	Status struct {
@@ -340,10 +341,12 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 		"lastTransitionTime": app.Status.LastTransitionTime,
 	}
 
-	// Create a map of entrance URLs from spec.entrances
+	// Create a map of entrance URLs and invisible flags from spec.entrances
 	entranceUrls := make(map[string]string)
+	entranceInvisible := make(map[string]bool)
 	for _, entrance := range app.Spec.Entrances {
 		entranceUrls[entrance.Name] = entrance.Url
+		entranceInvisible[entrance.Name] = entrance.Invisible
 	}
 
 	// Check if any entrance status has empty URL
@@ -365,12 +368,29 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 	entrances := make([]interface{}, 0, len(app.Status.EntranceStatuses))
 	for _, entranceStatus := range app.Status.EntranceStatuses {
 		if url, exists := entranceUrls[entranceStatus.Name]; exists && url != "" {
+			// Extract ID from URL: split by "." and take the first segment
+			id := ""
+			if url != "" {
+				segments := strings.Split(url, ".")
+				if len(segments) > 0 {
+					id = segments[0]
+				}
+			}
+
+			// Get invisible flag, default to false if not found
+			invisible := false
+			if invisibleFlag, exists := entranceInvisible[entranceStatus.Name]; exists {
+				invisible = invisibleFlag
+			}
+
 			entrances = append(entrances, map[string]interface{}{
+				"id":         id, // ID extracted from URL's first segment after splitting by "."
 				"name":       entranceStatus.Name,
 				"state":      entranceStatus.State,
 				"statusTime": entranceStatus.StatusTime,
 				"reason":     entranceStatus.Reason,
 				"url":        url,
+				"invisible":  invisible,
 			})
 		} else {
 			log.Printf("Skipping entrance %s for app %s due to missing URL", entranceStatus.Name, app.Spec.Name)

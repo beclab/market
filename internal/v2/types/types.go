@@ -132,6 +132,7 @@ type AppStateLatestData struct {
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
 			Url        string `json:"url"`
+			Invisible  bool   `json:"invisible"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -456,6 +457,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 		StatusTime string `json:"statusTime"`
 		Reason     string `json:"reason"`
 		Url        string `json:"url"`
+		Invisible  bool   `json:"invisible"`
 	}
 
 	// Extract name from various possible fields
@@ -497,6 +499,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
 			Url        string `json:"url"`
+			Invisible  bool   `json:"invisible"`
 		}, len(entranceStatusesVal))
 
 		for i, entrance := range entranceStatusesVal {
@@ -523,6 +526,9 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 						}
 					}
 				}
+				if invisible, ok := entranceMap["invisible"].(bool); ok {
+					entranceStatuses[i].Invisible = invisible
+				}
 			}
 		}
 	}
@@ -542,6 +548,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 				StatusTime string `json:"statusTime"`
 				Reason     string `json:"reason"`
 				Url        string `json:"url"`
+				Invisible  bool   `json:"invisible"`
 			} `json:"entranceStatuses"`
 		}{
 			Name:               name,
