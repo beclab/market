@@ -105,7 +105,17 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 9: Create installation task
+	// Step 9: Get app cfgType from cache
+	var cfgType string
+	if targetApp != nil && targetApp.RawData != nil {
+		cfgType = targetApp.RawData.CfgType
+		log.Printf("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
+	} else {
+		log.Printf("Warning: Could not retrieve cfgType for app: %s, using default", request.AppName)
+		cfgType = "app" // Default to app type
+	}
+
+	// Step 10: Create installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"source":     request.Source,
@@ -113,6 +123,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"version":    request.Version,
 		"chart_path": chartPath,
 		"token":      utils.GetTokenFromRequest(restfulReq),
+		"cfgType":    cfgType, // Add cfgType to metadata
 	}
 
 	task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata)
@@ -160,11 +171,38 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Create cancel installation task
+	// Step 4: Get app cfgType from cache
+	var cfgType string
+	// Try to find the app in user data to get cfgType
+	if userData != nil {
+		// Search through all sources to find the app
+		for sourceID, sourceData := range userData.Sources {
+			if sourceData != nil {
+				for _, appInfoData := range sourceData.AppInfoLatest {
+					if appInfoData != nil && appInfoData.RawData != nil && appInfoData.RawData.Name == appName {
+						cfgType = appInfoData.RawData.CfgType
+						log.Printf("Retrieved cfgType: %s for app: %s from source: %s", cfgType, appName, sourceID)
+						break
+					}
+				}
+				if cfgType != "" {
+					break
+				}
+			}
+		}
+	}
+
+	if cfgType == "" {
+		log.Printf("Warning: Could not retrieve cfgType for app: %s, using default 'app'", appName)
+		cfgType = "app" // Default to app type
+	}
+
+	// Step 5: Create cancel installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":  userID,
 		"app_name": appName,
 		"token":    utils.GetTokenFromRequest(restfulReq),
+		"cfgType":  cfgType, // Use retrieved cfgType
 	}
 
 	task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata)
@@ -212,11 +250,38 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Create uninstallation task
+	// Step 4: Get app cfgType from cache
+	var cfgType string
+	// Try to find the app in user data to get cfgType
+	if userData != nil {
+		// Search through all sources to find the app
+		for sourceID, sourceData := range userData.Sources {
+			if sourceData != nil {
+				for _, appInfoData := range sourceData.AppInfoLatest {
+					if appInfoData != nil && appInfoData.RawData != nil && appInfoData.RawData.Name == appName {
+						cfgType = appInfoData.RawData.CfgType
+						log.Printf("Retrieved cfgType: %s for app: %s from source: %s", cfgType, appName, sourceID)
+						break
+					}
+				}
+				if cfgType != "" {
+					break
+				}
+			}
+		}
+	}
+
+	if cfgType == "" {
+		log.Printf("Warning: Could not retrieve cfgType for app: %s, using default 'app'", appName)
+		cfgType = "app" // Default to app type
+	}
+
+	// Step 5: Create uninstallation task
 	taskMetadata := map[string]interface{}{
 		"user_id":  userID,
 		"app_name": appName,
 		"token":    utils.GetTokenFromRequest(restfulReq),
+		"cfgType":  cfgType, // Use retrieved cfgType
 	}
 
 	task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata)
@@ -317,7 +382,17 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 9: Create upgrade task
+	// Step 9: Get app cfgType from cache
+	var cfgType string
+	if targetApp != nil && targetApp.RawData != nil {
+		cfgType = targetApp.RawData.CfgType
+		log.Printf("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
+	} else {
+		log.Printf("Warning: Could not retrieve cfgType for app: %s, using default", request.AppName)
+		cfgType = "app" // Default to app type
+	}
+
+	// Step 10: Create upgrade task
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"source":     request.Source,
@@ -325,6 +400,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"version":    request.Version,
 		"chart_path": chartPath,
 		"token":      utils.GetTokenFromRequest(restfulReq),
+		"cfgType":    cfgType, // Add cfgType to metadata
 	}
 
 	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata)

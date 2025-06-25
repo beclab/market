@@ -20,11 +20,29 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
+	// Get cfgType from metadata
+	cfgType, ok := task.Metadata["cfgType"].(string)
+	if !ok {
+		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
+		cfgType = "app" // Default to app type
+	}
+
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/uninstall", appServiceHost, appServicePort, appName)
 
-	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
+	// Choose API endpoint based on cfgType
+	var urlStr string
+	if cfgType == "middleware" {
+		// Use middleware API for middleware type
+		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/uninstall", appServiceHost, appServicePort, appName)
+		log.Printf("Using middleware API for uninstall: %s", urlStr)
+	} else {
+		// Use regular app API for other types
+		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/uninstall", appServiceHost, appServicePort, appName)
+		log.Printf("Using regular app API for uninstall: %s", urlStr)
+	}
+
+	log.Printf("App service URL: %s for task: %s, cfgType: %s", urlStr, task.ID, cfgType)
 
 	headers := map[string]string{
 		"X-Authorization": token,
@@ -43,6 +61,7 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 			"operation": "uninstall",
 			"app_name":  appName,
 			"user":      task.User,
+			"cfgType":   cfgType,
 			"url":       urlStr,
 			"error":     err.Error(),
 			"status":    "failed",
@@ -58,6 +77,7 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		"operation": "uninstall",
 		"app_name":  appName,
 		"user":      task.User,
+		"cfgType":   cfgType,
 		"url":       urlStr,
 		"response":  response,
 		"status":    "success",
