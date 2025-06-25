@@ -115,7 +115,6 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
 	log.Printf("Created default market source with BaseURL: %s", defaultSource.BaseURL)
 
-	// 添加本地源配置
 	localSource := &MarketSource{
 		ID:          "local",
 		Name:        "local",
