@@ -123,31 +123,43 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps/open", s.openApp).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/apps/open")
 
+	// 12. Resume application
+	api.HandleFunc("/apps/resume", s.resumeApp).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/apps/resume")
+
+	// 13. Stop application
+	api.HandleFunc("/apps/stop", s.stopApp).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/apps/stop")
+
 	// Settings endpoints
-	// 12. Get market source configuration
+	// 14. Get market source configuration
 	api.HandleFunc("/settings/market-source", s.getMarketSource).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/market-source")
 
-	// 13. Set market source configuration
+	// 15. Set market source configuration
 	api.HandleFunc("/settings/market-source", s.setMarketSource).Methods("PUT")
 	log.Printf("Route configured: PUT /app-store/api/v2/settings/market-source")
 
-	// 17. Get system status aggregation
+	// 16. Get system status aggregation
 	api.HandleFunc("/settings/system-status", s.getSystemStatus).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/system-status")
 
 	// Diagnostic endpoints
-	// 14. Get cache and Redis diagnostic information
+	// 17. Get cache and Redis diagnostic information
 	api.HandleFunc("/diagnostic", s.getDiagnostic).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/diagnostic")
 
-	// 15. Force reload cache data from Redis
+	// 18. Force reload cache data from Redis
 	api.HandleFunc("/reload", s.forceReloadFromRedis).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/reload")
 
-	// 16. Cleanup invalid pending data
+	// 19. Cleanup invalid pending data
 	api.HandleFunc("/cleanup", s.cleanupInvalidPendingData).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/cleanup")
+
+	// 20. Get application version history
+	api.HandleFunc("/apps/version-history", s.getAppVersionHistory).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/apps/version-history")
 
 	log.Printf("All routes configured successfully")
 }
@@ -225,4 +237,9 @@ func (s *Server) sendResponse(w http.ResponseWriter, statusCode int, success boo
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+// getAppVersionHistory handles POST /api/v2/apps/version-history
+func (s *Server) getAppVersionHistory(w http.ResponseWriter, r *http.Request) {
+	getAppVersionHistoryHandler(w, r)
 }

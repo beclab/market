@@ -29,6 +29,20 @@ type MarketSourceRequest struct {
 	URL string `json:"url"`
 }
 
+// ResumeAppRequest represents the request body for resuming an application
+// Only supports 'app' type
+type ResumeAppRequest struct {
+	AppName string `json:"appName"`
+	Type    string `json:"type"` // Should be "app"
+}
+
+// StopAppRequest represents the request body for stopping an application
+// Only supports 'app' type
+type StopAppRequest struct {
+	AppName string `json:"appName"`
+	Type    string `json:"type"` // Should be "app"
+}
+
 // SystemStatusResponse
 // Aggregated system status response
 type SystemStatusResponse struct {
@@ -41,6 +55,22 @@ type SystemStatusResponse struct {
 // OpenAppRequest represents the request body for opening an application
 type OpenAppRequest struct {
 	ID string `json:"id"`
+}
+
+// ListVersionResponse for version history response
+// VersionInfo struct definition
+
+type VersionInfo struct {
+	ID                 string     `json:"-"`
+	AppName            string     `json:"appName"`
+	Version            string     `json:"version"`
+	VersionName        string     `json:"versionName"`
+	MergedAt           *time.Time `json:"mergedAt"`
+	UpgradeDescription string     `json:"upgradeDescription"`
+}
+
+type ListVersionResponse struct {
+	Data []*VersionInfo `json:"data"`
 }
 
 // getMarketSource handles GET /api/v2/settings/market-source
@@ -298,4 +328,281 @@ func (s *Server) openApp(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to open application, status: %s, body: %s", response.Status, string(body))
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to open application", nil)
 	}
+}
+
+// getAppVersionHistoryHandler handles POST /api/v2/apps/version-history
+func getAppVersionHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	// Log
+	log.Println("POST /api/v2/apps/version-history - Getting app version history")
+
+	// Parse request body
+	var req struct {
+		AppName string `json:"appName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Invalid request body",
+		})
+		return
+	}
+	if req.AppName == "" {
+		log.Println("appName is empty")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "appName cannot be empty",
+		})
+		return
+	}
+
+	// Query version history
+	versionList, err := getAppVersionHistory(req.AppName)
+	if err != nil {
+		log.Printf("Failed to get version history: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Failed to get version history",
+		})
+		return
+	}
+
+	resp := ListVersionResponse{
+		Data: versionList,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Version history retrieved successfully",
+		"data":    resp,
+	})
+}
+
+// getAppVersionHistory queries app version history
+func getAppVersionHistory(appName string) ([]*VersionInfo, error) {
+	// Use appService address like getSystemStatus
+	appServiceHost := "127.0.0.1"
+	appServicePort := "8080"
+	if host := getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+		appServiceHost = host
+	}
+	if port := getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+		appServicePort = port
+	}
+
+	url := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/applications/version-history/" + appName
+	log.Printf("Requesting version history from %s", url)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Printf("Failed to request version history: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Version history API returned status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("version history api status: %d", resp.StatusCode)
+	}
+	var result ListVersionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("Failed to decode version history response: %v", err)
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// resumeApp handles POST /api/v2/apps/resume
+func (s *Server) resumeApp(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/apps/resume - Resuming application")
+
+	// Parse request body
+	var req ResumeAppRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	// Validate required fields
+	if req.AppName == "" {
+		log.Println("AppName is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "AppName cannot be empty", nil)
+		return
+	}
+
+	if req.Type == "" {
+		log.Println("Type is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "Type cannot be empty", nil)
+		return
+	}
+
+	if req.Type != "app" {
+		log.Printf("Unsupported type: %s, only 'app' type is supported", req.Type)
+		s.sendResponse(w, http.StatusBadRequest, false, "Only 'app' type is supported", nil)
+		return
+	}
+
+	// Get token from request
+	restfulReq := &restful.Request{Request: r}
+	token := utils.GetTokenFromRequest(restfulReq)
+	if token == "" {
+		log.Println("Access token not found")
+		s.sendResponse(w, http.StatusUnauthorized, false, "Access token not found", nil)
+		return
+	}
+
+	// Resume application by type
+	resBody, err := resumeByType(req.AppName, token, req.Type)
+	if err != nil {
+		log.Printf("Failed to resume %s type:%s resp:%s, err:%s", req.AppName, req.Type, resBody, err.Error())
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to resume application", nil)
+		return
+	}
+
+	log.Printf("Application resumed successfully: %s, type: %s", req.AppName, req.Type)
+	s.sendResponse(w, http.StatusOK, true, "Application resumed successfully", map[string]interface{}{
+		"appName": req.AppName,
+		"type":    req.Type,
+		"result":  resBody,
+	})
+}
+
+// resumeByType resumes application by type (copied from handler_suspend.go)
+func resumeByType(name, token, ty string) (string, error) {
+	// Get app service host and port
+	appServiceHost := "127.0.0.1"
+	appServicePort := "8080"
+	if host := os.Getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+		appServiceHost = host
+	}
+	if port := os.Getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+		appServicePort = port
+	}
+
+	// Only support app type
+	if ty != "app" {
+		return "", fmt.Errorf("%s type %s invalid, only 'app' type is supported", name, ty)
+	}
+
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/resume", appServiceHost, appServicePort, name)
+	return doPostWithToken(url, token)
+}
+
+// doPostWithToken performs POST request with token
+func doPostWithToken(url, token string) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	log.Printf("doPostWithToken: url=%s, token=%s", url, token)
+
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		log.Printf("doPostWithToken: failed to create request: %v", err)
+		return "", err
+	}
+
+	if token != "" {
+		req.Header.Set("X-Authorization", token)
+	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("doPostWithToken: request failed: %v", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("doPostWithToken: failed to read response body: %v", err)
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("doPostWithToken: response status: %d, body: %s", resp.StatusCode, string(body))
+		return string(body), fmt.Errorf("HTTP status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return string(body), nil
+}
+
+// stopApp handles POST /api/v2/apps/stop
+func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/apps/stop - Stopping application")
+
+	// Parse request body
+	var req StopAppRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	// Validate required fields
+	if req.AppName == "" {
+		log.Println("AppName is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "AppName cannot be empty", nil)
+		return
+	}
+
+	if req.Type == "" {
+		log.Println("Type is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "Type cannot be empty", nil)
+		return
+	}
+
+	if req.Type != "app" {
+		log.Printf("Unsupported type: %s, only 'app' type is supported", req.Type)
+		s.sendResponse(w, http.StatusBadRequest, false, "Only 'app' type is supported", nil)
+		return
+	}
+
+	// Get token from request
+	restfulReq := &restful.Request{Request: r}
+	token := utils.GetTokenFromRequest(restfulReq)
+	if token == "" {
+		log.Println("Access token not found")
+		s.sendResponse(w, http.StatusUnauthorized, false, "Access token not found", nil)
+		return
+	}
+
+	// Stop application by type
+	resBody, err := stopByType(req.AppName, token, req.Type)
+	if err != nil {
+		log.Printf("Failed to stop %s type:%s resp:%s, err:%s", req.AppName, req.Type, resBody, err.Error())
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to stop application", nil)
+		return
+	}
+
+	log.Printf("Application stopped successfully: %s, type: %s", req.AppName, req.Type)
+	s.sendResponse(w, http.StatusOK, true, "Application stopped successfully", map[string]interface{}{
+		"appName": req.AppName,
+		"type":    req.Type,
+		"result":  resBody,
+	})
+}
+
+// stopByType stops application by type (copied from handler_suspend.go suspendByType)
+func stopByType(name, token, ty string) (string, error) {
+	// Get app service host and port
+	appServiceHost := "127.0.0.1"
+	appServicePort := "8080"
+	if host := os.Getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+		appServiceHost = host
+	}
+	if port := os.Getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+		appServicePort = port
+	}
+
+	// Only support app type
+	if ty != "app" {
+		return "", fmt.Errorf("%s type %s invalid, only 'app' type is supported", name, ty)
+	}
+
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/suspend", appServiceHost, appServicePort, name)
+	return doPostWithToken(url, token)
 }
