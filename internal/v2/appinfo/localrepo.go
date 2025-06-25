@@ -546,7 +546,7 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 		return nil, fmt.Errorf("failed to render manifest: %w", err)
 	}
 
-	// Parse the rendered configuration
+	// Parse the rendered configuration - using the correct structure that matches OlaresManifest.yaml
 	var appCfg struct {
 		ConfigVersion string `yaml:"olaresManifest.version"`
 		ConfigType    string `yaml:"olaresManifest.type"`
@@ -595,9 +595,20 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 		return nil, fmt.Errorf("failed to parse rendered %s: %w", AppCfgFileName, err)
 	}
 
-	// Create ApplicationInfoEntry
+	// Validate required fields
+	if appCfg.Metadata.Name == "" {
+		return nil, fmt.Errorf("metadata.name is required")
+	}
+	if appCfg.Metadata.AppID == "" {
+		return nil, fmt.Errorf("metadata.appid is required")
+	}
+	if appCfg.Metadata.Version == "" {
+		return nil, fmt.Errorf("metadata.version is required")
+	}
+
+	// Create ApplicationInfoEntry with proper field mapping
 	appInfo := &types.ApplicationInfoEntry{
-		ID:                 appCfg.Metadata.AppID,
+		ID:                 appCfg.Metadata.AppID, // Use AppID as the primary ID
 		AppID:              appCfg.Metadata.AppID,
 		Name:               appCfg.Metadata.Name,
 		CfgType:            appCfg.ConfigType,
@@ -691,25 +702,15 @@ func (lr *LocalRepo) storeAppInfo(userID, sourceID string, appInfo *types.Applic
 		return fmt.Errorf("failed to create chart package: %w", err)
 	}
 
-	// Step 2: Create AppInfoLatestPendingData
-	appInfoLatestPendingData := &types.AppInfoLatestPendingData{
-		Type:       types.AppInfoLatestPending,
-		Timestamp:  time.Now().Unix(),
-		Version:    appInfo.Version,
-		RawData:    appInfo,
-		RawPackage: chartPackagePath, // Store the chart package path
-		Values:     make([]*types.Values, 0),
-		AppInfo: &types.AppInfo{
-			AppEntry:      appInfo,
-			ImageAnalysis: nil, // Will be filled later if needed
-		},
-		RenderedPackage: chartDir, // For local packages, use the chart directory
-	}
+	// Step 2: Convert ApplicationInfoEntry to map for cache storage
+	appDataMap := lr.convertApplicationInfoEntryToMap(appInfo)
 
-	// Step 3: Store in cache
-	if err := lr.cacheManager.SetAppData(userID, sourceID, types.AppInfoLatestPending, map[string]interface{}{
-		"app_info": appInfoLatestPendingData,
-	}); err != nil {
+	// Add the chart package path to the data
+	appDataMap["raw_package"] = chartPackagePath
+	appDataMap["rendered_package"] = chartDir
+
+	// Step 3: Store in cache - pass the app data directly, not wrapped in app_info
+	if err := lr.cacheManager.SetAppData(userID, sourceID, types.AppInfoLatestPending, appDataMap); err != nil {
 		return fmt.Errorf("failed to store app data in cache: %w", err)
 	}
 
