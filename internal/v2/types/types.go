@@ -385,6 +385,14 @@ type InstallOptions struct {
 	ChartPath string `json:"chart_path"`
 }
 
+// AppInfoUpdate represents the data structure for app info updates
+type AppInfoUpdate struct {
+	AppStateLatest *AppStateLatestData `json:"app_state_latest"`
+	AppInfoLatest  *AppInfoLatestData  `json:"app_info_latest"`
+	Timestamp      int64               `json:"timestamp"`
+	User           string              `json:"user"`
+}
+
 // NewCacheData creates a new cache data structure
 func NewCacheData() *CacheData {
 	return &CacheData{

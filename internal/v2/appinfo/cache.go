@@ -48,10 +48,13 @@ const (
 // NewCacheManager creates a new cache manager
 func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheManager {
 	// Initialize state monitor
-	stateMonitor, err := utils.NewStateMonitor()
+	dataSender, err := NewDataSender()
+	var stateMonitor *utils.StateMonitor
 	if err != nil {
-		glog.Warningf("Failed to initialize state monitor: %v", err)
+		glog.Warningf("Failed to initialize DataSender for state monitor: %v", err)
 		// Continue without state monitor
+	} else {
+		stateMonitor = utils.NewStateMonitor(dataSender)
 	}
 
 	return &CacheManager{

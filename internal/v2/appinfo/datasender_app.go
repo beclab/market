@@ -8,17 +8,10 @@ import (
 	"time"
 
 	"market/internal/v2/types"
+	"market/internal/v2/utils"
 
 	"github.com/nats-io/nats.go"
 )
-
-// AppInfoUpdate represents the data structure for app info updates
-type AppInfoUpdate struct {
-	AppStateLatest *types.AppStateLatestData `json:"app_state_latest"`
-	AppInfoLatest  *types.AppInfoLatestData  `json:"app_info_latest"`
-	Timestamp      int64                     `json:"timestamp"`
-	User           string                    `json:"user"`
-}
 
 // DataSender handles NATS communication for app info updates
 type DataSender struct {
@@ -79,16 +72,16 @@ func NewDataSender() (*DataSender, error) {
 // loadConfig loads NATS configuration from environment variables
 func loadConfig() Config {
 	return Config{
-		Host:     getEnvOrDefault("NATS_HOST", "localhost"),
-		Port:     getEnvOrDefault("NATS_PORT", "4222"),
-		Username: getEnvOrDefault("NATS_USERNAME", ""),
-		Password: getEnvOrDefault("NATS_PASSWORD", ""),
-		Subject:  getEnvOrDefault("NATS_SUBJECT_SYSTEM_MARKET_STATE", "os.market"),
+		Host:     utils.GetEnvOrDefault("NATS_HOST", "localhost"),
+		Port:     utils.GetEnvOrDefault("NATS_PORT", "4222"),
+		Username: utils.GetEnvOrDefault("NATS_USERNAME", ""),
+		Password: utils.GetEnvOrDefault("NATS_PASSWORD", ""),
+		Subject:  utils.GetEnvOrDefault("NATS_SUBJECT_SYSTEM_MARKET_STATE", "os.market"),
 	}
 }
 
 // SendAppInfoUpdate sends app info update to NATS
-func (ds *DataSender) SendAppInfoUpdate(update AppInfoUpdate) error {
+func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
 	if !ds.enabled {
 		log.Println("NATS data sender is disabled, skipping message send")
 		return nil
