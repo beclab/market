@@ -38,10 +38,12 @@ type AppServiceResponse struct {
 		StatusTime         string `json:"statusTime"`
 		LastTransitionTime string `json:"lastTransitionTime"`
 		EntranceStatuses   []struct {
+			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 			Name       string `json:"name"`
 			State      string `json:"state"`
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
+			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }
@@ -56,10 +58,12 @@ type AppInfo struct {
 		StatusTime         string `json:"statusTime"`
 		LastTransitionTime string `json:"lastTransitionTime"`
 		EntranceStatuses   []struct {
+			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 			Name       string `json:"name"`
 			State      string `json:"state"`
 			StatusTime string `json:"statusTime"`
 			Reason     string `json:"reason"`
+			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
 	} `json:"status"`
 }

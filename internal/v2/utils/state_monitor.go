@@ -132,6 +132,7 @@ func (sm *StateMonitor) hasStateChanged(
 // compareEntranceStatuses compares two arrays of entrance statuses
 func (sm *StateMonitor) compareEntranceStatuses(
 	newStatuses []struct {
+		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 		Name       string `json:"name"`
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
@@ -139,6 +140,7 @@ func (sm *StateMonitor) compareEntranceStatuses(
 		Url        string `json:"url"`
 	},
 	existingStatuses []struct {
+		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 		Name       string `json:"name"`
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
