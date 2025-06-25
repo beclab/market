@@ -51,6 +51,15 @@ func (sm *SettingsManager) initializeMarketSources() error {
 		log.Printf("Loaded Official Market Sources from environment")
 	} else {
 		log.Printf("Loaded market sources from Redis: %d sources", len(config.Sources))
+
+		// Merge default configuration with existing Redis configuration
+		// This ensures new default sources (like "local") are added to existing config
+		config = sm.mergeWithDefaultConfig(config)
+
+		// Save merged config back to Redis if there were changes
+		if err := sm.saveMarketSourcesToRedis(config); err != nil {
+			log.Printf("Failed to save merged market sources to Redis: %v", err)
+		}
 	}
 
 	// Set in memory
@@ -439,4 +448,48 @@ func (sm *SettingsManager) saveAPIEndpointsToRedis(config *APIEndpointsConfig) e
 	}
 
 	return sm.redisClient.Set(RedisKeyAPIEndpoints, string(data), 0)
+}
+
+// mergeWithDefaultConfig merges a default configuration with an existing configuration
+func (sm *SettingsManager) mergeWithDefaultConfig(config *MarketSourcesConfig) *MarketSourcesConfig {
+	defaultConfig := sm.createDefaultMarketSources()
+
+	log.Printf("Merging default configuration with existing Redis configuration")
+	log.Printf("Existing sources: %d, Default sources: %d", len(config.Sources), len(defaultConfig.Sources))
+
+	// Create a map of existing source IDs for quick lookup
+	existingSourceIDs := make(map[string]bool)
+	for _, existingSource := range config.Sources {
+		existingSourceIDs[existingSource.ID] = true
+		log.Printf("Existing source: %s (%s)", existingSource.Name, existingSource.ID)
+	}
+
+	// Add default sources that don't exist in the current configuration
+	addedSources := 0
+	for _, defaultSource := range defaultConfig.Sources {
+		if !existingSourceIDs[defaultSource.ID] {
+			log.Printf("Adding new default source: %s (%s)", defaultSource.Name, defaultSource.ID)
+			config.Sources = append(config.Sources, defaultSource)
+			addedSources++
+		} else {
+			log.Printf("Default source already exists: %s (%s)", defaultSource.Name, defaultSource.ID)
+		}
+	}
+
+	if addedSources > 0 {
+		log.Printf("Added %d new sources to existing configuration", addedSources)
+		config.UpdatedAt = time.Now()
+	} else {
+		log.Printf("No new sources to add, existing configuration is up to date")
+	}
+
+	// Ensure default source is set
+	if config.DefaultSource == "" {
+		log.Printf("Setting default source to: %s", defaultConfig.DefaultSource)
+		config.DefaultSource = defaultConfig.DefaultSource
+		config.UpdatedAt = time.Now()
+	}
+
+	log.Printf("Final configuration has %d sources", len(config.Sources))
+	return config
 }
