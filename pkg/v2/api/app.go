@@ -7,8 +7,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
+	"market/internal/v2/appinfo"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -360,10 +362,93 @@ func (s *Server) updateAppConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 	log.Println("POST /api/v2/apps/upload - Uploading app package")
 
-	// TODO: Implement business logic for uploading app package
-	// Handle multipart form data for file upload
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for upload request: %s", userID)
 
-	s.sendResponse(w, http.StatusOK, true, "App package uploaded successfully", nil)
+	// Step 2: Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Printf("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Step 3: Parse multipart form data
+	if err := r.ParseMultipartForm(32 << 20); err != nil { // 32MB max
+		log.Printf("Failed to parse multipart form: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to parse form data", nil)
+		return
+	}
+
+	// Step 4: Get uploaded file
+	file, header, err := r.FormFile("chart")
+	if err != nil {
+		log.Printf("Failed to get uploaded file: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "No chart file found in request", nil)
+		return
+	}
+	defer file.Close()
+
+	// Step 5: Validate file
+	if header == nil {
+		log.Printf("File header is nil")
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid file header", nil)
+		return
+	}
+
+	// Check file size (max 100MB)
+	if header.Size > 100<<20 {
+		log.Printf("File too large: %d bytes", header.Size)
+		s.sendResponse(w, http.StatusBadRequest, false, "File too large (max 100MB)", nil)
+		return
+	}
+
+	// Check file extension
+	filename := header.Filename
+	if !strings.HasSuffix(strings.ToLower(filename), ".tgz") &&
+		!strings.HasSuffix(strings.ToLower(filename), ".tar.gz") {
+		log.Printf("Invalid file extension: %s", filename)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid file format (must be .tgz or .tar.gz)", nil)
+		return
+	}
+
+	// Step 6: Read file content
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("Failed to read file content: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to read file content", nil)
+		return
+	}
+
+	// Step 7: Get source ID from form or use default
+	sourceID := r.FormValue("source")
+	if sourceID == "" {
+		sourceID = "local" // Default source for uploaded packages
+	}
+
+	// Step 8: Get token for validation
+	token := utils.GetTokenFromRequest(restfulReq)
+
+	// Step 9: Process the uploaded package using LocalRepo
+	localRepo := appinfo.NewLocalRepo(s.cacheManager)
+	if err := localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token); err != nil {
+		log.Printf("Failed to process uploaded package: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, fmt.Sprintf("Failed to process package: %v", err), nil)
+		return
+	}
+
+	log.Printf("Successfully uploaded and processed chart package: %s for user: %s", filename, userID)
+	s.sendResponse(w, http.StatusOK, true, "App package uploaded and processed successfully", map[string]interface{}{
+		"filename": filename,
+		"source":   sourceID,
+		"user_id":  userID,
+	})
 }
 
 // extractAppDataFromPending extracts app data from the new AppInfoLatestPendingData structure

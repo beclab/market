@@ -93,6 +93,11 @@ func (s *SourceChartStep) Execute(ctx context.Context, task *HydrationTask) erro
 	log.Printf("Executing source chart step for app: %s (user: %s, source: %s)",
 		task.AppID, task.UserID, task.SourceID)
 
+	// Check if this is a local source
+	if s.isLocalSource(task) {
+		return s.handleLocalSource(ctx, task)
+	}
+
 	// Extract chart information from app data
 	chartInfo, err := s.extractChartInfo(task.AppData)
 	if err != nil {
@@ -424,4 +429,93 @@ func (s *SourceChartStep) isTaskForPendingData(task *HydrationTask, pendingData 
 	}
 
 	return false
+}
+
+// isLocalSource checks if the task is for a local source
+func (s *SourceChartStep) isLocalSource(task *HydrationTask) bool {
+	// Check if the source ID indicates a local source
+	// Local sources typically have specific naming patterns or are marked as local
+	if task.SourceID == "local" || strings.HasPrefix(task.SourceID, "local_") {
+		return true
+	}
+
+	// Check if the task has local source indicators in the data
+	if task.AppData != nil {
+		if sourceType, ok := task.AppData["source_type"].(string); ok && sourceType == "local" {
+			return true
+		}
+		if isLocal, ok := task.AppData["is_local"].(bool); ok && isLocal {
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleLocalSource handles chart verification for local sources
+func (s *SourceChartStep) handleLocalSource(ctx context.Context, task *HydrationTask) error {
+	log.Printf("Handling local source for app: %s (user: %s, source: %s)", task.AppID, task.UserID, task.SourceID)
+
+	// Extract chart information from app data
+	chartInfo, err := s.extractChartInfo(task.AppData)
+	if err != nil {
+		return fmt.Errorf("failed to extract chart info: %w", err)
+	}
+
+	// Store chart info in task data
+	task.ChartData["source_info"] = chartInfo
+
+	// Get CHART_ROOT environment variable
+	chartRoot := os.Getenv("CHART_ROOT")
+	if chartRoot == "" {
+		return fmt.Errorf("CHART_ROOT environment variable is not set")
+	}
+
+	// Extract chart details for filename
+	chartName := ""
+	chartVersion := ""
+
+	if name, ok := chartInfo["chart_name"].(string); ok {
+		chartName = name
+	} else if name, ok := chartInfo["name"].(string); ok {
+		chartName = name
+	}
+
+	if version, ok := chartInfo["chart_version"].(string); ok {
+		chartVersion = version
+	} else if version, ok := chartInfo["version"].(string); ok {
+		chartVersion = version
+	}
+
+	if chartName == "" || chartVersion == "" {
+		return fmt.Errorf("missing required chart information for local source: name=%s, version=%s", chartName, chartVersion)
+	}
+
+	// Build local file path: CHART_ROOT/sourceID/appName-appVersion.tgz
+	chartFileName := fmt.Sprintf("%s-%s.tgz", chartName, chartVersion)
+	localChartPath := filepath.Join(chartRoot, task.SourceID, chartFileName)
+
+	// Check if local chart file exists
+	if _, err := os.Stat(localChartPath); err == nil {
+		log.Printf("Local chart file exists: %s", localChartPath)
+		// Convert to absolute path before creating file:// URL
+		absLocalChartPath, err := filepath.Abs(localChartPath)
+		if err != nil {
+			return fmt.Errorf("failed to convert chart path to absolute path: %w", err)
+		}
+		task.SourceChartURL = "file://" + absLocalChartPath
+		task.ChartData["local_path"] = localChartPath
+
+		// Update AppInfoLatestPendingData with source chart path
+		if err := s.updatePendingDataRawPackage(task, localChartPath); err != nil {
+			log.Printf("Warning: failed to update pending data raw package: %v", err)
+		}
+
+		log.Printf("Local source chart verification successful for app: %s", task.AppID)
+		return nil
+	}
+
+	// Chart file doesn't exist for local source - this is a failure
+	log.Printf("Local chart file not found: %s", localChartPath)
+	return fmt.Errorf("local chart file not found: %s", localChartPath)
 }
