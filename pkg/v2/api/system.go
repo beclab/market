@@ -506,6 +506,8 @@ func doPostWithToken(url, token string) (string, error) {
 	if token != "" {
 		req.Header.Set("X-Authorization", token)
 	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
