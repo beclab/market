@@ -488,7 +488,7 @@ func resumeByType(name, token, ty string) (string, error) {
 		return "", fmt.Errorf("%s type %s invalid, only 'app' type is supported", name, ty)
 	}
 
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/applications/%s/resume", appServiceHost, appServicePort, name)
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/resume", appServiceHost, appServicePort, name)
 	return doPostWithToken(url, token)
 }
 
@@ -601,6 +601,6 @@ func stopByType(name, token, ty string) (string, error) {
 		return "", fmt.Errorf("%s type %s invalid, only 'app' type is supported", name, ty)
 	}
 
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/applications/%s/suspend", appServiceHost, appServicePort, name)
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/suspend", appServiceHost, appServicePort, name)
 	return doPostWithToken(url, token)
 }
