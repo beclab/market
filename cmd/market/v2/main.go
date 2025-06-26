@@ -204,6 +204,10 @@ func main() {
 	taskModule.SetHistoryModule(historyModule)
 	log.Println("Task module started successfully")
 
+	// Set task module reference in AppInfo module
+	appInfoModule.SetTaskModule(taskModule)
+	log.Println("Task module reference set in AppInfo module")
+
 	// 4. Initialize Helm Repository Service
 	// Start Helm Repository server in a goroutine
 	go func() {

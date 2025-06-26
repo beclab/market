@@ -1186,3 +1186,18 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 
 	return report
 }
+
+// SetTaskModule sets the task module reference
+func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.taskModule = taskModule
+	glog.Infof("Task module reference set in AppInfo module")
+}
+
+// GetTaskModule returns the task module instance
+func (m *AppInfoModule) GetTaskModule() *task.TaskModule {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.taskModule
+}
