@@ -826,6 +826,13 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{})
 		enhancedData[k] = v
 	}
 
+	// Add debug logging for input data
+	if entranceStatusesVal, ok := data["entranceStatuses"]; ok {
+		glog.Infof("DEBUG: enhanceAppStateDataWithUrls - input entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
+	} else {
+		glog.Infof("DEBUG: enhanceAppStateDataWithUrls - no entranceStatuses found in input data")
+	}
+
 	// Extract app name for URL fetching
 	var appName string
 	if name, ok := data["name"].(string); ok && name != "" {
@@ -906,6 +913,11 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{})
 		} else {
 			enhancedData["entranceStatuses"] = entranceStatuses
 		}
+	}
+
+	// Add debug logging for output data
+	if entranceStatusesVal, ok := enhancedData["entranceStatuses"]; ok {
+		glog.Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 	}
 
 	return enhancedData
