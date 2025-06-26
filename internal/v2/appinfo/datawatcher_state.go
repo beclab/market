@@ -35,6 +35,7 @@ type AppStateMessage struct {
 	OpType           string           `json:"opType"`
 	State            string           `json:"state"`
 	User             string           `json:"user"`
+	Progress         string           `json:"progress"`
 	EntranceStatuses []EntranceStatus `json:"entranceStatuses"`
 }
 
@@ -197,6 +198,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 	states := []string{"running", "stopped", "starting", "stopping", "error", "downloading"}
 	opTypes := []string{"install", "uninstall", "update", "restart", "start", "stop", "cancel"}
 	users := []string{"admin", "user1", "user2", "olaresid"}
+	progressValues := []string{"0%", "25%", "50%", "75%", "100%", "downloading...", "installing...", "updating..."}
 
 	// Create sample entrance statuses
 	entranceStatuses := []EntranceStatus{
@@ -226,6 +228,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 		OpType:           opTypes[rand.Intn(len(opTypes))],
 		State:            states[rand.Intn(len(states))],
 		User:             users[rand.Intn(len(users))],
+		Progress:         progressValues[rand.Intn(len(progressValues))],
 		EntranceStatuses: entranceStatuses,
 	}
 
@@ -282,6 +285,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		"updateTime":         "",
 		"statusTime":         msg.CreateTime,
 		"lastTransitionTime": "",
+		"progress":           msg.Progress,
 		"entranceStatuses":   msg.EntranceStatuses,
 		"name":               msg.Name, // Add app name for state monitoring
 	}
@@ -334,6 +338,7 @@ func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	log.Printf("Create Time: %s", msg.CreateTime)
 	log.Printf("Name: %s", msg.Name)
 	log.Printf("State: %s", msg.State)
+	log.Printf("Progress: %s", msg.Progress)
 	log.Printf("Operation Type: %s", msg.OpType)
 	log.Printf("Operation ID: %s", msg.OpID)
 	log.Printf("User: %s", msg.User)

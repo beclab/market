@@ -125,6 +125,7 @@ type AppStateLatestData struct {
 		UpdateTime         string `json:"updateTime"`
 		StatusTime         string `json:"statusTime"`
 		LastTransitionTime string `json:"lastTransitionTime"`
+		Progress           string `json:"progress"`
 		EntranceStatuses   []struct {
 			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 			Name       string `json:"name"`
@@ -473,7 +474,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 // NewAppStateLatestData creates a new app state latest data structure
 func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 	// Extract status information from data
-	var name, state, updateTime, statusTime, lastTransitionTime string
+	var name, state, updateTime, statusTime, lastTransitionTime, progress string
 	var entranceStatuses []struct {
 		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 		Name       string `json:"name"`
@@ -513,6 +514,9 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 	}
 	if lastTransitionTimeVal, ok := data["lastTransitionTime"].(string); ok {
 		lastTransitionTime = lastTransitionTimeVal
+	}
+	if progressVal, ok := data["progress"].(string); ok {
+		progress = progressVal
 	}
 
 	if entranceStatusesVal, ok := data["entranceStatuses"].([]interface{}); ok {
@@ -565,6 +569,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 			UpdateTime         string `json:"updateTime"`
 			StatusTime         string `json:"statusTime"`
 			LastTransitionTime string `json:"lastTransitionTime"`
+			Progress           string `json:"progress"`
 			EntranceStatuses   []struct {
 				ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 				Name       string `json:"name"`
@@ -580,6 +585,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 			UpdateTime:         updateTime,
 			StatusTime:         statusTime,
 			LastTransitionTime: lastTransitionTime,
+			Progress:           progress,
 			EntranceStatuses:   entranceStatuses,
 		},
 	}
