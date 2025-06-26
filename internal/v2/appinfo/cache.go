@@ -847,68 +847,65 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{})
 	if entranceStatusesVal, ok := data["entranceStatuses"].([]interface{}); ok {
 		entranceStatuses := make([]interface{}, 0, len(entranceStatusesVal))
 		needsUrlEnhancement := false
-		hasEmptyUrl := false
+		hasRunningWithEmptyUrl := false
 
-		// First pass: check if any entrance is missing URL
+		// First pass: check if any running entrance is missing URL and collect all entrances
 		for _, entrance := range entranceStatusesVal {
 			if entranceMap, ok := entrance.(map[string]interface{}); ok {
-				if url, ok := entranceMap["url"].(string); !ok || url == "" {
+				state, _ := entranceMap["state"].(string)
+				url, hasUrl := entranceMap["url"].(string)
+
+				// Only require URL for running entrances
+				if state == "running" && (!hasUrl || url == "") {
 					needsUrlEnhancement = true
-					hasEmptyUrl = true
-					break // If any entrance has empty URL, mark the whole entry as invalid
+					hasRunningWithEmptyUrl = true
+					glog.V(2).Infof("Running entrance %s has empty URL for app %s", entranceMap["name"], appName)
 				}
-				// Only add entrances with valid URLs
+
+				// Keep all entrances regardless of URL status (for now)
 				entranceStatuses = append(entranceStatuses, entrance)
 			}
 		}
 
-		// If any entrance has empty URL, return empty entrance statuses
-		if hasEmptyUrl {
-			glog.V(2).Infof("App state data has entrance with empty URL for app %s - returning empty entrance statuses", appName)
+		// If any running entrance has empty URL, return empty entrance statuses
+		if hasRunningWithEmptyUrl {
+			glog.V(2).Infof("App state data has running entrance with empty URL for app %s - returning empty entrance statuses", appName)
 			enhancedData["entranceStatuses"] = []interface{}{}
 			return enhancedData
 		}
 
-		// If URLs are missing but no empty URLs found, fetch them from app-service
+		// If URLs are missing for non-running entrances, try to fetch them from app-service
 		if needsUrlEnhancement {
 			glog.Infof("Some entrance URLs are missing for app %s, fetching from app-service", appName)
 
 			entranceUrls, err := utils.FetchAppEntranceUrls(appName)
 			if err != nil {
 				glog.Warningf("Failed to fetch entrance URLs for app %s: %v", appName, err)
-				// If we can't fetch URLs, return empty entrance statuses
-				enhancedData["entranceStatuses"] = []interface{}{}
+				// Keep original entrance statuses even if URL fetch fails
+				enhancedData["entranceStatuses"] = entranceStatuses
 				return enhancedData
 			}
 
 			// Re-process entrance statuses with fetched URLs
-			entranceStatuses = make([]interface{}, 0, len(entranceStatusesVal))
-			hasEmptyUrlAfterFetch := false
+			enhancedEntranceStatuses := make([]interface{}, 0, len(entranceStatusesVal))
 			for _, entrance := range entranceStatusesVal {
 				if entranceMap, ok := entrance.(map[string]interface{}); ok {
 					if entranceName, ok := entranceMap["name"].(string); ok {
 						if url, exists := entranceUrls[entranceName]; exists && url != "" {
 							entranceMap["url"] = url
-							entranceStatuses = append(entranceStatuses, entranceMap)
 							glog.V(2).Infof("Enhanced entrance %s with URL: %s", entranceName, url)
 						} else {
-							hasEmptyUrlAfterFetch = true
-							glog.V(2).Infof("Entrance %s has missing or empty URL after fetch", entranceName)
-							break // If any entrance has empty URL after fetch, mark the whole entry as invalid
+							glog.V(2).Infof("Entrance %s has missing or empty URL after fetch, keeping original", entranceName)
 						}
 					}
+					enhancedEntranceStatuses = append(enhancedEntranceStatuses, entranceMap)
 				}
 			}
 
-			// If any entrance has empty URL after fetch, return empty entrance statuses
-			if hasEmptyUrlAfterFetch {
-				glog.V(2).Infof("App state data has entrance with empty URL after fetch for app %s - returning empty entrance statuses", appName)
-				enhancedData["entranceStatuses"] = []interface{}{}
-				return enhancedData
-			}
+			enhancedData["entranceStatuses"] = enhancedEntranceStatuses
+		} else {
+			enhancedData["entranceStatuses"] = entranceStatuses
 		}
-
-		enhancedData["entranceStatuses"] = entranceStatuses
 	}
 
 	return enhancedData
