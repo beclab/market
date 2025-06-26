@@ -191,6 +191,13 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 
 // executeSyncCycleWithSource executes sync cycle with a specific market source
 func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *settings.MarketSource) error {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in executeSyncCycleWithSource: %v", r)
+		}
+	}()
+
 	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.Name)
 
 	syncContext := syncerfn.NewSyncContext(s.cache)
@@ -203,24 +210,51 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 	// Set the current market source in sync context
 	syncContext.SetMarketSource(source)
 
+	// Create a timeout context for the entire sync cycle
+	syncCtx, cancel := context.WithTimeout(ctx, 10*time.Minute) // 10 minute timeout for entire sync
+	defer cancel()
+
 	steps := s.GetSteps()
 	for i, step := range steps {
 		log.Printf("======== SYNC STEP %d/%d STARTED: %s ========", i+1, len(steps), step.GetStepName())
 		stepStartTime := time.Now()
 
 		// Check if step can be skipped
-		if step.CanSkip(ctx, syncContext) {
+		if step.CanSkip(syncCtx, syncContext) {
 			log.Printf("Skipping step %d: %s", i+1, step.GetStepName())
 			log.Printf("======== SYNC STEP %d/%d SKIPPED: %s ========", i+1, len(steps), step.GetStepName())
 			continue
 		}
 
-		// Execute step
-		if err := step.Execute(ctx, syncContext); err != nil {
-			log.Printf("Step %d (%s) failed: %v", i+1, step.GetStepName(), err)
-			log.Printf("======== SYNC STEP %d/%d FAILED: %s ========", i+1, len(steps), step.GetStepName())
-			log.Printf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.Name)
-			return fmt.Errorf("step %d failed: %w", i+1, err)
+		// Execute step with timeout check
+		stepErr := make(chan error, 1)
+		go func() {
+			stepErr <- step.Execute(syncCtx, syncContext)
+		}()
+
+		// Wait for step completion or timeout with progress monitoring
+		stepTimeout := 15 * time.Minute // 15 minute timeout per step
+		stepTimer := time.NewTimer(stepTimeout)
+		defer stepTimer.Stop()
+
+		select {
+		case err := <-stepErr:
+			if err != nil {
+				log.Printf("Step %d (%s) failed: %v", i+1, step.GetStepName(), err)
+				log.Printf("======== SYNC STEP %d/%d FAILED: %s ========", i+1, len(steps), step.GetStepName())
+				log.Printf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.Name)
+				return fmt.Errorf("step %d failed: %w", i+1, err)
+			}
+		case <-stepTimer.C:
+			log.Printf("Step %d (%s) timed out after %v", i+1, step.GetStepName(), stepTimeout)
+			log.Printf("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())
+			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.Name)
+			return fmt.Errorf("step %d timed out after %v", i+1, stepTimeout)
+		case <-syncCtx.Done():
+			log.Printf("Step %d (%s) timed out or context cancelled", i+1, step.GetStepName())
+			log.Printf("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())
+			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.Name)
+			return fmt.Errorf("step %d timed out: %w", i+1, syncCtx.Err())
 		}
 
 		stepDuration := time.Since(stepStartTime)

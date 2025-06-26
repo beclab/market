@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/history"
+	"market/internal/v2/task"
 	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
@@ -29,6 +31,8 @@ type AppInfoModule struct {
 	cancel           context.CancelFunc
 	mutex            sync.RWMutex
 	isStarted        bool
+	taskModule       *task.TaskModule
+	historyModule    *history.HistoryModule
 }
 
 // ModuleConfig holds configuration for the AppInfo module
@@ -496,8 +500,8 @@ func (m *AppInfoModule) initDataWatcher() error {
 func (m *AppInfoModule) initDataWatcherState() error {
 	glog.Infof("Initializing DataWatcherState...")
 
-	// Create DataWatcherState instance with cache manager
-	m.dataWatcherState = NewDataWatcherState(m.cacheManager)
+	// Create DataWatcherState instance with cache manager and task module
+	m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule)
 
 	// Start DataWatcherState
 	if err := m.dataWatcherState.Start(); err != nil {
@@ -1183,4 +1187,47 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 	report["totals"].(map[string]int)["total_invalid_data"] = totalInvalidData
 
 	return report
+}
+
+// SetTaskModule sets the task module for recording task events
+func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.taskModule = taskModule
+	glog.Infof("Task module reference set in AppInfo module")
+
+	// Re-initialize DataWatcherState if it exists and module is started
+	if m.isStarted && m.dataWatcherState != nil {
+		glog.Infof("Re-initializing DataWatcherState with task module")
+
+		// Stop existing DataWatcherState
+		if err := m.dataWatcherState.Stop(); err != nil {
+			glog.Errorf("Failed to stop existing DataWatcherState: %v", err)
+		}
+
+		// Create new DataWatcherState with task module
+		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule)
+
+		// Start new DataWatcherState
+		if err := m.dataWatcherState.Start(); err != nil {
+			glog.Errorf("Failed to start new DataWatcherState: %v", err)
+		} else {
+			glog.Infof("DataWatcherState re-initialized successfully with task module")
+		}
+	}
+}
+
+// SetHistoryModule sets the history module reference
+func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.historyModule = historyModule
+	glog.Infof("History module reference set in AppInfo module")
+}
+
+// GetTaskModule returns the task module instance
+func (m *AppInfoModule) GetTaskModule() *task.TaskModule {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.taskModule
 }

@@ -25,19 +25,11 @@ type Server struct {
 }
 
 // NewServer creates a new server instance
-func NewServer(port string, cacheManager *appinfo.CacheManager) *Server {
+func NewServer(port string, cacheManager *appinfo.CacheManager, taskModule *task.TaskModule, historyModule *history.HistoryModule) *Server {
 	log.Printf("Creating new server instance with port: %s", port)
 	log.Printf("Cache manager provided: %v", cacheManager != nil)
-
-	// Initialize history module
-	log.Printf("Initializing history module...")
-	historyModule, err := history.NewHistoryModule()
-	if err != nil {
-		log.Printf("Warning: Failed to initialize history module: %v", err)
-		// Continue without history module, but log the error
-	} else {
-		log.Printf("History module initialized successfully")
-	}
+	log.Printf("Task module provided: %v", taskModule != nil)
+	log.Printf("History module provided: %v", historyModule != nil)
 
 	log.Printf("Creating router...")
 	s := &Server{
@@ -45,15 +37,7 @@ func NewServer(port string, cacheManager *appinfo.CacheManager) *Server {
 		port:          port,
 		cacheManager:  cacheManager,
 		historyModule: historyModule,
-		taskModule:    task.NewTaskModule(),
-	}
-
-	// Set history module reference for task recording
-	if historyModule != nil {
-		s.taskModule.SetHistoryModule(historyModule)
-		log.Printf("History module reference set for task module")
-	} else {
-		log.Printf("Warning: History module is nil, task history recording will be skipped")
+		taskModule:    taskModule,
 	}
 
 	log.Printf("Server struct created successfully")

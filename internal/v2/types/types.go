@@ -215,11 +215,24 @@ type ApplicationInfoEntry struct {
 
 	Variants map[string]interface{} `json:"variants,omitempty"` // Using interface{} for flexibility
 
+	// Version history information
+	VersionHistory []*VersionInfo `json:"versionHistory,omitempty"`
+
 	// Legacy fields for backward compatibility
 	Screenshots []string               `json:"screenshots"`
 	Tags        []string               `json:"tags"`
 	Metadata    map[string]interface{} `json:"metadata"`
 	UpdatedAt   string                 `json:"updated_at"`
+}
+
+// VersionInfo represents version information from gitbot
+type VersionInfo struct {
+	ID                 string     `json:"-" bson:"_id,omitempty"`
+	AppName            string     `json:"appName" bson:"appName"`
+	Version            string     `json:"version" bson:"version"`
+	VersionName        string     `json:"versionName" bson:"versionName"`
+	MergedAt           *time.Time `json:"mergedAt" bson:"mergedAt"`
+	UpgradeDescription string     `json:"upgradeDescription" bson:"upgradeDescription"`
 }
 
 // AppInfo represents complete app information including analysis result
@@ -391,6 +404,9 @@ type AppInfoUpdate struct {
 	AppInfoLatest  *AppInfoLatestData  `json:"app_info_latest"`
 	Timestamp      int64               `json:"timestamp"`
 	User           string              `json:"user"`
+	AppName        string              `json:"app_name"`    // App name
+	NotifyType     string              `json:"notify_type"` // Notify type
+	Source         string              `json:"source"`      // Source
 }
 
 // NewCacheData creates a new cache data structure
@@ -1135,6 +1151,36 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 		}
 	}
 
+	// Version history information
+	if val, ok := sourceData["versionHistory"].([]interface{}); ok {
+		entry.VersionHistory = make([]*VersionInfo, len(val))
+		for i, versionInfo := range val {
+			if versionInfoMap, ok := versionInfo.(map[string]interface{}); ok {
+				versionInfo := &VersionInfo{}
+
+				if appName, ok := versionInfoMap["appName"].(string); ok {
+					versionInfo.AppName = appName
+				}
+				if version, ok := versionInfoMap["version"].(string); ok {
+					versionInfo.Version = version
+				}
+				if versionName, ok := versionInfoMap["versionName"].(string); ok {
+					versionInfo.VersionName = versionName
+				}
+				if upgradeDescription, ok := versionInfoMap["upgradeDescription"].(string); ok {
+					versionInfo.UpgradeDescription = upgradeDescription
+				}
+				if mergedAt, ok := versionInfoMap["mergedAt"].(string); ok && mergedAt != "" {
+					if parsedTime, err := time.Parse(time.RFC3339, mergedAt); err == nil {
+						versionInfo.MergedAt = &parsedTime
+					}
+				}
+
+				entry.VersionHistory[i] = versionInfo
+			}
+		}
+	}
+
 	// Handle legacy field names for backward compatibility
 	if val, ok := sourceData["app_id"].(string); ok && val != "" && entry.AppID == "" {
 		entry.AppID = val
@@ -1291,6 +1337,9 @@ func ValidateApplicationInfoEntryFields(entry *ApplicationInfoEntry) map[string]
 	validation["entrances"] = entry.Entrances
 	validation["license"] = entry.License
 	validation["legal"] = entry.Legal
+
+	// Check version history
+	validation["versionHistory"] = entry.VersionHistory
 
 	return validation
 }

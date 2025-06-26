@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"market/internal/v2/history" // Import history module with correct path
+	"market/internal/v2/task"
 
 	"github.com/nats-io/nats.go"
 )
@@ -51,18 +52,12 @@ type DataWatcherState struct {
 	subject       string
 	historyModule *history.HistoryModule // Add history module
 	cacheManager  *CacheManager          // Add cache manager reference
+	taskModule    *task.TaskModule       // Add task module reference
 }
 
 // NewDataWatcherState creates a new DataWatcherState instance
-func NewDataWatcherState(cacheManager *CacheManager) *DataWatcherState {
+func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule, historyModule *history.HistoryModule) *DataWatcherState {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	// Initialize history module
-	historyModule, err := history.NewHistoryModule()
-	if err != nil {
-		log.Printf("Warning: Failed to initialize history module: %v", err)
-		// Continue without history module
-	}
 
 	dw := &DataWatcherState{
 		ctx:           ctx,
@@ -75,6 +70,7 @@ func NewDataWatcherState(cacheManager *CacheManager) *DataWatcherState {
 		subject:       getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
 		historyModule: historyModule,
 		cacheManager:  cacheManager, // Set cache manager reference
+		taskModule:    taskModule,   // Set task module reference
 	}
 
 	return dw
@@ -275,14 +271,12 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		return
 	}
 
-	// Check if user exists and is valid
 	userID := msg.User
 	if userID == "" {
 		log.Printf("User ID is empty, skipping cache storage for app %s", msg.Name)
 		return
 	}
 
-	// Convert AppStateMessage to map[string]interface{} for cache storage
 	stateData := map[string]interface{}{
 		"state":              msg.State,
 		"updateTime":         "",
@@ -292,10 +286,39 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		"name":               msg.Name, // Add app name for state monitoring
 	}
 
-	// Use "Official-Market-Sources" as source ID for system app state data
-	sourceID := "Official-Market-Sources"
+	sourceID := ""
 
-	// Store to cache using AppStateLatest data type
+	userData := dw.cacheManager.GetUserData(userID)
+	if userData != nil {
+		for srcID, srcData := range userData.Sources {
+			if srcData == nil || srcData.AppStateLatest == nil {
+				continue
+			}
+			for _, appState := range srcData.AppStateLatest {
+				if appState != nil && appState.Status.Name == msg.Name {
+					sourceID = srcID
+					break
+				}
+			}
+			if sourceID != "" {
+				break
+			}
+		}
+	}
+
+	if sourceID == "" && dw.taskModule != nil {
+		_, src, found := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
+		if found && src != "" {
+			sourceID = src
+			log.Printf("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
+		}
+	}
+
+	if sourceID == "" {
+		log.Printf("[ERROR] Cannot determine sourceID for app state: user=%s, app=%s, state=%s. Ignore this message.", userID, msg.Name, msg.State)
+		return
+	}
+
 	if err := dw.cacheManager.SetAppData(userID, sourceID, AppStateLatest, stateData); err != nil {
 		log.Printf("Failed to store app state to cache: %v", err)
 	} else {

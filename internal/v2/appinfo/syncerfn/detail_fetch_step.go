@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
@@ -51,6 +52,14 @@ func (d *DetailFetchStep) GetStepName() string {
 
 // Execute performs the detail fetching logic with batch processing
 func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in DetailFetchStep.Execute: %v", r)
+			data.AddError(fmt.Errorf("panic in DetailFetchStep.Execute: %v", r))
+		}
+	}()
+
 	log.Printf("Executing %s for %d apps in batches of %d", d.GetStepName(), len(data.AppIDs), d.BatchSize)
 
 	if len(data.AppIDs) == 0 {
@@ -62,6 +71,9 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	totalBatches := (len(data.AppIDs) + d.BatchSize - 1) / d.BatchSize
 	successCount := 0
 	errorCount := 0
+	overallStartTime := time.Now()
+
+	log.Printf("Starting detail fetch with %d total batches", totalBatches)
 
 	for i := 0; i < len(data.AppIDs); i += d.BatchSize {
 		batchNumber := (i / d.BatchSize) + 1
@@ -71,15 +83,75 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 		}
 
 		batch := data.AppIDs[i:end]
-		log.Printf("Processing batch %d/%d with %d apps: %v", batchNumber, totalBatches, len(batch), batch)
+		batchStartTime := time.Now()
+		progressPercent := float64(batchNumber) / float64(totalBatches) * 100
 
-		batchSuccessCount, batchErrorCount := d.fetchAppsBatch(ctx, batch, data)
+		log.Printf("Processing batch %d/%d (%.1f%% complete) with %d apps: %v",
+			batchNumber, totalBatches, progressPercent, len(batch), batch)
+
+		// Check context cancellation before processing each batch
+		select {
+		case <-ctx.Done():
+			log.Printf("Context cancelled during batch %d/%d processing", batchNumber, totalBatches)
+			return fmt.Errorf("detail fetch cancelled: %w", ctx.Err())
+		default:
+		}
+
+		// Add retry mechanism for batch processing
+		maxRetries := 3
+		var batchSuccessCount, batchErrorCount int
+
+		for retry := 0; retry < maxRetries; retry++ {
+			if retry > 0 {
+				log.Printf("Retrying batch %d/%d (attempt %d/%d)", batchNumber, totalBatches, retry+1, maxRetries)
+				// Add exponential backoff delay
+				backoffDelay := time.Duration(retry) * 2 * time.Second
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("context cancelled during retry delay: %w", ctx.Err())
+				case <-time.After(backoffDelay):
+					// Continue with retry
+				}
+			}
+
+			batchSuccessCount, batchErrorCount = d.fetchAppsBatch(ctx, batch, data)
+
+			// If successful or context cancelled, break retry loop
+			if batchSuccessCount > 0 || ctx.Err() != nil {
+				break
+			}
+
+			// Log retry attempt
+			if retry < maxRetries-1 {
+				log.Printf("Batch %d/%d failed, will retry: %d successful, %d errors",
+					batchNumber, totalBatches, batchSuccessCount, batchErrorCount)
+			}
+		}
+
 		successCount += batchSuccessCount
 		errorCount += batchErrorCount
+
+		batchDuration := time.Since(batchStartTime)
+		// Log batch completion with timing
+		log.Printf("Batch %d/%d completed in %v: %d successful, %d errors",
+			batchNumber, totalBatches, batchDuration, batchSuccessCount, batchErrorCount)
+
+		// Add a small delay between batches to avoid overwhelming the API
+		if batchNumber < totalBatches {
+			log.Printf("Waiting 200ms before processing next batch...")
+			select {
+			case <-ctx.Done():
+				log.Printf("Context cancelled during batch delay")
+				return fmt.Errorf("detail fetch cancelled during batch delay: %w", ctx.Err())
+			case <-time.After(200 * time.Millisecond): // Increased delay to 200ms
+				// Continue to next batch
+			}
+		}
 	}
 
-	log.Printf("Completed detail fetch: %d successful, %d errors, total %d apps",
-		successCount, errorCount, len(data.AppIDs))
+	overallDuration := time.Since(overallStartTime)
+	log.Printf("Completed detail fetch in %v: %d successful, %d errors, total %d apps",
+		overallDuration, successCount, errorCount, len(data.AppIDs))
 
 	return nil
 }
@@ -102,6 +174,14 @@ func (d *DetailFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 
 // fetchAppsBatch fetches detailed information for a batch of apps
 func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, data *SyncContext) (int, int) {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in fetchAppsBatch: %v", r)
+			data.AddError(fmt.Errorf("panic in fetchAppsBatch: %v", r))
+		}
+	}()
+
 	// Get current market source from context
 	marketSource := data.GetMarketSource()
 	if marketSource == nil {
@@ -113,6 +193,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 	// Build complete URL from market source base URL and endpoint path
 	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
+	log.Printf("Fetching details for batch from: %s", detailURL)
 
 	request := types.AppsInfoRequest{
 		AppIds:  appIDs,
@@ -122,52 +203,89 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	// Use map[string]interface{} to avoid type mismatch with multi-language fields
 	var rawResponse map[string]interface{}
 
+	// Add timeout context for this specific request
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	requestStartTime := time.Now()
+	log.Printf("Sending batch request for %d apps...", len(appIDs))
+
 	resp, err := data.Client.R().
-		SetContext(ctx).
+		SetContext(requestCtx).
 		SetBody(request).
 		SetResult(&rawResponse).
 		Post(detailURL)
 
+	requestDuration := time.Since(requestStartTime)
+
 	if err != nil {
 		errMsg := fmt.Errorf("failed to fetch batch details for apps %v from %s: %w", appIDs, detailURL, err)
 		data.AddError(errMsg)
-		log.Printf("ERROR: %v", errMsg)
+		log.Printf("ERROR: %v (request took %v)", errMsg, requestDuration)
 		return 0, len(appIDs)
 	}
+
+	// Log response status for debugging
+	log.Printf("Batch request completed with status: %d for apps: %v (request took %v)",
+		resp.StatusCode(), appIDs, requestDuration)
 
 	// Handle different status codes
 	switch resp.StatusCode() {
 	case 200:
 		// Success - process the apps and replace simplified data with detailed data
+		log.Printf("Processing successful response for batch with %d apps", len(appIDs))
 		data.mutex.Lock()
+		log.Printf("Acquired mutex lock for batch processing")
+
+		// Collect apps that need to be removed from cache to avoid nested locks
+		appsToRemove := make([]struct {
+			appID      string
+			appInfoMap map[string]interface{}
+		}, 0)
 
 		// Extract apps from raw response
 		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
+			log.Printf("Found %d apps in response data", len(appsData))
 			// Update the original LatestData with detailed information
 			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
+				log.Printf("Processing %d apps in LatestData", len(appsData))
+
 				for appID, appData := range appsData {
+					log.Printf("Processing app %s in batch", appID)
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
 						// Check for Suspend or Remove labels before processing the app
 						shouldSkip := false
 						if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
+							log.Printf("App %s has %d labels", appID, len(appLabels))
 							for _, labelInterface := range appLabels {
 								if label, ok := labelInterface.(string); ok {
 									if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
 										shouldSkip = true
 										log.Printf("Warning: Skipping app %s - contains label: %s", appID, label)
 
-										// Remove the app from cache for all users
-										d.removeAppFromCache(appID, appInfoMap, data)
+										// Collect app for removal instead of calling directly to avoid nested locks
+										appsToRemove = append(appsToRemove, struct {
+											appID      string
+											appInfoMap map[string]interface{}
+										}{appID: appID, appInfoMap: appInfoMap})
 										break
 									}
 								}
 							}
+						} else {
+							log.Printf("App %s has no labels or labels is not an array", appID)
 						}
 
 						// Skip processing if app should be removed
 						if shouldSkip {
+							log.Printf("Skipping app %s due to suspend/remove label", appID)
+							// Remove from LatestData immediately
+							delete(data.LatestData.Data.Apps, appID)
+							log.Printf("Removed app %s from LatestData due to suspend/remove label", appID)
 							continue
 						}
+
+						log.Printf("Processing app %s data replacement", appID)
 
 						// Replace the simplified app data with detailed data in LatestData
 						detailedAppData := map[string]interface{}{
@@ -227,6 +345,9 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 							"count":          appInfoMap["count"],
 							"variants":       appInfoMap["variants"],
 
+							// Version history information
+							"versionHistory": appInfoMap["versionHistory"],
+
 							// Legacy fields for backward compatibility
 							"screenshots": appInfoMap["screenshots"],
 							"tags":        appInfoMap["tags"],
@@ -244,12 +365,29 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Log the main app information with more details
 						log.Printf("Replaced app data with details - ID: %s, Name: %s, Version: %s",
 							appInfoMap["id"], appInfoMap["name"], appInfoMap["version"])
+						log.Printf("App %s data replacement completed", appID)
+					} else {
+						log.Printf("Warning: App %s data is not a map", appID)
 					}
 				}
+				log.Printf("Finished processing all apps in LatestData")
+			} else {
+				log.Printf("WARNING: LatestData or LatestData.Data.Apps is nil")
 			}
+		} else {
+			log.Printf("WARNING: No apps data found in response")
 		}
 
+		log.Printf("Releasing mutex lock for batch processing")
 		data.mutex.Unlock()
+		log.Printf("Mutex lock released successfully")
+
+		// Now remove apps from cache after releasing the main lock to avoid nested locks
+		for _, appToRemove := range appsToRemove {
+			log.Printf("Calling removeAppFromCache for app %s", appToRemove.appID)
+			d.removeAppFromCache(appToRemove.appID, appToRemove.appInfoMap, data)
+			log.Printf("removeAppFromCache completed for app %s", appToRemove.appID)
+		}
 
 		// Count successful and failed apps
 		successCount := 0
@@ -278,6 +416,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		errMsg := fmt.Errorf("data is being loaded for version %s, batch: %v - %s", d.Version, appIDs, message)
 		data.AddError(errMsg)
 		log.Printf("WARNING: %v", errMsg)
+		// Return all apps as errors for 202 status
 		return 0, len(appIDs)
 
 	case 400:
@@ -285,6 +424,22 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		errMsg := fmt.Errorf("bad request for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
 		data.AddError(errMsg)
 		log.Printf("ERROR: %v", errMsg)
+		return 0, len(appIDs)
+
+	case 429:
+		// Rate limit exceeded - this is a retryable error
+		errMsg := fmt.Errorf("rate limit exceeded for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
+		data.AddError(errMsg)
+		log.Printf("ERROR: %v", errMsg)
+		// Return all apps as errors for rate limiting - will trigger retry
+		return 0, len(appIDs)
+
+	case 500, 502, 503, 504:
+		// Server errors - these are retryable
+		errMsg := fmt.Errorf("server error for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
+		data.AddError(errMsg)
+		log.Printf("ERROR: %v", errMsg)
+		// Return all apps as errors for server errors - will trigger retry
 		return 0, len(appIDs)
 
 	default:
@@ -298,6 +453,15 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 // removeAppFromCache removes an app from cache for all users
 func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string]interface{}, data *SyncContext) {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in removeAppFromCache: %v", r)
+		}
+	}()
+
+	log.Printf("Starting to remove app %s from cache", appID)
+
 	// Get app name for matching
 	appName, ok := appInfoMap["name"].(string)
 	if !ok || appName == "" {
@@ -307,19 +471,29 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 	// Get source ID from market source
 	sourceID := data.GetMarketSource().Name
+	log.Printf("Removing app %s (name: %s) from cache for source: %s", appID, appName, sourceID)
 
 	// Remove app from cache for all users
+	log.Printf("Acquiring cache mutex lock for app removal")
 	data.Cache.Mutex.Lock()
-	defer data.Cache.Mutex.Unlock()
+	defer func() {
+		log.Printf("Releasing cache mutex lock for app removal")
+		data.Cache.Mutex.Unlock()
+	}()
+
+	log.Printf("Processing %d users for app removal", len(data.Cache.Users))
 
 	for userID, userData := range data.Cache.Users {
+		log.Printf("Processing user %s for app removal", userID)
 		sourceData, sourceExists := userData.Sources[sourceID]
 		if !sourceExists {
+			log.Printf("Source %s not found for user %s, skipping", sourceID, userID)
 			continue
 		}
 
 		// Remove from latest list
 		originalLatestCount := len(sourceData.AppInfoLatest)
+		log.Printf("User %s, source %s: checking %d apps in latest list", userID, sourceID, originalLatestCount)
 		for i := len(sourceData.AppInfoLatest) - 1; i >= 0; i-- {
 			latestApp := sourceData.AppInfoLatest[i]
 			if latestApp.RawData != nil && latestApp.RawData.Name == appName {
@@ -330,6 +504,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 		// Remove from pending list
 		originalPendingCount := len(sourceData.AppInfoLatestPending)
+		log.Printf("User %s, source %s: checking %d apps in pending list", userID, sourceID, originalPendingCount)
 		for i := len(sourceData.AppInfoLatestPending) - 1; i >= 0; i-- {
 			pendingApp := sourceData.AppInfoLatestPending[i]
 			if pendingApp.RawData != nil && pendingApp.RawData.Name == appName {
@@ -343,4 +518,6 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 			originalLatestCount, len(sourceData.AppInfoLatest),
 			originalPendingCount, len(sourceData.AppInfoLatestPending))
 	}
+
+	log.Printf("App removal from cache completed for app: %s", appID)
 }

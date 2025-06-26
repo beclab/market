@@ -55,6 +55,7 @@ type Task struct {
 
 // TaskModule manages task queues and execution
 type TaskModule struct {
+	instanceID     string // Unique instance identifier for debugging
 	mu             sync.RWMutex
 	pendingTasks   []*Task          // queue for pending tasks
 	runningTasks   map[string]*Task // map for running tasks
@@ -70,6 +71,7 @@ func NewTaskModule() *TaskModule {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	tm := &TaskModule{
+		instanceID:   fmt.Sprintf("tm-%d", time.Now().UnixNano()),
 		pendingTasks: make([]*Task, 0),
 		runningTasks: make(map[string]*Task),
 		ctx:          ctx,
@@ -106,7 +108,7 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, me
 
 	tm.pendingTasks = append(tm.pendingTasks, task)
 
-	log.Printf("Task added: ID=%s, Type=%d, AppName=%s, User=%s", task.ID, task.Type, task.AppName, user)
+	log.Printf("[%s] Task added: ID=%s, Type=%d, AppName=%s, User=%s", tm.instanceID, task.ID, task.Type, task.AppName, user)
 
 	// Record task addition in history
 	tm.recordTaskHistory(task, user)
@@ -248,7 +250,7 @@ func (tm *TaskModule) executeNextTask() {
 
 	tm.mu.Unlock()
 
-	log.Printf("Executing task: ID=%s, Type=%d, AppName=%s", task.ID, task.Type, task.AppName)
+	log.Printf("[%s] Executing task: ID=%s, Type=%d, AppName=%s", tm.instanceID, task.ID, task.Type, task.AppName)
 
 	// Execute the task
 	tm.executeTask(task)
@@ -327,6 +329,12 @@ func (tm *TaskModule) executeTask(task *Task) {
 	log.Printf("Task result summary: ID=%s, Result length=%d bytes", task.ID, len(result))
 
 	tm.recordTaskResult(task, result, nil)
+
+	// Remove completed task from running tasks
+	// tm.mu.Lock()
+	// delete(tm.runningTasks, task.ID)
+	// tm.mu.Unlock()
+	// log.Printf("[%s] Removed completed task from running tasks: ID=%s", tm.instanceID, task.ID)
 }
 
 // statusUpdater runs every 10 seconds to update running task status
@@ -444,4 +452,57 @@ func (tm *TaskModule) recordTaskResult(task *Task, result string, err error) {
 		log.Printf("Successfully recorded task result in history: task=%s, history_id=%d, user=%s, extended_length=%d bytes",
 			task.ID, historyRecord.ID, task.User, len(resultJSON))
 	}
+}
+
+func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskType string, source string, found bool) {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	var latestTask *Task
+
+	// Only search for InstallApp tasks
+	for _, t := range tm.runningTasks {
+		if t.AppName == appName && t.User == user && t.Type == InstallApp {
+			if latestTask == nil || t.CreatedAt.After(latestTask.CreatedAt) {
+				latestTask = t
+			}
+		}
+	}
+
+	for _, t := range tm.pendingTasks {
+		if t.AppName == appName && t.User == user && t.Type == InstallApp {
+			if latestTask == nil || t.CreatedAt.After(latestTask.CreatedAt) {
+				latestTask = t
+			}
+		}
+	}
+
+	if latestTask == nil {
+		// Log all running tasks
+		log.Printf("[%s] GetLatestTaskByAppNameAndUser - All running tasks for app: %s, user: %s", tm.instanceID, appName, user)
+		for _, t := range tm.runningTasks {
+			log.Printf("  Running task: ID=%s, Type=%s, AppName=%s, User=%s, Status=%d, CreatedAt=%v",
+				t.ID, getTaskTypeString(t.Type), t.AppName, t.User, t.Status, t.CreatedAt)
+		}
+
+		// Log all pending tasks
+		log.Printf("[%s] GetLatestTaskByAppNameAndUser - All pending tasks for app: %s, user: %s", tm.instanceID, appName, user)
+		for _, t := range tm.pendingTasks {
+			log.Printf("  Pending task: ID=%s, Type=%s, AppName=%s, User=%s, Status=%d, CreatedAt=%v",
+				t.ID, getTaskTypeString(t.Type), t.AppName, t.User, t.Status, t.CreatedAt)
+		}
+		return "", "", false
+	}
+
+	typeStr := getTaskTypeString(latestTask.Type)
+	source = ""
+	if s, ok := latestTask.Metadata["source"].(string); ok {
+		source = s
+	}
+	return typeStr, source, true
+}
+
+// GetInstanceID returns the unique instance identifier
+func (tm *TaskModule) GetInstanceID() string {
+	return tm.instanceID
 }
