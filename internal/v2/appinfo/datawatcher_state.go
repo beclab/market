@@ -24,6 +24,7 @@ type EntranceStatus struct {
 	StatusTime string `json:"statusTime"`
 	Reason     string `json:"reason"`
 	Url        string `json:"url"`
+	Invisible  bool   `json:"invisible"`
 }
 
 // AppStateMessage represents the message structure from NATS
@@ -209,6 +210,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 			StatusTime: "",
 			Reason:     "",
 			Url:        "http://localhost:8080/aa",
+			Invisible:  false,
 		},
 		{
 			ID:         "http", // ID extracted from "http://localhost:8080/bb"
@@ -217,6 +219,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 			StatusTime: time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"),
 			Reason:     "",
 			Url:        "http://localhost:8080/bb",
+			Invisible:  false,
 		},
 	}
 
