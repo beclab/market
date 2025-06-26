@@ -227,6 +227,9 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 							"count":          appInfoMap["count"],
 							"variants":       appInfoMap["variants"],
 
+							// Version history information
+							"versionHistory": appInfoMap["versionHistory"],
+
 							// Legacy fields for backward compatibility
 							"screenshots": appInfoMap["screenshots"],
 							"tags":        appInfoMap["tags"],
