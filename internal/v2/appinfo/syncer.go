@@ -225,7 +225,11 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			stepErr <- step.Execute(syncCtx, syncContext)
 		}()
 
-		// Wait for step completion or timeout
+		// Wait for step completion or timeout with progress monitoring
+		stepTimeout := 15 * time.Minute // 15 minute timeout per step
+		stepTimer := time.NewTimer(stepTimeout)
+		defer stepTimer.Stop()
+
 		select {
 		case err := <-stepErr:
 			if err != nil {
@@ -234,6 +238,11 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 				log.Printf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.Name)
 				return fmt.Errorf("step %d failed: %w", i+1, err)
 			}
+		case <-stepTimer.C:
+			log.Printf("Step %d (%s) timed out after %v", i+1, step.GetStepName(), stepTimeout)
+			log.Printf("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())
+			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.Name)
+			return fmt.Errorf("step %d timed out after %v", i+1, stepTimeout)
 		case <-syncCtx.Done():
 			log.Printf("Step %d (%s) timed out or context cancelled", i+1, step.GetStepName())
 			log.Printf("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())

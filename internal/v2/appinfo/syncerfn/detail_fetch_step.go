@@ -63,6 +63,9 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	totalBatches := (len(data.AppIDs) + d.BatchSize - 1) / d.BatchSize
 	successCount := 0
 	errorCount := 0
+	overallStartTime := time.Now()
+
+	log.Printf("Starting detail fetch with %d total batches", totalBatches)
 
 	for i := 0; i < len(data.AppIDs); i += d.BatchSize {
 		batchNumber := (i / d.BatchSize) + 1
@@ -72,7 +75,11 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 		}
 
 		batch := data.AppIDs[i:end]
-		log.Printf("Processing batch %d/%d with %d apps: %v", batchNumber, totalBatches, len(batch), batch)
+		batchStartTime := time.Now()
+		progressPercent := float64(batchNumber) / float64(totalBatches) * 100
+
+		log.Printf("Processing batch %d/%d (%.1f%% complete) with %d apps: %v",
+			batchNumber, totalBatches, progressPercent, len(batch), batch)
 
 		// Check context cancellation before processing each batch
 		select {
@@ -116,11 +123,14 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 		successCount += batchSuccessCount
 		errorCount += batchErrorCount
 
-		// Log batch completion
-		log.Printf("Batch %d/%d completed: %d successful, %d errors", batchNumber, totalBatches, batchSuccessCount, batchErrorCount)
+		batchDuration := time.Since(batchStartTime)
+		// Log batch completion with timing
+		log.Printf("Batch %d/%d completed in %v: %d successful, %d errors",
+			batchNumber, totalBatches, batchDuration, batchSuccessCount, batchErrorCount)
 
 		// Add a small delay between batches to avoid overwhelming the API
 		if batchNumber < totalBatches {
+			log.Printf("Waiting 200ms before processing next batch...")
 			select {
 			case <-ctx.Done():
 				log.Printf("Context cancelled during batch delay")
@@ -131,8 +141,9 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 		}
 	}
 
-	log.Printf("Completed detail fetch: %d successful, %d errors, total %d apps",
-		successCount, errorCount, len(data.AppIDs))
+	overallDuration := time.Since(overallStartTime)
+	log.Printf("Completed detail fetch in %v: %d successful, %d errors, total %d apps",
+		overallDuration, successCount, errorCount, len(data.AppIDs))
 
 	return nil
 }
@@ -180,21 +191,27 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	requestStartTime := time.Now()
+	log.Printf("Sending batch request for %d apps...", len(appIDs))
+
 	resp, err := data.Client.R().
 		SetContext(requestCtx).
 		SetBody(request).
 		SetResult(&rawResponse).
 		Post(detailURL)
 
+	requestDuration := time.Since(requestStartTime)
+
 	if err != nil {
 		errMsg := fmt.Errorf("failed to fetch batch details for apps %v from %s: %w", appIDs, detailURL, err)
 		data.AddError(errMsg)
-		log.Printf("ERROR: %v", errMsg)
+		log.Printf("ERROR: %v (request took %v)", errMsg, requestDuration)
 		return 0, len(appIDs)
 	}
 
 	// Log response status for debugging
-	log.Printf("Batch request completed with status: %d for apps: %v", resp.StatusCode(), appIDs)
+	log.Printf("Batch request completed with status: %d for apps: %v (request took %v)",
+		resp.StatusCode(), appIDs, requestDuration)
 
 	// Handle different status codes
 	switch resp.StatusCode() {
