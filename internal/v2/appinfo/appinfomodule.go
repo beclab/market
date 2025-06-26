@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/task"
 	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
@@ -29,6 +30,7 @@ type AppInfoModule struct {
 	cancel           context.CancelFunc
 	mutex            sync.RWMutex
 	isStarted        bool
+	taskModule       *task.TaskModule
 }
 
 // ModuleConfig holds configuration for the AppInfo module
@@ -496,8 +498,8 @@ func (m *AppInfoModule) initDataWatcher() error {
 func (m *AppInfoModule) initDataWatcherState() error {
 	glog.Infof("Initializing DataWatcherState...")
 
-	// Create DataWatcherState instance with cache manager
-	m.dataWatcherState = NewDataWatcherState(m.cacheManager)
+	// Create DataWatcherState instance with cache manager and task module
+	m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule)
 
 	// Start DataWatcherState
 	if err := m.dataWatcherState.Start(); err != nil {

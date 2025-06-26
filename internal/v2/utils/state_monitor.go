@@ -61,6 +61,9 @@ func (sm *StateMonitor) CheckAndNotifyStateChange(
 		AppInfoLatest:  appInfoLatest,
 		Timestamp:      time.Now().Unix(),
 		User:           userID,
+		AppName:        appName,
+		NotifyType:     "app_state_change",
+		Source:         sourceID,
 	}
 
 	return sm.dataSender.SendAppInfoUpdate(update)

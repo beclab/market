@@ -445,3 +445,39 @@ func (tm *TaskModule) recordTaskResult(task *Task, result string, err error) {
 			task.ID, historyRecord.ID, task.User, len(resultJSON))
 	}
 }
+
+func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskType string, source string, found bool) {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	var latestTask *Task
+
+	for _, t := range tm.runningTasks {
+		if t.AppName == appName && t.User == user {
+			if latestTask == nil || t.CreatedAt.After(latestTask.CreatedAt) {
+				latestTask = t
+			}
+		}
+	}
+
+	for _, t := range tm.pendingTasks {
+		if t.AppName == appName && t.User == user {
+			if latestTask == nil || t.CreatedAt.After(latestTask.CreatedAt) {
+				latestTask = t
+			}
+		}
+	}
+
+	if latestTask == nil {
+		return "", "", false
+	}
+
+	typeStr := getTaskTypeString(latestTask.Type)
+	source = ""
+	if latestTask.Type == InstallApp {
+		if s, ok := latestTask.Metadata["source"].(string); ok {
+			source = s
+		}
+	}
+	return typeStr, source, true
+}

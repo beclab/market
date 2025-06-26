@@ -404,6 +404,9 @@ type AppInfoUpdate struct {
 	AppInfoLatest  *AppInfoLatestData  `json:"app_info_latest"`
 	Timestamp      int64               `json:"timestamp"`
 	User           string              `json:"user"`
+	AppName        string              `json:"app_name"`    // App name
+	NotifyType     string              `json:"notify_type"` // Notify type
+	Source         string              `json:"source"`      // Source
 }
 
 // NewCacheData creates a new cache data structure
