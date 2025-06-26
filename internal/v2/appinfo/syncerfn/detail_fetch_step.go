@@ -237,12 +237,19 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		data.mutex.Lock()
 		log.Printf("Acquired mutex lock for batch processing")
 
+		// Collect apps that need to be removed from cache to avoid nested locks
+		appsToRemove := make([]struct {
+			appID      string
+			appInfoMap map[string]interface{}
+		}, 0)
+
 		// Extract apps from raw response
 		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
 			log.Printf("Found %d apps in response data", len(appsData))
 			// Update the original LatestData with detailed information
 			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
 				log.Printf("Processing %d apps in LatestData", len(appsData))
+
 				for appID, appData := range appsData {
 					log.Printf("Processing app %s in batch", appID)
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
@@ -256,10 +263,11 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 										shouldSkip = true
 										log.Printf("Warning: Skipping app %s - contains label: %s", appID, label)
 
-										// Remove the app from cache for all users
-										log.Printf("Calling removeAppFromCache for app %s", appID)
-										d.removeAppFromCache(appID, appInfoMap, data)
-										log.Printf("removeAppFromCache completed for app %s", appID)
+										// Collect app for removal instead of calling directly to avoid nested locks
+										appsToRemove = append(appsToRemove, struct {
+											appID      string
+											appInfoMap map[string]interface{}
+										}{appID: appID, appInfoMap: appInfoMap})
 										break
 									}
 								}
@@ -370,6 +378,13 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		log.Printf("Releasing mutex lock for batch processing")
 		data.mutex.Unlock()
 		log.Printf("Mutex lock released successfully")
+
+		// Now remove apps from cache after releasing the main lock to avoid nested locks
+		for _, appToRemove := range appsToRemove {
+			log.Printf("Calling removeAppFromCache for app %s", appToRemove.appID)
+			d.removeAppFromCache(appToRemove.appID, appToRemove.appInfoMap, data)
+			log.Printf("removeAppFromCache completed for app %s", appToRemove.appID)
+		}
 
 		// Count successful and failed apps
 		successCount := 0
