@@ -244,10 +244,12 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
 				log.Printf("Processing %d apps in LatestData", len(appsData))
 				for appID, appData := range appsData {
+					log.Printf("Processing app %s in batch", appID)
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
 						// Check for Suspend or Remove labels before processing the app
 						shouldSkip := false
 						if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
+							log.Printf("App %s has %d labels", appID, len(appLabels))
 							for _, labelInterface := range appLabels {
 								if label, ok := labelInterface.(string); ok {
 									if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
@@ -255,17 +257,24 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 										log.Printf("Warning: Skipping app %s - contains label: %s", appID, label)
 
 										// Remove the app from cache for all users
+										log.Printf("Calling removeAppFromCache for app %s", appID)
 										d.removeAppFromCache(appID, appInfoMap, data)
+										log.Printf("removeAppFromCache completed for app %s", appID)
 										break
 									}
 								}
 							}
+						} else {
+							log.Printf("App %s has no labels or labels is not an array", appID)
 						}
 
 						// Skip processing if app should be removed
 						if shouldSkip {
+							log.Printf("Skipping app %s due to suspend/remove label", appID)
 							continue
 						}
+
+						log.Printf("Processing app %s data replacement", appID)
 
 						// Replace the simplified app data with detailed data in LatestData
 						detailedAppData := map[string]interface{}{
@@ -345,6 +354,9 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Log the main app information with more details
 						log.Printf("Replaced app data with details - ID: %s, Name: %s, Version: %s",
 							appInfoMap["id"], appInfoMap["name"], appInfoMap["version"])
+						log.Printf("App %s data replacement completed", appID)
+					} else {
+						log.Printf("Warning: App %s data is not a map", appID)
 					}
 				}
 				log.Printf("Finished processing all apps in LatestData")
@@ -423,6 +435,15 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 // removeAppFromCache removes an app from cache for all users
 func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string]interface{}, data *SyncContext) {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in removeAppFromCache: %v", r)
+		}
+	}()
+
+	log.Printf("Starting to remove app %s from cache", appID)
+
 	// Get app name for matching
 	appName, ok := appInfoMap["name"].(string)
 	if !ok || appName == "" {
@@ -432,19 +453,29 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 	// Get source ID from market source
 	sourceID := data.GetMarketSource().Name
+	log.Printf("Removing app %s (name: %s) from cache for source: %s", appID, appName, sourceID)
 
 	// Remove app from cache for all users
+	log.Printf("Acquiring cache mutex lock for app removal")
 	data.Cache.Mutex.Lock()
-	defer data.Cache.Mutex.Unlock()
+	defer func() {
+		log.Printf("Releasing cache mutex lock for app removal")
+		data.Cache.Mutex.Unlock()
+	}()
+
+	log.Printf("Processing %d users for app removal", len(data.Cache.Users))
 
 	for userID, userData := range data.Cache.Users {
+		log.Printf("Processing user %s for app removal", userID)
 		sourceData, sourceExists := userData.Sources[sourceID]
 		if !sourceExists {
+			log.Printf("Source %s not found for user %s, skipping", sourceID, userID)
 			continue
 		}
 
 		// Remove from latest list
 		originalLatestCount := len(sourceData.AppInfoLatest)
+		log.Printf("User %s, source %s: checking %d apps in latest list", userID, sourceID, originalLatestCount)
 		for i := len(sourceData.AppInfoLatest) - 1; i >= 0; i-- {
 			latestApp := sourceData.AppInfoLatest[i]
 			if latestApp.RawData != nil && latestApp.RawData.Name == appName {
@@ -455,6 +486,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 		// Remove from pending list
 		originalPendingCount := len(sourceData.AppInfoLatestPending)
+		log.Printf("User %s, source %s: checking %d apps in pending list", userID, sourceID, originalPendingCount)
 		for i := len(sourceData.AppInfoLatestPending) - 1; i >= 0; i-- {
 			pendingApp := sourceData.AppInfoLatestPending[i]
 			if pendingApp.RawData != nil && pendingApp.RawData.Name == appName {
@@ -468,4 +500,6 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 			originalLatestCount, len(sourceData.AppInfoLatest),
 			originalPendingCount, len(sourceData.AppInfoLatestPending))
 	}
+
+	log.Printf("App removal from cache completed for app: %s", appID)
 }
