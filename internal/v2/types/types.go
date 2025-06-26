@@ -519,19 +519,63 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 		progress = progressVal
 	}
 
-	if entranceStatusesVal, ok := data["entranceStatuses"].([]interface{}); ok {
-		entranceStatuses = make([]struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-			Invisible  bool   `json:"invisible"`
-		}, len(entranceStatusesVal))
+	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
+	if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
+		switch v := entranceStatusesVal.(type) {
+		case []interface{}:
+			// Handle []interface{} case (from map[string]interface{})
+			entranceStatuses = make([]struct {
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				State      string `json:"state"`
+				StatusTime string `json:"statusTime"`
+				Reason     string `json:"reason"`
+				Url        string `json:"url"`
+				Invisible  bool   `json:"invisible"`
+			}, len(v))
 
-		for i, entrance := range entranceStatusesVal {
-			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+			for i, entrance := range v {
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					if name, ok := entranceMap["name"].(string); ok {
+						entranceStatuses[i].Name = name
+					}
+					if entranceState, ok := entranceMap["state"].(string); ok {
+						entranceStatuses[i].State = entranceState
+					}
+					if entranceStatusTime, ok := entranceMap["statusTime"].(string); ok {
+						entranceStatuses[i].StatusTime = entranceStatusTime
+					}
+					if reason, ok := entranceMap["reason"].(string); ok {
+						entranceStatuses[i].Reason = reason
+					}
+					if url, ok := entranceMap["url"].(string); ok {
+						entranceStatuses[i].Url = url
+						// Extract ID from URL: split by "." and take the first segment
+						if url != "" {
+							segments := strings.Split(url, ".")
+							if len(segments) > 0 {
+								entranceStatuses[i].ID = segments[0]
+							}
+						}
+					}
+					if invisible, ok := entranceMap["invisible"].(bool); ok {
+						entranceStatuses[i].Invisible = invisible
+					}
+				}
+			}
+		case []map[string]interface{}:
+			// Handle []map[string]interface{} case (direct conversion)
+			entranceStatuses = make([]struct {
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				State      string `json:"state"`
+				StatusTime string `json:"statusTime"`
+				Reason     string `json:"reason"`
+				Url        string `json:"url"`
+				Invisible  bool   `json:"invisible"`
+			}, len(v))
+
+			for i, entranceMap := range v {
 				if name, ok := entranceMap["name"].(string); ok {
 					entranceStatuses[i].Name = name
 				}
@@ -558,6 +602,9 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 					entranceStatuses[i].Invisible = invisible
 				}
 			}
+		default:
+			// Try to handle other cases by converting to JSON and back
+			log.Printf("DEBUG: NewAppStateLatestData - entranceStatuses type: %T, value: %+v", v, v)
 		}
 	}
 
