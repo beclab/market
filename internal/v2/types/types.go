@@ -125,6 +125,7 @@ type AppStateLatestData struct {
 		UpdateTime         string `json:"updateTime"`
 		StatusTime         string `json:"statusTime"`
 		LastTransitionTime string `json:"lastTransitionTime"`
+		Progress           string `json:"progress"`
 		EntranceStatuses   []struct {
 			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 			Name       string `json:"name"`
@@ -473,7 +474,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 // NewAppStateLatestData creates a new app state latest data structure
 func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 	// Extract status information from data
-	var name, state, updateTime, statusTime, lastTransitionTime string
+	var name, state, updateTime, statusTime, lastTransitionTime, progress string
 	var entranceStatuses []struct {
 		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 		Name       string `json:"name"`
@@ -514,20 +515,77 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 	if lastTransitionTimeVal, ok := data["lastTransitionTime"].(string); ok {
 		lastTransitionTime = lastTransitionTimeVal
 	}
+	if progressVal, ok := data["progress"].(string); ok {
+		progress = progressVal
+	}
 
-	if entranceStatusesVal, ok := data["entranceStatuses"].([]interface{}); ok {
-		entranceStatuses = make([]struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-			Invisible  bool   `json:"invisible"`
-		}, len(entranceStatusesVal))
+	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
+	if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
+		log.Printf("DEBUG: NewAppStateLatestData - found entranceStatuses, type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 
-		for i, entrance := range entranceStatusesVal {
-			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+		switch v := entranceStatusesVal.(type) {
+		case []interface{}:
+			log.Printf("DEBUG: NewAppStateLatestData - handling []interface{} case, length: %d", len(v))
+			// Handle []interface{} case (from map[string]interface{})
+			entranceStatuses = make([]struct {
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				State      string `json:"state"`
+				StatusTime string `json:"statusTime"`
+				Reason     string `json:"reason"`
+				Url        string `json:"url"`
+				Invisible  bool   `json:"invisible"`
+			}, len(v))
+
+			for i, entrance := range v {
+				log.Printf("DEBUG: NewAppStateLatestData - processing entrance[%d], type: %T, value: %+v", i, entrance, entrance)
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					if name, ok := entranceMap["name"].(string); ok {
+						entranceStatuses[i].Name = name
+					}
+					if entranceState, ok := entranceMap["state"].(string); ok {
+						entranceStatuses[i].State = entranceState
+					}
+					if entranceStatusTime, ok := entranceMap["statusTime"].(string); ok {
+						entranceStatuses[i].StatusTime = entranceStatusTime
+					}
+					if reason, ok := entranceMap["reason"].(string); ok {
+						entranceStatuses[i].Reason = reason
+					}
+					if url, ok := entranceMap["url"].(string); ok {
+						entranceStatuses[i].Url = url
+						// Extract ID from URL: split by "." and take the first segment
+						if url != "" {
+							segments := strings.Split(url, ".")
+							if len(segments) > 0 {
+								entranceStatuses[i].ID = segments[0]
+							}
+						}
+					}
+					if invisible, ok := entranceMap["invisible"].(bool); ok {
+						entranceStatuses[i].Invisible = invisible
+					}
+					log.Printf("DEBUG: NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
+						i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
+				} else {
+					log.Printf("DEBUG: NewAppStateLatestData - entrance[%d] is not map[string]interface{}, type: %T", i, entrance)
+				}
+			}
+		case []map[string]interface{}:
+			log.Printf("DEBUG: NewAppStateLatestData - handling []map[string]interface{} case, length: %d", len(v))
+			// Handle []map[string]interface{} case (direct conversion)
+			entranceStatuses = make([]struct {
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				State      string `json:"state"`
+				StatusTime string `json:"statusTime"`
+				Reason     string `json:"reason"`
+				Url        string `json:"url"`
+				Invisible  bool   `json:"invisible"`
+			}, len(v))
+
+			for i, entranceMap := range v {
+				log.Printf("DEBUG: NewAppStateLatestData - processing entranceMap[%d]: %+v", i, entranceMap)
 				if name, ok := entranceMap["name"].(string); ok {
 					entranceStatuses[i].Name = name
 				}
@@ -553,9 +611,18 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 				if invisible, ok := entranceMap["invisible"].(bool); ok {
 					entranceStatuses[i].Invisible = invisible
 				}
+				log.Printf("DEBUG: NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
+					i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
 			}
+		default:
+			// Try to handle other cases by converting to JSON and back
+			log.Printf("DEBUG: NewAppStateLatestData - entranceStatuses type: %T, value: %+v", v, v)
 		}
+	} else {
+		log.Printf("DEBUG: NewAppStateLatestData - no entranceStatuses found in data")
 	}
+
+	log.Printf("DEBUG: NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
 
 	return &AppStateLatestData{
 		Type: AppStateLatest,
@@ -565,6 +632,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 			UpdateTime         string `json:"updateTime"`
 			StatusTime         string `json:"statusTime"`
 			LastTransitionTime string `json:"lastTransitionTime"`
+			Progress           string `json:"progress"`
 			EntranceStatuses   []struct {
 				ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 				Name       string `json:"name"`
@@ -580,6 +648,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 			UpdateTime:         updateTime,
 			StatusTime:         statusTime,
 			LastTransitionTime: lastTransitionTime,
+			Progress:           progress,
 			EntranceStatuses:   entranceStatuses,
 		},
 	}

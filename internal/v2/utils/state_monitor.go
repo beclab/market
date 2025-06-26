@@ -98,6 +98,11 @@ func (sm *StateMonitor) hasStateChanged(
 		return true, "main state changed: " + existingState.Status.State + " -> " + newStateData.Status.State
 	}
 
+	// Compare progress
+	if newStateData.Status.Progress != existingState.Status.Progress {
+		return true, "progress changed: " + existingState.Status.Progress + " -> " + newStateData.Status.Progress
+	}
+
 	// Compare entrance statuses
 	if !sm.compareEntranceStatuses(newStateData.Status.EntranceStatuses, existingState.Status.EntranceStatuses) {
 		return true, "entrance statuses changed"

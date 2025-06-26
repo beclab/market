@@ -519,6 +519,14 @@ func (m *AppInfoModule) initDataWatcherUser() error {
 	// Create DataWatcherUser instance
 	m.dataWatcherUser = NewDataWatcherUser()
 
+	// Set history module reference if available
+	if m.historyModule != nil {
+		m.dataWatcherUser.SetHistoryModule(m.historyModule)
+		glog.Infof("History module reference set in DataWatcherUser")
+	} else {
+		glog.Warningf("History module not available when initializing DataWatcherUser")
+	}
+
 	// Start DataWatcherUser
 	if err := m.dataWatcherUser.Start(m.ctx); err != nil {
 		return fmt.Errorf("failed to start DataWatcherUser: %w", err)
@@ -1223,6 +1231,47 @@ func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
 	defer m.mutex.Unlock()
 	m.historyModule = historyModule
 	glog.Infof("History module reference set in AppInfo module")
+
+	// Re-initialize DataWatcherState if it exists and module is started
+	if m.isStarted && m.dataWatcherState != nil {
+		glog.Infof("Re-initializing DataWatcherState with history module")
+
+		// Stop existing DataWatcherState
+		if err := m.dataWatcherState.Stop(); err != nil {
+			glog.Errorf("Failed to stop existing DataWatcherState: %v", err)
+		}
+
+		// Create new DataWatcherState with history module
+		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule)
+
+		// Start new DataWatcherState
+		if err := m.dataWatcherState.Start(); err != nil {
+			glog.Errorf("Failed to start new DataWatcherState: %v", err)
+		} else {
+			glog.Infof("DataWatcherState re-initialized successfully with history module")
+		}
+	}
+
+	// Re-initialize DataWatcherUser if it exists and module is started
+	if m.isStarted && m.dataWatcherUser != nil {
+		glog.Infof("Re-initializing DataWatcherUser with history module")
+
+		// Stop existing DataWatcherUser
+		m.dataWatcherUser.Stop()
+
+		// Create new DataWatcherUser
+		m.dataWatcherUser = NewDataWatcherUser()
+
+		// Set history module reference
+		m.dataWatcherUser.SetHistoryModule(m.historyModule)
+
+		// Start new DataWatcherUser
+		if err := m.dataWatcherUser.Start(m.ctx); err != nil {
+			glog.Errorf("Failed to start new DataWatcherUser: %v", err)
+		} else {
+			glog.Infof("DataWatcherUser re-initialized successfully with history module")
+		}
+	}
 }
 
 // GetTaskModule returns the task module instance

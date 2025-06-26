@@ -42,17 +42,21 @@ func NewDataWatcherUser() *DataWatcherUser {
 	}
 }
 
+// SetHistoryModule sets the history module reference
+func (dw *DataWatcherUser) SetHistoryModule(historyModule *history.HistoryModule) {
+	dw.historyModule = historyModule
+	log.Printf("History module reference set in DataWatcherUser")
+}
+
 // Start initializes and starts the data watcher
 func (dw *DataWatcherUser) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	dw.cancelFunc = cancel
 
-	// Initialize history module
-	historyModule, err := history.NewHistoryModule()
-	if err != nil {
-		return fmt.Errorf("failed to initialize history module: %w", err)
+	// Check if history module is available
+	if dw.historyModule == nil {
+		log.Printf("Warning: History module not available in DataWatcherUser, some functionality may be limited")
 	}
-	dw.historyModule = historyModule
 
 	if dw.isDev {
 		log.Printf("Running in development mode, NATS connection disabled")

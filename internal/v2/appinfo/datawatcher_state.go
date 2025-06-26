@@ -24,6 +24,7 @@ type EntranceStatus struct {
 	StatusTime string `json:"statusTime"`
 	Reason     string `json:"reason"`
 	Url        string `json:"url"`
+	Invisible  bool   `json:"invisible"`
 }
 
 // AppStateMessage represents the message structure from NATS
@@ -35,6 +36,7 @@ type AppStateMessage struct {
 	OpType           string           `json:"opType"`
 	State            string           `json:"state"`
 	User             string           `json:"user"`
+	Progress         string           `json:"progress"`
 	EntranceStatuses []EntranceStatus `json:"entranceStatuses"`
 }
 
@@ -197,6 +199,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 	states := []string{"running", "stopped", "starting", "stopping", "error", "downloading"}
 	opTypes := []string{"install", "uninstall", "update", "restart", "start", "stop", "cancel"}
 	users := []string{"admin", "user1", "user2", "olaresid"}
+	progressValues := []string{"0%", "25%", "50%", "75%", "100%", "downloading...", "installing...", "updating..."}
 
 	// Create sample entrance statuses
 	entranceStatuses := []EntranceStatus{
@@ -207,6 +210,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 			StatusTime: "",
 			Reason:     "",
 			Url:        "http://localhost:8080/aa",
+			Invisible:  false,
 		},
 		{
 			ID:         "http", // ID extracted from "http://localhost:8080/bb"
@@ -215,6 +219,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 			StatusTime: time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"),
 			Reason:     "",
 			Url:        "http://localhost:8080/bb",
+			Invisible:  false,
 		},
 	}
 
@@ -226,6 +231,7 @@ func (dw *DataWatcherState) generateMockMessage() {
 		OpType:           opTypes[rand.Intn(len(opTypes))],
 		State:            states[rand.Intn(len(states))],
 		User:             users[rand.Intn(len(users))],
+		Progress:         progressValues[rand.Intn(len(progressValues))],
 		EntranceStatuses: entranceStatuses,
 	}
 
@@ -277,13 +283,41 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		return
 	}
 
+	// Add debug logging for entranceStatuses
+	log.Printf("DEBUG: storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
+	for i, entrance := range msg.EntranceStatuses {
+		log.Printf("DEBUG: storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, Invisible=%t",
+			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, entrance.Invisible)
+	}
+
+	// 将 []EntranceStatus 转为 []map[string]interface{}，避免后续类型断言失败导致数据丢失
+	entranceStatuses := make([]interface{}, len(msg.EntranceStatuses))
+	for i, v := range msg.EntranceStatuses {
+		entranceStatuses[i] = map[string]interface{}{
+			"id":         v.ID,
+			"name":       v.Name,
+			"state":      v.State,
+			"statusTime": v.StatusTime,
+			"reason":     v.Reason,
+			"url":        v.Url,
+			"invisible":  v.Invisible,
+		}
+	}
+
 	stateData := map[string]interface{}{
 		"state":              msg.State,
 		"updateTime":         "",
 		"statusTime":         msg.CreateTime,
 		"lastTransitionTime": "",
-		"entranceStatuses":   msg.EntranceStatuses,
+		"progress":           msg.Progress,
+		"entranceStatuses":   entranceStatuses,
 		"name":               msg.Name, // Add app name for state monitoring
+	}
+
+	// Add debug logging for stateData
+	log.Printf("DEBUG: storeStateToCache - stateData keys: %v", getMapKeys(stateData))
+	if entranceStatusesVal, ok := stateData["entranceStatuses"]; ok {
+		log.Printf("DEBUG: storeStateToCache - entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 	}
 
 	sourceID := ""
@@ -327,6 +361,15 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	}
 }
 
+// Helper function to get map keys for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // printAppStateMessage prints the app state message details
 func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	log.Printf("=== App State Message ===")
@@ -334,6 +377,7 @@ func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	log.Printf("Create Time: %s", msg.CreateTime)
 	log.Printf("Name: %s", msg.Name)
 	log.Printf("State: %s", msg.State)
+	log.Printf("Progress: %s", msg.Progress)
 	log.Printf("Operation Type: %s", msg.OpType)
 	log.Printf("Operation ID: %s", msg.OpID)
 	log.Printf("User: %s", msg.User)
