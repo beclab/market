@@ -398,5 +398,5 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 	}
 	data["entranceStatuses"] = entrances
 
-	return types.NewAppStateLatestData(data)
+	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppVersionFromDownloadRecord)
 }

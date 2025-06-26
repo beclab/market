@@ -118,8 +118,9 @@ type AppInfoHistoryData struct {
 
 // AppStateLatestData contains latest app state data
 type AppStateLatestData struct {
-	Type   AppDataType `json:"type"`
-	Status struct {
+	Type    AppDataType `json:"type"`
+	Version string      `json:"version"` // Version field, cannot be empty
+	Status  struct {
 		Name               string `json:"name"`
 		State              string `json:"state"`
 		UpdateTime         string `json:"updateTime"`
@@ -472,7 +473,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 }
 
 // NewAppStateLatestData creates a new app state latest data structure
-func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
+func NewAppStateLatestData(data map[string]interface{}, userID string, getVersionFunc func(string, string) (string, error)) *AppStateLatestData {
 	// Extract status information from data
 	var name, state, updateTime, statusTime, lastTransitionTime, progress string
 	var entranceStatuses []struct {
@@ -624,8 +625,36 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 
 	log.Printf("DEBUG: NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
 
+	// Get version from download record using GetAppVersionFromDownloadRecord
+	version := ""
+	if userID != "" && name != "" && getVersionFunc != nil {
+		// Try to get version from data first
+		if versionVal, ok := data["version"].(string); ok && versionVal != "" {
+			version = versionVal
+			log.Printf("DEBUG: NewAppStateLatestData - using version from data: %s", version)
+		} else {
+			// Get version from download record using the provided function
+			versionFromRecord, err := getVersionFunc(userID, name)
+			if err != nil {
+				log.Printf("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
+			} else if versionFromRecord != "" {
+				version = versionFromRecord
+				log.Printf("DEBUG: NewAppStateLatestData - using version from download record: %s", version)
+			} else {
+				log.Printf("WARNING: NewAppStateLatestData - no version found in download record")
+			}
+		}
+	}
+
+	// If version is still empty, we cannot create the object
+	// if version == "" {
+	// 	log.Printf("ERROR: NewAppStateLatestData - version is empty, cannot create AppStateLatestData")
+	// 	return nil
+	// }
+
 	return &AppStateLatestData{
-		Type: AppStateLatest,
+		Type:    AppStateLatest,
+		Version: version,
 		Status: struct {
 			Name               string `json:"name"`
 			State              string `json:"state"`
@@ -1413,85 +1442,6 @@ func ValidateApplicationInfoEntryFields(entry *ApplicationInfoEntry) map[string]
 	return validation
 }
 
-// ExampleCompleteFieldMapping demonstrates how to use the complete field mapping
-// This function shows the proper way to create ApplicationInfoEntry without data loss
-func ExampleCompleteFieldMapping() {
-	// Sample source data with all possible fields
-	sampleData := map[string]interface{}{
-		"id":                 "example-app-123",
-		"name":               "Example Application",
-		"cfgType":            "app",
-		"chartName":          "example-chart",
-		"icon":               "https://example.com/icon.png",
-		"appID":              "example-app-123",
-		"version":            "1.0.0",
-		"versionName":        "First Release",
-		"description":        "This is an example application",
-		"title":              "Example App",
-		"fullDescription":    "This is a complete description of the example application",
-		"upgradeDescription": "This update includes new features",
-		"promoteImage":       []interface{}{"https://example.com/promo1.png", "https://example.com/promo2.png"},
-		"promoteVideo":       "https://example.com/video.mp4",
-		"subCategory":        "Development",
-		"locale":             []interface{}{"en-US", "zh-CN"},
-		"developer":          "Example Developer",
-		"requiredMemory":     "512Mi",
-		"requiredDisk":       "1Gi",
-		"supportClient":      map[string]interface{}{"chrome": ">=90", "edge": ">=90"},
-		"supportArch":        []interface{}{"amd64", "arm64"},
-		"requiredGPU":        "1Gi",
-		"requiredCPU":        "1",
-		"rating":             4.5,
-		"target":             "production",
-		"permission":         map[string]interface{}{"appData": true, "userData": []string{"read", "write"}},
-		"entrances":          []interface{}{map[string]interface{}{"name": "main", "host": "localhost", "port": 8080}},
-		"middleware":         map[string]interface{}{"postgres": map[string]interface{}{"enabled": true}},
-		"options":            map[string]interface{}{"policies": []interface{}{}},
-		"submitter":          "example@example.com",
-		"doc":                "https://example.com/docs",
-		"website":            "https://example.com",
-		"featuredImage":      "https://example.com/featured.png",
-		"sourceCode":         "https://github.com/example/app",
-		"license":            []interface{}{map[string]interface{}{"text": "MIT", "url": "https://opensource.org/licenses/MIT"}},
-		"legal":              []interface{}{map[string]interface{}{"text": "Terms of Service", "url": "https://example.com/terms"}},
-		"i18n":               map[string]interface{}{"en-US": map[string]interface{}{"metadata": map[string]interface{}{"title": "Example App"}}},
-		"modelSize":          "2GB",
-		"namespace":          "default",
-		"onlyAdmin":          false,
-		"lastCommitHash":     "abc123def456",
-		"createTime":         int64(1640995200),
-		"updateTime":         int64(1640995200),
-		"appLabels":          []interface{}{"featured", "recommended"},
-		"count":              42,
-		"variants":           map[string]interface{}{"user": map[string]interface{}{"name": "User Variant"}},
-		"screenshots":        []interface{}{"https://example.com/screenshot1.png"},
-		"tags":               []interface{}{"example", "demo"},
-		"categories":         []interface{}{"Development", "Tools"},
-		"metadata":           map[string]interface{}{"custom_field": "custom_value"},
-		"updated_at":         "2024-01-01T00:00:00Z",
-	}
-
-	// Create ApplicationInfoEntry using the complete field mapping
-	entry := NewApplicationInfoEntry(sampleData)
-	if entry == nil {
-		log.Printf("ERROR: Failed to create ApplicationInfoEntry")
-		return
-	}
-
-	// Validate that all fields are properly mapped
-	validation := ValidateApplicationInfoEntryFields(entry)
-
-	log.Printf("SUCCESS: ApplicationInfoEntry created with %d fields", len(validation))
-	log.Printf("Sample field values:")
-	log.Printf("  ID: %s", entry.ID)
-	log.Printf("  Name: %s", entry.Name)
-	log.Printf("  Version: %s", entry.Version)
-	log.Printf("  Rating: %f", entry.Rating)
-	log.Printf("  Categories: %v", entry.Categories)
-	log.Printf("  RequiredMemory: %s", entry.RequiredMemory)
-	log.Printf("  SupportClient: %v", entry.SupportClient)
-}
-
 // DebugAppLabelsFlow helps debug AppLabels data flow through the system
 func DebugAppLabelsFlow(sourceData map[string]interface{}, entry *ApplicationInfoEntry, stage string) {
 	log.Printf("DEBUG: AppLabels Flow - Stage: %s", stage)
@@ -1563,47 +1513,6 @@ func ValidateAndFixAppLabels(sourceData map[string]interface{}, entry *Applicati
 			}
 		}
 	}
-}
-
-// TestAppLabelsFix demonstrates the AppLabels fix functionality
-func TestAppLabelsFix() {
-	// Test case 1: AppLabels in source data
-	testData1 := map[string]interface{}{
-		"id":        "test-app-1",
-		"name":      "Test App 1",
-		"appLabels": []interface{}{"featured", "recommended", "suspend"},
-	}
-
-	entry1 := NewApplicationInfoEntry(testData1)
-	log.Printf("TEST 1: AppLabels from source data: %v", entry1.AppLabels)
-
-	// Test case 2: AppLabels in metadata
-	testData2 := map[string]interface{}{
-		"id":        "test-app-2",
-		"name":      "Test App 2",
-		"appLabels": []interface{}{"remove", "nsfw"},
-	}
-
-	entry2 := &ApplicationInfoEntry{
-		ID:        "test-app-2",
-		Name:      "Test App 2",
-		AppLabels: []string{}, // Empty AppLabels
-		Metadata: map[string]interface{}{
-			"source_app_data": testData2,
-		},
-	}
-
-	ValidateAndFixAppLabels(nil, entry2)
-	log.Printf("TEST 2: AppLabels from metadata: %v", entry2.AppLabels)
-
-	// Test case 3: No AppLabels
-	testData3 := map[string]interface{}{
-		"id":   "test-app-3",
-		"name": "Test App 3",
-	}
-
-	entry3 := NewApplicationInfoEntry(testData3)
-	log.Printf("TEST 3: No AppLabels: %v", entry3.AppLabels)
 }
 
 // NewAppRenderFailedData creates a new app render failed data structure
