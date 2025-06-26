@@ -279,6 +279,9 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Skip processing if app should be removed
 						if shouldSkip {
 							log.Printf("Skipping app %s due to suspend/remove label", appID)
+							// Remove from LatestData immediately
+							delete(data.LatestData.Data.Apps, appID)
+							log.Printf("Removed app %s from LatestData due to suspend/remove label", appID)
 							continue
 						}
 
