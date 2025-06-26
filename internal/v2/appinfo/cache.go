@@ -232,17 +232,17 @@ func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState
 		return
 	}
 
-	// Check if any entrance status has empty URL
-	hasEmptyUrl := false
+	// Check if any running entrance has empty URL (only running entrances require URLs)
+	hasRunningWithEmptyUrl := false
 	for _, entrance := range newAppState.Status.EntranceStatuses {
-		if entrance.Url == "" {
-			hasEmptyUrl = true
+		if entrance.State == "running" && entrance.Url == "" {
+			hasRunningWithEmptyUrl = true
 			break
 		}
 	}
 
-	if hasEmptyUrl {
-		glog.Warningf("App state data has entrance with empty URL for app %s - app state will be rejected", newAppState.Status.Name)
+	if hasRunningWithEmptyUrl {
+		glog.Warningf("App state data has running entrance with empty URL for app %s - app state will be rejected", newAppState.Status.Name)
 		return
 	}
 
