@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
@@ -73,9 +74,61 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 		batch := data.AppIDs[i:end]
 		log.Printf("Processing batch %d/%d with %d apps: %v", batchNumber, totalBatches, len(batch), batch)
 
-		batchSuccessCount, batchErrorCount := d.fetchAppsBatch(ctx, batch, data)
+		// Check context cancellation before processing each batch
+		select {
+		case <-ctx.Done():
+			log.Printf("Context cancelled during batch %d/%d processing", batchNumber, totalBatches)
+			return fmt.Errorf("detail fetch cancelled: %w", ctx.Err())
+		default:
+		}
+
+		// Add retry mechanism for batch processing
+		maxRetries := 3
+		var batchSuccessCount, batchErrorCount int
+
+		for retry := 0; retry < maxRetries; retry++ {
+			if retry > 0 {
+				log.Printf("Retrying batch %d/%d (attempt %d/%d)", batchNumber, totalBatches, retry+1, maxRetries)
+				// Add exponential backoff delay
+				backoffDelay := time.Duration(retry) * 2 * time.Second
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("context cancelled during retry delay: %w", ctx.Err())
+				case <-time.After(backoffDelay):
+					// Continue with retry
+				}
+			}
+
+			batchSuccessCount, batchErrorCount = d.fetchAppsBatch(ctx, batch, data)
+
+			// If successful or context cancelled, break retry loop
+			if batchSuccessCount > 0 || ctx.Err() != nil {
+				break
+			}
+
+			// Log retry attempt
+			if retry < maxRetries-1 {
+				log.Printf("Batch %d/%d failed, will retry: %d successful, %d errors",
+					batchNumber, totalBatches, batchSuccessCount, batchErrorCount)
+			}
+		}
+
 		successCount += batchSuccessCount
 		errorCount += batchErrorCount
+
+		// Log batch completion
+		log.Printf("Batch %d/%d completed: %d successful, %d errors", batchNumber, totalBatches, batchSuccessCount, batchErrorCount)
+
+		// Add a small delay between batches to avoid overwhelming the API
+		if batchNumber < totalBatches {
+			select {
+			case <-ctx.Done():
+				log.Printf("Context cancelled during batch delay")
+				return fmt.Errorf("detail fetch cancelled during batch delay: %w", ctx.Err())
+			case <-time.After(200 * time.Millisecond): // Increased delay to 200ms
+				// Continue to next batch
+			}
+		}
 	}
 
 	log.Printf("Completed detail fetch: %d successful, %d errors, total %d apps",
@@ -113,6 +166,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 	// Build complete URL from market source base URL and endpoint path
 	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
+	log.Printf("Fetching details for batch from: %s", detailURL)
 
 	request := types.AppsInfoRequest{
 		AppIds:  appIDs,
@@ -122,8 +176,12 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	// Use map[string]interface{} to avoid type mismatch with multi-language fields
 	var rawResponse map[string]interface{}
 
+	// Add timeout context for this specific request
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	resp, err := data.Client.R().
-		SetContext(ctx).
+		SetContext(requestCtx).
 		SetBody(request).
 		SetResult(&rawResponse).
 		Post(detailURL)
@@ -134,6 +192,9 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		log.Printf("ERROR: %v", errMsg)
 		return 0, len(appIDs)
 	}
+
+	// Log response status for debugging
+	log.Printf("Batch request completed with status: %d for apps: %v", resp.StatusCode(), appIDs)
 
 	// Handle different status codes
 	switch resp.StatusCode() {
@@ -281,6 +342,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		errMsg := fmt.Errorf("data is being loaded for version %s, batch: %v - %s", d.Version, appIDs, message)
 		data.AddError(errMsg)
 		log.Printf("WARNING: %v", errMsg)
+		// Return all apps as errors for 202 status
 		return 0, len(appIDs)
 
 	case 400:
@@ -288,6 +350,22 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		errMsg := fmt.Errorf("bad request for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
 		data.AddError(errMsg)
 		log.Printf("ERROR: %v", errMsg)
+		return 0, len(appIDs)
+
+	case 429:
+		// Rate limit exceeded - this is a retryable error
+		errMsg := fmt.Errorf("rate limit exceeded for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
+		data.AddError(errMsg)
+		log.Printf("ERROR: %v", errMsg)
+		// Return all apps as errors for rate limiting - will trigger retry
+		return 0, len(appIDs)
+
+	case 500, 502, 503, 504:
+		// Server errors - these are retryable
+		errMsg := fmt.Errorf("server error for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
+		data.AddError(errMsg)
+		log.Printf("ERROR: %v", errMsg)
+		// Return all apps as errors for server errors - will trigger retry
 		return 0, len(appIDs)
 
 	default:
