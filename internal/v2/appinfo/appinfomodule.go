@@ -1193,6 +1193,26 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 	defer m.mutex.Unlock()
 	m.taskModule = taskModule
 	glog.Infof("Task module reference set in AppInfo module")
+
+	// Re-initialize DataWatcherState if it exists and module is started
+	if m.isStarted && m.dataWatcherState != nil {
+		glog.Infof("Re-initializing DataWatcherState with task module")
+
+		// Stop existing DataWatcherState
+		if err := m.dataWatcherState.Stop(); err != nil {
+			glog.Errorf("Failed to stop existing DataWatcherState: %v", err)
+		}
+
+		// Create new DataWatcherState with task module
+		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule)
+
+		// Start new DataWatcherState
+		if err := m.dataWatcherState.Start(); err != nil {
+			glog.Errorf("Failed to start new DataWatcherState: %v", err)
+		} else {
+			glog.Infof("DataWatcherState re-initialized successfully with task module")
+		}
+	}
 }
 
 // GetTaskModule returns the task module instance
