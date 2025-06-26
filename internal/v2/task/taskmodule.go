@@ -452,8 +452,9 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 
 	var latestTask *Task
 
+	// Only search for InstallApp tasks
 	for _, t := range tm.runningTasks {
-		if t.AppName == appName && t.User == user {
+		if t.AppName == appName && t.User == user && t.Type == InstallApp {
 			if latestTask == nil || t.CreatedAt.After(latestTask.CreatedAt) {
 				latestTask = t
 			}
@@ -461,7 +462,7 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 	}
 
 	for _, t := range tm.pendingTasks {
-		if t.AppName == appName && t.User == user {
+		if t.AppName == appName && t.User == user && t.Type == InstallApp {
 			if latestTask == nil || t.CreatedAt.After(latestTask.CreatedAt) {
 				latestTask = t
 			}
@@ -469,15 +470,26 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 	}
 
 	if latestTask == nil {
+		// Log all running tasks
+		log.Printf("GetLatestTaskByAppNameAndUser - All running tasks for app: %s, user: %s", appName, user)
+		for _, t := range tm.runningTasks {
+			log.Printf("  Running task: ID=%s, Type=%s, AppName=%s, User=%s, Status=%d, CreatedAt=%v",
+				t.ID, getTaskTypeString(t.Type), t.AppName, t.User, t.Status, t.CreatedAt)
+		}
+
+		// Log all pending tasks
+		log.Printf("GetLatestTaskByAppNameAndUser - All pending tasks for app: %s, user: %s", appName, user)
+		for _, t := range tm.pendingTasks {
+			log.Printf("  Pending task: ID=%s, Type=%s, AppName=%s, User=%s, Status=%d, CreatedAt=%v",
+				t.ID, getTaskTypeString(t.Type), t.AppName, t.User, t.Status, t.CreatedAt)
+		}
 		return "", "", false
 	}
 
 	typeStr := getTaskTypeString(latestTask.Type)
 	source = ""
-	if latestTask.Type == InstallApp {
-		if s, ok := latestTask.Metadata["source"].(string); ok {
-			source = s
-		}
+	if s, ok := latestTask.Metadata["source"].(string); ok {
+		source = s
 	}
 	return typeStr, source, true
 }
