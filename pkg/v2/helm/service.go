@@ -1,14 +1,17 @@
 package helm
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/mux"
 
 	"market/internal/v2/appinfo"
+	"market/internal/v2/utils"
 )
 
 // ==================== User Context Helper Functions ====================
@@ -117,6 +120,38 @@ func InitializeHelmRepository(cacheManager *appinfo.CacheManager) error {
 	return nil
 }
 
+// InitializeHelmRepositoryWithRedis initializes the Helm repository with cache manager and Redis client
+func InitializeHelmRepositoryWithRedis(cacheManager *appinfo.CacheManager, redisConfig *appinfo.RedisConfig) error {
+	if cacheManager == nil {
+		return fmt.Errorf("cache manager cannot be nil")
+	}
+
+	// Set the global cache manager
+	SetCacheManager(cacheManager)
+
+	// Create Redis client directly
+	rdb := redis.NewClient(&redis.Options{
+		Addr:         fmt.Sprintf("%s:%d", redisConfig.Host, redisConfig.Port),
+		Password:     redisConfig.Password,
+		DB:           redisConfig.DB,
+		DialTimeout:  redisConfig.Timeout,
+		ReadTimeout:  redisConfig.Timeout,
+		WriteTimeout: redisConfig.Timeout,
+	})
+
+	// Test connection
+	ctx := context.Background()
+	_, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		return fmt.Errorf("failed to connect to Redis: %v", err)
+	}
+
+	utils.SetRedisClient(rdb)
+
+	log.Printf("Helm Repository: Initialized with cache manager and Redis client")
+	return nil
+}
+
 // StartHelmRepositoryServer starts the Helm repository server on port 82
 func StartHelmRepositoryServer() error {
 	// Create a new router for Helm repository
@@ -143,6 +178,17 @@ func StartHelmRepositoryServer() error {
 func StartHelmRepositoryServerWithCacheManager(cacheManager *appinfo.CacheManager) error {
 	// Initialize the repository with cache manager
 	if err := InitializeHelmRepository(cacheManager); err != nil {
+		return fmt.Errorf("failed to initialize Helm repository: %v", err)
+	}
+
+	// Start the server
+	return StartHelmRepositoryServer()
+}
+
+// StartHelmRepositoryServerWithRedis starts the Helm repository server with cache manager and Redis client
+func StartHelmRepositoryServerWithRedis(cacheManager *appinfo.CacheManager, redisConfig *appinfo.RedisConfig) error {
+	// Initialize the repository with cache manager and Redis client
+	if err := InitializeHelmRepositoryWithRedis(cacheManager, redisConfig); err != nil {
 		return fmt.Errorf("failed to initialize Helm repository: %v", err)
 	}
 

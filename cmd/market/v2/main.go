@@ -219,8 +219,20 @@ func main() {
 	// Start Helm Repository server in a goroutine
 	go func() {
 		log.Println("Starting Helm Repository server on port 82...")
-		if err := helm.StartHelmRepositoryServerWithCacheManager(cacheManager); err != nil {
-			log.Printf("Failed to start Helm Repository server: %v", err)
+		// Get Redis client from AppInfo module to set up download history tracking
+		redisClient := appInfoModule.GetRedisClient()
+		if redisClient != nil {
+			// Use Redis configuration for download history tracking
+			redisConfig := appInfoModule.GetRedisConfig()
+			if err := helm.StartHelmRepositoryServerWithRedis(cacheManager, redisConfig); err != nil {
+				log.Printf("Failed to start Helm Repository server: %v", err)
+			}
+		} else {
+			// Fallback to cache manager only if Redis is not available
+			log.Printf("Warning: Redis client not available, starting Helm Repository server without download history tracking")
+			if err := helm.StartHelmRepositoryServerWithCacheManager(cacheManager); err != nil {
+				log.Printf("Failed to start Helm Repository server: %v", err)
+			}
 		}
 	}()
 	log.Println("Helm Repository service initialized successfully")

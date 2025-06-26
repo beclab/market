@@ -15,6 +15,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/types"
+	"market/internal/v2/utils"
 )
 
 // Global cache manager instance
@@ -456,6 +457,15 @@ func (hr *HelmRepository) downloadChart(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		log.Printf("Helm Repository: Error streaming file: %v", err)
 		return
+	}
+
+	// Save download record after successful download
+	err = utils.SaveDownloadRecord(userCtx.UserID, chartName, userCtx.Source, version)
+	if err != nil {
+		log.Printf("Helm Repository: Failed to save download record for user %s, app %s: %v", userCtx.UserID, chartName, err)
+		// Don't fail the download, just log the error
+	} else {
+		log.Printf("Helm Repository: Successfully saved download record for user %s, app %s, version %s", userCtx.UserID, chartName, version)
 	}
 
 	log.Printf("Helm Repository: Successfully served chart %s to user %s", filename, userCtx.UserID)

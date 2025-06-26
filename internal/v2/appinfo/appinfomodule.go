@@ -307,6 +307,13 @@ func (m *AppInfoModule) GetRedisClient() *RedisClient {
 	return m.redisClient
 }
 
+// GetRedisConfig returns the Redis configuration
+func (m *AppInfoModule) GetRedisConfig() *RedisConfig {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.config.Redis
+}
+
 // IsStarted returns whether the module is currently running
 func (m *AppInfoModule) IsStarted() bool {
 	m.mutex.RLock()
