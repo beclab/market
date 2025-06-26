@@ -52,6 +52,14 @@ func (d *DetailFetchStep) GetStepName() string {
 
 // Execute performs the detail fetching logic with batch processing
 func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in DetailFetchStep.Execute: %v", r)
+			data.AddError(fmt.Errorf("panic in DetailFetchStep.Execute: %v", r))
+		}
+	}()
+
 	log.Printf("Executing %s for %d apps in batches of %d", d.GetStepName(), len(data.AppIDs), d.BatchSize)
 
 	if len(data.AppIDs) == 0 {
@@ -166,6 +174,14 @@ func (d *DetailFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 
 // fetchAppsBatch fetches detailed information for a batch of apps
 func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, data *SyncContext) (int, int) {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in fetchAppsBatch: %v", r)
+			data.AddError(fmt.Errorf("panic in fetchAppsBatch: %v", r))
+		}
+	}()
+
 	// Get current market source from context
 	marketSource := data.GetMarketSource()
 	if marketSource == nil {
@@ -217,12 +233,16 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	switch resp.StatusCode() {
 	case 200:
 		// Success - process the apps and replace simplified data with detailed data
+		log.Printf("Processing successful response for batch with %d apps", len(appIDs))
 		data.mutex.Lock()
+		log.Printf("Acquired mutex lock for batch processing")
 
 		// Extract apps from raw response
 		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
+			log.Printf("Found %d apps in response data", len(appsData))
 			// Update the original LatestData with detailed information
 			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
+				log.Printf("Processing %d apps in LatestData", len(appsData))
 				for appID, appData := range appsData {
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
 						// Check for Suspend or Remove labels before processing the app
@@ -327,10 +347,17 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 							appInfoMap["id"], appInfoMap["name"], appInfoMap["version"])
 					}
 				}
+				log.Printf("Finished processing all apps in LatestData")
+			} else {
+				log.Printf("WARNING: LatestData or LatestData.Data.Apps is nil")
 			}
+		} else {
+			log.Printf("WARNING: No apps data found in response")
 		}
 
+		log.Printf("Releasing mutex lock for batch processing")
 		data.mutex.Unlock()
+		log.Printf("Mutex lock released successfully")
 
 		// Count successful and failed apps
 		successCount := 0

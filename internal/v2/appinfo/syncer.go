@@ -191,6 +191,13 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 
 // executeSyncCycleWithSource executes sync cycle with a specific market source
 func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *settings.MarketSource) error {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in executeSyncCycleWithSource: %v", r)
+		}
+	}()
+
 	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.Name)
 
 	syncContext := syncerfn.NewSyncContext(s.cache)
