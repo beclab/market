@@ -98,9 +98,26 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 		domainMap := map[string]string{}
 		for name, entrance := range entrances {
 			if entranceMap, ok := entrance.(map[string]interface{}); ok {
-				if domain, ok := entranceMap["domain"].(string); ok {
-					domainMap[name] = domain
+				// Try to get domain from entrance, fallback to host if domain is not available
+				var domain string
+				if domainVal, ok := entranceMap["domain"].(string); ok && domainVal != "" {
+					domain = domainVal
+				} else if hostVal, ok := entranceMap["host"].(string); ok && hostVal != "" {
+					// Use host as domain if domain is not available
+					domain = hostVal
+					log.Printf("Using host '%s' as domain for entrance '%s'", hostVal, name)
+				} else {
+					// Generate a default domain based on entrance name and user
+					domain = fmt.Sprintf("%s-%s", name, task.UserID)
+					log.Printf("Generated default domain '%s' for entrance '%s'", domain, name)
 				}
+
+				// Update both domainMap and the entrance object itself
+				domainMap[name] = domain
+				entranceMap["domain"] = domain
+
+				// Update the entrance in the entrances map
+				entrances[name] = entranceMap
 			}
 		}
 		templateData.Values["domain"] = domainMap
