@@ -290,13 +290,18 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, entrance.Invisible)
 	}
 
+	entranceStatuses := make([]interface{}, len(msg.EntranceStatuses))
+	for i, v := range msg.EntranceStatuses {
+		entranceStatuses[i] = v
+	}
+
 	stateData := map[string]interface{}{
 		"state":              msg.State,
 		"updateTime":         "",
 		"statusTime":         msg.CreateTime,
 		"lastTransitionTime": "",
 		"progress":           msg.Progress,
-		"entranceStatuses":   msg.EntranceStatuses,
+		"entranceStatuses":   entranceStatuses,
 		"name":               msg.Name, // Add app name for state monitoring
 	}
 
