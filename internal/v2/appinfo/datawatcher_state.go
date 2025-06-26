@@ -283,6 +283,13 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		return
 	}
 
+	// Add debug logging for entranceStatuses
+	log.Printf("DEBUG: storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
+	for i, entrance := range msg.EntranceStatuses {
+		log.Printf("DEBUG: storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, Invisible=%t",
+			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, entrance.Invisible)
+	}
+
 	stateData := map[string]interface{}{
 		"state":              msg.State,
 		"updateTime":         "",
@@ -291,6 +298,12 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		"progress":           msg.Progress,
 		"entranceStatuses":   msg.EntranceStatuses,
 		"name":               msg.Name, // Add app name for state monitoring
+	}
+
+	// Add debug logging for stateData
+	log.Printf("DEBUG: storeStateToCache - stateData keys: %v", getMapKeys(stateData))
+	if entranceStatusesVal, ok := stateData["entranceStatuses"]; ok {
+		log.Printf("DEBUG: storeStateToCache - entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 	}
 
 	sourceID := ""
@@ -332,6 +345,15 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		log.Printf("Successfully stored app state to cache for user=%s, source=%s, app=%s, state=%s",
 			userID, sourceID, msg.Name, msg.State)
 	}
+}
+
+// Helper function to get map keys for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // printAppStateMessage prints the app state message details

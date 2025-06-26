@@ -521,8 +521,11 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 
 	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
 	if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
+		log.Printf("DEBUG: NewAppStateLatestData - found entranceStatuses, type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
+
 		switch v := entranceStatusesVal.(type) {
 		case []interface{}:
+			log.Printf("DEBUG: NewAppStateLatestData - handling []interface{} case, length: %d", len(v))
 			// Handle []interface{} case (from map[string]interface{})
 			entranceStatuses = make([]struct {
 				ID         string `json:"id"`
@@ -535,6 +538,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 			}, len(v))
 
 			for i, entrance := range v {
+				log.Printf("DEBUG: NewAppStateLatestData - processing entrance[%d], type: %T, value: %+v", i, entrance, entrance)
 				if entranceMap, ok := entrance.(map[string]interface{}); ok {
 					if name, ok := entranceMap["name"].(string); ok {
 						entranceStatuses[i].Name = name
@@ -561,9 +565,14 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 					if invisible, ok := entranceMap["invisible"].(bool); ok {
 						entranceStatuses[i].Invisible = invisible
 					}
+					log.Printf("DEBUG: NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
+						i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
+				} else {
+					log.Printf("DEBUG: NewAppStateLatestData - entrance[%d] is not map[string]interface{}, type: %T", i, entrance)
 				}
 			}
 		case []map[string]interface{}:
+			log.Printf("DEBUG: NewAppStateLatestData - handling []map[string]interface{} case, length: %d", len(v))
 			// Handle []map[string]interface{} case (direct conversion)
 			entranceStatuses = make([]struct {
 				ID         string `json:"id"`
@@ -576,6 +585,7 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 			}, len(v))
 
 			for i, entranceMap := range v {
+				log.Printf("DEBUG: NewAppStateLatestData - processing entranceMap[%d]: %+v", i, entranceMap)
 				if name, ok := entranceMap["name"].(string); ok {
 					entranceStatuses[i].Name = name
 				}
@@ -601,12 +611,18 @@ func NewAppStateLatestData(data map[string]interface{}) *AppStateLatestData {
 				if invisible, ok := entranceMap["invisible"].(bool); ok {
 					entranceStatuses[i].Invisible = invisible
 				}
+				log.Printf("DEBUG: NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
+					i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
 			}
 		default:
 			// Try to handle other cases by converting to JSON and back
 			log.Printf("DEBUG: NewAppStateLatestData - entranceStatuses type: %T, value: %+v", v, v)
 		}
+	} else {
+		log.Printf("DEBUG: NewAppStateLatestData - no entranceStatuses found in data")
 	}
+
+	log.Printf("DEBUG: NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
 
 	return &AppStateLatestData{
 		Type: AppStateLatest,
