@@ -56,15 +56,8 @@ type DataWatcherState struct {
 }
 
 // NewDataWatcherState creates a new DataWatcherState instance
-func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule) *DataWatcherState {
+func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule, historyModule *history.HistoryModule) *DataWatcherState {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	// Initialize history module
-	historyModule, err := history.NewHistoryModule()
-	if err != nil {
-		log.Printf("Warning: Failed to initialize history module: %v", err)
-		// Continue without history module
-	}
 
 	dw := &DataWatcherState{
 		ctx:           ctx,

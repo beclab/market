@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/history"
 	"market/internal/v2/task"
 	"market/internal/v2/utils"
 
@@ -31,6 +32,7 @@ type AppInfoModule struct {
 	mutex            sync.RWMutex
 	isStarted        bool
 	taskModule       *task.TaskModule
+	historyModule    *history.HistoryModule
 }
 
 // ModuleConfig holds configuration for the AppInfo module
@@ -499,7 +501,7 @@ func (m *AppInfoModule) initDataWatcherState() error {
 	glog.Infof("Initializing DataWatcherState...")
 
 	// Create DataWatcherState instance with cache manager and task module
-	m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule)
+	m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule)
 
 	// Start DataWatcherState
 	if err := m.dataWatcherState.Start(); err != nil {
@@ -1187,7 +1189,7 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 	return report
 }
 
-// SetTaskModule sets the task module reference
+// SetTaskModule sets the task module for recording task events
 func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -1204,7 +1206,7 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 		}
 
 		// Create new DataWatcherState with task module
-		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule)
+		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule)
 
 		// Start new DataWatcherState
 		if err := m.dataWatcherState.Start(); err != nil {
@@ -1213,6 +1215,14 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 			glog.Infof("DataWatcherState re-initialized successfully with task module")
 		}
 	}
+}
+
+// SetHistoryModule sets the history module reference
+func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.historyModule = historyModule
+	glog.Infof("History module reference set in AppInfo module")
 }
 
 // GetTaskModule returns the task module instance

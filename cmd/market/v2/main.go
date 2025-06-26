@@ -142,15 +142,39 @@ func main() {
 	cacheManager := appInfoModule.GetCacheManager()
 	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
 
+	// 2. Initialize History Module
+	historyModule, err := history.NewHistoryModule()
+	if err != nil {
+		log.Fatalf("Failed to create History module: %v", err)
+	}
+	log.Println("History module started successfully")
+
+	// 3. Initialize Task Module
+	taskModule := task.NewTaskModule()
+	// Set history module reference for task recording
+	taskModule.SetHistoryModule(historyModule)
+	log.Println("Task module started successfully")
+
+	// Set task module reference in AppInfo module
+	appInfoModule.SetTaskModule(taskModule)
+	log.Println("Task module reference set in AppInfo module")
+
+	// Set history module reference in AppInfo module
+	appInfoModule.SetHistoryModule(historyModule)
+	log.Println("History module reference set in AppInfo module")
+
 	// Create and start the HTTP server
 	log.Printf("Preparing to create HTTP server...")
 	log.Printf("Server configuration before creation:")
 	log.Printf("  - Port: 8080")
 	log.Printf("  - Cache Manager: %v", cacheManager != nil)
 	log.Printf("  - AppInfo Module: %v", appInfoModule != nil)
+	log.Printf("  - Task Module: %v", taskModule != nil)
+	log.Printf("  - History Module: %v", historyModule != nil)
 
-	server := api.NewServer("8080", cacheManager)
+	server := api.NewServer("8080", cacheManager, taskModule, historyModule)
 	log.Printf("HTTP server instance created successfully")
+	log.Printf("Task module instance ID: %s", taskModule.GetInstanceID())
 
 	// Lock to system thread
 	runtime.LockOSThread()
@@ -190,23 +214,6 @@ func main() {
 	log.Println("  POST   /api/v2/apps/upload               - Upload application installation package")
 	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
-
-	// 2. Initialize History Module
-	historyModule, err := history.NewHistoryModule()
-	if err != nil {
-		log.Fatalf("Failed to create History module: %v", err)
-	}
-	log.Println("History module started successfully")
-
-	// 3. Initialize Task Module
-	taskModule := task.NewTaskModule()
-	// Set history module reference for task recording
-	taskModule.SetHistoryModule(historyModule)
-	log.Println("Task module started successfully")
-
-	// Set task module reference in AppInfo module
-	appInfoModule.SetTaskModule(taskModule)
-	log.Println("Task module reference set in AppInfo module")
 
 	// 4. Initialize Helm Repository Service
 	// Start Helm Repository server in a goroutine
