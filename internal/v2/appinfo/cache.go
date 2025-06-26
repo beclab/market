@@ -846,78 +846,78 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{})
 	}
 
 	if appName == "" {
-		glog.Warningf("Cannot enhance app state data: no app name found")
+		glog.Warningf("Cannot determine app name for URL enhancement")
 		return enhancedData
 	}
 
-	// Check if entranceStatuses exist and if any are missing URLs
-	if entranceStatusesVal, ok := data["entranceStatuses"].([]interface{}); ok {
-		entranceStatuses := make([]interface{}, 0, len(entranceStatusesVal))
-		needsUrlEnhancement := false
-		hasRunningWithEmptyUrl := false
+	// Process entrance statuses
+	if entranceStatusesVal, ok := data["entranceStatuses"]; ok {
+		if entranceStatuses, ok := entranceStatusesVal.([]interface{}); ok {
+			// Check if any running entrance has empty URL
+			hasRunningWithEmptyUrl := false
+			runningEntrancesWithoutUrl := make([]string, 0)
 
-		// First pass: check if any running entrance is missing URL and collect all entrances
-		for _, entrance := range entranceStatusesVal {
-			if entranceMap, ok := entrance.(map[string]interface{}); ok {
-				state, _ := entranceMap["state"].(string)
-				url, hasUrl := entranceMap["url"].(string)
+			for _, entranceVal := range entranceStatuses {
+				if entranceMap, ok := entranceVal.(map[string]interface{}); ok {
+					state, _ := entranceMap["state"].(string)
+					url, hasUrl := entranceMap["url"].(string)
+					name, _ := entranceMap["name"].(string)
 
-				// Only require URL for running entrances
-				if state == "running" && (!hasUrl || url == "") {
-					needsUrlEnhancement = true
-					hasRunningWithEmptyUrl = true
-					glog.V(2).Infof("Running entrance %s has empty URL for app %s", entranceMap["name"], appName)
+					// Only require URL for running entrances
+					if state == "running" && (!hasUrl || url == "") {
+						hasRunningWithEmptyUrl = true
+						if name != "" {
+							runningEntrancesWithoutUrl = append(runningEntrancesWithoutUrl, name)
+						}
+					}
+				}
+			}
+
+			// If running entrances have empty URLs, try to fetch them from app-service
+			if hasRunningWithEmptyUrl {
+				glog.Infof("Running entrances %v have empty URLs for app %s - attempting to fetch URLs from app-service", runningEntrancesWithoutUrl, appName)
+
+				// Fetch entrance URLs from app-service
+				entranceUrls, err := utils.FetchAppEntranceUrls(appName)
+				if err != nil {
+					glog.Warningf("Failed to fetch entrance URLs for app %s: %v - returning empty entrance statuses", appName, err)
+					enhancedData["entranceStatuses"] = []interface{}{}
+					return enhancedData
 				}
 
-				// Keep all entrances regardless of URL status (for now)
-				entranceStatuses = append(entranceStatuses, entrance)
-			}
-		}
+				// Update entrance statuses with fetched URLs
+				updatedEntrances := make([]interface{}, 0, len(entranceStatuses))
+				for _, entranceVal := range entranceStatuses {
+					if entranceMap, ok := entranceVal.(map[string]interface{}); ok {
+						name, _ := entranceMap["name"].(string)
+						state, _ := entranceMap["state"].(string)
+						url, hasUrl := entranceMap["url"].(string)
 
-		// If any running entrance has empty URL, return empty entrance statuses
-		if hasRunningWithEmptyUrl {
-			glog.V(2).Infof("App state data has running entrance with empty URL for app %s - returning empty entrance statuses", appName)
-			enhancedData["entranceStatuses"] = []interface{}{}
-			return enhancedData
-		}
+						// If this is a running entrance without URL, try to get it from fetched URLs
+						if state == "running" && (!hasUrl || url == "") {
+							if fetchedUrl, exists := entranceUrls[name]; exists && fetchedUrl != "" {
+								entranceMap["url"] = fetchedUrl
+								glog.Infof("Updated entrance %s URL for app %s: %s", name, appName, fetchedUrl)
+							} else {
+								glog.Warningf("Running entrance %s for app %s still has no URL after fetching - skipping", name, appName)
+								continue // Skip this entrance
+							}
+						}
 
-		// If URLs are missing for non-running entrances, try to fetch them from app-service
-		if needsUrlEnhancement {
-			glog.Infof("Some entrance URLs are missing for app %s, fetching from app-service", appName)
+						updatedEntrances = append(updatedEntrances, entranceMap)
+					}
+				}
 
-			entranceUrls, err := utils.FetchAppEntranceUrls(appName)
-			if err != nil {
-				glog.Warningf("Failed to fetch entrance URLs for app %s: %v", appName, err)
-				// Keep original entrance statuses even if URL fetch fails
-				enhancedData["entranceStatuses"] = entranceStatuses
+				enhancedData["entranceStatuses"] = updatedEntrances
+				glog.Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
 				return enhancedData
 			}
 
-			// Re-process entrance statuses with fetched URLs
-			enhancedEntranceStatuses := make([]interface{}, 0, len(entranceStatusesVal))
-			for _, entrance := range entranceStatusesVal {
-				if entranceMap, ok := entrance.(map[string]interface{}); ok {
-					if entranceName, ok := entranceMap["name"].(string); ok {
-						if url, exists := entranceUrls[entranceName]; exists && url != "" {
-							entranceMap["url"] = url
-							glog.V(2).Infof("Enhanced entrance %s with URL: %s", entranceName, url)
-						} else {
-							glog.V(2).Infof("Entrance %s has missing or empty URL after fetch, keeping original", entranceName)
-						}
-					}
-					enhancedEntranceStatuses = append(enhancedEntranceStatuses, entranceMap)
-				}
-			}
-
-			enhancedData["entranceStatuses"] = enhancedEntranceStatuses
-		} else {
+			// If no running entrances with empty URLs, return as is
 			enhancedData["entranceStatuses"] = entranceStatuses
+			glog.Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
+			return enhancedData
 		}
-	}
-
-	// Add debug logging for output data
-	if entranceStatusesVal, ok := enhancedData["entranceStatuses"]; ok {
-		glog.Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 	}
 
 	return enhancedData
