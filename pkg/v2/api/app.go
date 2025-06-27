@@ -437,18 +437,41 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 
 	// Step 9: Process the uploaded package using LocalRepo
 	localRepo := appinfo.NewLocalRepo(s.cacheManager)
-	if err := localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token); err != nil {
+	appInfo, err := localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token)
+	if err != nil {
 		log.Printf("Failed to process uploaded package: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, fmt.Sprintf("Failed to process package: %v", err), nil)
 		return
 	}
 
 	log.Printf("Successfully uploaded and processed chart package: %s for user: %s", filename, userID)
-	s.sendResponse(w, http.StatusOK, true, "App package uploaded and processed successfully", map[string]interface{}{
+
+	// Prepare response with app information
+	responseData := map[string]interface{}{
 		"filename": filename,
 		"source":   sourceID,
 		"user_id":  userID,
-	})
+		"app_info": map[string]interface{}{
+			"id":           appInfo.ID,
+			"app_id":       appInfo.AppID,
+			"name":         appInfo.Name,
+			"cfg_type":     appInfo.CfgType,
+			"chart_name":   appInfo.ChartName,
+			"icon":         appInfo.Icon,
+			"description":  appInfo.Description,
+			"title":        appInfo.Title,
+			"version":      appInfo.Version,
+			"categories":   appInfo.Categories,
+			"version_name": appInfo.VersionName,
+			"developer":    appInfo.Developer,
+			"rating":       appInfo.Rating,
+			"target":       appInfo.Target,
+			"create_time":  appInfo.CreateTime,
+			"update_time":  appInfo.UpdateTime,
+		},
+	}
+
+	s.sendResponse(w, http.StatusOK, true, "App package uploaded and processed successfully", responseData)
 }
 
 // extractAppDataFromPending extracts app data from the new AppInfoLatestPendingData structure

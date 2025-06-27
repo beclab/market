@@ -90,52 +90,52 @@ func (lr *LocalRepo) SetHydrator(hydrator *Hydrator) {
 }
 
 // UploadAppPackage processes an uploaded chart package and stores it in the local repository
-func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte, filename string, token string) error {
+func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte, filename string, token string) (*types.ApplicationInfoEntry, error) {
 	log.Printf("Processing uploaded chart package: %s for user: %s, source: %s", filename, userID, sourceID)
 
 	// Step 1: Create temporary directory for processing
 	tempDir, err := lr.createTempDir(filename)
 	if err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
 	// Step 2: Write uploaded file to temp directory
 	tempFilePath := filepath.Join(tempDir, filename)
 	if err := os.WriteFile(tempFilePath, fileBytes, 0644); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
 
 	// Step 3: Extract chart package
 	extractDir := filepath.Join(tempDir, "extracted")
 	if err := lr.unArchive(tempFilePath, extractDir); err != nil {
-		return fmt.Errorf("failed to extract chart package: %w", err)
+		return nil, fmt.Errorf("failed to extract chart package: %w", err)
 	}
 
 	// Step 4: Find and validate chart directory
 	chartDir := lr.findChartPath(extractDir)
 	if chartDir == "" {
-		return fmt.Errorf("no valid chart directory found in package")
+		return nil, fmt.Errorf("no valid chart directory found in package")
 	}
 
 	// Step 5: Validate chart structure and configuration
 	if err := lr.validateChart(chartDir, token); err != nil {
-		return fmt.Errorf("chart validation failed: %w", err)
+		return nil, fmt.Errorf("chart validation failed: %w", err)
 	}
 
 	// Step 6: Parse app information from chart
 	appInfo, err := lr.parseAppInfo(chartDir, token)
 	if err != nil {
-		return fmt.Errorf("failed to parse app info: %w", err)
+		return nil, fmt.Errorf("failed to parse app info: %w", err)
 	}
 
 	// Step 7: Convert to AppInfoLatestData and store in cache
 	if err := lr.storeAppInfo(userID, sourceID, appInfo, chartDir); err != nil {
-		return fmt.Errorf("failed to store app info: %w", err)
+		return nil, fmt.Errorf("failed to store app info: %w", err)
 	}
 
 	log.Printf("Successfully processed and stored chart package: %s", filename)
-	return nil
+	return appInfo, nil
 }
 
 // createTempDir creates a temporary directory for processing
