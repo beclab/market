@@ -215,8 +215,6 @@ type ApplicationInfoEntry struct {
 	AppLabels      []string    `json:"appLabels,omitempty"`
 	Count          interface{} `json:"count"`
 
-	Variants map[string]interface{} `json:"variants,omitempty"` // Using interface{} for flexibility
-
 	// Version history information
 	VersionHistory []*VersionInfo `json:"versionHistory,omitempty"`
 
@@ -1213,9 +1211,6 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 	if val, ok := sourceData["i18n"].(map[string]interface{}); ok {
 		entry.I18n = val
 	}
-	if val, ok := sourceData["variants"].(map[string]interface{}); ok {
-		entry.Variants = val
-	}
 	if val, ok := sourceData["metadata"].(map[string]interface{}); ok {
 		entry.Metadata = val
 	}
@@ -1427,7 +1422,6 @@ func ValidateApplicationInfoEntryFields(entry *ApplicationInfoEntry) map[string]
 	validation["middleware"] = entry.Middleware
 	validation["options"] = entry.Options
 	validation["i18n"] = entry.I18n
-	validation["variants"] = entry.Variants
 	validation["metadata"] = entry.Metadata
 	validation["count"] = entry.Count
 
