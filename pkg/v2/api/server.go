@@ -220,7 +220,31 @@ func (s *Server) sendResponse(w http.ResponseWriter, statusCode int, success boo
 		Data:    data,
 	}
 
-	json.NewEncoder(w).Encode(response)
+	// Add debug logging for JSON serialization
+	log.Printf("DEBUG: sendResponse - StatusCode: %d, Success: %v, Message: %s", statusCode, success, message)
+	log.Printf("DEBUG: sendResponse - Data type: %T", data)
+
+	// Try to marshal the response to check for JSON errors
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("ERROR: JSON marshaling failed: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("DEBUG: sendResponse - JSON data length: %d bytes", len(jsonData))
+	log.Printf("DEBUG: sendResponse - JSON data preview: %s", string(jsonData[:min(len(jsonData), 200)]))
+
+	// Write the JSON data directly
+	w.Write(jsonData)
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // getAppVersionHistory handles POST /api/v2/apps/version-history
