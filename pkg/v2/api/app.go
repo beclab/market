@@ -332,6 +332,30 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("Apps information retrieved successfully for user: %s", userID)
+
+		// Add debug logging to check response data
+		log.Printf("DEBUG: Response data structure:")
+		log.Printf("DEBUG: - Total apps found: %d", len(res.response.Apps))
+		log.Printf("DEBUG: - Total count: %d", res.response.TotalCount)
+		log.Printf("DEBUG: - Not found count: %d", len(res.response.NotFound))
+
+		// Log details of each found app
+		for i, app := range res.response.Apps {
+			log.Printf("DEBUG: App %d details:", i+1)
+			log.Printf("DEBUG:   - Type: %s", app.Type)
+			log.Printf("DEBUG:   - Timestamp: %d", app.Timestamp)
+			log.Printf("DEBUG:   - Version: %s", app.Version)
+			log.Printf("DEBUG:   - RawPackage: %s", app.RawPackage)
+			log.Printf("DEBUG:   - RenderedPackage: %s", app.RenderedPackage)
+			log.Printf("DEBUG:   - Values count: %d", len(app.Values))
+			log.Printf("DEBUG:   - AppInfo is nil: %v", app.AppInfo == nil)
+			log.Printf("DEBUG:   - AppSimpleInfo is nil: %v", app.AppSimpleInfo == nil)
+			if app.AppSimpleInfo != nil {
+				log.Printf("DEBUG:   - AppSimpleInfo.AppID: %s", app.AppSimpleInfo.AppID)
+				log.Printf("DEBUG:   - AppSimpleInfo.AppName: %s", app.AppSimpleInfo.AppName)
+			}
+		}
+
 		s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", res.response)
 	}
 }
