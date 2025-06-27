@@ -100,7 +100,13 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 
 // createDefaultMarketSources creates Official Market Sources from environment
 func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
-	baseURL := os.Getenv("SYNCER_REMOTE")
+
+	baseURL := os.Getenv("MARKET_PROVIDER")
+
+	if baseURL == "" {
+		baseURL = os.Getenv("SYNCER_REMOTE")
+	}
+
 	log.Printf("Reading SYNCER_REMOTE from environment: %s", baseURL)
 
 	if baseURL == "" {
