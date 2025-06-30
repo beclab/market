@@ -180,6 +180,25 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		}
 	}
 
+	// Check if this is an install operation with installFailed state
+	if appStateMsg.OpType == "install" && appStateMsg.State == "installFailed" {
+		log.Printf("Detected install operation with installFailed state for opID: %s, app: %s, user: %s",
+			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
+
+		// Call InstallTaskFailed if task module is available
+		if dw.taskModule != nil {
+			errorMsg := fmt.Sprintf("Installation failed for app %s", appStateMsg.Name)
+			if err := dw.taskModule.InstallTaskFailed(appStateMsg.OpID, errorMsg); err != nil {
+				log.Printf("Failed to mark install task as failed for opID %s: %v", appStateMsg.OpID, err)
+			} else {
+				log.Printf("Successfully marked install task as failed for opID: %s, app: %s, user: %s",
+					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
+			}
+		} else {
+			log.Printf("Task module not available, cannot mark install task as failed for opID: %s", appStateMsg.OpID)
+		}
+	}
+
 	// Store as history record
 	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
 
@@ -214,7 +233,7 @@ func (dw *DataWatcherState) startDevMockData() {
 // generateMockMessage creates and processes a random mock message
 func (dw *DataWatcherState) generateMockMessage() {
 	appIds := []string{"app001", "app002", "app003", "app004", "app005"}
-	states := []string{"running", "stopped", "starting", "stopping", "error", "downloading"}
+	states := []string{"running", "stopped", "starting", "stopping", "error", "downloading", "installFailed"}
 	opTypes := []string{"install", "uninstall", "update", "restart", "start", "stop", "cancel"}
 	users := []string{"admin", "user1", "user2", "olaresid"}
 	progressValues := []string{"0%", "25%", "50%", "75%", "100%", "downloading...", "installing...", "updating..."}
@@ -271,6 +290,25 @@ func (dw *DataWatcherState) generateMockMessage() {
 			}
 		} else {
 			log.Printf("Task module not available, cannot mark install task as succeeded for opID: %s", msg.OpID)
+		}
+	}
+
+	// Check if this is an install operation with installFailed state
+	if msg.OpType == "install" && msg.State == "installFailed" {
+		log.Printf("Detected install operation with installFailed state for opID: %s, app: %s, user: %s",
+			msg.OpID, msg.Name, msg.User)
+
+		// Call InstallTaskFailed if task module is available
+		if dw.taskModule != nil {
+			errorMsg := fmt.Sprintf("Installation failed for app %s", msg.Name)
+			if err := dw.taskModule.InstallTaskFailed(msg.OpID, errorMsg); err != nil {
+				log.Printf("Failed to mark install task as failed for opID %s: %v", msg.OpID, err)
+			} else {
+				log.Printf("Successfully marked install task as failed for opID: %s, app: %s, user: %s",
+					msg.OpID, msg.Name, msg.User)
+			}
+		} else {
+			log.Printf("Task module not available, cannot mark install task as failed for opID: %s", msg.OpID)
 		}
 	}
 

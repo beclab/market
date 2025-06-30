@@ -348,11 +348,6 @@ func (tm *TaskModule) executeTask(task *Task) {
 
 	tm.recordTaskResult(task, result, nil)
 
-	// Remove completed task from running tasks
-	// tm.mu.Lock()
-	// delete(tm.runningTasks, task.ID)
-	// tm.mu.Unlock()
-	// log.Printf("[%s] Removed completed task from running tasks: ID=%s", tm.instanceID, task.ID)
 }
 
 // sendTaskExecutionUpdate sends system update when task execution starts
@@ -599,8 +594,50 @@ func (tm *TaskModule) InstallTaskSucceed(opID string) error {
 	log.Printf("[%s] InstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
 		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
 
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] InstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
 	// Record task completion in history
 	tm.recordTaskResult(targetTask, "Installation completed successfully via external signal", nil)
+
+	return nil
+}
+
+// InstallTaskFailed marks an install task as failed by opID
+func (tm *TaskModule) InstallTaskFailed(opID string, errorMsg string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the install task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == InstallApp {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] InstallTaskFailed - No running install task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running install task found with opID: %s", opID)
+	}
+
+	// Mark task as failed
+	targetTask.Status = Failed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+	targetTask.ErrorMsg = errorMsg
+
+	log.Printf("[%s] InstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] InstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task failure in history
+	tm.recordTaskResult(targetTask, "Installation failed via external signal", fmt.Errorf(errorMsg))
 
 	return nil
 }
