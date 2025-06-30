@@ -109,6 +109,12 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
 	log.Printf("Reading SYNCER_REMOTE from environment: %s", baseURL)
 
+	// Add https:// prefix if baseURL doesn't start with http:// or https://
+	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "https://" + baseURL
+		log.Printf("Added https:// prefix to baseURL: %s", baseURL)
+	}
+
 	if baseURL == "" {
 		baseURL = "https://appstore-server-prod.bttcdn.com"
 		log.Printf("SYNCER_REMOTE not set, using default: %s", baseURL)
