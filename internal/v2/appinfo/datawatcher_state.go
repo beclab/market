@@ -473,7 +473,6 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, entrance.Invisible)
 	}
 
-	// 将 []EntranceStatus 转为 []map[string]interface{}，避免后续类型断言失败导致数据丢失
 	entranceStatuses := make([]interface{}, len(msg.EntranceStatuses))
 	for i, v := range msg.EntranceStatuses {
 		entranceStatuses[i] = map[string]interface{}{
