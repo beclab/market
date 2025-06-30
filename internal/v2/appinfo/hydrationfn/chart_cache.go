@@ -1,6 +1,7 @@
 package hydrationfn
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"market/internal/v2/types"
@@ -29,12 +30,48 @@ func (s *RenderedChartStep) updatePendingDataRenderedPackage(task *HydrationTask
 			log.Printf("Updating RenderedPackage for pending data at index %d: %s", i, chartDir)
 			userData.Sources[task.SourceID].AppInfoLatestPending[i].RenderedPackage = chartDir
 			log.Printf("Successfully updated RenderedPackage for app: %s", task.AppID)
+
+			// Log pending data after update to check for cycles
+			s.logPendingDataAfterUpdate(pendingData, "after rendered package update in chart_cache")
+
 			return nil
 		}
 	}
 
 	log.Printf("No matching pending data found for task %s, skipping RenderedPackage update", task.ID)
 	return nil
+}
+
+// logPendingDataAfterUpdate logs pending data after update to check for cycles
+func (s *RenderedChartStep) logPendingDataAfterUpdate(pendingData *types.AppInfoLatestPendingData, context string) {
+	log.Printf("DEBUG: Pending data structure check - %s", context)
+
+	if pendingData == nil {
+		log.Printf("DEBUG: Pending data is nil")
+		return
+	}
+
+	// Try to JSON marshal the entire pending data
+	if jsonData, err := json.Marshal(pendingData); err != nil {
+		log.Printf("ERROR: JSON marshal failed for pending data - %s: %v", context, err)
+		log.Printf("ERROR: Pending data structure: RawData=%v, AppInfo=%v, RawPackage=%s, RenderedPackage=%s",
+			pendingData.RawData != nil, pendingData.AppInfo != nil, pendingData.RawPackage, pendingData.RenderedPackage)
+
+		// Try to marshal individual components to isolate the problem
+		if pendingData.RawData != nil {
+			if _, err := json.Marshal(pendingData.RawData); err != nil {
+				log.Printf("ERROR: JSON marshal failed for RawData - %s: %v", context, err)
+			}
+		}
+
+		if pendingData.AppInfo != nil {
+			if _, err := json.Marshal(pendingData.AppInfo); err != nil {
+				log.Printf("ERROR: JSON marshal failed for AppInfo - %s: %v", context, err)
+			}
+		}
+	} else {
+		log.Printf("DEBUG: Pending data JSON length - %s: %d bytes", context, len(jsonData))
+	}
 }
 
 // isTaskForPendingDataRendered checks if the current task corresponds to the pending data for rendered package

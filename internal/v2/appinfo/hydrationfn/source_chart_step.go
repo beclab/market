@@ -2,6 +2,7 @@ package hydrationfn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -391,12 +392,48 @@ func (s *SourceChartStep) updatePendingDataRawPackage(task *HydrationTask, chart
 			log.Printf("Updating RawPackage for pending data at index %d: %s", i, chartPath)
 			userData.Sources[task.SourceID].AppInfoLatestPending[i].RawPackage = chartPath
 			log.Printf("Successfully updated RawPackage for app: %s", task.AppID)
+
+			// Log pending data after update to check for cycles
+			s.logPendingDataAfterUpdate(pendingData, "after raw package update")
+
 			return nil
 		}
 	}
 
 	log.Printf("No matching pending data found for task %s, skipping RawPackage update", task.ID)
 	return nil
+}
+
+// logPendingDataAfterUpdate logs pending data after update to check for cycles
+func (s *SourceChartStep) logPendingDataAfterUpdate(pendingData *types.AppInfoLatestPendingData, context string) {
+	log.Printf("DEBUG: Pending data structure check - %s", context)
+
+	if pendingData == nil {
+		log.Printf("DEBUG: Pending data is nil")
+		return
+	}
+
+	// Try to JSON marshal the entire pending data
+	if jsonData, err := json.Marshal(pendingData); err != nil {
+		log.Printf("ERROR: JSON marshal failed for pending data - %s: %v", context, err)
+		log.Printf("ERROR: Pending data structure: RawData=%v, AppInfo=%v, RawPackage=%s, RenderedPackage=%s",
+			pendingData.RawData != nil, pendingData.AppInfo != nil, pendingData.RawPackage, pendingData.RenderedPackage)
+
+		// Try to marshal individual components to isolate the problem
+		if pendingData.RawData != nil {
+			if _, err := json.Marshal(pendingData.RawData); err != nil {
+				log.Printf("ERROR: JSON marshal failed for RawData - %s: %v", context, err)
+			}
+		}
+
+		if pendingData.AppInfo != nil {
+			if _, err := json.Marshal(pendingData.AppInfo); err != nil {
+				log.Printf("ERROR: JSON marshal failed for AppInfo - %s: %v", context, err)
+			}
+		}
+	} else {
+		log.Printf("DEBUG: Pending data JSON length - %s: %d bytes", context, len(jsonData))
+	}
 }
 
 // isTaskForPendingData checks if the current task corresponds to the pending data

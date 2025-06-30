@@ -281,6 +281,10 @@ func (s *DatabaseUpdateStep) updatePackageInformation(task *HydrationTask) error
 
 	log.Printf("Updated package information for app: %s (RawPackage: %s, RenderedPackage: %s)",
 		task.AppID, pendingDataRef.RawPackage, pendingDataRef.RenderedPackage)
+
+	// Log pending data after package update to check for cycles
+	s.logPendingDataAfterUpdate(pendingDataRef, "after package update")
+
 	return nil
 }
 
@@ -354,7 +358,43 @@ func (s *DatabaseUpdateStep) updateAppInfoWithImages(task *HydrationTask, imageA
 	pendingDataRef.Timestamp = time.Now().Unix()
 
 	log.Printf("Updated AppInfo for app: %s with hydration completion metadata", task.AppID)
+
+	// Log pending data after AppInfo update to check for cycles
+	s.logPendingDataAfterUpdate(pendingDataRef, "after AppInfo update")
+
 	return nil
+}
+
+// logPendingDataAfterUpdate logs pending data after update to check for cycles
+func (s *DatabaseUpdateStep) logPendingDataAfterUpdate(pendingDataRef *types.AppInfoLatestPendingData, context string) {
+	log.Printf("DEBUG: Pending data structure check - %s", context)
+
+	if pendingDataRef == nil {
+		log.Printf("DEBUG: Pending data is nil")
+		return
+	}
+
+	// Try to JSON marshal the entire pending data
+	if jsonData, err := json.Marshal(pendingDataRef); err != nil {
+		log.Printf("ERROR: JSON marshal failed for pending data - %s: %v", context, err)
+		log.Printf("ERROR: Pending data structure: RawData=%v, AppInfo=%v, RawPackage=%s, RenderedPackage=%s",
+			pendingDataRef.RawData != nil, pendingDataRef.AppInfo != nil, pendingDataRef.RawPackage, pendingDataRef.RenderedPackage)
+
+		// Try to marshal individual components to isolate the problem
+		if pendingDataRef.RawData != nil {
+			if _, err := json.Marshal(pendingDataRef.RawData); err != nil {
+				log.Printf("ERROR: JSON marshal failed for RawData - %s: %v", context, err)
+			}
+		}
+
+		if pendingDataRef.AppInfo != nil {
+			if _, err := json.Marshal(pendingDataRef.AppInfo); err != nil {
+				log.Printf("ERROR: JSON marshal failed for AppInfo - %s: %v", context, err)
+			}
+		}
+	} else {
+		log.Printf("DEBUG: Pending data JSON length - %s: %d bytes", context, len(jsonData))
+	}
 }
 
 // readI18nData reads i18n data from files and returns it without modifying any state.

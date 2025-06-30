@@ -2,6 +2,7 @@ package hydrationfn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -122,6 +123,10 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 		}
 		templateData.Values["domain"] = domainMap
 		log.Printf("Extracted %d entrances from rendered OlaresManifest.yaml", len(entrances))
+
+		// Log entrances and templateData after modification to check for cycles
+		s.logDataStructureCheck("entrances", entrances, "after entrance processing")
+		s.logDataStructureCheck("templateData.Values", templateData.Values, "after entrance processing")
 	}
 
 	// Render the entire chart package
@@ -139,6 +144,9 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	task.ChartData["rendered_manifest"] = renderedManifest
 	task.ChartData["rendered_chart"] = renderedChart
 	task.ChartData["template_data"] = templateData
+
+	// Log task.ChartData after storing rendered content
+	s.logDataStructureCheck("task.ChartData", task.ChartData, "after storing rendered content")
 
 	// Build rendered chart URL (optional, for compatibility)
 	// For local sources, use local file path instead of remote URL
@@ -169,6 +177,9 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	if renderedChartDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
 		if err := s.updatePendingDataRenderedPackage(task, renderedChartDir); err != nil {
 			log.Printf("Warning: failed to update pending data rendered package: %v", err)
+		} else {
+			// Log pending data after update to check for cycles
+			s.logPendingDataAfterUpdate(task, "after rendered package update")
 		}
 	}
 
@@ -199,4 +210,75 @@ type AdminUsernameResponse struct {
 	Data struct {
 		Username string `json:"username"`
 	} `json:"data"`
+}
+
+// logDataStructureCheck logs data structure for debugging JSON cycle issues
+func (s *RenderedChartStep) logDataStructureCheck(dataName string, data interface{}, context string) {
+	log.Printf("DEBUG: %s structure check - %s", dataName, context)
+
+	if data == nil {
+		log.Printf("DEBUG: %s is nil", dataName)
+		return
+	}
+
+	if jsonData, err := json.Marshal(data); err != nil {
+		log.Printf("ERROR: JSON marshal failed for %s - %s: %v", dataName, context, err)
+
+		// Try to extract more information about the problematic data
+		if mapData, ok := data.(map[string]interface{}); ok {
+			log.Printf("ERROR: %s keys: %v", dataName, s.getMapKeys(mapData))
+		}
+	} else {
+		log.Printf("DEBUG: %s JSON length - %s: %d bytes", dataName, context, len(jsonData))
+	}
+}
+
+// logPendingDataAfterUpdate logs pending data after update to check for cycles
+func (s *RenderedChartStep) logPendingDataAfterUpdate(task *HydrationTask, context string) {
+	if task.Cache == nil {
+		log.Printf("DEBUG: Cache is nil, cannot log pending data")
+		return
+	}
+
+	// Use read lock to safely access cache
+	task.Cache.Mutex.RLock()
+	defer task.Cache.Mutex.RUnlock()
+
+	userData, userExists := task.Cache.Users[task.UserID]
+	if !userExists {
+		log.Printf("DEBUG: User %s not found in cache", task.UserID)
+		return
+	}
+
+	sourceData, sourceExists := userData.Sources[task.SourceID]
+	if !sourceExists {
+		log.Printf("DEBUG: Source %s not found for user %s", task.UserID, task.SourceID)
+		return
+	}
+
+	// Find and log the specific pending data for this task
+	for i, pendingData := range sourceData.AppInfoLatestPending {
+		if s.isTaskForPendingDataRendered(task, pendingData) {
+			log.Printf("DEBUG: Found pending data at index %d for task %s", i, task.ID)
+
+			// Try to JSON marshal the pending data
+			if jsonData, err := json.Marshal(pendingData); err != nil {
+				log.Printf("ERROR: JSON marshal failed for pending data - %s: %v", context, err)
+				log.Printf("ERROR: Pending data structure: RawData=%v, AppInfo=%v, RawPackage=%s, RenderedPackage=%s",
+					pendingData.RawData != nil, pendingData.AppInfo != nil, pendingData.RawPackage, pendingData.RenderedPackage)
+			} else {
+				log.Printf("DEBUG: Pending data JSON length - %s: %d bytes", context, len(jsonData))
+			}
+			break
+		}
+	}
+}
+
+// getMapKeys safely extracts keys from a map for debugging
+func (s *RenderedChartStep) getMapKeys(data map[string]interface{}) []string {
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	return keys
 }
