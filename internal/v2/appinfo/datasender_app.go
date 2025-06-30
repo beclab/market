@@ -112,6 +112,39 @@ func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
 	return nil
 }
 
+// SendMarketSystemUpdate sends market system update to NATS
+func (ds *DataSender) SendMarketSystemUpdate(update types.MarketSystemUpdate) error {
+	if !ds.enabled {
+		log.Println("NATS data sender is disabled, skipping market system update message send")
+		return nil
+	}
+
+	if ds.conn == nil {
+		return fmt.Errorf("NATS connection is not initialized")
+	}
+
+	// Convert data to JSON
+	data, err := json.Marshal(update)
+	if err != nil {
+		return fmt.Errorf("failed to marshal market system update: %w", err)
+	}
+
+	// Use system subject for market system updates
+	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
+
+	// Log before sending
+	log.Printf("Sending market system update to NATS subject '%s': %s", subject, string(data))
+
+	// Send message to NATS
+	err = ds.conn.Publish(subject, data)
+	if err != nil {
+		return fmt.Errorf("failed to publish market system update message to NATS: %w", err)
+	}
+
+	log.Printf("Successfully sent market system update to NATS")
+	return nil
+}
+
 // Close closes the NATS connection
 func (ds *DataSender) Close() {
 	if ds.conn != nil && ds.enabled {
