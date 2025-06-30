@@ -38,6 +38,8 @@ const (
 	Completed
 	// Failed task has failed
 	Failed
+	// Canceled task has been canceled
+	Canceled
 )
 
 // Task represents a task in the system
@@ -310,16 +312,30 @@ func (tm *TaskModule) executeTask(task *Task) {
 		log.Printf("App uninstallation completed successfully for task: %s, app: %s", task.ID, task.AppName)
 
 	case CancelAppInstall:
-		// Execute app cancel
+		// Execute app cancel - cancel running install tasks
 		log.Printf("Executing app cancel for task: %s, app: %s", task.ID, task.AppName)
-		result, err = tm.AppCancel(task)
+
+		// Get version and source from task metadata
+		version := ""
+		source := ""
+		if v, ok := task.Metadata["version"].(string); ok {
+			version = v
+		}
+		if s, ok := task.Metadata["source"].(string); ok {
+			source = s
+		}
+
+		// Call InstallTaskCanceled to cancel running install tasks
+		err = tm.InstallTaskCanceled(task.AppName, version, source, task.User)
 		if err != nil {
 			log.Printf("App cancel failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Cancel failed: %v", err)
-			tm.recordTaskResult(task, result, err)
+			tm.recordTaskResult(task, "Cancel operation failed", err)
 			return
 		}
+
+		result = "Install task canceled successfully"
 		log.Printf("App cancel completed successfully for task: %s, app: %s", task.ID, task.AppName)
 
 	case UpgradeApp:
@@ -638,6 +654,126 @@ func (tm *TaskModule) InstallTaskFailed(opID string, errorMsg string) error {
 
 	// Record task failure in history
 	tm.recordTaskResult(targetTask, "Installation failed via external signal", fmt.Errorf(errorMsg))
+
+	return nil
+}
+
+// InstallTaskCanceled marks an install task as canceled by app name, version, source, and user
+func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the install task with matching criteria in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.Type == InstallApp && task.AppName == appName && task.User == user {
+			// Check if version matches
+			if version, ok := task.Metadata["version"].(string); ok && version == appVersion {
+				// Check if source matches
+				if taskSource, ok := task.Metadata["source"].(string); ok && taskSource == source {
+					targetTask = task
+					break
+				}
+			}
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] InstallTaskCanceled - No running install task found with appName: %s, version: %s, source: %s, user: %s",
+			tm.instanceID, appName, appVersion, source, user)
+		return fmt.Errorf("no running install task found with appName: %s, version: %s, source: %s, user: %s", appName, appVersion, source, user)
+	}
+
+	// Mark task as canceled
+	targetTask.Status = Canceled
+	now := time.Now()
+	targetTask.CompletedAt = &now
+	targetTask.ErrorMsg = "Installation canceled via external signal"
+
+	log.Printf("[%s] InstallTaskCanceled - Task marked as canceled: ID=%s, AppName=%s, Version=%s, Source=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, appName, appVersion, source, user, now.Sub(*targetTask.StartedAt))
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] InstallTaskCanceled - Removed canceled task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task cancellation in history
+	tm.recordTaskResult(targetTask, "Installation canceled via external signal", fmt.Errorf("installation canceled"))
+
+	return nil
+}
+
+// CancelInstallTaskSucceed marks a cancel install task as completed successfully by opID
+func (tm *TaskModule) CancelInstallTaskSucceed(opID string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the cancel install task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == CancelAppInstall {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] CancelInstallTaskSucceed - No running cancel install task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running cancel install task found with opID: %s", opID)
+	}
+
+	// Mark task as completed
+	targetTask.Status = Completed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+
+	log.Printf("[%s] CancelInstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] CancelInstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task completion in history
+	tm.recordTaskResult(targetTask, "Cancel installation completed successfully via external signal", nil)
+
+	return nil
+}
+
+// CancelInstallTaskFailed marks a cancel install task as failed by opID
+func (tm *TaskModule) CancelInstallTaskFailed(opID string, errorMsg string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the cancel install task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == CancelAppInstall {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] CancelInstallTaskFailed - No running cancel install task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running cancel install task found with opID: %s", opID)
+	}
+
+	// Mark task as failed
+	targetTask.Status = Failed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+	targetTask.ErrorMsg = errorMsg
+
+	log.Printf("[%s] CancelInstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] CancelInstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task failure in history
+	tm.recordTaskResult(targetTask, "Cancel installation failed via external signal", fmt.Errorf(errorMsg))
 
 	return nil
 }
