@@ -35,6 +35,128 @@ var (
 	ValidTypes = []string{AppType, RecommendType, AgentType, ModelType, MiddlewareType}
 )
 
+// SupportClient represents the support client configuration
+type SupportClient struct {
+	Web     bool `yaml:"web,omitempty"`
+	Desktop bool `yaml:"desktop,omitempty"`
+	Mobile  bool `yaml:"mobile,omitempty"`
+	CLI     bool `yaml:"cli,omitempty"`
+}
+
+// Permission represents app permissions
+type Permission struct {
+	AppData  bool     `yaml:"appData,omitempty"`
+	AppCache bool     `yaml:"appCache,omitempty"`
+	UserData []string `yaml:"userData,omitempty"`
+	Network  bool     `yaml:"network,omitempty"`
+	GPU      bool     `yaml:"gpu,omitempty"`
+	Storage  bool     `yaml:"storage,omitempty"`
+}
+
+// Middleware represents middleware configuration
+type Middleware struct {
+	Database *DatabaseConfig        `yaml:"database,omitempty"`
+	Cache    *MiddlewareCacheConfig `yaml:"cache,omitempty"`
+	Queue    *QueueConfig           `yaml:"queue,omitempty"`
+	Storage  *StorageConfig         `yaml:"storage,omitempty"`
+}
+
+// DatabaseConfig represents database configuration
+type DatabaseConfig struct {
+	Type     string `yaml:"type,omitempty"`
+	Host     string `yaml:"host,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Database string `yaml:"database,omitempty"`
+	Username string `yaml:"username,omitempty"`
+	Password string `yaml:"password,omitempty"`
+}
+
+// MiddlewareCacheConfig represents cache configuration for middleware
+type MiddlewareCacheConfig struct {
+	Type     string `yaml:"type,omitempty"`
+	Host     string `yaml:"host,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Database int    `yaml:"database,omitempty"`
+}
+
+// QueueConfig represents queue configuration
+type QueueConfig struct {
+	Type     string `yaml:"type,omitempty"`
+	Host     string `yaml:"host,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Username string `yaml:"username,omitempty"`
+	Password string `yaml:"password,omitempty"`
+}
+
+// StorageConfig represents storage configuration
+type StorageConfig struct {
+	Type      string `yaml:"type,omitempty"`
+	Endpoint  string `yaml:"endpoint,omitempty"`
+	Bucket    string `yaml:"bucket,omitempty"`
+	Region    string `yaml:"region,omitempty"`
+	AccessKey string `yaml:"accessKey,omitempty"`
+	SecretKey string `yaml:"secretKey,omitempty"`
+}
+
+// Options represents app options and dependencies
+type Options struct {
+	Dependencies []Dependency           `yaml:"dependencies,omitempty"`
+	Conflicts    []Dependency           `yaml:"conflicts,omitempty"`
+	Settings     map[string]interface{} `yaml:"settings,omitempty"`
+}
+
+// Dependency represents a dependency or conflict
+type Dependency struct {
+	Name    string `yaml:"name"`
+	Type    string `yaml:"type"`
+	Version string `yaml:"version,omitempty"`
+}
+
+// Entrance represents an app entrance point
+type Entrance struct {
+	Name        string `yaml:"name"`
+	Port        int    `yaml:"port,omitempty"`
+	Host        string `yaml:"host,omitempty"`
+	Title       string `yaml:"title,omitempty"`
+	Icon        string `yaml:"icon,omitempty"`
+	Path        string `yaml:"path,omitempty"`
+	Protocol    string `yaml:"protocol,omitempty"`
+	Description string `yaml:"description,omitempty"`
+}
+
+// License represents license information
+type License struct {
+	Name        string `yaml:"name,omitempty"`
+	Type        string `yaml:"type,omitempty"`
+	URL         string `yaml:"url,omitempty"`
+	Description string `yaml:"description,omitempty"`
+}
+
+// Legal represents legal information
+type Legal struct {
+	PrivacyPolicy  string `yaml:"privacyPolicy,omitempty"`
+	TermsOfService string `yaml:"termsOfService,omitempty"`
+	Disclaimer     string `yaml:"disclaimer,omitempty"`
+}
+
+// I18nData represents internationalization data
+type I18nData struct {
+	Metadata *I18nMetadata `yaml:"metadata,omitempty"`
+	Spec     *I18nSpec     `yaml:"spec,omitempty"`
+}
+
+// I18nMetadata represents internationalized metadata
+type I18nMetadata struct {
+	Title       string `yaml:"title,omitempty"`
+	Description string `yaml:"description,omitempty"`
+}
+
+// I18nSpec represents internationalized spec
+type I18nSpec struct {
+	FullDescription    string `yaml:"fullDescription,omitempty"`
+	UpgradeDescription string `yaml:"upgradeDescription,omitempty"`
+}
+
 // Chart represents the Chart.yaml structure
 type Chart struct {
 	APIVersion string `yaml:"apiVersion"`
@@ -562,33 +684,33 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 			Target      string   `yaml:"target"`
 		} `yaml:"metadata"`
 		Spec struct {
-			VersionName        string                 `yaml:"versionName"`
-			FullDescription    string                 `yaml:"fullDescription"`
-			UpgradeDescription string                 `yaml:"upgradeDescription"`
-			PromoteImage       []string               `yaml:"promoteImage"`
-			PromoteVideo       string                 `yaml:"promoteVideo"`
-			SubCategory        string                 `yaml:"subCategory"`
-			Developer          string                 `yaml:"developer"`
-			RequiredMemory     string                 `yaml:"requiredMemory"`
-			RequiredDisk       string                 `yaml:"requiredDisk"`
-			SupportClient      map[string]interface{} `yaml:"supportClient"`
-			SupportArch        []string               `yaml:"supportArch"`
-			RequiredGPU        string                 `yaml:"requiredGPU"`
-			RequiredCPU        string                 `yaml:"requiredCPU"`
-			Locale             []string               `yaml:"locale"`
-			Submitter          string                 `yaml:"submitter"`
-			Doc                string                 `yaml:"doc"`
-			Website            string                 `yaml:"website"`
-			FeatureImage       string                 `yaml:"featuredImage"`
-			SourceCode         string                 `yaml:"sourceCode"`
-			ModelSize          string                 `yaml:"modelSize"`
-			Namespace          string                 `yaml:"namespace"`
-			OnlyAdmin          bool                   `yaml:"onlyAdmin"`
+			VersionName        string         `yaml:"versionName"`
+			FullDescription    string         `yaml:"fullDescription"`
+			UpgradeDescription string         `yaml:"upgradeDescription"`
+			PromoteImage       []string       `yaml:"promoteImage"`
+			PromoteVideo       string         `yaml:"promoteVideo"`
+			SubCategory        string         `yaml:"subCategory"`
+			Developer          string         `yaml:"developer"`
+			RequiredMemory     string         `yaml:"requiredMemory"`
+			RequiredDisk       string         `yaml:"requiredDisk"`
+			SupportClient      *SupportClient `yaml:"supportClient"`
+			SupportArch        []string       `yaml:"supportArch"`
+			RequiredGPU        string         `yaml:"requiredGPU"`
+			RequiredCPU        string         `yaml:"requiredCPU"`
+			Locale             []string       `yaml:"locale"`
+			Submitter          string         `yaml:"submitter"`
+			Doc                string         `yaml:"doc"`
+			Website            string         `yaml:"website"`
+			FeatureImage       string         `yaml:"featuredImage"`
+			SourceCode         string         `yaml:"sourceCode"`
+			ModelSize          string         `yaml:"modelSize"`
+			Namespace          string         `yaml:"namespace"`
+			OnlyAdmin          bool           `yaml:"onlyAdmin"`
 		} `yaml:"spec"`
-		Permission map[string]interface{}   `yaml:"permission"`
-		Middleware map[string]interface{}   `yaml:"middleware"`
-		Options    map[string]interface{}   `yaml:"options"`
-		Entrances  []map[string]interface{} `yaml:"entrances"`
+		Permission *Permission `yaml:"permission"`
+		Middleware *Middleware `yaml:"middleware"`
+		Options    *Options    `yaml:"options"`
+		Entrances  []*Entrance `yaml:"entrances"`
 	}
 
 	if err := yaml.Unmarshal([]byte(renderedContent), &appCfg); err != nil {
@@ -651,173 +773,118 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 	appInfo.Metadata["config_type"] = appCfg.ConfigType
 	appInfo.Metadata["parsed_at"] = time.Now().Unix()
 
-	// Safely handle map[string]interface{} fields to avoid circular references
+	// Convert SupportClient to map[string]interface{} for compatibility
 	if appCfg.Spec.SupportClient != nil {
-		log.Printf("DEBUG: Processing SupportClient field, length: %d", len(appCfg.Spec.SupportClient))
-		// Create a safe copy of SupportClient
-		supportClientCopy := make(map[string]interface{})
-		for k, v := range appCfg.Spec.SupportClient {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: SupportClient[%s] = %v (type: %T)", k, v, v)
-					supportClientCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					supportClientCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping SupportClient[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping SupportClient[%s] to avoid circular reference", k)
-			}
+		appInfo.SupportClient = map[string]interface{}{
+			"web":     appCfg.Spec.SupportClient.Web,
+			"desktop": appCfg.Spec.SupportClient.Desktop,
+			"mobile":  appCfg.Spec.SupportClient.Mobile,
+			"cli":     appCfg.Spec.SupportClient.CLI,
 		}
-		appInfo.SupportClient = supportClientCopy
-		log.Printf("DEBUG: SupportClient copy completed, length: %d", len(supportClientCopy))
 	}
 
+	// Convert Permission to map[string]interface{} for compatibility
 	if appCfg.Permission != nil {
-		log.Printf("DEBUG: Processing Permission field, length: %d", len(appCfg.Permission))
-		// Create a safe copy of Permission
-		permissionCopy := make(map[string]interface{})
-		for k, v := range appCfg.Permission {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: Permission[%s] = %v (type: %T)", k, v, v)
-					permissionCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					permissionCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Permission[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Permission[%s] to avoid circular reference", k)
-			}
+		appInfo.Permission = map[string]interface{}{
+			"appData":  appCfg.Permission.AppData,
+			"appCache": appCfg.Permission.AppCache,
+			"userData": appCfg.Permission.UserData,
+			"network":  appCfg.Permission.Network,
+			"gpu":      appCfg.Permission.GPU,
+			"storage":  appCfg.Permission.Storage,
 		}
-		appInfo.Permission = permissionCopy
-		log.Printf("DEBUG: Permission copy completed, length: %d", len(permissionCopy))
 	}
 
+	// Convert Middleware to map[string]interface{} for compatibility
 	if appCfg.Middleware != nil {
-		log.Printf("DEBUG: Processing Middleware field, length: %d", len(appCfg.Middleware))
-		// Create a safe copy of Middleware
-		middlewareCopy := make(map[string]interface{})
-		for k, v := range appCfg.Middleware {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: Middleware[%s] = %v (type: %T)", k, v, v)
-					middlewareCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					middlewareCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Middleware[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Middleware[%s] to avoid circular reference", k)
+		middlewareMap := make(map[string]interface{})
+		if appCfg.Middleware.Database != nil {
+			middlewareMap["database"] = map[string]interface{}{
+				"type":     appCfg.Middleware.Database.Type,
+				"host":     appCfg.Middleware.Database.Host,
+				"port":     appCfg.Middleware.Database.Port,
+				"database": appCfg.Middleware.Database.Database,
+				"username": appCfg.Middleware.Database.Username,
+				"password": appCfg.Middleware.Database.Password,
 			}
 		}
-		appInfo.Middleware = middlewareCopy
-		log.Printf("DEBUG: Middleware copy completed, length: %d", len(middlewareCopy))
+		if appCfg.Middleware.Cache != nil {
+			middlewareMap["cache"] = map[string]interface{}{
+				"type":     appCfg.Middleware.Cache.Type,
+				"host":     appCfg.Middleware.Cache.Host,
+				"port":     appCfg.Middleware.Cache.Port,
+				"database": appCfg.Middleware.Cache.Database,
+			}
+		}
+		if appCfg.Middleware.Queue != nil {
+			middlewareMap["queue"] = map[string]interface{}{
+				"type":     appCfg.Middleware.Queue.Type,
+				"host":     appCfg.Middleware.Queue.Host,
+				"port":     appCfg.Middleware.Queue.Port,
+				"username": appCfg.Middleware.Queue.Username,
+				"password": appCfg.Middleware.Queue.Password,
+			}
+		}
+		if appCfg.Middleware.Storage != nil {
+			middlewareMap["storage"] = map[string]interface{}{
+				"type":      appCfg.Middleware.Storage.Type,
+				"endpoint":  appCfg.Middleware.Storage.Endpoint,
+				"bucket":    appCfg.Middleware.Storage.Bucket,
+				"region":    appCfg.Middleware.Storage.Region,
+				"accessKey": appCfg.Middleware.Storage.AccessKey,
+				"secretKey": appCfg.Middleware.Storage.SecretKey,
+			}
+		}
+		appInfo.Middleware = middlewareMap
 	}
 
+	// Convert Options to map[string]interface{} for compatibility
 	if appCfg.Options != nil {
-		log.Printf("DEBUG: Processing Options field, length: %d", len(appCfg.Options))
-		// Create a safe copy of Options
-		optionsCopy := make(map[string]interface{})
-		for k, v := range appCfg.Options {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: Options[%s] = %v (type: %T)", k, v, v)
-					optionsCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					optionsCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Options[%s] with complex type %T", k, v)
+		optionsMap := make(map[string]interface{})
+		if len(appCfg.Options.Dependencies) > 0 {
+			deps := make([]map[string]interface{}, len(appCfg.Options.Dependencies))
+			for i, dep := range appCfg.Options.Dependencies {
+				deps[i] = map[string]interface{}{
+					"name":    dep.Name,
+					"type":    dep.Type,
+					"version": dep.Version,
 				}
-			} else {
-				log.Printf("DEBUG: Skipping Options[%s] to avoid circular reference", k)
 			}
+			optionsMap["dependencies"] = deps
 		}
-		appInfo.Options = optionsCopy
-		log.Printf("DEBUG: Options copy completed, length: %d", len(optionsCopy))
+		if len(appCfg.Options.Conflicts) > 0 {
+			conflicts := make([]map[string]interface{}, len(appCfg.Options.Conflicts))
+			for i, conflict := range appCfg.Options.Conflicts {
+				conflicts[i] = map[string]interface{}{
+					"name":    conflict.Name,
+					"type":    conflict.Type,
+					"version": conflict.Version,
+				}
+			}
+			optionsMap["conflicts"] = conflicts
+		}
+		if appCfg.Options.Settings != nil {
+			optionsMap["settings"] = appCfg.Options.Settings
+		}
+		appInfo.Options = optionsMap
 	}
 
+	// Convert Entrances to []map[string]interface{} for compatibility
 	if appCfg.Entrances != nil {
-		log.Printf("DEBUG: Processing Entrances field, length: %d", len(appCfg.Entrances))
-		// Create a safe copy of Entrances
-		entrancesCopy := make([]map[string]interface{}, len(appCfg.Entrances))
+		entrances := make([]map[string]interface{}, len(appCfg.Entrances))
 		for i, entrance := range appCfg.Entrances {
-			if entrance != nil {
-				log.Printf("DEBUG: Processing entrance[%d], length: %d", i, len(entrance))
-				entranceCopy := make(map[string]interface{})
-				for k, v := range entrance {
-					// Skip any potential circular references and complex nested structures
-					if k != "source_data" && k != "raw_data" && k != "app_info" {
-						// Only copy simple types to avoid circular references
-						switch val := v.(type) {
-						case string, int, int64, float64, bool, []string, []interface{}:
-							log.Printf("DEBUG: Entrance[%d][%s] = %v (type: %T)", i, k, v, v)
-							entranceCopy[k] = v
-						case map[string]interface{}:
-							// Create a shallow copy of nested maps, excluding problematic keys
-							nestedCopy := make(map[string]interface{})
-							for nk, nv := range val {
-								if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-									nestedCopy[nk] = nv
-								}
-							}
-							entranceCopy[k] = nestedCopy
-						default:
-							log.Printf("DEBUG: Skipping Entrance[%d][%s] with complex type %T", i, k, v)
-						}
-					} else {
-						log.Printf("DEBUG: Skipping Entrance[%d][%s] to avoid circular reference", i, k)
-					}
-				}
-				entrancesCopy[i] = entranceCopy
-				log.Printf("DEBUG: Entrance[%d] copy completed, length: %d", i, len(entranceCopy))
+			entrances[i] = map[string]interface{}{
+				"name":        entrance.Name,
+				"port":        entrance.Port,
+				"host":        entrance.Host,
+				"title":       entrance.Title,
+				"icon":        entrance.Icon,
+				"path":        entrance.Path,
+				"protocol":    entrance.Protocol,
+				"description": entrance.Description,
 			}
 		}
-		appInfo.Entrances = entrancesCopy
-		log.Printf("DEBUG: Entrances copy completed, total entrances: %d", len(entrancesCopy))
+		appInfo.Entrances = entrances
 	}
 
 	// Load i18n information if available
@@ -851,38 +918,30 @@ func (lr *LocalRepo) loadI18nInfo(appInfo *types.ApplicationInfoEntry, chartDir 
 			continue
 		}
 
-		var i18nData map[string]interface{}
+		var i18nData I18nData
 		if err := yaml.Unmarshal(content, &i18nData); err != nil {
 			log.Printf("Warning: failed to parse i18n file %s: %v", i18nPath, err)
 			continue
 		}
 
-		log.Printf("DEBUG: Successfully parsed i18n data for %s, length: %d", lang, len(i18nData))
-		// Create a safe copy of i18n data to avoid circular references
+		log.Printf("DEBUG: Successfully parsed i18n data for %s", lang)
+		// Convert I18nData to map[string]interface{} for compatibility
 		safeI18nData := make(map[string]interface{})
-		for k, v := range i18nData {
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: i18n[%s][%s] = %v (type: %T)", lang, k, v, v)
-					safeI18nData[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					safeI18nData[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping i18n[%s][%s] with complex type %T", lang, k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping i18n[%s][%s] to avoid circular reference", lang, k)
+
+		if i18nData.Metadata != nil {
+			safeI18nData["metadata"] = map[string]interface{}{
+				"title":       i18nData.Metadata.Title,
+				"description": i18nData.Metadata.Description,
 			}
 		}
+
+		if i18nData.Spec != nil {
+			safeI18nData["spec"] = map[string]interface{}{
+				"fullDescription":    i18nData.Spec.FullDescription,
+				"upgradeDescription": i18nData.Spec.UpgradeDescription,
+			}
+		}
+
 		i18nMap[lang] = safeI18nData
 		log.Printf("DEBUG: Safe i18n data for %s, length: %d", lang, len(safeI18nData))
 	}
@@ -1237,331 +1296,41 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 		result["upgradeDescription"] = upgradeDescCopy
 	}
 
-	// Handle interface{} fields safely
+	// Handle interface{} fields safely - these are already map[string]interface{} from the types package
 	if entry.SupportClient != nil {
-		// Create a safe copy of SupportClient to avoid circular references
-		supportClientCopy := make(map[string]interface{})
-		for k, v := range entry.SupportClient {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: SupportClient[%s] = %v (type: %T)", k, v, v)
-					supportClientCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					supportClientCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping SupportClient[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping SupportClient[%s] to avoid circular reference", k)
-			}
-		}
-		result["supportClient"] = supportClientCopy
-		log.Printf("DEBUG: SupportClient copy completed, length: %d", len(supportClientCopy))
+		result["supportClient"] = entry.SupportClient
 	}
 
 	if entry.Permission != nil {
-		// Create a safe copy of Permission to avoid circular references
-		permissionCopy := make(map[string]interface{})
-		for k, v := range entry.Permission {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: Permission[%s] = %v (type: %T)", k, v, v)
-					permissionCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					permissionCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Permission[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Permission[%s] to avoid circular reference", k)
-			}
-		}
-		result["permission"] = permissionCopy
-		log.Printf("DEBUG: Permission copy completed, length: %d", len(permissionCopy))
+		result["permission"] = entry.Permission
 	}
 
 	if entry.Middleware != nil {
-		// Create a safe copy of Middleware to avoid circular references
-		middlewareCopy := make(map[string]interface{})
-		for k, v := range entry.Middleware {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: Middleware[%s] = %v (type: %T)", k, v, v)
-					middlewareCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					middlewareCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Middleware[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Middleware[%s] to avoid circular reference", k)
-			}
-		}
-		result["middleware"] = middlewareCopy
-		log.Printf("DEBUG: Middleware copy completed, length: %d", len(middlewareCopy))
+		result["middleware"] = entry.Middleware
 	}
 
 	if entry.Options != nil {
-		// Create a safe copy of Options to avoid circular references
-		log.Printf("DEBUG: Processing Options field, length: %d", len(entry.Options))
-		optionsCopy := make(map[string]interface{})
-		for k, v := range entry.Options {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: Options[%s] = %v (type: %T)", k, v, v)
-					optionsCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					optionsCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Options[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Options[%s] to avoid circular reference", k)
-			}
-		}
-		result["options"] = optionsCopy
-		log.Printf("DEBUG: Options copy completed, length: %d", len(optionsCopy))
+		result["options"] = entry.Options
 	}
 
 	if entry.Entrances != nil {
-		// Create a safe copy of Entrances to avoid circular references
-		entrancesCopy := make([]map[string]interface{}, len(entry.Entrances))
-		for i, entrance := range entry.Entrances {
-			if entrance != nil {
-				log.Printf("DEBUG: Processing entrance[%d], length: %d", i, len(entrance))
-				entranceCopy := make(map[string]interface{})
-				for k, v := range entrance {
-					// Skip any potential circular references and complex nested structures
-					if k != "source_data" && k != "raw_data" && k != "app_info" {
-						// Only copy simple types to avoid circular references
-						switch val := v.(type) {
-						case string, int, int64, float64, bool, []string, []interface{}:
-							log.Printf("DEBUG: Entrance[%d][%s] = %v (type: %T)", i, k, v, v)
-							entranceCopy[k] = v
-						case map[string]interface{}:
-							// Create a shallow copy of nested maps, excluding problematic keys
-							nestedCopy := make(map[string]interface{})
-							for nk, nv := range val {
-								if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-									nestedCopy[nk] = nv
-								}
-							}
-							entranceCopy[k] = nestedCopy
-						default:
-							log.Printf("DEBUG: Skipping Entrance[%d][%s] with complex type %T", i, k, v)
-						}
-					} else {
-						log.Printf("DEBUG: Skipping Entrance[%d][%s] to avoid circular reference", i, k)
-					}
-				}
-				entrancesCopy[i] = entranceCopy
-				log.Printf("DEBUG: Entrance[%d] copy completed, length: %d", i, len(entranceCopy))
-			}
-		}
-		result["entrances"] = entrancesCopy
-		log.Printf("DEBUG: Entrances copy completed, total entrances: %d", len(entrancesCopy))
+		result["entrances"] = entry.Entrances
 	}
 
 	if entry.License != nil {
-		// Create a safe copy of License to avoid circular references
-		licenseCopy := make([]map[string]interface{}, len(entry.License))
-		for i, license := range entry.License {
-			if license != nil {
-				log.Printf("DEBUG: Processing license[%d], length: %d", i, len(license))
-				licenseItemCopy := make(map[string]interface{})
-				for k, v := range license {
-					// Skip any potential circular references and complex nested structures
-					if k != "source_data" && k != "raw_data" && k != "app_info" {
-						// Only copy simple types to avoid circular references
-						switch val := v.(type) {
-						case string, int, int64, float64, bool, []string, []interface{}:
-							log.Printf("DEBUG: License[%d][%s] = %v (type: %T)", i, k, v, v)
-							licenseItemCopy[k] = v
-						case map[string]interface{}:
-							// Create a shallow copy of nested maps, excluding problematic keys
-							nestedCopy := make(map[string]interface{})
-							for nk, nv := range val {
-								if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-									nestedCopy[nk] = nv
-								}
-							}
-							licenseItemCopy[k] = nestedCopy
-						default:
-							log.Printf("DEBUG: Skipping License[%d][%s] with complex type %T", i, k, v)
-						}
-					} else {
-						log.Printf("DEBUG: Skipping License[%d][%s] to avoid circular reference", i, k)
-					}
-				}
-				licenseCopy[i] = licenseItemCopy
-				log.Printf("DEBUG: License[%d] copy completed, length: %d", i, len(licenseItemCopy))
-			}
-		}
-		result["license"] = licenseCopy
-		log.Printf("DEBUG: License copy completed, total licenses: %d", len(licenseCopy))
+		result["license"] = entry.License
 	}
 
 	if entry.Legal != nil {
-		// Create a safe copy of Legal to avoid circular references
-		legalCopy := make([]map[string]interface{}, len(entry.Legal))
-		for i, legal := range entry.Legal {
-			if legal != nil {
-				log.Printf("DEBUG: Processing legal[%d], length: %d", i, len(legal))
-				legalItemCopy := make(map[string]interface{})
-				for k, v := range legal {
-					// Skip any potential circular references and complex nested structures
-					if k != "source_data" && k != "raw_data" && k != "app_info" {
-						// Only copy simple types to avoid circular references
-						switch val := v.(type) {
-						case string, int, int64, float64, bool, []string, []interface{}:
-							log.Printf("DEBUG: Legal[%d][%s] = %v (type: %T)", i, k, v, v)
-							legalItemCopy[k] = v
-						case map[string]interface{}:
-							// Create a shallow copy of nested maps, excluding problematic keys
-							nestedCopy := make(map[string]interface{})
-							for nk, nv := range val {
-								if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-									nestedCopy[nk] = nv
-								}
-							}
-							legalItemCopy[k] = nestedCopy
-						default:
-							log.Printf("DEBUG: Skipping Legal[%d][%s] with complex type %T", i, k, v)
-						}
-					} else {
-						log.Printf("DEBUG: Skipping Legal[%d][%s] to avoid circular reference", i, k)
-					}
-				}
-				legalCopy[i] = legalItemCopy
-				log.Printf("DEBUG: Legal[%d] copy completed, length: %d", i, len(legalItemCopy))
-			}
-		}
-		result["legal"] = legalCopy
-		log.Printf("DEBUG: Legal copy completed, total legal items: %d", len(legalCopy))
+		result["legal"] = entry.Legal
 	}
 
 	if entry.I18n != nil {
-		// Create a safe copy of I18n to avoid circular references
-		i18nCopy := make(map[string]interface{})
-		for k, v := range entry.I18n {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Create a deep copy of the value to avoid circular references
-				if mapValue, ok := v.(map[string]interface{}); ok {
-					log.Printf("DEBUG: Processing i18n[%s], length: %d", k, len(mapValue))
-					safeMap := make(map[string]interface{})
-					for mk, mv := range mapValue {
-						if mk != "source_data" && mk != "raw_data" && mk != "app_info" {
-							// Only copy simple types to avoid circular references
-							switch val := mv.(type) {
-							case string, int, int64, float64, bool, []string, []interface{}:
-								log.Printf("DEBUG: i18n[%s][%s] = %v (type: %T)", k, mk, mv, mv)
-								safeMap[mk] = mv
-							case map[string]interface{}:
-								// Create a shallow copy of nested maps, excluding problematic keys
-								nestedCopy := make(map[string]interface{})
-								for nk, nv := range val {
-									if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-										nestedCopy[nk] = nv
-									}
-								}
-								safeMap[mk] = nestedCopy
-							default:
-								log.Printf("DEBUG: Skipping i18n[%s][%s] with complex type %T", k, mk, mv)
-							}
-						} else {
-							log.Printf("DEBUG: Skipping i18n[%s][%s] to avoid circular reference", k, mk)
-						}
-					}
-					i18nCopy[k] = safeMap
-					log.Printf("DEBUG: i18n[%s] copy completed, length: %d", k, len(safeMap))
-				} else {
-					log.Printf("DEBUG: i18n[%s] is not a map, copying as-is", k)
-					i18nCopy[k] = v
-				}
-			} else {
-				log.Printf("DEBUG: Skipping i18n[%s] to avoid circular reference", k)
-			}
-		}
-		result["i18n"] = i18nCopy
-		log.Printf("DEBUG: i18n copy completed, total languages: %d", len(i18nCopy))
+		result["i18n"] = entry.I18n
 	}
 
 	if entry.Count != nil {
-		// Create a safe copy of Count to avoid circular references
-		if countMap, ok := entry.Count.(map[string]interface{}); ok {
-			log.Printf("DEBUG: Processing Count field, length: %d", len(countMap))
-			countCopy := make(map[string]interface{})
-			for k, v := range countMap {
-				// Skip any potential circular references and complex nested structures
-				if k != "source_data" && k != "raw_data" && k != "app_info" {
-					// Only copy simple types to avoid circular references
-					switch val := v.(type) {
-					case string, int, int64, float64, bool, []string, []interface{}:
-						log.Printf("DEBUG: Count[%s] = %v (type: %T)", k, v, v)
-						countCopy[k] = v
-					case map[string]interface{}:
-						// Create a shallow copy of nested maps, excluding problematic keys
-						nestedCopy := make(map[string]interface{})
-						for nk, nv := range val {
-							if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-								nestedCopy[nk] = nv
-							}
-						}
-						countCopy[k] = nestedCopy
-					default:
-						log.Printf("DEBUG: Skipping Count[%s] with complex type %T", k, v)
-					}
-				} else {
-					log.Printf("DEBUG: Skipping Count[%s] to avoid circular reference", k)
-				}
-			}
-			result["count"] = countCopy
-			log.Printf("DEBUG: Count copy completed, length: %d", len(countCopy))
-		} else {
-			log.Printf("DEBUG: Count is not a map, copying as-is")
-			result["count"] = entry.Count
-		}
+		result["count"] = entry.Count
 	}
 
 	// Handle metadata field safely - create a copy to avoid circular references
@@ -1682,250 +1451,37 @@ func (lr *LocalRepo) createSafeApplicationInfoEntryCopy(entry *types.Application
 		}
 	}
 
-	// Handle interface{} fields safely
+	// Handle interface{} fields safely - these are already map[string]interface{} from the types package
 	if entry.SupportClient != nil {
-		safeAppInfo.SupportClient = make(map[string]interface{})
-		for k, v := range entry.SupportClient {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					safeAppInfo.SupportClient[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					safeAppInfo.SupportClient[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping SupportClient[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping SupportClient[%s] to avoid circular reference", k)
-			}
-		}
+		safeAppInfo.SupportClient = entry.SupportClient
 	}
 
 	if entry.Permission != nil {
-		safeAppInfo.Permission = make(map[string]interface{})
-		for k, v := range entry.Permission {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					safeAppInfo.Permission[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					safeAppInfo.Permission[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Permission[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Permission[%s] to avoid circular reference", k)
-			}
-		}
+		safeAppInfo.Permission = entry.Permission
 	}
 
 	if entry.Middleware != nil {
-		safeAppInfo.Middleware = make(map[string]interface{})
-		for k, v := range entry.Middleware {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					safeAppInfo.Middleware[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					safeAppInfo.Middleware[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Middleware[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Middleware[%s] to avoid circular reference", k)
-			}
-		}
+		safeAppInfo.Middleware = entry.Middleware
 	}
 
 	if entry.Options != nil {
-		safeAppInfo.Options = make(map[string]interface{})
-		for k, v := range entry.Options {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					safeAppInfo.Options[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					safeAppInfo.Options[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Options[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Options[%s] to avoid circular reference", k)
-			}
-		}
+		safeAppInfo.Options = entry.Options
 	}
 
 	if entry.Entrances != nil {
-		safeAppInfo.Entrances = make([]map[string]interface{}, len(entry.Entrances))
-		for i, entrance := range entry.Entrances {
-			if entrance != nil {
-				safeAppInfo.Entrances[i] = make(map[string]interface{})
-				for k, v := range entrance {
-					// Skip any potential circular references and complex nested structures
-					if k != "source_data" && k != "raw_data" && k != "app_info" {
-						// Only copy simple types to avoid circular references
-						switch val := v.(type) {
-						case string, int, int64, float64, bool, []string, []interface{}:
-							safeAppInfo.Entrances[i][k] = v
-						case map[string]interface{}:
-							// Create a shallow copy of nested maps, excluding problematic keys
-							nestedCopy := make(map[string]interface{})
-							for nk, nv := range val {
-								if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-									nestedCopy[nk] = nv
-								}
-							}
-							safeAppInfo.Entrances[i][k] = nestedCopy
-						default:
-							log.Printf("DEBUG: Skipping Entrance[%d][%s] with complex type %T", i, k, v)
-						}
-					} else {
-						log.Printf("DEBUG: Skipping Entrance[%d][%s] to avoid circular reference", i, k)
-					}
-				}
-			}
-		}
+		safeAppInfo.Entrances = entry.Entrances
 	}
 
 	if entry.License != nil {
-		safeAppInfo.License = make([]map[string]interface{}, len(entry.License))
-		for i, license := range entry.License {
-			if license != nil {
-				safeAppInfo.License[i] = make(map[string]interface{})
-				for k, v := range license {
-					// Skip any potential circular references and complex nested structures
-					if k != "source_data" && k != "raw_data" && k != "app_info" {
-						// Only copy simple types to avoid circular references
-						switch val := v.(type) {
-						case string, int, int64, float64, bool, []string, []interface{}:
-							safeAppInfo.License[i][k] = v
-						case map[string]interface{}:
-							// Create a shallow copy of nested maps, excluding problematic keys
-							nestedCopy := make(map[string]interface{})
-							for nk, nv := range val {
-								if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-									nestedCopy[nk] = nv
-								}
-							}
-							safeAppInfo.License[i][k] = nestedCopy
-						default:
-							log.Printf("DEBUG: Skipping License[%d][%s] with complex type %T", i, k, v)
-						}
-					} else {
-						log.Printf("DEBUG: Skipping License[%d][%s] to avoid circular reference", i, k)
-					}
-				}
-			}
-		}
+		safeAppInfo.License = entry.License
 	}
 
 	if entry.Legal != nil {
-		safeAppInfo.Legal = make([]map[string]interface{}, len(entry.Legal))
-		for i, legal := range entry.Legal {
-			if legal != nil {
-				safeAppInfo.Legal[i] = make(map[string]interface{})
-				for k, v := range legal {
-					// Skip any potential circular references and complex nested structures
-					if k != "source_data" && k != "raw_data" && k != "app_info" {
-						// Only copy simple types to avoid circular references
-						switch val := v.(type) {
-						case string, int, int64, float64, bool, []string, []interface{}:
-							safeAppInfo.Legal[i][k] = v
-						case map[string]interface{}:
-							// Create a shallow copy of nested maps, excluding problematic keys
-							nestedCopy := make(map[string]interface{})
-							for nk, nv := range val {
-								if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-									nestedCopy[nk] = nv
-								}
-							}
-							safeAppInfo.Legal[i][k] = nestedCopy
-						default:
-							log.Printf("DEBUG: Skipping Legal[%d][%s] with complex type %T", i, k, v)
-						}
-					} else {
-						log.Printf("DEBUG: Skipping Legal[%d][%s] to avoid circular reference", i, k)
-					}
-				}
-			}
-		}
+		safeAppInfo.Legal = entry.Legal
 	}
 
 	if entry.I18n != nil {
-		safeAppInfo.I18n = make(map[string]interface{})
-		for k, v := range entry.I18n {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Create a deep copy of the value to avoid circular references
-				if mapValue, ok := v.(map[string]interface{}); ok {
-					safeMap := make(map[string]interface{})
-					for mk, mv := range mapValue {
-						if mk != "source_data" && mk != "raw_data" && mk != "app_info" {
-							// Only copy simple types to avoid circular references
-							switch val := mv.(type) {
-							case string, int, int64, float64, bool, []string, []interface{}:
-								safeMap[mk] = mv
-							case map[string]interface{}:
-								// Create a shallow copy of nested maps, excluding problematic keys
-								nestedCopy := make(map[string]interface{})
-								for nk, nv := range val {
-									if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-										nestedCopy[nk] = nv
-									}
-								}
-								safeMap[mk] = nestedCopy
-							default:
-								log.Printf("DEBUG: Skipping i18n[%s][%s] with complex type %T", k, mk, mv)
-							}
-						} else {
-							log.Printf("DEBUG: Skipping i18n[%s][%s] to avoid circular reference", k, mk)
-						}
-					}
-					safeAppInfo.I18n[k] = safeMap
-				} else {
-					log.Printf("DEBUG: i18n[%s] is not a map, copying as-is", k)
-					safeAppInfo.I18n[k] = v
-				}
-			} else {
-				log.Printf("DEBUG: Skipping i18n[%s] to avoid circular reference", k)
-			}
-		}
+		safeAppInfo.I18n = entry.I18n
 	}
 
 	if entry.Count != nil {
