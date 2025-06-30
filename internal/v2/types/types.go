@@ -2,6 +2,7 @@ package types
 
 import (
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -1356,11 +1357,95 @@ func NewApplicationInfoEntry(sourceData map[string]interface{}) *ApplicationInfo
 	// Validate and fix AppLabels if needed
 	ValidateAndFixAppLabels(sourceData, entry)
 
-	// Store source data in metadata for reference
-	entry.Metadata["source_data"] = sourceData
+	// Store a safe copy of source data in metadata to avoid circular references
+	// Create a deep copy of source data without potential circular references
+	safeSourceData := createSafeSourceDataCopy(sourceData)
+	entry.Metadata["source_data"] = safeSourceData
 	entry.Metadata["creation_method"] = "NewApplicationInfoEntry"
 
 	return entry
+}
+
+// createSafeSourceDataCopy creates a safe copy of source data to avoid circular references
+func createSafeSourceDataCopy(sourceData map[string]interface{}) map[string]interface{} {
+	if sourceData == nil {
+		return nil
+	}
+
+	safeCopy := make(map[string]interface{})
+	visited := make(map[uintptr]bool)
+
+	for key, value := range sourceData {
+		// Skip potential circular reference keys
+		if key == "source_data" || key == "raw_data" || key == "app_info" ||
+			key == "parent" || key == "self" || key == "circular_ref" ||
+			key == "back_ref" || key == "loop" {
+			continue
+		}
+
+		safeCopy[key] = deepCopyValue(value, visited)
+	}
+
+	return safeCopy
+}
+
+// deepCopyValue performs a deep copy of a value while avoiding circular references
+func deepCopyValue(value interface{}, visited map[uintptr]bool) interface{} {
+	if value == nil {
+		return nil
+	}
+
+	switch v := value.(type) {
+	case string, int, int64, float64, bool:
+		return v
+	case []string:
+		return append([]string{}, v...)
+	case []interface{}:
+		// Only copy simple types from interface slice
+		safeSlice := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			switch item.(type) {
+			case string, int, int64, float64, bool:
+				safeSlice = append(safeSlice, item)
+			default:
+				// Skip complex slice items to avoid circular references
+			}
+		}
+		return safeSlice
+	case map[string]interface{}:
+		// Check for circular references using pointer
+		ptr := reflect.ValueOf(v).Pointer()
+		if visited[ptr] {
+			return nil // Skip circular reference
+		}
+		visited[ptr] = true
+		defer delete(visited, ptr)
+
+		safeMap := make(map[string]interface{})
+		for k, val := range v {
+			// Skip potential circular reference keys
+			if k == "source_data" || k == "raw_data" || k == "app_info" ||
+				k == "parent" || k == "self" || k == "circular_ref" ||
+				k == "back_ref" || k == "loop" {
+				continue
+			}
+			safeMap[k] = deepCopyValue(val, visited)
+		}
+		return safeMap
+	case []map[string]interface{}:
+		safeSlice := make([]map[string]interface{}, 0, len(v))
+		for _, item := range v {
+			if itemCopy := deepCopyValue(item, visited); itemCopy != nil {
+				if itemMap, ok := itemCopy.(map[string]interface{}); ok {
+					safeSlice = append(safeSlice, itemMap)
+				}
+			}
+		}
+		return safeSlice
+	default:
+		// For other types, return nil to avoid potential circular references
+		return nil
+	}
 }
 
 // ValidateApplicationInfoEntryFields validates that all fields are properly mapped
