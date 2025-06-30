@@ -143,7 +143,6 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	// Store rendered content in task
 	task.ChartData["rendered_manifest"] = renderedManifest
 	task.ChartData["rendered_chart"] = renderedChart
-	task.ChartData["template_data"] = templateData
 
 	// Log task.ChartData after storing rendered content
 	s.logDataStructureCheck("task.ChartData", task.ChartData, "after storing rendered content")
