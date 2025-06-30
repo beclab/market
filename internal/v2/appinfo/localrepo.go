@@ -63,14 +63,6 @@ type DatabaseConfig struct {
 	Password string `yaml:"password,omitempty"`
 }
 
-// CacheConfig represents cache configuration
-type CacheConfig struct {
-	Type     string `yaml:"type,omitempty"`
-	Host     string `yaml:"host,omitempty"`
-	Port     int    `yaml:"port,omitempty"`
-	Database int    `yaml:"database,omitempty"`
-}
-
 // QueueConfig represents queue configuration
 type QueueConfig struct {
 	Type     string `yaml:"type,omitempty"`
@@ -92,10 +84,10 @@ type StorageConfig struct {
 
 // Middleware represents middleware configuration
 type Middleware struct {
-	Database *DatabaseConfig `yaml:"database,omitempty"`
-	Cache    *CacheConfig    `yaml:"cache,omitempty"`
-	Queue    *QueueConfig    `yaml:"queue,omitempty"`
-	Storage  *StorageConfig  `yaml:"storage,omitempty"`
+	Database *DatabaseConfig    `yaml:"database,omitempty"`
+	Cache    *types.CacheConfig `yaml:"cache,omitempty"`
+	Queue    *QueueConfig       `yaml:"queue,omitempty"`
+	Storage  *StorageConfig     `yaml:"storage,omitempty"`
 }
 
 // Dependency represents a dependency or conflict
@@ -1527,7 +1519,7 @@ func (lr *LocalRepo) convertDatabaseConfigToMap(databaseConfig *DatabaseConfig) 
 }
 
 // convertCacheConfigToMap converts CacheConfig to map[string]interface{} for compatibility
-func (lr *LocalRepo) convertCacheConfigToMap(cacheConfig *CacheConfig) map[string]interface{} {
+func (lr *LocalRepo) convertCacheConfigToMap(cacheConfig *types.CacheConfig) map[string]interface{} {
 	return map[string]interface{}{
 		"type":     cacheConfig.Type,
 		"host":     cacheConfig.Host,

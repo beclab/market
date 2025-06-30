@@ -1551,3 +1551,10 @@ func NewAppRenderFailedDataFromPending(pendingData *AppInfoLatestPendingData, fa
 		RetryCount:      retryCount,
 	}
 }
+
+type CacheConfig struct {
+	Type     string `json:"type,omitempty" yaml:"type,omitempty"`
+	Host     string `json:"host,omitempty" yaml:"host,omitempty"`
+	Port     int    `json:"port,omitempty" yaml:"port,omitempty"`
+	Database int    `json:"database,omitempty" yaml:"database,omitempty"`
+}
