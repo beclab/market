@@ -236,6 +236,41 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		}
 	}
 
+	// Check if this is an uninstall operation with uninstalled state
+	if appStateMsg.OpType == "uninstall" && appStateMsg.State == "uninstalled" {
+		log.Printf("Detected uninstall operation with uninstalled state for opID: %s, app: %s, user: %s",
+			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
+
+		if dw.taskModule != nil {
+			if err := dw.taskModule.UninstallTaskSucceed(appStateMsg.OpID); err != nil {
+				log.Printf("Failed to mark uninstall task as succeeded for opID %s: %v", appStateMsg.OpID, err)
+			} else {
+				log.Printf("Successfully marked uninstall task as succeeded for opID: %s, app: %s, user: %s",
+					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
+			}
+		} else {
+			log.Printf("Task module not available, cannot mark uninstall task as succeeded for opID: %s", appStateMsg.OpID)
+		}
+	}
+
+	// Check if this is an uninstall operation with uninstallFailed state
+	if appStateMsg.OpType == "uninstall" && appStateMsg.State == "uninstallFailed" {
+		log.Printf("Detected uninstall operation with uninstallFailed state for opID: %s, app: %s, user: %s",
+			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
+
+		if dw.taskModule != nil {
+			errorMsg := fmt.Sprintf("Uninstallation failed for app %s", appStateMsg.Name)
+			if err := dw.taskModule.UninstallTaskFailed(appStateMsg.OpID, errorMsg); err != nil {
+				log.Printf("Failed to mark uninstall task as failed for opID %s: %v", appStateMsg.OpID, err)
+			} else {
+				log.Printf("Successfully marked uninstall task as failed for opID: %s, app: %s, user: %s",
+					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
+			}
+		} else {
+			log.Printf("Task module not available, cannot mark uninstall task as failed for opID: %s", appStateMsg.OpID)
+		}
+	}
+
 	// Store as history record
 	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
 

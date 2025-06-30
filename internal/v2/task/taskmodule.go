@@ -777,3 +777,78 @@ func (tm *TaskModule) CancelInstallTaskFailed(opID string, errorMsg string) erro
 
 	return nil
 }
+
+// UninstallTaskSucceed marks an uninstall task as completed successfully by opID
+func (tm *TaskModule) UninstallTaskSucceed(opID string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the uninstall task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == UninstallApp {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] UninstallTaskSucceed - No running uninstall task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running uninstall task found with opID: %s", opID)
+	}
+
+	// Mark task as completed
+	targetTask.Status = Completed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+
+	log.Printf("[%s] UninstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] UninstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task completion in history
+	tm.recordTaskResult(targetTask, "Uninstallation completed successfully via external signal", nil)
+
+	return nil
+}
+
+// UninstallTaskFailed marks an uninstall task as failed by opID
+func (tm *TaskModule) UninstallTaskFailed(opID string, errorMsg string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the uninstall task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == UninstallApp {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] UninstallTaskFailed - No running uninstall task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running uninstall task found with opID: %s", opID)
+	}
+
+	// Mark task as failed
+	targetTask.Status = Failed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+	targetTask.ErrorMsg = errorMsg
+
+	log.Printf("[%s] UninstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] UninstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task failure in history
+	tm.recordTaskResult(targetTask, "Uninstallation failed via external signal", fmt.Errorf(errorMsg))
+
+	return nil
+}
