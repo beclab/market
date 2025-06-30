@@ -3,6 +3,7 @@ package appinfo
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -1102,7 +1103,6 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 
 	log.Printf("DEBUG: Converting ApplicationInfoEntry to map for app: %s", entry.Name)
 
-	// Create a safe map that avoids potential circular references
 	result := map[string]interface{}{
 		"id":          entry.ID,
 		"name":        entry.Name,
@@ -1146,61 +1146,81 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 		"tags":        entry.Tags,
 		"updated_at":  entry.UpdatedAt,
 	}
+	// marshal basic fields
+	if _, err := json.Marshal(result); err != nil {
+		log.Printf("DEBUG: marshal basic fields: %v", err)
+	}
 
-	log.Printf("DEBUG: Basic fields converted, processing map fields...")
-
-	// Safely handle map fields that might contain circular references
 	if entry.Description != nil {
-		// Create a copy of the description map
 		descCopy := make(map[string]string)
 		for k, v := range entry.Description {
 			descCopy[k] = v
 		}
 		result["description"] = descCopy
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal description: %v", err)
+		}
 	}
 
 	if entry.Title != nil {
-		// Create a copy of the title map
 		titleCopy := make(map[string]string)
 		for k, v := range entry.Title {
 			titleCopy[k] = v
 		}
 		result["title"] = titleCopy
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal title: %v", err)
+		}
 	}
 
 	if entry.FullDescription != nil {
-		// Create a copy of the full description map
 		fullDescCopy := make(map[string]string)
 		for k, v := range entry.FullDescription {
 			fullDescCopy[k] = v
 		}
 		result["fullDescription"] = fullDescCopy
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal fullDescription: %v", err)
+		}
 	}
 
 	if entry.UpgradeDescription != nil {
-		// Create a copy of the upgrade description map
 		upgradeDescCopy := make(map[string]string)
 		for k, v := range entry.UpgradeDescription {
 			upgradeDescCopy[k] = v
 		}
 		result["upgradeDescription"] = upgradeDescCopy
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal upgradeDescription: %v", err)
+		}
 	}
 
-	// Handle interface{} fields safely - these are already map[string]interface{} from the types package
 	if entry.SupportClient != nil {
 		result["supportClient"] = lr.deepSafeCopy(entry.SupportClient)
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal supportClient: %v", err)
+		}
 	}
 
 	if entry.Permission != nil {
 		result["permission"] = lr.deepSafeCopy(entry.Permission)
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal permission: %v", err)
+		}
 	}
 
 	if entry.Middleware != nil {
 		result["middleware"] = lr.deepSafeCopy(entry.Middleware)
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal middleware: %v", err)
+		}
 	}
 
 	if entry.Options != nil {
 		result["options"] = lr.deepSafeCopy(entry.Options)
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal options: %v", err)
+		}
 	}
 
 	if entry.Entrances != nil {
@@ -1212,11 +1232,13 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 		}
 		if len(safeEntrances) > 0 {
 			result["entrances"] = safeEntrances
+			if _, err := json.Marshal(result); err != nil {
+				log.Printf("DEBUG: marshal entrances: %v", err)
+			}
 		}
 	}
 
 	if entry.License != nil {
-		// License is []map[string]interface{}, need to handle slice
 		safeLicenses := make([]map[string]interface{}, 0, len(entry.License))
 		for _, license := range entry.License {
 			if safeLicense := lr.deepSafeCopy(license); safeLicense != nil {
@@ -1225,11 +1247,13 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 		}
 		if len(safeLicenses) > 0 {
 			result["license"] = safeLicenses
+			if _, err := json.Marshal(result); err != nil {
+				log.Printf("DEBUG: marshal license: %v", err)
+			}
 		}
 	}
 
 	if entry.Legal != nil {
-		// Legal is []map[string]interface{}, need to handle slice
 		safeLegals := make([]map[string]interface{}, 0, len(entry.Legal))
 		for _, legal := range entry.Legal {
 			if safeLegal := lr.deepSafeCopy(legal); safeLegal != nil {
@@ -1238,25 +1262,34 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 		}
 		if len(safeLegals) > 0 {
 			result["legal"] = safeLegals
+			if _, err := json.Marshal(result); err != nil {
+				log.Printf("DEBUG: marshal legal: %v", err)
+			}
 		}
 	}
 
 	if entry.I18n != nil {
-		// Use deepSafeCopy to avoid any potential circular references
 		result["i18n"] = lr.deepSafeCopy(entry.I18n)
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal i18n: %v", err)
+		}
 	}
 
 	if entry.Count != nil {
-		// Use safeCopyCount for the Count field
 		result["count"] = lr.safeCopyCount(entry.Count)
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal count: %v", err)
+		}
 	}
 
-	// Handle metadata field safely - create a copy to avoid circular references
 	if entry.Metadata != nil {
 		log.Printf("DEBUG: Processing Metadata field, length: %d", len(entry.Metadata))
 		metadataCopy := lr.convertMetadataToMap(entry.Metadata)
 		result["metadata"] = metadataCopy
 		log.Printf("DEBUG: Metadata copy completed, length: %d", len(metadataCopy))
+		if _, err := json.Marshal(result); err != nil {
+			log.Printf("DEBUG: marshal metadata: %v", err)
+		}
 	}
 
 	return result
