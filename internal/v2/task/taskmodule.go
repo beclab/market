@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"market/internal/v2/history"
+	"market/internal/v2/types"
 )
 
 // TaskType defines the type of task
@@ -37,6 +38,8 @@ const (
 	Completed
 	// Failed task has failed
 	Failed
+	// Canceled task has been canceled
+	Canceled
 )
 
 // Task represents a task in the system
@@ -46,11 +49,17 @@ type Task struct {
 	Status      TaskStatus             `json:"status"`
 	AppName     string                 `json:"app_name"`
 	User        string                 `json:"user,omitempty"`
+	OpID        string                 `json:"op_id,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 	StartedAt   *time.Time             `json:"started_at,omitempty"`
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
 	ErrorMsg    string                 `json:"error_msg,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// DataSenderInterface defines the interface for sending system updates
+type DataSenderInterface interface {
+	SendMarketSystemUpdate(update types.MarketSystemUpdate) error
 }
 
 // TaskModule manages task queues and execution
@@ -64,6 +73,7 @@ type TaskModule struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	historyModule  *history.HistoryModule // Add history module reference
+	dataSender     DataSenderInterface    // Add data sender interface reference
 }
 
 // NewTaskModule creates a new task module instance
@@ -89,6 +99,13 @@ func (tm *TaskModule) SetHistoryModule(historyModule *history.HistoryModule) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.historyModule = historyModule
+}
+
+// SetDataSender sets the data sender for sending system updates
+func (tm *TaskModule) SetDataSender(dataSender DataSenderInterface) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.dataSender = dataSender
 }
 
 // AddTask adds a new task to the pending queue
@@ -212,9 +229,9 @@ func (tm *TaskModule) start() {
 	tm.executorTicker = time.NewTicker(2 * time.Second)
 	go tm.taskExecutor()
 
-	// Start status updater (every 10 seconds)
-	tm.statusTicker = time.NewTicker(10 * time.Second)
-	go tm.statusUpdater()
+	// Start status checker (every 10 seconds)
+	tm.statusTicker = time.NewTicker(30 * time.Second)
+	go tm.statusChecker()
 }
 
 // taskExecutor runs every 2 seconds to execute pending tasks
@@ -264,6 +281,9 @@ func (tm *TaskModule) executeTask(task *Task) {
 	log.Printf("Starting task execution: ID=%s, Type=%s, AppName=%s, User=%s",
 		task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
 
+	// Send task execution system update
+	tm.sendTaskExecutionUpdate(task)
+
 	switch task.Type {
 	case InstallApp:
 		// Execute app installation
@@ -292,16 +312,30 @@ func (tm *TaskModule) executeTask(task *Task) {
 		log.Printf("App uninstallation completed successfully for task: %s, app: %s", task.ID, task.AppName)
 
 	case CancelAppInstall:
-		// Execute app cancel
+		// Execute app cancel - cancel running install tasks
 		log.Printf("Executing app cancel for task: %s, app: %s", task.ID, task.AppName)
-		result, err = tm.AppCancel(task)
+
+		// Get version and source from task metadata
+		version := ""
+		source := ""
+		if v, ok := task.Metadata["version"].(string); ok {
+			version = v
+		}
+		if s, ok := task.Metadata["source"].(string); ok {
+			source = s
+		}
+
+		// Call InstallTaskCanceled to cancel running install tasks
+		err = tm.InstallTaskCanceled(task.AppName, version, source, task.User)
 		if err != nil {
 			log.Printf("App cancel failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Cancel failed: %v", err)
-			tm.recordTaskResult(task, result, err)
+			tm.recordTaskResult(task, "Cancel operation failed", err)
 			return
 		}
+
+		result = "Install task canceled successfully"
 		log.Printf("App cancel completed successfully for task: %s, app: %s", task.ID, task.AppName)
 
 	case UpgradeApp:
@@ -330,39 +364,120 @@ func (tm *TaskModule) executeTask(task *Task) {
 
 	tm.recordTaskResult(task, result, nil)
 
-	// Remove completed task from running tasks
-	// tm.mu.Lock()
-	// delete(tm.runningTasks, task.ID)
-	// tm.mu.Unlock()
-	// log.Printf("[%s] Removed completed task from running tasks: ID=%s", tm.instanceID, task.ID)
 }
 
-// statusUpdater runs every 10 seconds to update running task status
-func (tm *TaskModule) statusUpdater() {
+// sendTaskExecutionUpdate sends system update when task execution starts
+func (tm *TaskModule) sendTaskExecutionUpdate(task *Task) {
+	if tm.dataSender == nil {
+		log.Printf("Data sender not available, skipping task execution update for task: %s", task.ID)
+		return
+	}
+
+	// Create extensions map with task information
+	extensions := make(map[string]string)
+	extensions["task_type"] = getTaskTypeString(task.Type)
+	extensions["app_name"] = task.AppName
+
+	// Add version and source if available in metadata
+	if version, ok := task.Metadata["version"].(string); ok && version != "" {
+		extensions["version"] = version
+	}
+	if source, ok := task.Metadata["source"].(string); ok && source != "" {
+		extensions["source"] = source
+	}
+
+	// Create market system update
+	update := &types.MarketSystemUpdate{
+		Timestamp:  time.Now().Unix(),
+		User:       task.User,
+		NotifyType: "market_system_point",
+		Point:      "task_execute",
+		Extensions: extensions,
+	}
+
+	// Send the notification
+	if err := tm.dataSender.SendMarketSystemUpdate(*update); err != nil {
+		log.Printf("Failed to send task execution update for task %s: %v", task.ID, err)
+	} else {
+		log.Printf("Successfully sent task execution update for task %s (type: %s, app: %s, user: %s)",
+			task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
+	}
+}
+
+// sendTaskFinishedUpdate sends system update when task status changes to finished state
+func (tm *TaskModule) sendTaskFinishedUpdate(task *Task, status string) {
+	if tm.dataSender == nil {
+		log.Printf("Data sender not available, skipping task finished update for task: %s", task.ID)
+		return
+	}
+
+	// Create extensions map with task information
+	extensions := make(map[string]string)
+	extensions["task_type"] = getTaskTypeString(task.Type)
+	extensions["app_name"] = task.AppName
+	extensions["task_status"] = status
+
+	// Add version and source if available in metadata
+	if version, ok := task.Metadata["version"].(string); ok && version != "" {
+		extensions["version"] = version
+	}
+	if source, ok := task.Metadata["source"].(string); ok && source != "" {
+		extensions["source"] = source
+	}
+
+	// Create market system update
+	update := &types.MarketSystemUpdate{
+		Timestamp:  time.Now().Unix(),
+		User:       task.User,
+		NotifyType: "market_system_point",
+		Point:      "task_finished_" + status,
+		Extensions: extensions,
+	}
+
+	// Send the notification
+	if err := tm.dataSender.SendMarketSystemUpdate(*update); err != nil {
+		log.Printf("Failed to send task finished update for task %s: %v", task.ID, err)
+	} else {
+		log.Printf("Successfully sent task finished update for task %s (type: %s, app: %s, user: %s, status: %s)",
+			task.ID, getTaskTypeString(task.Type), task.AppName, task.User, status)
+	}
+}
+
+// statusChecker runs every 10 seconds to check running task status
+func (tm *TaskModule) statusChecker() {
 	for {
 		select {
 		case <-tm.ctx.Done():
 			return
 		case <-tm.statusTicker.C:
-			tm.updateRunningTasksStatus()
+			tm.checkRunningTasksStatus()
 		}
 	}
 }
 
-// updateRunningTasksStatus updates the status of all running tasks
-func (tm *TaskModule) updateRunningTasksStatus() {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
+// checkRunningTasksStatus checks the status of all running tasks
+func (tm *TaskModule) checkRunningTasksStatus() {
 
 	for taskID, task := range tm.runningTasks {
-		log.Printf("Updating status for task: ID=%s", taskID)
-		tm.updateTaskStatus(task)
+		log.Printf("Checking status for task: ID=%s", taskID)
+		tm.showTaskStatus(task)
 	}
 }
 
-// updateTaskStatus updates the status of a single task
-func (tm *TaskModule) updateTaskStatus(task *Task) {
-	log.Printf("Checking status for task: ID=%s, Type=%d, AppName=%s", task.ID, task.Type, task.AppName)
+// showTaskStatus shows the status of a single task
+func (tm *TaskModule) showTaskStatus(task *Task) {
+	log.Printf("Task details - ID: %s, Type: %s, Status: %d, AppName: %s, User: %s, OpID: %s, CreatedAt: %v, StartedAt: %v, CompletedAt: %v, ErrorMsg: %s, Metadata: %+v",
+		task.ID,
+		getTaskTypeString(task.Type),
+		task.Status,
+		task.AppName,
+		task.User,
+		task.OpID,
+		task.CreatedAt,
+		task.StartedAt,
+		task.CompletedAt,
+		task.ErrorMsg,
+		task.Metadata)
 }
 
 // Stop gracefully stops the task module
@@ -505,4 +620,295 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 // GetInstanceID returns the unique instance identifier
 func (tm *TaskModule) GetInstanceID() string {
 	return tm.instanceID
+}
+
+// InstallTaskSucceed marks an install task as completed successfully by opID
+func (tm *TaskModule) InstallTaskSucceed(opID string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the install task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == InstallApp {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] InstallTaskSucceed - No running install task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running install task found with opID: %s", opID)
+	}
+
+	// Mark task as completed
+	targetTask.Status = Completed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+
+	log.Printf("[%s] InstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] InstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task completion in history
+	tm.recordTaskResult(targetTask, "Installation completed successfully via external signal", nil)
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "succeed")
+
+	return nil
+}
+
+// InstallTaskFailed marks an install task as failed by opID
+func (tm *TaskModule) InstallTaskFailed(opID string, errorMsg string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the install task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == InstallApp {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] InstallTaskFailed - No running install task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running install task found with opID: %s", opID)
+	}
+
+	// Mark task as failed
+	targetTask.Status = Failed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+	targetTask.ErrorMsg = errorMsg
+
+	log.Printf("[%s] InstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] InstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task failure in history
+	tm.recordTaskResult(targetTask, "Installation failed via external signal", fmt.Errorf(errorMsg))
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "failed")
+
+	return nil
+}
+
+// InstallTaskCanceled marks an install task as canceled by app name, version, source, and user
+func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the install task with matching criteria in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.Type == InstallApp && task.AppName == appName && task.User == user {
+			// Check if version matches
+			if version, ok := task.Metadata["version"].(string); ok && version == appVersion {
+				// Check if source matches
+				if taskSource, ok := task.Metadata["source"].(string); ok && taskSource == source {
+					targetTask = task
+					break
+				}
+			}
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] InstallTaskCanceled - No running install task found with appName: %s, version: %s, source: %s, user: %s",
+			tm.instanceID, appName, appVersion, source, user)
+		return fmt.Errorf("no running install task found with appName: %s, version: %s, source: %s, user: %s", appName, appVersion, source, user)
+	}
+
+	// Mark task as canceled
+	targetTask.Status = Canceled
+	now := time.Now()
+	targetTask.CompletedAt = &now
+	targetTask.ErrorMsg = "Installation canceled via external signal"
+
+	log.Printf("[%s] InstallTaskCanceled - Task marked as canceled: ID=%s, AppName=%s, Version=%s, Source=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, appName, appVersion, source, user, now.Sub(*targetTask.StartedAt))
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] InstallTaskCanceled - Removed canceled task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task cancellation in history
+	tm.recordTaskResult(targetTask, "Installation canceled via external signal", fmt.Errorf("installation canceled"))
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "canceled")
+
+	return nil
+}
+
+// CancelInstallTaskSucceed marks a cancel install task as completed successfully by opID
+func (tm *TaskModule) CancelInstallTaskSucceed(opID string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the cancel install task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == CancelAppInstall {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] CancelInstallTaskSucceed - No running cancel install task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running cancel install task found with opID: %s", opID)
+	}
+
+	// Mark task as completed
+	targetTask.Status = Completed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+
+	log.Printf("[%s] CancelInstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] CancelInstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task completion in history
+	tm.recordTaskResult(targetTask, "Cancel installation completed successfully via external signal", nil)
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "succeed")
+
+	return nil
+}
+
+// CancelInstallTaskFailed marks a cancel install task as failed by opID
+func (tm *TaskModule) CancelInstallTaskFailed(opID string, errorMsg string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the cancel install task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == CancelAppInstall {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] CancelInstallTaskFailed - No running cancel install task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running cancel install task found with opID: %s", opID)
+	}
+
+	// Mark task as failed
+	targetTask.Status = Failed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+	targetTask.ErrorMsg = errorMsg
+
+	log.Printf("[%s] CancelInstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] CancelInstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task failure in history
+	tm.recordTaskResult(targetTask, "Cancel installation failed via external signal", fmt.Errorf(errorMsg))
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "failed")
+
+	return nil
+}
+
+// UninstallTaskSucceed marks an uninstall task as completed successfully by opID
+func (tm *TaskModule) UninstallTaskSucceed(opID string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the uninstall task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == UninstallApp {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] UninstallTaskSucceed - No running uninstall task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running uninstall task found with opID: %s", opID)
+	}
+
+	// Mark task as completed
+	targetTask.Status = Completed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+
+	log.Printf("[%s] UninstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] UninstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task completion in history
+	tm.recordTaskResult(targetTask, "Uninstallation completed successfully via external signal", nil)
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "succeed")
+
+	return nil
+}
+
+// UninstallTaskFailed marks an uninstall task as failed by opID
+func (tm *TaskModule) UninstallTaskFailed(opID string, errorMsg string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the uninstall task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == UninstallApp {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] UninstallTaskFailed - No running uninstall task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running uninstall task found with opID: %s", opID)
+	}
+
+	// Mark task as failed
+	targetTask.Status = Failed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+	targetTask.ErrorMsg = errorMsg
+
+	log.Printf("[%s] UninstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+
+	// Remove task from running tasks
+	delete(tm.runningTasks, targetTask.ID)
+	log.Printf("[%s] UninstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	// Record task failure in history
+	tm.recordTaskResult(targetTask, "Uninstallation failed via external signal", fmt.Errorf(errorMsg))
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "failed")
+
+	return nil
 }

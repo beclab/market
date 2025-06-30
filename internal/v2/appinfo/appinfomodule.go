@@ -27,6 +27,7 @@ type AppInfoModule struct {
 	dataWatcher      *DataWatcher
 	dataWatcherState *DataWatcherState
 	dataWatcherUser  *DataWatcherUser
+	dataSender       *DataSender
 	ctx              context.Context
 	cancel           context.CancelFunc
 	mutex            sync.RWMutex
@@ -231,6 +232,12 @@ func (m *AppInfoModule) Stop() error {
 		glog.Infof("DataWatcherUser stopped")
 	}
 
+	// Close DataSender
+	if m.dataSender != nil {
+		m.dataSender.Close()
+		glog.Infof("DataSender closed")
+	}
+
 	if m.syncer != nil {
 		m.syncer.Stop()
 	}
@@ -300,6 +307,13 @@ func (m *AppInfoModule) GetDataWatcherUser() *DataWatcherUser {
 	return m.dataWatcherUser
 }
 
+// GetDataSender returns the DataSender instance (can nil)
+func (m *AppInfoModule) GetDataSender() *DataSender {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.dataSender
+}
+
 // GetRedisClient returns the Redis client instance
 func (m *AppInfoModule) GetRedisClient() *RedisClient {
 	m.mutex.RLock()
@@ -342,6 +356,7 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 			"data_watcher":       m.dataWatcher != nil,
 			"data_watcher_state": m.dataWatcherState != nil,
 			"data_watcher_user":  m.dataWatcherUser != nil,
+			"data_sender":        m.dataSender != nil,
 		},
 	}
 
@@ -491,8 +506,18 @@ func (m *AppInfoModule) initDataWatcher() error {
 		return fmt.Errorf("hydrator is required for DataWatcher")
 	}
 
+	// Initialize DataSender for system notifications
+	dataSender, err := NewDataSender()
+	if err != nil {
+		glog.Warningf("Failed to initialize DataSender: %v, DataWatcher will run without system notifications", err)
+		dataSender = nil
+	} else {
+		m.dataSender = dataSender
+		glog.Infof("DataSender initialized successfully")
+	}
+
 	// Create DataWatcher instance
-	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator)
+	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator, m.dataSender)
 
 	// Start DataWatcher
 	if err := m.dataWatcher.Start(m.ctx); err != nil {

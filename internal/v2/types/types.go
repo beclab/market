@@ -409,6 +409,14 @@ type AppInfoUpdate struct {
 	Source         string              `json:"source"`      // Source
 }
 
+type MarketSystemUpdate struct {
+	Timestamp  int64             `json:"timestamp"`
+	User       string            `json:"user"`
+	NotifyType string            `json:"notify_type"`
+	Point      string            `json:"point"`
+	Extensions map[string]string `json:"extensions,omitempty"` // Additional extension information
+}
+
 // NewCacheData creates a new cache data structure
 func NewCacheData() *CacheData {
 	return &CacheData{
@@ -1542,4 +1550,11 @@ func NewAppRenderFailedDataFromPending(pendingData *AppInfoLatestPendingData, fa
 		FailureTime:     time.Now(),
 		RetryCount:      retryCount,
 	}
+}
+
+type CacheConfig struct {
+	Type     string `json:"type,omitempty" yaml:"type,omitempty"`
+	Host     string `json:"host,omitempty" yaml:"host,omitempty"`
+	Port     int    `json:"port,omitempty" yaml:"port,omitempty"`
+	Database int    `json:"database,omitempty" yaml:"database,omitempty"`
 }

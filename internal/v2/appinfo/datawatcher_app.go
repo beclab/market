@@ -16,6 +16,7 @@ import (
 type DataWatcher struct {
 	cacheManager *CacheManager
 	hydrator     *Hydrator
+	dataSender   *DataSender
 	interval     time.Duration
 	isRunning    bool
 	stopChan     chan struct{}
@@ -36,10 +37,11 @@ type DataWatcher struct {
 }
 
 // NewDataWatcher creates a new DataWatcher instance
-func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator) *DataWatcher {
+func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator, dataSender *DataSender) *DataWatcher {
 	return &DataWatcher{
 		cacheManager:           cacheManager,
 		hydrator:               hydrator,
+		dataSender:             dataSender,
 		interval:               30 * time.Second, // Run every 30 seconds
 		stopChan:               make(chan struct{}),
 		isRunning:              false,
@@ -747,6 +749,9 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 				}
 
 				movedCount++
+
+				// Send system notification for new app ready
+				dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
 			}
 		}
 
@@ -1202,4 +1207,70 @@ func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
 	}
 
 	return nil
+}
+
+// getAppVersion extracts app version from pending app data
+func (dw *DataWatcher) getAppVersion(pendingApp *types.AppInfoLatestPendingData) string {
+	if pendingApp == nil {
+		return ""
+	}
+
+	// Try to get version from RawData first
+	if pendingApp.RawData != nil {
+		if pendingApp.RawData.Version != "" {
+			return pendingApp.RawData.Version
+		}
+	}
+
+	// Try to get version from AppInfo
+	if pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil {
+		if pendingApp.AppInfo.AppEntry.Version != "" {
+			return pendingApp.AppInfo.AppEntry.Version
+		}
+	}
+
+	// Try to get version from pending app's version field
+	if pendingApp.Version != "" {
+		return pendingApp.Version
+	}
+
+	return ""
+}
+
+// sendNewAppReadyNotification sends a system notification for a new app ready
+func (dw *DataWatcher) sendNewAppReadyNotification(userID string, completedApp *types.AppInfoLatestPendingData, sourceID string) {
+	if completedApp == nil {
+		glog.Warningf("DataWatcher: sendNewAppReadyNotification called with nil completedApp")
+		return
+	}
+
+	if dw.dataSender == nil {
+		glog.Warningf("DataWatcher: dataSender is nil, unable to send notification")
+		return
+	}
+
+	appName := dw.getAppName(completedApp)
+	appVersion := dw.getAppVersion(completedApp)
+
+	// Create extensions map with app information
+	extensions := make(map[string]string)
+	extensions["app_name"] = appName
+	extensions["app_version"] = appVersion
+	extensions["source"] = sourceID
+
+	// Create market system update
+	update := &types.MarketSystemUpdate{
+		Timestamp:  time.Now().Unix(),
+		User:       userID,
+		NotifyType: "market_system_point",
+		Point:      "new_app_ready",
+		Extensions: extensions,
+	}
+
+	// Send the notification
+	if err := dw.dataSender.SendMarketSystemUpdate(*update); err != nil {
+		glog.Errorf("DataWatcher: Failed to send new app ready notification for app %s: %v", appName, err)
+	} else {
+		glog.Infof("DataWatcher: Successfully sent new app ready notification for app %s (version: %s, source: %s)", appName, appVersion, sourceID)
+	}
 }
