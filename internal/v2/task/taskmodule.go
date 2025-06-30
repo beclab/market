@@ -404,6 +404,45 @@ func (tm *TaskModule) sendTaskExecutionUpdate(task *Task) {
 	}
 }
 
+// sendTaskFinishedUpdate sends system update when task status changes to finished state
+func (tm *TaskModule) sendTaskFinishedUpdate(task *Task, status string) {
+	if tm.dataSender == nil {
+		log.Printf("Data sender not available, skipping task finished update for task: %s", task.ID)
+		return
+	}
+
+	// Create extensions map with task information
+	extensions := make(map[string]string)
+	extensions["task_type"] = getTaskTypeString(task.Type)
+	extensions["app_name"] = task.AppName
+	extensions["task_status"] = status
+
+	// Add version and source if available in metadata
+	if version, ok := task.Metadata["version"].(string); ok && version != "" {
+		extensions["version"] = version
+	}
+	if source, ok := task.Metadata["source"].(string); ok && source != "" {
+		extensions["source"] = source
+	}
+
+	// Create market system update
+	update := &types.MarketSystemUpdate{
+		Timestamp:  time.Now().Unix(),
+		User:       task.User,
+		NotifyType: "market_system_point",
+		Point:      "task_finished_" + status,
+		Extensions: extensions,
+	}
+
+	// Send the notification
+	if err := tm.dataSender.SendMarketSystemUpdate(*update); err != nil {
+		log.Printf("Failed to send task finished update for task %s: %v", task.ID, err)
+	} else {
+		log.Printf("Successfully sent task finished update for task %s (type: %s, app: %s, user: %s, status: %s)",
+			task.ID, getTaskTypeString(task.Type), task.AppName, task.User, status)
+	}
+}
+
 // statusChecker runs every 10 seconds to check running task status
 func (tm *TaskModule) statusChecker() {
 	for {
@@ -617,6 +656,9 @@ func (tm *TaskModule) InstallTaskSucceed(opID string) error {
 	// Record task completion in history
 	tm.recordTaskResult(targetTask, "Installation completed successfully via external signal", nil)
 
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "succeed")
+
 	return nil
 }
 
@@ -654,6 +696,9 @@ func (tm *TaskModule) InstallTaskFailed(opID string, errorMsg string) error {
 
 	// Record task failure in history
 	tm.recordTaskResult(targetTask, "Installation failed via external signal", fmt.Errorf(errorMsg))
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "failed")
 
 	return nil
 }
@@ -700,6 +745,9 @@ func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user stri
 	// Record task cancellation in history
 	tm.recordTaskResult(targetTask, "Installation canceled via external signal", fmt.Errorf("installation canceled"))
 
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "canceled")
+
 	return nil
 }
 
@@ -736,6 +784,9 @@ func (tm *TaskModule) CancelInstallTaskSucceed(opID string) error {
 
 	// Record task completion in history
 	tm.recordTaskResult(targetTask, "Cancel installation completed successfully via external signal", nil)
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "succeed")
 
 	return nil
 }
@@ -775,6 +826,9 @@ func (tm *TaskModule) CancelInstallTaskFailed(opID string, errorMsg string) erro
 	// Record task failure in history
 	tm.recordTaskResult(targetTask, "Cancel installation failed via external signal", fmt.Errorf(errorMsg))
 
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "failed")
+
 	return nil
 }
 
@@ -811,6 +865,9 @@ func (tm *TaskModule) UninstallTaskSucceed(opID string) error {
 
 	// Record task completion in history
 	tm.recordTaskResult(targetTask, "Uninstallation completed successfully via external signal", nil)
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "succeed")
 
 	return nil
 }
@@ -849,6 +906,9 @@ func (tm *TaskModule) UninstallTaskFailed(opID string, errorMsg string) error {
 
 	// Record task failure in history
 	tm.recordTaskResult(targetTask, "Uninstallation failed via external signal", fmt.Errorf(errorMsg))
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(targetTask, "failed")
 
 	return nil
 }
