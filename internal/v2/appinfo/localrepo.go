@@ -99,9 +99,9 @@ type Dependency struct {
 
 // Options represents app options and dependencies
 type Options struct {
-	Dependencies []Dependency           `yaml:"dependencies,omitempty"`
-	Conflicts    []Dependency           `yaml:"conflicts,omitempty"`
-	Settings     map[string]interface{} `yaml:"settings,omitempty"`
+	Dependencies []Dependency      `yaml:"dependencies,omitempty"`
+	Conflicts    []Dependency      `yaml:"conflicts,omitempty"`
+	Settings     map[string]string `yaml:"settings,omitempty"`
 }
 
 // Entrance represents an app entrance point
@@ -1187,39 +1187,67 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 
 	// Handle interface{} fields safely - these are already map[string]interface{} from the types package
 	if entry.SupportClient != nil {
-		result["supportClient"] = entry.SupportClient
+		result["supportClient"] = lr.deepSafeCopy(entry.SupportClient)
 	}
 
 	if entry.Permission != nil {
-		result["permission"] = entry.Permission
+		result["permission"] = lr.deepSafeCopy(entry.Permission)
 	}
 
 	if entry.Middleware != nil {
-		result["middleware"] = entry.Middleware
+		result["middleware"] = lr.deepSafeCopy(entry.Middleware)
 	}
 
 	if entry.Options != nil {
-		result["options"] = entry.Options
+		result["options"] = lr.deepSafeCopy(entry.Options)
 	}
 
 	if entry.Entrances != nil {
-		result["entrances"] = entry.Entrances
+		safeEntrances := make([]map[string]interface{}, 0, len(entry.Entrances))
+		for _, entrance := range entry.Entrances {
+			if safeEntrance := lr.deepSafeCopy(entrance); safeEntrance != nil {
+				safeEntrances = append(safeEntrances, safeEntrance)
+			}
+		}
+		if len(safeEntrances) > 0 {
+			result["entrances"] = safeEntrances
+		}
 	}
 
 	if entry.License != nil {
-		result["license"] = entry.License
+		// License is []map[string]interface{}, need to handle slice
+		safeLicenses := make([]map[string]interface{}, 0, len(entry.License))
+		for _, license := range entry.License {
+			if safeLicense := lr.deepSafeCopy(license); safeLicense != nil {
+				safeLicenses = append(safeLicenses, safeLicense)
+			}
+		}
+		if len(safeLicenses) > 0 {
+			result["license"] = safeLicenses
+		}
 	}
 
 	if entry.Legal != nil {
-		result["legal"] = entry.Legal
+		// Legal is []map[string]interface{}, need to handle slice
+		safeLegals := make([]map[string]interface{}, 0, len(entry.Legal))
+		for _, legal := range entry.Legal {
+			if safeLegal := lr.deepSafeCopy(legal); safeLegal != nil {
+				safeLegals = append(safeLegals, safeLegal)
+			}
+		}
+		if len(safeLegals) > 0 {
+			result["legal"] = safeLegals
+		}
 	}
 
 	if entry.I18n != nil {
-		result["i18n"] = entry.I18n
+		// Use deepSafeCopy to avoid any potential circular references
+		result["i18n"] = lr.deepSafeCopy(entry.I18n)
 	}
 
 	if entry.Count != nil {
-		result["count"] = entry.Count
+		// Use safeCopyCount for the Count field
+		result["count"] = lr.safeCopyCount(entry.Count)
 	}
 
 	// Handle metadata field safely - create a copy to avoid circular references
@@ -1318,39 +1346,65 @@ func (lr *LocalRepo) createSafeApplicationInfoEntryCopy(entry *types.Application
 
 	// Handle interface{} fields safely - these are already map[string]interface{} from the types package
 	if entry.SupportClient != nil {
-		safeAppInfo.SupportClient = entry.SupportClient
+		safeAppInfo.SupportClient = lr.deepSafeCopy(entry.SupportClient)
 	}
 
 	if entry.Permission != nil {
-		safeAppInfo.Permission = entry.Permission
+		safeAppInfo.Permission = lr.deepSafeCopy(entry.Permission)
 	}
 
 	if entry.Middleware != nil {
-		safeAppInfo.Middleware = entry.Middleware
+		safeAppInfo.Middleware = lr.deepSafeCopy(entry.Middleware)
 	}
 
 	if entry.Options != nil {
-		safeAppInfo.Options = entry.Options
+		safeAppInfo.Options = lr.deepSafeCopy(entry.Options)
 	}
 
 	if entry.Entrances != nil {
-		safeAppInfo.Entrances = entry.Entrances
+		safeAppInfo.Entrances = make([]map[string]interface{}, len(entry.Entrances))
+		for i, entrance := range entry.Entrances {
+			safeEntrance := make(map[string]interface{})
+			for k, v := range entrance {
+				safeEntrance[k] = v
+			}
+			safeAppInfo.Entrances[i] = safeEntrance
+		}
 	}
 
 	if entry.License != nil {
-		safeAppInfo.License = entry.License
+		// License is []map[string]interface{}, need to handle slice
+		safeLicenses := make([]map[string]interface{}, 0, len(entry.License))
+		for _, license := range entry.License {
+			if safeLicense := lr.deepSafeCopy(license); safeLicense != nil {
+				safeLicenses = append(safeLicenses, safeLicense)
+			}
+		}
+		if len(safeLicenses) > 0 {
+			safeAppInfo.License = safeLicenses
+		}
 	}
 
 	if entry.Legal != nil {
-		safeAppInfo.Legal = entry.Legal
+		// Legal is []map[string]interface{}, need to handle slice
+		safeLegals := make([]map[string]interface{}, 0, len(entry.Legal))
+		for _, legal := range entry.Legal {
+			if safeLegal := lr.deepSafeCopy(legal); safeLegal != nil {
+				safeLegals = append(safeLegals, safeLegal)
+			}
+		}
+		if len(safeLegals) > 0 {
+			safeAppInfo.Legal = safeLegals
+		}
 	}
 
 	if entry.I18n != nil {
-		safeAppInfo.I18n = entry.I18n
+		safeAppInfo.I18n = lr.deepSafeCopy(entry.I18n)
 	}
 
 	if entry.Count != nil {
-		safeAppInfo.Count = entry.Count
+		// Use safeCopyCount for the Count field
+		safeAppInfo.Count = lr.safeCopyCount(entry.Count)
 	}
 
 	if entry.VersionHistory != nil {
@@ -1426,6 +1480,7 @@ func (lr *LocalRepo) convertOptionsToMap(options *Options) map[string]interface{
 		optionsMap["conflicts"] = lr.convertDependenciesToMapSlice(options.Conflicts)
 	}
 	if options.Settings != nil {
+		// Settings is now map[string]string, safe to use directly
 		optionsMap["settings"] = options.Settings
 	}
 	return optionsMap
@@ -1457,21 +1512,43 @@ func (lr *LocalRepo) convertMetadataToMap(metadata map[string]interface{}) map[s
 	safeMetadata := make(map[string]interface{})
 	for k, v := range metadata {
 		// Skip any potential circular references and complex nested structures
-		if k != "source_data" && k != "raw_data" && k != "app_info" {
+		if k != "source_data" && k != "raw_data" && k != "app_info" && k != "parent" && k != "self" {
 			// Only copy simple types to avoid circular references
 			switch val := v.(type) {
-			case string, int, int64, float64, bool, []string, []interface{}:
+			case string, int, int64, float64, bool, []string:
 				log.Printf("DEBUG: Metadata[%s] = %v (type: %T)", k, v, v)
 				safeMetadata[k] = v
+			case []interface{}:
+				// Only allow simple types in slices
+				safeSlice := make([]interface{}, 0, len(val))
+				for _, item := range val {
+					switch item.(type) {
+					case string, int, int64, float64, bool:
+						safeSlice = append(safeSlice, item)
+					default:
+						log.Printf("DEBUG: Skipping complex slice item in Metadata[%s]", k)
+					}
+				}
+				if len(safeSlice) > 0 {
+					safeMetadata[k] = safeSlice
+				}
 			case map[string]interface{}:
 				// Create a shallow copy of nested maps, excluding problematic keys
 				nestedCopy := make(map[string]interface{})
 				for nk, nv := range val {
-					if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-						nestedCopy[nk] = nv
+					if nk != "source_data" && nk != "raw_data" && nk != "app_info" && nk != "parent" && nk != "self" {
+						// Only allow simple types in nested maps
+						switch nv.(type) {
+						case string, int, int64, float64, bool, []string:
+							nestedCopy[nk] = nv
+						default:
+							log.Printf("DEBUG: Skipping complex nested value in Metadata[%s][%s]", k, nk)
+						}
 					}
 				}
-				safeMetadata[k] = nestedCopy
+				if len(nestedCopy) > 0 {
+					safeMetadata[k] = nestedCopy
+				}
 			default:
 				log.Printf("DEBUG: Skipping Metadata[%s] with complex type %T", k, v)
 			}
@@ -1602,4 +1679,131 @@ func (lr *LocalRepo) convertI18nSpecToMap(spec *I18nSpec) map[string]interface{}
 // createI18nDataMap creates a new map for i18n data
 func (lr *LocalRepo) createI18nDataMap() map[string]interface{} {
 	return make(map[string]interface{})
+}
+
+// deepSafeCopy creates a deep copy of map[string]interface{} avoiding circular references
+func (lr *LocalRepo) deepSafeCopy(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	// Use a visited map to detect circular references, key is *map[string]interface{}
+	visited := make(map[interface{}]bool)
+	return lr.deepSafeCopyWithVisited(src, visited)
+}
+
+// deepSafeCopyWithVisited creates a deep copy with circular reference detection
+func (lr *LocalRepo) deepSafeCopyWithVisited(src map[string]interface{}, visited map[interface{}]bool) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	// Use the address of src as the key
+	ptr := &src
+	if visited[ptr] {
+		log.Printf("DEBUG: Detected circular reference in deepSafeCopy, skipping")
+		return nil
+	}
+	visited[ptr] = true
+	defer delete(visited, ptr)
+
+	dst := make(map[string]interface{})
+	for k, v := range src {
+		// Skip potential circular reference keys
+		if k == "source_data" || k == "raw_data" || k == "app_info" || k == "parent" || k == "self" ||
+			k == "circular_ref" || k == "back_ref" || k == "loop" {
+			log.Printf("DEBUG: Skipping potential circular reference key: %s", k)
+			continue
+		}
+
+		switch val := v.(type) {
+		case string, int, int64, float64, bool:
+			dst[k] = val
+		case []string:
+			// Copy string slice
+			dst[k] = append([]string{}, val...)
+		case []interface{}:
+			// Only copy simple types from interface slice
+			safeSlice := make([]interface{}, 0, len(val))
+			for _, item := range val {
+				switch item.(type) {
+				case string, int, int64, float64, bool:
+					safeSlice = append(safeSlice, item)
+				default:
+					log.Printf("DEBUG: Skipping complex slice item in deepSafeCopy for key %s", k)
+				}
+			}
+			if len(safeSlice) > 0 {
+				dst[k] = safeSlice
+			}
+		case map[string]interface{}:
+			// Recursively copy nested map with visited tracking
+			if nestedCopy := lr.deepSafeCopyWithVisited(val, visited); nestedCopy != nil {
+				dst[k] = nestedCopy
+			}
+		case []map[string]interface{}:
+			// Copy slice of maps with visited tracking
+			safeSlice := make([]map[string]interface{}, 0, len(val))
+			for _, item := range val {
+				if itemCopy := lr.deepSafeCopyWithVisited(item, visited); itemCopy != nil {
+					safeSlice = append(safeSlice, itemCopy)
+				}
+			}
+			if len(safeSlice) > 0 {
+				dst[k] = safeSlice
+			}
+		default:
+			// Skip complex types and log for debugging
+			log.Printf("DEBUG: Skipping complex type in deepSafeCopy for key %s: %T", k, v)
+		}
+	}
+	return dst
+}
+
+// safeCopyCount safely copies the Count field which is interface{} type
+func (lr *LocalRepo) safeCopyCount(count interface{}) interface{} {
+	if count == nil {
+		return nil
+	}
+
+	switch val := count.(type) {
+	case string, int, int64, float64, bool:
+		// Simple types are safe to copy directly
+		return val
+	case []string:
+		// String slice is safe to copy
+		return append([]string{}, val...)
+	case map[string]interface{}:
+		// Use deepSafeCopy for map[string]interface{}
+		return lr.deepSafeCopy(val)
+	case []map[string]interface{}:
+		// Handle slice of maps
+		safeSlice := make([]map[string]interface{}, 0, len(val))
+		for _, item := range val {
+			if safeItem := lr.deepSafeCopy(item); safeItem != nil {
+				safeSlice = append(safeSlice, safeItem)
+			}
+		}
+		if len(safeSlice) > 0 {
+			return safeSlice
+		}
+		return nil
+	case []interface{}:
+		// Handle interface slice with simple types only
+		safeSlice := make([]interface{}, 0, len(val))
+		for _, item := range val {
+			switch item.(type) {
+			case string, int, int64, float64, bool:
+				safeSlice = append(safeSlice, item)
+			default:
+				log.Printf("DEBUG: Skipping complex Count slice item: %T", item)
+			}
+		}
+		if len(safeSlice) > 0 {
+			return safeSlice
+		}
+		return nil
+	default:
+		// For any other type, log and return nil to be safe
+		log.Printf("DEBUG: Skipping complex Count type: %T", val)
+		return nil
+	}
 }
