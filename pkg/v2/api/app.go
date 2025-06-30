@@ -461,6 +461,9 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 
 	// Step 9: Process the uploaded package using LocalRepo
 	localRepo := appinfo.NewLocalRepo(s.cacheManager)
+	if s.hydrator != nil {
+		localRepo.SetHydrator(s.hydrator)
+	}
 	appInfo, err := localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token)
 	if err != nil {
 		log.Printf("Failed to process uploaded package: %v", err)
