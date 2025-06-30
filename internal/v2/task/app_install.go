@@ -121,6 +121,28 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	log.Printf("HTTP request completed successfully for app installation: task=%s, response_length=%d", task.ID, len(response))
 
+	// Parse response to extract opID if installation is successful
+	var responseData map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
+		log.Printf("Failed to parse response JSON for task %s: %v", task.ID, err)
+	} else {
+		// Check if installation was successful by checking code field
+		if code, ok := responseData["code"].(float64); ok && code == 200 {
+			if data, ok := responseData["data"].(map[string]interface{}); ok {
+				if opID, ok := data["opID"].(string); ok && opID != "" {
+					task.OpID = opID
+					log.Printf("Successfully extracted opID: %s for task: %s", opID, task.ID)
+				} else {
+					log.Printf("opID not found in response data for task: %s", task.ID)
+				}
+			} else {
+				log.Printf("Data field not found or not a map in response for task: %s", task.ID)
+			}
+		} else {
+			log.Printf("Installation code is not 200 for task: %s, code: %v", task.ID, code)
+		}
+	}
+
 	// Create success result
 	successResult := map[string]interface{}{
 		"operation":  "install",
@@ -131,6 +153,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		"cfgType":    cfgType,   // Log cfgType
 		"url":        urlStr,
 		"response":   response,
+		"opID":       task.OpID, // Include opID in result
 		"status":     "success",
 	}
 	successJSON, _ := json.Marshal(successResult)

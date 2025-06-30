@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"market/internal/v2/history"
+	"market/internal/v2/types"
 )
 
 // TaskType defines the type of task
@@ -46,11 +47,17 @@ type Task struct {
 	Status      TaskStatus             `json:"status"`
 	AppName     string                 `json:"app_name"`
 	User        string                 `json:"user,omitempty"`
+	OpID        string                 `json:"op_id,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 	StartedAt   *time.Time             `json:"started_at,omitempty"`
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
 	ErrorMsg    string                 `json:"error_msg,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// DataSenderInterface defines the interface for sending system updates
+type DataSenderInterface interface {
+	SendMarketSystemUpdate(update types.MarketSystemUpdate) error
 }
 
 // TaskModule manages task queues and execution
@@ -64,6 +71,7 @@ type TaskModule struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	historyModule  *history.HistoryModule // Add history module reference
+	dataSender     DataSenderInterface    // Add data sender interface reference
 }
 
 // NewTaskModule creates a new task module instance
@@ -89,6 +97,13 @@ func (tm *TaskModule) SetHistoryModule(historyModule *history.HistoryModule) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.historyModule = historyModule
+}
+
+// SetDataSender sets the data sender for sending system updates
+func (tm *TaskModule) SetDataSender(dataSender DataSenderInterface) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.dataSender = dataSender
 }
 
 // AddTask adds a new task to the pending queue
@@ -212,9 +227,9 @@ func (tm *TaskModule) start() {
 	tm.executorTicker = time.NewTicker(2 * time.Second)
 	go tm.taskExecutor()
 
-	// Start status updater (every 10 seconds)
-	tm.statusTicker = time.NewTicker(10 * time.Second)
-	go tm.statusUpdater()
+	// Start status checker (every 10 seconds)
+	tm.statusTicker = time.NewTicker(30 * time.Second)
+	go tm.statusChecker()
 }
 
 // taskExecutor runs every 2 seconds to execute pending tasks
@@ -263,6 +278,9 @@ func (tm *TaskModule) executeTask(task *Task) {
 
 	log.Printf("Starting task execution: ID=%s, Type=%s, AppName=%s, User=%s",
 		task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
+
+	// Send task execution system update
+	tm.sendTaskExecutionUpdate(task)
 
 	switch task.Type {
 	case InstallApp:
@@ -337,32 +355,79 @@ func (tm *TaskModule) executeTask(task *Task) {
 	// log.Printf("[%s] Removed completed task from running tasks: ID=%s", tm.instanceID, task.ID)
 }
 
-// statusUpdater runs every 10 seconds to update running task status
-func (tm *TaskModule) statusUpdater() {
+// sendTaskExecutionUpdate sends system update when task execution starts
+func (tm *TaskModule) sendTaskExecutionUpdate(task *Task) {
+	if tm.dataSender == nil {
+		log.Printf("Data sender not available, skipping task execution update for task: %s", task.ID)
+		return
+	}
+
+	// Create extensions map with task information
+	extensions := make(map[string]string)
+	extensions["task_type"] = getTaskTypeString(task.Type)
+	extensions["app_name"] = task.AppName
+
+	// Add version and source if available in metadata
+	if version, ok := task.Metadata["version"].(string); ok && version != "" {
+		extensions["version"] = version
+	}
+	if source, ok := task.Metadata["source"].(string); ok && source != "" {
+		extensions["source"] = source
+	}
+
+	// Create market system update
+	update := &types.MarketSystemUpdate{
+		Timestamp:  time.Now().Unix(),
+		User:       task.User,
+		NotifyType: "market_system_point",
+		Point:      "task_execute",
+		Extensions: extensions,
+	}
+
+	// Send the notification
+	if err := tm.dataSender.SendMarketSystemUpdate(*update); err != nil {
+		log.Printf("Failed to send task execution update for task %s: %v", task.ID, err)
+	} else {
+		log.Printf("Successfully sent task execution update for task %s (type: %s, app: %s, user: %s)",
+			task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
+	}
+}
+
+// statusChecker runs every 10 seconds to check running task status
+func (tm *TaskModule) statusChecker() {
 	for {
 		select {
 		case <-tm.ctx.Done():
 			return
 		case <-tm.statusTicker.C:
-			tm.updateRunningTasksStatus()
+			tm.checkRunningTasksStatus()
 		}
 	}
 }
 
-// updateRunningTasksStatus updates the status of all running tasks
-func (tm *TaskModule) updateRunningTasksStatus() {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
+// checkRunningTasksStatus checks the status of all running tasks
+func (tm *TaskModule) checkRunningTasksStatus() {
 
 	for taskID, task := range tm.runningTasks {
-		log.Printf("Updating status for task: ID=%s", taskID)
-		tm.updateTaskStatus(task)
+		log.Printf("Checking status for task: ID=%s", taskID)
+		tm.showTaskStatus(task)
 	}
 }
 
-// updateTaskStatus updates the status of a single task
-func (tm *TaskModule) updateTaskStatus(task *Task) {
-	log.Printf("Checking status for task: ID=%s, Type=%d, AppName=%s", task.ID, task.Type, task.AppName)
+// showTaskStatus shows the status of a single task
+func (tm *TaskModule) showTaskStatus(task *Task) {
+	log.Printf("Task details - ID: %s, Type: %s, Status: %d, AppName: %s, User: %s, OpID: %s, CreatedAt: %v, StartedAt: %v, CompletedAt: %v, ErrorMsg: %s, Metadata: %+v",
+		task.ID,
+		getTaskTypeString(task.Type),
+		task.Status,
+		task.AppName,
+		task.User,
+		task.OpID,
+		task.CreatedAt,
+		task.StartedAt,
+		task.CompletedAt,
+		task.ErrorMsg,
+		task.Metadata)
 }
 
 // Stop gracefully stops the task module
@@ -505,4 +570,37 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 // GetInstanceID returns the unique instance identifier
 func (tm *TaskModule) GetInstanceID() string {
 	return tm.instanceID
+}
+
+// InstallTaskSucceed marks an install task as completed successfully by opID
+func (tm *TaskModule) InstallTaskSucceed(opID string) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Find the install task with matching opID in running tasks
+	var targetTask *Task
+	for _, task := range tm.runningTasks {
+		if task.OpID == opID && task.Type == InstallApp {
+			targetTask = task
+			break
+		}
+	}
+
+	if targetTask == nil {
+		log.Printf("[%s] InstallTaskSucceed - No running install task found with opID: %s", tm.instanceID, opID)
+		return fmt.Errorf("no running install task found with opID: %s", opID)
+	}
+
+	// Mark task as completed
+	targetTask.Status = Completed
+	now := time.Now()
+	targetTask.CompletedAt = &now
+
+	log.Printf("[%s] InstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+
+	// Record task completion in history
+	tm.recordTaskResult(targetTask, "Installation completed successfully via external signal", nil)
+
+	return nil
 }

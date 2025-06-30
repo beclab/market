@@ -162,6 +162,24 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		return
 	}
 
+	// Check if this is an install operation with running state
+	if appStateMsg.OpType == "install" && appStateMsg.State == "running" {
+		log.Printf("Detected install operation with running state for opID: %s, app: %s, user: %s",
+			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
+
+		// Call InstallTaskSucceed if task module is available
+		if dw.taskModule != nil {
+			if err := dw.taskModule.InstallTaskSucceed(appStateMsg.OpID); err != nil {
+				log.Printf("Failed to mark install task as succeeded for opID %s: %v", appStateMsg.OpID, err)
+			} else {
+				log.Printf("Successfully marked install task as succeeded for opID: %s, app: %s, user: %s",
+					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
+			}
+		} else {
+			log.Printf("Task module not available, cannot mark install task as succeeded for opID: %s", appStateMsg.OpID)
+		}
+	}
+
 	// Store as history record
 	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
 
@@ -237,6 +255,24 @@ func (dw *DataWatcherState) generateMockMessage() {
 
 	jsonData, _ := json.Marshal(msg)
 	log.Printf("Generated mock message: %s", string(jsonData))
+
+	// Check if this is an install operation with running state
+	if msg.OpType == "install" && msg.State == "running" {
+		log.Printf("Detected install operation with running state for opID: %s, app: %s, user: %s",
+			msg.OpID, msg.Name, msg.User)
+
+		// Call InstallTaskSucceed if task module is available
+		if dw.taskModule != nil {
+			if err := dw.taskModule.InstallTaskSucceed(msg.OpID); err != nil {
+				log.Printf("Failed to mark install task as succeeded for opID %s: %v", msg.OpID, err)
+			} else {
+				log.Printf("Successfully marked install task as succeeded for opID: %s, app: %s, user: %s",
+					msg.OpID, msg.Name, msg.User)
+			}
+		} else {
+			log.Printf("Task module not available, cannot mark install task as succeeded for opID: %s", msg.OpID)
+		}
+	}
 
 	// Store as history record
 	dw.storeHistoryRecord(msg, string(jsonData))
