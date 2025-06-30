@@ -179,7 +179,7 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 			log.Printf("Warning: failed to update pending data rendered package: %v", err)
 		} else {
 			// Log pending data after update to check for cycles
-			s.logPendingDataAfterUpdate(task, "after rendered package update")
+			s.logPendingDataAfterUpdateFromTask(task, "after rendered package update")
 		}
 	}
 
@@ -233,8 +233,8 @@ func (s *RenderedChartStep) logDataStructureCheck(dataName string, data interfac
 	}
 }
 
-// logPendingDataAfterUpdate logs pending data after update to check for cycles
-func (s *RenderedChartStep) logPendingDataAfterUpdate(task *HydrationTask, context string) {
+// logPendingDataAfterUpdateFromTask logs pending data after update to check for cycles
+func (s *RenderedChartStep) logPendingDataAfterUpdateFromTask(task *HydrationTask, context string) {
 	if task.Cache == nil {
 		log.Printf("DEBUG: Cache is nil, cannot log pending data")
 		return
