@@ -153,6 +153,16 @@ func main() {
 	taskModule := task.NewTaskModule()
 	// Set history module reference for task recording
 	taskModule.SetHistoryModule(historyModule)
+
+	// Set data sender from AppInfo module for system notifications
+	dataSender := appInfoModule.GetDataSender()
+	if dataSender != nil {
+		taskModule.SetDataSender(dataSender)
+		log.Println("Data sender set in Task module successfully")
+	} else {
+		log.Println("Warning: Data sender not available from AppInfo module, Task module will run without system notifications")
+	}
+
 	log.Println("Task module started successfully")
 
 	// Set task module reference in AppInfo module
