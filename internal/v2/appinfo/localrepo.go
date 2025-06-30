@@ -53,14 +53,6 @@ type Permission struct {
 	Storage  bool     `yaml:"storage,omitempty"`
 }
 
-// Middleware represents middleware configuration
-type Middleware struct {
-	Database *DatabaseConfig        `yaml:"database,omitempty"`
-	Cache    *MiddlewareCacheConfig `yaml:"cache,omitempty"`
-	Queue    *QueueConfig           `yaml:"queue,omitempty"`
-	Storage  *StorageConfig         `yaml:"storage,omitempty"`
-}
-
 // DatabaseConfig represents database configuration
 type DatabaseConfig struct {
 	Type     string `yaml:"type,omitempty"`
@@ -71,8 +63,8 @@ type DatabaseConfig struct {
 	Password string `yaml:"password,omitempty"`
 }
 
-// MiddlewareCacheConfig represents cache configuration for middleware
-type MiddlewareCacheConfig struct {
+// CacheConfig represents cache configuration
+type CacheConfig struct {
 	Type     string `yaml:"type,omitempty"`
 	Host     string `yaml:"host,omitempty"`
 	Port     int    `yaml:"port,omitempty"`
@@ -98,11 +90,12 @@ type StorageConfig struct {
 	SecretKey string `yaml:"secretKey,omitempty"`
 }
 
-// Options represents app options and dependencies
-type Options struct {
-	Dependencies []Dependency           `yaml:"dependencies,omitempty"`
-	Conflicts    []Dependency           `yaml:"conflicts,omitempty"`
-	Settings     map[string]interface{} `yaml:"settings,omitempty"`
+// Middleware represents middleware configuration
+type Middleware struct {
+	Database *DatabaseConfig `yaml:"database,omitempty"`
+	Cache    *CacheConfig    `yaml:"cache,omitempty"`
+	Queue    *QueueConfig    `yaml:"queue,omitempty"`
+	Storage  *StorageConfig  `yaml:"storage,omitempty"`
 }
 
 // Dependency represents a dependency or conflict
@@ -110,6 +103,13 @@ type Dependency struct {
 	Name    string `yaml:"name"`
 	Type    string `yaml:"type"`
 	Version string `yaml:"version,omitempty"`
+}
+
+// Options represents app options and dependencies
+type Options struct {
+	Dependencies []Dependency           `yaml:"dependencies,omitempty"`
+	Conflicts    []Dependency           `yaml:"conflicts,omitempty"`
+	Settings     map[string]interface{} `yaml:"settings,omitempty"`
 }
 
 // Entrance represents an app entrance point
@@ -139,12 +139,6 @@ type Legal struct {
 	Disclaimer     string `yaml:"disclaimer,omitempty"`
 }
 
-// I18nData represents internationalization data
-type I18nData struct {
-	Metadata *I18nMetadata `yaml:"metadata,omitempty"`
-	Spec     *I18nSpec     `yaml:"spec,omitempty"`
-}
-
 // I18nMetadata represents internationalized metadata
 type I18nMetadata struct {
 	Title       string `yaml:"title,omitempty"`
@@ -155,6 +149,12 @@ type I18nMetadata struct {
 type I18nSpec struct {
 	FullDescription    string `yaml:"fullDescription,omitempty"`
 	UpgradeDescription string `yaml:"upgradeDescription,omitempty"`
+}
+
+// I18nData represents internationalization data
+type I18nData struct {
+	Metadata *I18nMetadata `yaml:"metadata,omitempty"`
+	Spec     *I18nSpec     `yaml:"spec,omitempty"`
 }
 
 // Chart represents the Chart.yaml structure
@@ -765,7 +765,7 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 		OnlyAdmin:          appCfg.Spec.OnlyAdmin,
 		CreateTime:         time.Now().Unix(),
 		UpdateTime:         time.Now().Unix(),
-		Metadata:           make(map[string]interface{}),
+		Metadata:           lr.createInitialMetadata(appCfg.ConfigVersion, appCfg.ConfigType),
 	}
 
 	// Store only essential metadata to avoid circular references
@@ -775,116 +775,27 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 
 	// Convert SupportClient to map[string]interface{} for compatibility
 	if appCfg.Spec.SupportClient != nil {
-		appInfo.SupportClient = map[string]interface{}{
-			"web":     appCfg.Spec.SupportClient.Web,
-			"desktop": appCfg.Spec.SupportClient.Desktop,
-			"mobile":  appCfg.Spec.SupportClient.Mobile,
-			"cli":     appCfg.Spec.SupportClient.CLI,
-		}
+		appInfo.SupportClient = lr.convertSupportClientToMap(appCfg.Spec.SupportClient)
 	}
 
 	// Convert Permission to map[string]interface{} for compatibility
 	if appCfg.Permission != nil {
-		appInfo.Permission = map[string]interface{}{
-			"appData":  appCfg.Permission.AppData,
-			"appCache": appCfg.Permission.AppCache,
-			"userData": appCfg.Permission.UserData,
-			"network":  appCfg.Permission.Network,
-			"gpu":      appCfg.Permission.GPU,
-			"storage":  appCfg.Permission.Storage,
-		}
+		appInfo.Permission = lr.convertPermissionToMap(appCfg.Permission)
 	}
 
 	// Convert Middleware to map[string]interface{} for compatibility
 	if appCfg.Middleware != nil {
-		middlewareMap := make(map[string]interface{})
-		if appCfg.Middleware.Database != nil {
-			middlewareMap["database"] = map[string]interface{}{
-				"type":     appCfg.Middleware.Database.Type,
-				"host":     appCfg.Middleware.Database.Host,
-				"port":     appCfg.Middleware.Database.Port,
-				"database": appCfg.Middleware.Database.Database,
-				"username": appCfg.Middleware.Database.Username,
-				"password": appCfg.Middleware.Database.Password,
-			}
-		}
-		if appCfg.Middleware.Cache != nil {
-			middlewareMap["cache"] = map[string]interface{}{
-				"type":     appCfg.Middleware.Cache.Type,
-				"host":     appCfg.Middleware.Cache.Host,
-				"port":     appCfg.Middleware.Cache.Port,
-				"database": appCfg.Middleware.Cache.Database,
-			}
-		}
-		if appCfg.Middleware.Queue != nil {
-			middlewareMap["queue"] = map[string]interface{}{
-				"type":     appCfg.Middleware.Queue.Type,
-				"host":     appCfg.Middleware.Queue.Host,
-				"port":     appCfg.Middleware.Queue.Port,
-				"username": appCfg.Middleware.Queue.Username,
-				"password": appCfg.Middleware.Queue.Password,
-			}
-		}
-		if appCfg.Middleware.Storage != nil {
-			middlewareMap["storage"] = map[string]interface{}{
-				"type":      appCfg.Middleware.Storage.Type,
-				"endpoint":  appCfg.Middleware.Storage.Endpoint,
-				"bucket":    appCfg.Middleware.Storage.Bucket,
-				"region":    appCfg.Middleware.Storage.Region,
-				"accessKey": appCfg.Middleware.Storage.AccessKey,
-				"secretKey": appCfg.Middleware.Storage.SecretKey,
-			}
-		}
-		appInfo.Middleware = middlewareMap
+		appInfo.Middleware = lr.convertMiddlewareToMap(appCfg.Middleware)
 	}
 
 	// Convert Options to map[string]interface{} for compatibility
 	if appCfg.Options != nil {
-		optionsMap := make(map[string]interface{})
-		if len(appCfg.Options.Dependencies) > 0 {
-			deps := make([]map[string]interface{}, len(appCfg.Options.Dependencies))
-			for i, dep := range appCfg.Options.Dependencies {
-				deps[i] = map[string]interface{}{
-					"name":    dep.Name,
-					"type":    dep.Type,
-					"version": dep.Version,
-				}
-			}
-			optionsMap["dependencies"] = deps
-		}
-		if len(appCfg.Options.Conflicts) > 0 {
-			conflicts := make([]map[string]interface{}, len(appCfg.Options.Conflicts))
-			for i, conflict := range appCfg.Options.Conflicts {
-				conflicts[i] = map[string]interface{}{
-					"name":    conflict.Name,
-					"type":    conflict.Type,
-					"version": conflict.Version,
-				}
-			}
-			optionsMap["conflicts"] = conflicts
-		}
-		if appCfg.Options.Settings != nil {
-			optionsMap["settings"] = appCfg.Options.Settings
-		}
-		appInfo.Options = optionsMap
+		appInfo.Options = lr.convertOptionsToMap(appCfg.Options)
 	}
 
 	// Convert Entrances to []map[string]interface{} for compatibility
 	if appCfg.Entrances != nil {
-		entrances := make([]map[string]interface{}, len(appCfg.Entrances))
-		for i, entrance := range appCfg.Entrances {
-			entrances[i] = map[string]interface{}{
-				"name":        entrance.Name,
-				"port":        entrance.Port,
-				"host":        entrance.Host,
-				"title":       entrance.Title,
-				"icon":        entrance.Icon,
-				"path":        entrance.Path,
-				"protocol":    entrance.Protocol,
-				"description": entrance.Description,
-			}
-		}
-		appInfo.Entrances = entrances
+		appInfo.Entrances = lr.convertEntrancesToMapSlice(appCfg.Entrances)
 	}
 
 	// Load i18n information if available
@@ -903,7 +814,7 @@ func (lr *LocalRepo) loadI18nInfo(appInfo *types.ApplicationInfoEntry, chartDir 
 	}
 
 	log.Printf("DEBUG: Loading i18n info for locales: %v", appInfo.Locale)
-	i18nMap := make(map[string]interface{})
+	i18nMap := lr.createI18nMap()
 	for _, lang := range appInfo.Locale {
 		i18nPath := filepath.Join(chartDir, "i18n", lang, AppCfgFileName)
 		log.Printf("DEBUG: Checking i18n path: %s", i18nPath)
@@ -926,21 +837,7 @@ func (lr *LocalRepo) loadI18nInfo(appInfo *types.ApplicationInfoEntry, chartDir 
 
 		log.Printf("DEBUG: Successfully parsed i18n data for %s", lang)
 		// Convert I18nData to map[string]interface{} for compatibility
-		safeI18nData := make(map[string]interface{})
-
-		if i18nData.Metadata != nil {
-			safeI18nData["metadata"] = map[string]interface{}{
-				"title":       i18nData.Metadata.Title,
-				"description": i18nData.Metadata.Description,
-			}
-		}
-
-		if i18nData.Spec != nil {
-			safeI18nData["spec"] = map[string]interface{}{
-				"fullDescription":    i18nData.Spec.FullDescription,
-				"upgradeDescription": i18nData.Spec.UpgradeDescription,
-			}
-		}
+		safeI18nData := lr.convertI18nDataToMap(&i18nData)
 
 		i18nMap[lang] = safeI18nData
 		log.Printf("DEBUG: Safe i18n data for %s, length: %d", lang, len(safeI18nData))
@@ -1336,31 +1233,7 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 	// Handle metadata field safely - create a copy to avoid circular references
 	if entry.Metadata != nil {
 		log.Printf("DEBUG: Processing Metadata field, length: %d", len(entry.Metadata))
-		metadataCopy := make(map[string]interface{})
-		for k, v := range entry.Metadata {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					log.Printf("DEBUG: Metadata[%s] = %v (type: %T)", k, v, v)
-					metadataCopy[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					metadataCopy[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Metadata[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Metadata[%s] to avoid circular reference", k)
-			}
-		}
+		metadataCopy := lr.convertMetadataToMap(entry.Metadata)
 		result["metadata"] = metadataCopy
 		log.Printf("DEBUG: Metadata copy completed, length: %d", len(metadataCopy))
 	}
@@ -1418,7 +1291,7 @@ func (lr *LocalRepo) createSafeApplicationInfoEntryCopy(entry *types.Application
 		Screenshots:        append([]string{}, entry.Screenshots...),
 		Tags:               append([]string{}, entry.Tags...),
 		UpdatedAt:          entry.UpdatedAt,
-		Metadata:           make(map[string]interface{}),
+		Metadata:           lr.createSafeMetadata(entry.Metadata),
 	}
 
 	// Copy all fields from the original entry to the new one
@@ -1505,31 +1378,236 @@ func (lr *LocalRepo) createSafeApplicationInfoEntryCopy(entry *types.Application
 	}
 
 	if entry.Metadata != nil {
-		safeAppInfo.Metadata = make(map[string]interface{})
-		for k, v := range entry.Metadata {
-			// Skip any potential circular references and complex nested structures
-			if k != "source_data" && k != "raw_data" && k != "app_info" {
-				// Only copy simple types to avoid circular references
-				switch val := v.(type) {
-				case string, int, int64, float64, bool, []string, []interface{}:
-					safeAppInfo.Metadata[k] = v
-				case map[string]interface{}:
-					// Create a shallow copy of nested maps, excluding problematic keys
-					nestedCopy := make(map[string]interface{})
-					for nk, nv := range val {
-						if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
-							nestedCopy[nk] = nv
-						}
-					}
-					safeAppInfo.Metadata[k] = nestedCopy
-				default:
-					log.Printf("DEBUG: Skipping Metadata[%s] with complex type %T", k, v)
-				}
-			} else {
-				log.Printf("DEBUG: Skipping Metadata[%s] to avoid circular reference", k)
-			}
-		}
+		safeAppInfo.Metadata = lr.convertMetadataToMap(entry.Metadata)
 	}
 
 	return safeAppInfo
+}
+
+// convertSupportClientToMap converts SupportClient to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertSupportClientToMap(supportClient *SupportClient) map[string]interface{} {
+	return map[string]interface{}{
+		"web":     supportClient.Web,
+		"desktop": supportClient.Desktop,
+		"mobile":  supportClient.Mobile,
+		"cli":     supportClient.CLI,
+	}
+}
+
+// convertPermissionToMap converts Permission to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertPermissionToMap(permission *Permission) map[string]interface{} {
+	return map[string]interface{}{
+		"appData":  permission.AppData,
+		"appCache": permission.AppCache,
+		"userData": permission.UserData,
+		"network":  permission.Network,
+		"gpu":      permission.GPU,
+		"storage":  permission.Storage,
+	}
+}
+
+// convertMiddlewareToMap converts Middleware to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertMiddlewareToMap(middleware *Middleware) map[string]interface{} {
+	middlewareMap := lr.createMiddlewareMap()
+	if middleware.Database != nil {
+		middlewareMap["database"] = lr.convertDatabaseConfigToMap(middleware.Database)
+	}
+	if middleware.Cache != nil {
+		middlewareMap["cache"] = lr.convertCacheConfigToMap(middleware.Cache)
+	}
+	if middleware.Queue != nil {
+		middlewareMap["queue"] = lr.convertQueueConfigToMap(middleware.Queue)
+	}
+	if middleware.Storage != nil {
+		middlewareMap["storage"] = lr.convertStorageConfigToMap(middleware.Storage)
+	}
+	return middlewareMap
+}
+
+// convertOptionsToMap converts Options to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertOptionsToMap(options *Options) map[string]interface{} {
+	optionsMap := lr.createOptionsMap()
+	if len(options.Dependencies) > 0 {
+		optionsMap["dependencies"] = lr.convertDependenciesToMapSlice(options.Dependencies)
+	}
+	if len(options.Conflicts) > 0 {
+		optionsMap["conflicts"] = lr.convertDependenciesToMapSlice(options.Conflicts)
+	}
+	if options.Settings != nil {
+		optionsMap["settings"] = options.Settings
+	}
+	return optionsMap
+}
+
+// convertEntrancesToMapSlice converts []*Entrance to []map[string]interface{} for compatibility
+func (lr *LocalRepo) convertEntrancesToMapSlice(entrances []*Entrance) []map[string]interface{} {
+	entrancesMap := make([]map[string]interface{}, len(entrances))
+	for i, entrance := range entrances {
+		entrancesMap[i] = lr.convertEntranceToMap(entrance)
+	}
+	return entrancesMap
+}
+
+// convertI18nDataToMap converts I18nData to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertI18nDataToMap(i18nData *I18nData) map[string]interface{} {
+	safeI18nData := lr.createI18nDataMap()
+	if i18nData.Metadata != nil {
+		safeI18nData["metadata"] = lr.convertI18nMetadataToMap(i18nData.Metadata)
+	}
+	if i18nData.Spec != nil {
+		safeI18nData["spec"] = lr.convertI18nSpecToMap(i18nData.Spec)
+	}
+	return safeI18nData
+}
+
+// convertMetadataToMap converts metadata to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertMetadataToMap(metadata map[string]interface{}) map[string]interface{} {
+	safeMetadata := make(map[string]interface{})
+	for k, v := range metadata {
+		// Skip any potential circular references and complex nested structures
+		if k != "source_data" && k != "raw_data" && k != "app_info" {
+			// Only copy simple types to avoid circular references
+			switch val := v.(type) {
+			case string, int, int64, float64, bool, []string, []interface{}:
+				log.Printf("DEBUG: Metadata[%s] = %v (type: %T)", k, v, v)
+				safeMetadata[k] = v
+			case map[string]interface{}:
+				// Create a shallow copy of nested maps, excluding problematic keys
+				nestedCopy := make(map[string]interface{})
+				for nk, nv := range val {
+					if nk != "source_data" && nk != "raw_data" && nk != "app_info" {
+						nestedCopy[nk] = nv
+					}
+				}
+				safeMetadata[k] = nestedCopy
+			default:
+				log.Printf("DEBUG: Skipping Metadata[%s] with complex type %T", k, v)
+			}
+		} else {
+			log.Printf("DEBUG: Skipping Metadata[%s] to avoid circular reference", k)
+		}
+	}
+	return safeMetadata
+}
+
+// createInitialMetadata creates an initial metadata map for the ApplicationInfoEntry
+func (lr *LocalRepo) createInitialMetadata(configVersion, configType string) map[string]interface{} {
+	return map[string]interface{}{
+		"config_version": configVersion,
+		"config_type":    configType,
+		"parsed_at":      time.Now().Unix(),
+	}
+}
+
+// createSafeMetadata creates a safe metadata map for the ApplicationInfoEntry
+func (lr *LocalRepo) createSafeMetadata(metadata map[string]interface{}) map[string]interface{} {
+	return lr.convertMetadataToMap(metadata)
+}
+
+// createI18nMap creates a new map for i18n data
+func (lr *LocalRepo) createI18nMap() map[string]interface{} {
+	return make(map[string]interface{})
+}
+
+// createMiddlewareMap creates a new map for middleware data
+func (lr *LocalRepo) createMiddlewareMap() map[string]interface{} {
+	return make(map[string]interface{})
+}
+
+// convertDatabaseConfigToMap converts DatabaseConfig to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertDatabaseConfigToMap(databaseConfig *DatabaseConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"type":     databaseConfig.Type,
+		"host":     databaseConfig.Host,
+		"port":     databaseConfig.Port,
+		"database": databaseConfig.Database,
+		"username": databaseConfig.Username,
+		"password": databaseConfig.Password,
+	}
+}
+
+// convertCacheConfigToMap converts CacheConfig to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertCacheConfigToMap(cacheConfig *CacheConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"type":     cacheConfig.Type,
+		"host":     cacheConfig.Host,
+		"port":     cacheConfig.Port,
+		"database": cacheConfig.Database,
+	}
+}
+
+// convertQueueConfigToMap converts QueueConfig to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertQueueConfigToMap(queueConfig *QueueConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"type":     queueConfig.Type,
+		"host":     queueConfig.Host,
+		"port":     queueConfig.Port,
+		"username": queueConfig.Username,
+		"password": queueConfig.Password,
+	}
+}
+
+// convertStorageConfigToMap converts StorageConfig to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertStorageConfigToMap(storageConfig *StorageConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"type":      storageConfig.Type,
+		"endpoint":  storageConfig.Endpoint,
+		"bucket":    storageConfig.Bucket,
+		"region":    storageConfig.Region,
+		"accessKey": storageConfig.AccessKey,
+		"secretKey": storageConfig.SecretKey,
+	}
+}
+
+// createOptionsMap creates a new map for options data
+func (lr *LocalRepo) createOptionsMap() map[string]interface{} {
+	return make(map[string]interface{})
+}
+
+// convertDependenciesToMapSlice converts []Dependency to []map[string]interface{} for compatibility
+func (lr *LocalRepo) convertDependenciesToMapSlice(dependencies []Dependency) []map[string]interface{} {
+	depsMap := make([]map[string]interface{}, len(dependencies))
+	for i, dep := range dependencies {
+		depsMap[i] = map[string]interface{}{
+			"name":    dep.Name,
+			"type":    dep.Type,
+			"version": dep.Version,
+		}
+	}
+	return depsMap
+}
+
+// convertEntranceToMap converts an Entrance to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertEntranceToMap(entrance *Entrance) map[string]interface{} {
+	return map[string]interface{}{
+		"name":        entrance.Name,
+		"port":        entrance.Port,
+		"host":        entrance.Host,
+		"title":       entrance.Title,
+		"icon":        entrance.Icon,
+		"path":        entrance.Path,
+		"protocol":    entrance.Protocol,
+		"description": entrance.Description,
+	}
+}
+
+// convertI18nMetadataToMap converts I18nMetadata to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertI18nMetadataToMap(metadata *I18nMetadata) map[string]interface{} {
+	return map[string]interface{}{
+		"title":       metadata.Title,
+		"description": metadata.Description,
+	}
+}
+
+// convertI18nSpecToMap converts I18nSpec to map[string]interface{} for compatibility
+func (lr *LocalRepo) convertI18nSpecToMap(spec *I18nSpec) map[string]interface{} {
+	return map[string]interface{}{
+		"fullDescription":    spec.FullDescription,
+		"upgradeDescription": spec.UpgradeDescription,
+	}
+}
+
+// createI18nDataMap creates a new map for i18n data
+func (lr *LocalRepo) createI18nDataMap() map[string]interface{} {
+	return make(map[string]interface{})
 }
