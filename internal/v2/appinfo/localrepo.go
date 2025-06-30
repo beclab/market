@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -1686,18 +1687,18 @@ func (lr *LocalRepo) deepSafeCopy(src map[string]interface{}) map[string]interfa
 	if src == nil {
 		return nil
 	}
-	// Use a visited map to detect circular references, key is *map[string]interface{}
-	visited := make(map[interface{}]bool)
+	// Use a visited map to detect circular references, key is uintptr (map pointer)
+	visited := make(map[uintptr]bool)
 	return lr.deepSafeCopyWithVisited(src, visited)
 }
 
 // deepSafeCopyWithVisited creates a deep copy with circular reference detection
-func (lr *LocalRepo) deepSafeCopyWithVisited(src map[string]interface{}, visited map[interface{}]bool) map[string]interface{} {
+func (lr *LocalRepo) deepSafeCopyWithVisited(src map[string]interface{}, visited map[uintptr]bool) map[string]interface{} {
 	if src == nil {
 		return nil
 	}
-	// Use the address of src as the key
-	ptr := &src
+	// Use reflect to get the unique pointer of the map
+	ptr := reflect.ValueOf(src).Pointer()
 	if visited[ptr] {
 		log.Printf("DEBUG: Detected circular reference in deepSafeCopy, skipping")
 		return nil
