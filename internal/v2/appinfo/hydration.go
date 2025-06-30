@@ -1625,3 +1625,15 @@ func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool 
 
 	return false
 }
+
+// ForceCheckPendingData immediately triggers checkForPendingData without waiting for the 30-second interval
+// This method can be called externally to force immediate processing of pending data
+func (h *Hydrator) ForceCheckPendingData() {
+	if !h.IsRunning() {
+		log.Printf("Hydrator is not running, cannot force check pending data")
+		return
+	}
+
+	log.Printf("Force checking pending data triggered externally")
+	h.checkForPendingData()
+}
