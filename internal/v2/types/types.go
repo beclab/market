@@ -1214,8 +1214,19 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 	if val, ok := sourceData["middleware"].(map[string]interface{}); ok {
 		entry.Middleware = val
 	}
-	if val, ok := sourceData["options"].(map[string]interface{}); ok {
-		entry.Options = val
+	if val, ok := sourceData["options"]; ok {
+		switch v := val.(type) {
+		case map[string]interface{}:
+			entry.Options = v
+		case map[interface{}]interface{}:
+			converted := make(map[string]interface{})
+			for k, v2 := range v {
+				if ks, ok := k.(string); ok {
+					converted[ks] = v2
+				}
+			}
+			entry.Options = converted
+		}
 	}
 	if val, ok := sourceData["i18n"].(map[string]interface{}); ok {
 		entry.I18n = val
@@ -1430,6 +1441,15 @@ func deepCopyValue(value interface{}, visited map[uintptr]bool) interface{} {
 				continue
 			}
 			safeMap[k] = deepCopyValue(val, visited)
+		}
+		return safeMap
+	case map[interface{}]interface{}:
+		// 新增: 支持 map[interface{}]interface{} 转 map[string]interface{}
+		safeMap := make(map[string]interface{})
+		for k, val := range v {
+			if ks, ok := k.(string); ok {
+				safeMap[ks] = deepCopyValue(val, visited)
+			}
 		}
 		return safeMap
 	case []map[string]interface{}:

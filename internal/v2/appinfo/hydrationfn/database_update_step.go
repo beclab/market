@@ -903,22 +903,37 @@ func (s *DatabaseUpdateStep) createSafePendingDataCopy(pendingData *types.AppInf
 
 	// Only include basic information from RawData to avoid cycles
 	if pendingData.RawData != nil {
-		safeCopy["raw_data"] = map[string]interface{}{
-			"id":     pendingData.RawData.ID,
-			"name":   pendingData.RawData.Name,
-			"app_id": pendingData.RawData.AppID,
+		rawDataMap := map[string]interface{}{
+			"id":            pendingData.RawData.ID,
+			"name":          pendingData.RawData.Name,
+			"app_id":        pendingData.RawData.AppID,
+			"options":       convertToStringMapDBUS(pendingData.RawData.Options),
+			"supportClient": convertToStringMapDBUS(pendingData.RawData.SupportClient),
+			"permission":    convertToStringMapDBUS(pendingData.RawData.Permission),
+			"middleware":    convertToStringMapDBUS(pendingData.RawData.Middleware),
+			"i18n":          convertToStringMapDBUS(pendingData.RawData.I18n),
+			"metadata":      convertToStringMapDBUS(pendingData.RawData.Metadata),
 		}
+		safeCopy["raw_data"] = rawDataMap
 	}
 
 	// Only include basic information from AppInfo to avoid cycles
 	if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
-		safeCopy["app_info"] = map[string]interface{}{
-			"app_entry": map[string]interface{}{
-				"id":     pendingData.AppInfo.AppEntry.ID,
-				"name":   pendingData.AppInfo.AppEntry.Name,
-				"app_id": pendingData.AppInfo.AppEntry.AppID,
-			},
+		appEntryMap := map[string]interface{}{
+			"id":            pendingData.AppInfo.AppEntry.ID,
+			"name":          pendingData.AppInfo.AppEntry.Name,
+			"app_id":        pendingData.AppInfo.AppEntry.AppID,
+			"options":       convertToStringMapDBUS(pendingData.AppInfo.AppEntry.Options),
+			"supportClient": convertToStringMapDBUS(pendingData.AppInfo.AppEntry.SupportClient),
+			"permission":    convertToStringMapDBUS(pendingData.AppInfo.AppEntry.Permission),
+			"middleware":    convertToStringMapDBUS(pendingData.AppInfo.AppEntry.Middleware),
+			"i18n":          convertToStringMapDBUS(pendingData.AppInfo.AppEntry.I18n),
+			"metadata":      convertToStringMapDBUS(pendingData.AppInfo.AppEntry.Metadata),
 		}
+		appInfoMap := map[string]interface{}{
+			"app_entry": appEntryMap,
+		}
+		safeCopy["app_info"] = appInfoMap
 	}
 
 	// Include Values if they exist
@@ -927,4 +942,24 @@ func (s *DatabaseUpdateStep) createSafePendingDataCopy(pendingData *types.AppInf
 	}
 
 	return safeCopy
+}
+
+// convertToStringMapDBUS 工具函数，兼容 map[string]interface{} 和 map[interface{}]interface{}，DatabaseUpdateStep专用
+func convertToStringMapDBUS(val interface{}) map[string]interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		return v
+	case map[interface{}]interface{}:
+		converted := make(map[string]interface{})
+		for k, v2 := range v {
+			if ks, ok := k.(string); ok {
+				converted[ks] = v2
+			}
+		}
+		return converted
+	case nil:
+		return nil
+	default:
+		return nil
+	}
 }

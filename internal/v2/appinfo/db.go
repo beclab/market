@@ -588,8 +588,37 @@ func (r *RedisClient) createSafeApplicationInfoEntryCopy(entry *types.Applicatio
 		"screenshots":        entry.Screenshots,
 		"tags":               entry.Tags,
 		"updated_at":         entry.UpdatedAt,
-		// Skip complex interface{} fields that might cause cycles
-		// "supportClient", "permission", "entrances", "middleware", "options", "license", "legal", "i18n", "count", "versionHistory", "metadata"
+		"supportClient":      convertToStringMapDB(entry.SupportClient),
+		"permission":         convertToStringMapDB(entry.Permission),
+		"middleware":         convertToStringMapDB(entry.Middleware),
+		"options":            convertToStringMapDB(entry.Options),
+		"i18n":               convertToStringMapDB(entry.I18n),
+		"metadata":           convertToStringMapDB(entry.Metadata),
+		"count":              entry.Count,
+		"entrances":          entry.Entrances,
+		"license":            entry.License,
+		"legal":              entry.Legal,
+		"versionHistory":     entry.VersionHistory,
+	}
+}
+
+// convertToStringMapDB 工具函数，兼容 map[string]interface{} 和 map[interface{}]interface{}，RedisClient专用
+func convertToStringMapDB(val interface{}) map[string]interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		return v
+	case map[interface{}]interface{}:
+		converted := make(map[string]interface{})
+		for k, v2 := range v {
+			if ks, ok := k.(string); ok {
+				converted[ks] = v2
+			}
+		}
+		return converted
+	case nil:
+		return nil
+	default:
+		return nil
 	}
 }
 

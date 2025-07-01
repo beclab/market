@@ -79,6 +79,7 @@ func (cm *CacheManager) Start() error {
 			glog.Errorf("Failed to load cache from Redis: %v", err)
 			return err
 		}
+		glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
 		cm.mutex.Lock()
 		cm.cache = cache
 		cm.mutex.Unlock()
@@ -91,6 +92,7 @@ func (cm *CacheManager) Start() error {
 			return err
 		}
 
+		glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
 		cm.mutex.Lock()
 		cm.cache = NewCacheData()
 		cm.mutex.Unlock()
@@ -100,6 +102,7 @@ func (cm *CacheManager) Start() error {
 	if cm.userConfig != nil && len(cm.userConfig.UserList) > 0 {
 		glog.Infof("Initializing data structures for configured users")
 
+		glog.Infof("[LOCK] cm.mutex.Lock() @102 Start")
 		cm.mutex.Lock()
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
@@ -112,6 +115,7 @@ func (cm *CacheManager) Start() error {
 		glog.Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
 	}
 
+	glog.Infof("[LOCK] cm.mutex.Lock() @114 Start")
 	cm.mutex.Lock()
 	cm.isRunning = true
 	cm.mutex.Unlock()
@@ -127,6 +131,7 @@ func (cm *CacheManager) Start() error {
 func (cm *CacheManager) Stop() {
 	glog.Infof("Stopping cache manager")
 
+	glog.Infof("[LOCK] cm.mutex.Lock() @129 Start")
 	cm.mutex.Lock()
 	if cm.isRunning {
 		cm.isRunning = false
@@ -182,6 +187,7 @@ func (cm *CacheManager) processSyncRequest(req SyncRequest) {
 
 // GetUserData retrieves user data from cache
 func (cm *CacheManager) GetUserData(userID string) *UserData {
+	glog.Infof("[LOCK] cm.mutex.RLock() @184 Start")
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
@@ -195,6 +201,7 @@ func (cm *CacheManager) getUserData(userID string) *UserData {
 
 // GetSourceData retrieves source data from cache
 func (cm *CacheManager) GetSourceData(userID, sourceID string) *SourceData {
+	glog.Infof("[LOCK] cm.mutex.RLock() @197 Start")
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
@@ -214,6 +221,7 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 
 // SetHydrationNotifier sets the hydration notifier for real-time updates
 func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
+	glog.Infof("[LOCK] cm.mutex.Lock() @216 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 	cm.hydrationNotifier = notifier
@@ -267,6 +275,7 @@ func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState
 
 // SetAppData sets app data in cache using single global lock
 func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @269 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
@@ -541,6 +550,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 
 // GetAppData retrieves app data from cache using single global lock
 func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
+	glog.Infof("[LOCK] cm.mutex.RLock() @543 Start")
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
@@ -566,6 +576,7 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 
 // RemoveUserData removes user data from cache and Redis
 func (cm *CacheManager) RemoveUserData(userID string) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @568 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
@@ -584,6 +595,7 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 
 // GetCacheStats returns cache statistics using single global lock
 func (cm *CacheManager) GetCacheStats() map[string]interface{} {
+	glog.Infof("[LOCK] cm.mutex.RLock() @586 Start")
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
@@ -615,6 +627,7 @@ func (cm *CacheManager) requestSync(req SyncRequest) {
 
 // ForceSync forces immediate synchronization of all data to Redis
 func (cm *CacheManager) ForceSync() error {
+	glog.Infof("[LOCK] cm.mutex.RLock() @617 Start")
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
@@ -633,6 +646,7 @@ func (cm *CacheManager) ForceSync() error {
 
 // GetAllUsersData returns all users data from cache using single global lock
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
+	glog.Infof("[LOCK] cm.mutex.RLock() @635 Start")
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
@@ -658,6 +672,7 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 
 // UpdateUserConfig updates the user configuration and ensures all users have data structures
 func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @660 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
@@ -716,6 +731,7 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 
 // SyncUserListToCache ensures all users from current userConfig have initialized data structures
 func (cm *CacheManager) SyncUserListToCache() error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @718 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
@@ -749,6 +765,7 @@ func (cm *CacheManager) SyncUserListToCache() error {
 
 // CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
 func (cm *CacheManager) CleanupInvalidPendingData() int {
+	glog.Infof("[LOCK] cm.mutex.Lock() @751 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 

@@ -369,6 +369,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		}()
 
 		glog.Infof("DataWatcher: Attempting to acquire global cache lock for user %s", userID)
+		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @371 Start")
 		dw.cacheManager.mutex.RLock()
 		glog.Infof("DataWatcher: Global cache read lock acquired for user %s", userID)
 		lockAcquired <- true
@@ -389,6 +390,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	// Ensure we release the read lock when done with read operations
 	defer func() {
 		glog.Infof("DataWatcher: Releasing global cache read lock for user %s", userID)
+		glog.Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @391 Start")
 		dw.cacheManager.mutex.RUnlock()
 	}()
 
@@ -421,6 +423,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	// Release read lock before acquiring write lock to avoid deadlock
 	glog.Infof("DataWatcher: Releasing read lock to acquire write lock for user %s", userID)
+	glog.Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @423 Start")
 	dw.cacheManager.mutex.RUnlock()
 
 	// Acquire write lock for hash update
@@ -437,6 +440,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		}()
 
 		glog.Infof("DataWatcher: Attempting to acquire write lock for user %s", userID)
+		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Start")
 		dw.cacheManager.mutex.Lock()
 		glog.Infof("DataWatcher: Write lock acquired for user %s", userID)
 		writeLockAcquired <- true
@@ -451,23 +455,27 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		originalUserData.Hash = newHash
 		glog.Infof("DataWatcher: Hash updated in memory for user %s", userID)
 
+		glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @453 Start")
 		dw.cacheManager.mutex.Unlock()
 		glog.Infof("DataWatcher: Write lock released for user %s", userID)
 
 	case err := <-writeLockError:
 		glog.Errorf("DataWatcher: Error acquiring write lock for user %s: %v", userID, err)
 		// Re-acquire read lock for the defer statement since we released it earlier
+		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @459 Start")
 		dw.cacheManager.mutex.RLock()
 		return
 
 	case <-time.After(writeTimeout):
 		glog.Errorf("DataWatcher: Timeout acquiring write lock for hash update, user %s", userID)
 		// Re-acquire read lock for the defer statement since we released it earlier
+		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @465 Start")
 		dw.cacheManager.mutex.RLock()
 		return
 	}
 
 	// Re-acquire read lock for the defer statement since we released it earlier
+	glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @470 Start")
 	dw.cacheManager.mutex.RLock()
 
 	glog.Infof("DataWatcher: Hash updated for user %s", userID)
@@ -658,6 +666,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 
 	// Step 1: Quick check and data copy with minimal lock time
 	func() {
+		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @660 Start")
 		dw.cacheManager.mutex.RLock()
 		defer dw.cacheManager.mutex.RUnlock()
 
@@ -714,6 +723,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	lockStartTime := time.Now()
 	writeLockChan := make(chan bool, 1)
 	go func() {
+		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Start")
 		dw.cacheManager.mutex.Lock()
 		writeLockChan <- true
 	}()
@@ -723,6 +733,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		glog.Infof("DataWatcher: Write lock acquired for user=%s, source=%s", userID, sourceID)
 
 		defer func() {
+			glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @725 Start")
 			dw.cacheManager.mutex.Unlock()
 			totalLockTime := time.Since(lockStartTime)
 			glog.Infof("DataWatcher: Write lock released after %v for user=%s, source=%s", totalLockTime, userID, sourceID)
@@ -1391,8 +1402,38 @@ func (dw *DataWatcher) createSafeApplicationInfoEntryCopy(entry *types.Applicati
 		"screenshots":        entry.Screenshots,
 		"tags":               entry.Tags,
 		"updated_at":         entry.UpdatedAt,
-		// Skip complex interface{} fields that might cause cycles
-		// "supportClient", "permission", "entrances", "middleware", "options", "license", "legal", "i18n", "count", "versionHistory", "metadata"
+		// 新增 interface{} 字段
+		"supportClient":  convertToStringMapDW(entry.SupportClient),
+		"permission":     convertToStringMapDW(entry.Permission),
+		"middleware":     convertToStringMapDW(entry.Middleware),
+		"options":        convertToStringMapDW(entry.Options),
+		"i18n":           convertToStringMapDW(entry.I18n),
+		"metadata":       convertToStringMapDW(entry.Metadata),
+		"count":          entry.Count,
+		"entrances":      entry.Entrances,
+		"license":        entry.License,
+		"legal":          entry.Legal,
+		"versionHistory": entry.VersionHistory,
+	}
+}
+
+// convertToStringMapDW 工具函数，兼容 map[string]interface{} 和 map[interface{}]interface{}，DataWatcher专用
+func convertToStringMapDW(val interface{}) map[string]interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		return v
+	case map[interface{}]interface{}:
+		converted := make(map[string]interface{})
+		for k, v2 := range v {
+			if ks, ok := k.(string); ok {
+				converted[ks] = v2
+			}
+		}
+		return converted
+	case nil:
+		return nil
+	default:
+		return nil
 	}
 }
 
