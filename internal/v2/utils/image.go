@@ -132,7 +132,7 @@ type LayerData struct {
 }
 
 // GetDockerImageInfo retrieves detailed information about a Docker image from registry
-func GetDockerImageInfo(imageName string) (*DockerImageInfo, error) {
+func GetDockerImageInfo(imageName, appName string) (*DockerImageInfo, error) {
 	glog.Infof("Getting Docker image info for: %s", imageName)
 
 	// Check if it's development environment
@@ -143,7 +143,7 @@ func GetDockerImageInfo(imageName string) (*DockerImageInfo, error) {
 
 	// Production environment - use API
 	glog.Infof("Production environment detected, using API access")
-	return getDockerImageInfoFromAPI(imageName)
+	return getDockerImageInfoFromAPI(imageName, appName)
 }
 
 // getDockerImageInfoFromRegistry gets image info directly from registry
@@ -209,9 +209,9 @@ func getDockerImageInfoFromRegistry(imageName string) (*DockerImageInfo, error) 
 }
 
 // getDockerImageInfoFromAPI gets image info from the app service API
-func getDockerImageInfoFromAPI(imageName string) (*DockerImageInfo, error) {
+func getDockerImageInfoFromAPI(imageName, appName string) (*DockerImageInfo, error) {
 	// Get the complete API response with node information
-	apiResponse, err := GetImageInfoAPIResponse(imageName)
+	apiResponse, err := GetImageInfoAPIResponse(imageName, appName)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +265,7 @@ func getDockerImageInfoFromAPI(imageName string) (*DockerImageInfo, error) {
 }
 
 // GetImageInfoAPIResponse gets the complete API response with node information
-func GetImageInfoAPIResponse(imageName string) (*ImageInfoResponse, error) {
+func GetImageInfoAPIResponse(imageName, appName string) (*ImageInfoResponse, error) {
 	// Get app service host and port from environment
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
@@ -279,7 +279,7 @@ func GetImageInfoAPIResponse(imageName string) (*ImageInfoResponse, error) {
 
 	// Prepare request body
 	requestBody := map[string]interface{}{
-		"name":   "image-info",
+		"name":   appName,
 		"images": []string{imageName},
 	}
 

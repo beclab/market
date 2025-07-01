@@ -859,8 +859,8 @@ func DefaultModuleConfig() *ModuleConfig {
 }
 
 // GetDockerImageInfo is a convenience function to get Docker image information
-func (m *AppInfoModule) GetDockerImageInfo(imageName string) (*utils.DockerImageInfo, error) {
-	return utils.GetDockerImageInfo(imageName)
+func (m *AppInfoModule) GetDockerImageInfo(imageName, appName string) (*utils.DockerImageInfo, error) {
+	return utils.GetDockerImageInfo(imageName, appName)
 }
 
 // GetLayerDownloadProgress is a convenience function to get layer download progress
