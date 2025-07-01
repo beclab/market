@@ -576,22 +576,37 @@ func (s *SourceChartStep) createSafePendingDataCopy(pendingData *types.AppInfoLa
 
 	// Only include basic information from RawData to avoid cycles
 	if pendingData.RawData != nil {
-		safeCopy["raw_data"] = map[string]interface{}{
-			"id":     pendingData.RawData.ID,
-			"name":   pendingData.RawData.Name,
-			"app_id": pendingData.RawData.AppID,
+		rawDataMap := map[string]interface{}{
+			"id":            pendingData.RawData.ID,
+			"name":          pendingData.RawData.Name,
+			"app_id":        pendingData.RawData.AppID,
+			"options":       convertToStringMapSCS(pendingData.RawData.Options),
+			"supportClient": convertToStringMapSCS(pendingData.RawData.SupportClient),
+			"permission":    convertToStringMapSCS(pendingData.RawData.Permission),
+			"middleware":    convertToStringMapSCS(pendingData.RawData.Middleware),
+			"i18n":          convertToStringMapSCS(pendingData.RawData.I18n),
+			"metadata":      convertToStringMapSCS(pendingData.RawData.Metadata),
 		}
+		safeCopy["raw_data"] = rawDataMap
 	}
 
 	// Only include basic information from AppInfo to avoid cycles
 	if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
-		safeCopy["app_info"] = map[string]interface{}{
-			"app_entry": map[string]interface{}{
-				"id":     pendingData.AppInfo.AppEntry.ID,
-				"name":   pendingData.AppInfo.AppEntry.Name,
-				"app_id": pendingData.AppInfo.AppEntry.AppID,
-			},
+		appEntryMap := map[string]interface{}{
+			"id":            pendingData.AppInfo.AppEntry.ID,
+			"name":          pendingData.AppInfo.AppEntry.Name,
+			"app_id":        pendingData.AppInfo.AppEntry.AppID,
+			"options":       convertToStringMapSCS(pendingData.AppInfo.AppEntry.Options),
+			"supportClient": convertToStringMapSCS(pendingData.AppInfo.AppEntry.SupportClient),
+			"permission":    convertToStringMapSCS(pendingData.AppInfo.AppEntry.Permission),
+			"middleware":    convertToStringMapSCS(pendingData.AppInfo.AppEntry.Middleware),
+			"i18n":          convertToStringMapSCS(pendingData.AppInfo.AppEntry.I18n),
+			"metadata":      convertToStringMapSCS(pendingData.AppInfo.AppEntry.Metadata),
 		}
+		appInfoMap := map[string]interface{}{
+			"app_entry": appEntryMap,
+		}
+		safeCopy["app_info"] = appInfoMap
 	}
 
 	// Include Values if they exist
@@ -600,4 +615,24 @@ func (s *SourceChartStep) createSafePendingDataCopy(pendingData *types.AppInfoLa
 	}
 
 	return safeCopy
+}
+
+// convertToStringMapSCS 工具函数，兼容 map[string]interface{} 和 map[interface{}]interface{}，SourceChartStep专用
+func convertToStringMapSCS(val interface{}) map[string]interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		return v
+	case map[interface{}]interface{}:
+		converted := make(map[string]interface{})
+		for k, v2 := range v {
+			if ks, ok := k.(string); ok {
+				converted[ks] = v2
+			}
+		}
+		return converted
+	case nil:
+		return nil
+	default:
+		return nil
+	}
 }

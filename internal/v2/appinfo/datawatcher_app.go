@@ -1402,8 +1402,38 @@ func (dw *DataWatcher) createSafeApplicationInfoEntryCopy(entry *types.Applicati
 		"screenshots":        entry.Screenshots,
 		"tags":               entry.Tags,
 		"updated_at":         entry.UpdatedAt,
-		// Skip complex interface{} fields that might cause cycles
-		// "supportClient", "permission", "entrances", "middleware", "options", "license", "legal", "i18n", "count", "versionHistory", "metadata"
+		// 新增 interface{} 字段
+		"supportClient":  convertToStringMapDW(entry.SupportClient),
+		"permission":     convertToStringMapDW(entry.Permission),
+		"middleware":     convertToStringMapDW(entry.Middleware),
+		"options":        convertToStringMapDW(entry.Options),
+		"i18n":           convertToStringMapDW(entry.I18n),
+		"metadata":       convertToStringMapDW(entry.Metadata),
+		"count":          entry.Count,
+		"entrances":      entry.Entrances,
+		"license":        entry.License,
+		"legal":          entry.Legal,
+		"versionHistory": entry.VersionHistory,
+	}
+}
+
+// convertToStringMapDW 工具函数，兼容 map[string]interface{} 和 map[interface{}]interface{}，DataWatcher专用
+func convertToStringMapDW(val interface{}) map[string]interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		return v
+	case map[interface{}]interface{}:
+		converted := make(map[string]interface{})
+		for k, v2 := range v {
+			if ks, ok := k.(string); ok {
+				converted[ks] = v2
+			}
+		}
+		return converted
+	case nil:
+		return nil
+	default:
+		return nil
 	}
 }
 
