@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -111,8 +112,9 @@ func (s *DatabaseUpdateStep) prepareUpdateDataWithImages(task *HydrationTask) (m
 	updateData["source_chart_url"] = task.SourceChartURL
 	updateData["rendered_chart_url"] = task.RenderedChartURL
 
-	// Chart data
-	updateData["chart_data"] = task.ChartData
+	// Chart data - create a safe copy to avoid circular references
+	safeChartData := s.createSafeChartDataCopy(task.ChartData)
+	updateData["chart_data"] = safeChartData
 
 	// Extract and integrate image analysis data
 	var imageAnalysis *types.AppImageAnalysis
@@ -281,6 +283,10 @@ func (s *DatabaseUpdateStep) updatePackageInformation(task *HydrationTask) error
 
 	log.Printf("Updated package information for app: %s (RawPackage: %s, RenderedPackage: %s)",
 		task.AppID, pendingDataRef.RawPackage, pendingDataRef.RenderedPackage)
+
+	// Log pending data after package update to check for cycles
+	s.logPendingDataAfterUpdate(pendingDataRef, "after package update")
+
 	return nil
 }
 
@@ -354,7 +360,46 @@ func (s *DatabaseUpdateStep) updateAppInfoWithImages(task *HydrationTask, imageA
 	pendingDataRef.Timestamp = time.Now().Unix()
 
 	log.Printf("Updated AppInfo for app: %s with hydration completion metadata", task.AppID)
+
+	// Log pending data after AppInfo update to check for cycles
+	s.logPendingDataAfterUpdate(pendingDataRef, "after AppInfo update")
+
 	return nil
+}
+
+// logPendingDataAfterUpdate logs pending data after update to check for cycles
+func (s *DatabaseUpdateStep) logPendingDataAfterUpdate(pendingDataRef *types.AppInfoLatestPendingData, context string) {
+	log.Printf("DEBUG: Pending data structure check - %s", context)
+
+	if pendingDataRef == nil {
+		log.Printf("DEBUG: Pending data is nil")
+		return
+	}
+
+	// Create a safe copy of pending data for JSON marshaling to avoid cycles
+	safePendingData := s.createSafePendingDataCopy(pendingDataRef)
+
+	// Try to JSON marshal the safe copy of pending data
+	if jsonData, err := json.Marshal(safePendingData); err != nil {
+		log.Printf("ERROR: JSON marshal failed for pending data - %s: %v", context, err)
+		log.Printf("ERROR: Pending data structure: RawData=%v, AppInfo=%v, RawPackage=%s, RenderedPackage=%s",
+			pendingDataRef.RawData != nil, pendingDataRef.AppInfo != nil, pendingDataRef.RawPackage, pendingDataRef.RenderedPackage)
+
+		// Try to marshal individual components to isolate the problem
+		if pendingDataRef.RawData != nil {
+			if _, err := json.Marshal(pendingDataRef.RawData); err != nil {
+				log.Printf("ERROR: JSON marshal failed for RawData - %s: %v", context, err)
+			}
+		}
+
+		if pendingDataRef.AppInfo != nil {
+			if _, err := json.Marshal(pendingDataRef.AppInfo); err != nil {
+				log.Printf("ERROR: JSON marshal failed for AppInfo - %s: %v", context, err)
+			}
+		}
+	} else {
+		log.Printf("DEBUG: Pending data JSON length - %s: %d bytes", context, len(jsonData))
+	}
 }
 
 // readI18nData reads i18n data from files and returns it without modifying any state.
@@ -752,4 +797,134 @@ func (s *DatabaseUpdateStep) cleanupRenderedDirectory(task *HydrationTask) {
 			log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
 		}
 	}
+}
+
+// createSafeChartDataCopy creates a safe copy of chart data to avoid circular references
+func (s *DatabaseUpdateStep) createSafeChartDataCopy(chartData map[string]interface{}) map[string]interface{} {
+	if chartData == nil {
+		return make(map[string]interface{})
+	}
+
+	safeChartData := make(map[string]interface{})
+	visited := make(map[uintptr]bool)
+
+	for key, value := range chartData {
+		// Skip potential circular reference keys or large data structures
+		if key == "template_data" || key == "template_values" || key == "entrances" ||
+			key == "domain" || key == "chart_files" || key == "rendered_manifest" ||
+			key == "rendered_chart" || key == "source_data" || key == "raw_data" ||
+			key == "app_info" || key == "parent" || key == "self" || key == "circular_ref" ||
+			key == "back_ref" || key == "loop" || key == "templateData" || key == "templateData.Values" {
+			continue
+		}
+
+		// For values that might contain circular references, create a safe copy
+		if key == "rendered_manifest" || key == "rendered_chart" {
+			// Only store essential information, not the full content
+			if strVal, ok := value.(string); ok {
+				safeChartData[key] = strVal
+			}
+			continue
+		}
+
+		safeChartData[key] = s.deepCopyChartDataValue(value, visited)
+	}
+
+	return safeChartData
+}
+
+// deepCopyChartDataValue performs a deep copy of a chart data value while avoiding circular references
+func (s *DatabaseUpdateStep) deepCopyChartDataValue(value interface{}, visited map[uintptr]bool) interface{} {
+	if value == nil {
+		return nil
+	}
+
+	// Only check for circular references for pointer types
+	if reflect.ValueOf(value).Kind() == reflect.Ptr {
+		ptr := reflect.ValueOf(value).Pointer()
+		if visited[ptr] {
+			return nil // Return nil for circular references
+		}
+		visited[ptr] = true
+		defer delete(visited, ptr)
+	}
+
+	switch v := value.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for key, val := range v {
+			// Skip potential circular reference keys
+			if key == "template_data" || key == "template_values" || key == "entrances" ||
+				key == "domain" || key == "chart_files" || key == "rendered_manifest" ||
+				key == "rendered_chart" || key == "source_data" || key == "raw_data" ||
+				key == "app_info" || key == "parent" || key == "self" || key == "circular_ref" ||
+				key == "back_ref" || key == "loop" || key == "templateData" || key == "templateData.Values" {
+				continue
+			}
+			result[key] = s.deepCopyChartDataValue(val, visited)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, 0, len(v))
+		for _, val := range v {
+			// Only copy simple types to avoid circular references
+			switch val.(type) {
+			case string, int, int64, float64, bool:
+				result = append(result, val)
+			default:
+				// Skip complex types to avoid cycles
+			}
+		}
+		return result
+	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		return v // Return primitive types as-is
+	default:
+		// For other types, try to convert to string or return nil
+		if str, ok := v.(fmt.Stringer); ok {
+			return str.String()
+		}
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// createSafePendingDataCopy creates a safe copy of pending data to avoid circular references
+func (s *DatabaseUpdateStep) createSafePendingDataCopy(pendingData *types.AppInfoLatestPendingData) map[string]interface{} {
+	if pendingData == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{
+		"type":             pendingData.Type,
+		"timestamp":        pendingData.Timestamp,
+		"version":          pendingData.Version,
+		"raw_package":      pendingData.RawPackage,
+		"rendered_package": pendingData.RenderedPackage,
+	}
+
+	// Only include basic information from RawData to avoid cycles
+	if pendingData.RawData != nil {
+		safeCopy["raw_data"] = map[string]interface{}{
+			"id":     pendingData.RawData.ID,
+			"name":   pendingData.RawData.Name,
+			"app_id": pendingData.RawData.AppID,
+		}
+	}
+
+	// Only include basic information from AppInfo to avoid cycles
+	if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
+		safeCopy["app_info"] = map[string]interface{}{
+			"app_entry": map[string]interface{}{
+				"id":     pendingData.AppInfo.AppEntry.ID,
+				"name":   pendingData.AppInfo.AppEntry.Name,
+				"app_id": pendingData.AppInfo.AppEntry.AppID,
+			},
+		}
+	}
+
+	// Include Values if they exist
+	if pendingData.Values != nil {
+		safeCopy["values"] = pendingData.Values
+	}
+
+	return safeCopy
 }

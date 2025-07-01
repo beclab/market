@@ -94,7 +94,7 @@ func (s *ImageAnalysisStep) Execute(ctx context.Context, task *HydrationTask) er
 	for _, imageName := range images {
 		log.Printf("Analyzing Docker image: %s", imageName)
 
-		imageInfo, err := s.analyzeImage(ctx, imageName)
+		imageInfo, err := s.analyzeImage(ctx, imageName, task.AppName)
 		if err != nil {
 			log.Printf("Warning: failed to analyze image %s: %v", imageName, err)
 			// Create basic info even if analysis fails
@@ -305,7 +305,7 @@ func (s *ImageAnalysisStep) cleanImageName(imageName string) string {
 }
 
 // analyzeImage analyzes a single Docker image and returns detailed information
-func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) (*types.ImageInfo, error) {
+func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string, appName string) (*types.ImageInfo, error) {
 	// Clean and validate image name
 	cleanedName := s.cleanImageName(imageName)
 	if !s.isValidImageName(cleanedName) {
@@ -329,7 +329,7 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 	// }
 
 	// Get Docker image info from registry
-	dockerImageInfo, err := utils.GetDockerImageInfo(imageName)
+	dockerImageInfo, err := utils.GetDockerImageInfo(imageName, appName)
 	if err != nil {
 		imageInfo.Status = "registry_error"
 		imageInfo.ErrorMessage = err.Error()
@@ -361,7 +361,7 @@ func (s *ImageAnalysisStep) analyzeImage(ctx context.Context, imageName string) 
 	if isProduction {
 		// Production environment: use offset-based analysis with node information
 		log.Printf("Production environment detected, using offset-based analysis for %s", imageName)
-		s.analyzeLocalLayersWithOffsetAndNodes(imageInfo, imageName)
+		s.analyzeLocalLayersWithOffsetAndNodes(imageInfo, imageName, appName)
 	} else {
 		// Development environment: use traditional local layer checking
 		log.Printf("Development environment detected, using traditional local layer checking for %s", imageName)
@@ -555,11 +555,11 @@ func (s *ImageAnalysisStep) analyzeLocalLayersWithOffset(imageInfo *types.ImageI
 }
 
 // analyzeLocalLayersWithOffsetAndNodes analyzes local layers using offset and size information from API with node information
-func (s *ImageAnalysisStep) analyzeLocalLayersWithOffsetAndNodes(imageInfo *types.ImageInfo, imageName string) {
+func (s *ImageAnalysisStep) analyzeLocalLayersWithOffsetAndNodes(imageInfo *types.ImageInfo, imageName string, appName string) {
 	log.Printf("Analyzing local layers with offset and node information for image: %s", imageName)
 
 	// Get the complete API response with node information
-	apiResponse, err := utils.GetImageInfoAPIResponse(imageName)
+	apiResponse, err := utils.GetImageInfoAPIResponse(imageName, appName)
 	if err != nil {
 		log.Printf("Warning: failed to get API response with node information: %v", err)
 		// Fallback to single node analysis

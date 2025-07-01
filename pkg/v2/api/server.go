@@ -20,14 +20,16 @@ type Server struct {
 	router        *mux.Router
 	port          string
 	cacheManager  *appinfo.CacheManager
+	hydrator      *appinfo.Hydrator
 	historyModule *history.HistoryModule
 	taskModule    *task.TaskModule
 }
 
 // NewServer creates a new server instance
-func NewServer(port string, cacheManager *appinfo.CacheManager, taskModule *task.TaskModule, historyModule *history.HistoryModule) *Server {
+func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinfo.Hydrator, taskModule *task.TaskModule, historyModule *history.HistoryModule) *Server {
 	log.Printf("Creating new server instance with port: %s", port)
 	log.Printf("Cache manager provided: %v", cacheManager != nil)
+	log.Printf("Hydrator provided: %v", hydrator != nil)
 	log.Printf("Task module provided: %v", taskModule != nil)
 	log.Printf("History module provided: %v", historyModule != nil)
 
@@ -36,6 +38,7 @@ func NewServer(port string, cacheManager *appinfo.CacheManager, taskModule *task
 		router:        mux.NewRouter(),
 		port:          port,
 		cacheManager:  cacheManager,
+		hydrator:      hydrator,
 		historyModule: historyModule,
 		taskModule:    taskModule,
 	}
@@ -154,6 +157,7 @@ func (s *Server) Start() error {
 	log.Printf("Server configuration:")
 	log.Printf("  - Port: %s", s.port)
 	log.Printf("  - Cache Manager: %v", s.cacheManager != nil)
+	log.Printf("  - Hydrator: %v", s.hydrator != nil)
 	log.Printf("  - History Module: %v", s.historyModule != nil)
 
 	// Check if port is available

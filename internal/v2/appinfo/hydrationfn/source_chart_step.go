@@ -2,6 +2,7 @@ package hydrationfn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -391,12 +392,51 @@ func (s *SourceChartStep) updatePendingDataRawPackage(task *HydrationTask, chart
 			log.Printf("Updating RawPackage for pending data at index %d: %s", i, chartPath)
 			userData.Sources[task.SourceID].AppInfoLatestPending[i].RawPackage = chartPath
 			log.Printf("Successfully updated RawPackage for app: %s", task.AppID)
+
+			// Log pending data after update to check for cycles
+			s.logPendingDataAfterUpdate(pendingData, "after raw package update")
+
 			return nil
 		}
 	}
 
 	log.Printf("No matching pending data found for task %s, skipping RawPackage update", task.ID)
 	return nil
+}
+
+// logPendingDataAfterUpdate logs pending data after update to check for cycles
+func (s *SourceChartStep) logPendingDataAfterUpdate(pendingData *types.AppInfoLatestPendingData, context string) {
+	log.Printf("DEBUG: Pending data structure check - %s", context)
+
+	if pendingData == nil {
+		log.Printf("DEBUG: Pending data is nil")
+		return
+	}
+
+	// Create a safe copy of pending data for JSON marshaling to avoid cycles
+	safePendingData := s.createSafePendingDataCopy(pendingData)
+
+	// Try to JSON marshal the safe copy of pending data
+	if jsonData, err := json.Marshal(safePendingData); err != nil {
+		log.Printf("ERROR: JSON marshal failed for pending data - %s: %v", context, err)
+		log.Printf("ERROR: Pending data structure: RawData=%v, AppInfo=%v, RawPackage=%s, RenderedPackage=%s",
+			pendingData.RawData != nil, pendingData.AppInfo != nil, pendingData.RawPackage, pendingData.RenderedPackage)
+
+		// Try to marshal individual components to isolate the problem
+		if pendingData.RawData != nil {
+			if _, err := json.Marshal(pendingData.RawData); err != nil {
+				log.Printf("ERROR: JSON marshal failed for RawData - %s: %v", context, err)
+			}
+		}
+
+		if pendingData.AppInfo != nil {
+			if _, err := json.Marshal(pendingData.AppInfo); err != nil {
+				log.Printf("ERROR: JSON marshal failed for AppInfo - %s: %v", context, err)
+			}
+		}
+	} else {
+		log.Printf("DEBUG: Pending data JSON length - %s: %d bytes", context, len(jsonData))
+	}
 }
 
 // isTaskForPendingData checks if the current task corresponds to the pending data
@@ -518,4 +558,46 @@ func (s *SourceChartStep) handleLocalSource(ctx context.Context, task *Hydration
 	// Chart file doesn't exist for local source - this is a failure
 	log.Printf("Local chart file not found: %s", localChartPath)
 	return fmt.Errorf("local chart file not found: %s", localChartPath)
+}
+
+// createSafePendingDataCopy creates a safe copy of pending data to avoid circular references
+func (s *SourceChartStep) createSafePendingDataCopy(pendingData *types.AppInfoLatestPendingData) map[string]interface{} {
+	if pendingData == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{
+		"type":             pendingData.Type,
+		"timestamp":        pendingData.Timestamp,
+		"version":          pendingData.Version,
+		"raw_package":      pendingData.RawPackage,
+		"rendered_package": pendingData.RenderedPackage,
+	}
+
+	// Only include basic information from RawData to avoid cycles
+	if pendingData.RawData != nil {
+		safeCopy["raw_data"] = map[string]interface{}{
+			"id":     pendingData.RawData.ID,
+			"name":   pendingData.RawData.Name,
+			"app_id": pendingData.RawData.AppID,
+		}
+	}
+
+	// Only include basic information from AppInfo to avoid cycles
+	if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
+		safeCopy["app_info"] = map[string]interface{}{
+			"app_entry": map[string]interface{}{
+				"id":     pendingData.AppInfo.AppEntry.ID,
+				"name":   pendingData.AppInfo.AppEntry.Name,
+				"app_id": pendingData.AppInfo.AppEntry.AppID,
+			},
+		}
+	}
+
+	// Include Values if they exist
+	if pendingData.Values != nil {
+		safeCopy["values"] = pendingData.Values
+	}
+
+	return safeCopy
 }

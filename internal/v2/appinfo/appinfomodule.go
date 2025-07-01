@@ -532,8 +532,8 @@ func (m *AppInfoModule) initDataWatcher() error {
 func (m *AppInfoModule) initDataWatcherState() error {
 	glog.Infof("Initializing DataWatcherState...")
 
-	// Create DataWatcherState instance with cache manager and task module
-	m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule)
+	// Create DataWatcherState instance with cache manager, task module, history module, and data watcher
+	m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule, m.dataWatcher)
 
 	// Start DataWatcherState
 	if err := m.dataWatcherState.Start(); err != nil {
@@ -859,8 +859,8 @@ func DefaultModuleConfig() *ModuleConfig {
 }
 
 // GetDockerImageInfo is a convenience function to get Docker image information
-func (m *AppInfoModule) GetDockerImageInfo(imageName string) (*utils.DockerImageInfo, error) {
-	return utils.GetDockerImageInfo(imageName)
+func (m *AppInfoModule) GetDockerImageInfo(imageName, appName string) (*utils.DockerImageInfo, error) {
+	return utils.GetDockerImageInfo(imageName, appName)
 }
 
 // GetLayerDownloadProgress is a convenience function to get layer download progress
@@ -1246,7 +1246,7 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 		}
 
 		// Create new DataWatcherState with task module
-		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule)
+		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule, m.dataWatcher)
 
 		// Start new DataWatcherState
 		if err := m.dataWatcherState.Start(); err != nil {
@@ -1274,7 +1274,7 @@ func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
 		}
 
 		// Create new DataWatcherState with history module
-		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule)
+		m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule, m.dataWatcher)
 
 		// Start new DataWatcherState
 		if err := m.dataWatcherState.Start(); err != nil {

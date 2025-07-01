@@ -2,9 +2,11 @@ package appinfo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -221,6 +223,9 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 		log.Printf("-------- HYDRATION STEP %d/%d STARTED: %s --------", i+1, len(h.steps), step.GetStepName())
 		log.Printf("Executing step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
 
+		// Log task data before step execution
+		h.logTaskDataBeforeStep(task, i+1, step.GetStepName())
+
 		// Execute step
 		if err := step.Execute(ctx, task); err != nil {
 			log.Printf("Step %d (%s) failed for task: %s, error: %v", i+1, step.GetStepName(), task.ID, err)
@@ -275,6 +280,9 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			return
 		}
 
+		// Log task data after step execution
+		h.logTaskDataAfterStep(task, i+1, step.GetStepName())
+
 		task.IncrementStep()
 		log.Printf("Step %d (%s) completed for task: %s", i+1, step.GetStepName(), task.ID)
 		log.Printf("-------- HYDRATION STEP %d/%d COMPLETED: %s --------", i+1, len(h.steps), step.GetStepName())
@@ -286,6 +294,85 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 	log.Printf("Task completed successfully: %s for app: %s", task.ID, task.AppID)
 	log.Printf("==================== HYDRATION TASK COMPLETED ====================")
+}
+
+// logTaskDataBeforeStep logs task data before step execution to help debug JSON cycle issues
+func (h *Hydrator) logTaskDataBeforeStep(task *hydrationfn.HydrationTask, stepNum int, stepName string) {
+	log.Printf("DEBUG: Before step %d (%s) - Task data structure check", stepNum, stepName)
+
+	// Try to JSON marshal task.ChartData
+	if len(task.ChartData) > 0 {
+		if jsonData, err := json.Marshal(task.ChartData); err != nil {
+			log.Printf("ERROR: JSON marshal failed for task.ChartData before step %d: %v", stepNum, err)
+			log.Printf("ERROR: ChartData keys: %v", h.getMapKeys(task.ChartData))
+		} else {
+			log.Printf("DEBUG: task.ChartData JSON length before step %d: %d bytes", stepNum, len(jsonData))
+		}
+	}
+
+	// Try to JSON marshal task.AppData
+	if len(task.AppData) > 0 {
+		if jsonData, err := json.Marshal(task.AppData); err != nil {
+			log.Printf("ERROR: JSON marshal failed for task.AppData before step %d: %v", stepNum, err)
+			log.Printf("ERROR: AppData keys: %v", h.getMapKeys(task.AppData))
+		} else {
+			log.Printf("DEBUG: task.AppData JSON length before step %d: %d bytes", stepNum, len(jsonData))
+		}
+	}
+
+	// Try to JSON marshal task.DatabaseUpdateData
+	if len(task.DatabaseUpdateData) > 0 {
+		if jsonData, err := json.Marshal(task.DatabaseUpdateData); err != nil {
+			log.Printf("ERROR: JSON marshal failed for task.DatabaseUpdateData before step %d: %v", stepNum, err)
+			log.Printf("ERROR: DatabaseUpdateData keys: %v", h.getMapKeys(task.DatabaseUpdateData))
+		} else {
+			log.Printf("DEBUG: task.DatabaseUpdateData JSON length before step %d: %d bytes", stepNum, len(jsonData))
+		}
+	}
+}
+
+// logTaskDataAfterStep logs task data after step execution to help debug JSON cycle issues
+func (h *Hydrator) logTaskDataAfterStep(task *hydrationfn.HydrationTask, stepNum int, stepName string) {
+	log.Printf("DEBUG: After step %d (%s) - Task data structure check", stepNum, stepName)
+
+	// Try to JSON marshal task.ChartData
+	if len(task.ChartData) > 0 {
+		if jsonData, err := json.Marshal(task.ChartData); err != nil {
+			log.Printf("ERROR: JSON marshal failed for task.ChartData after step %d: %v", stepNum, err)
+			log.Printf("ERROR: ChartData keys: %v", h.getMapKeys(task.ChartData))
+		} else {
+			log.Printf("DEBUG: task.ChartData JSON length after step %d: %d bytes", stepNum, len(jsonData))
+		}
+	}
+
+	// Try to JSON marshal task.AppData
+	if len(task.AppData) > 0 {
+		if jsonData, err := json.Marshal(task.AppData); err != nil {
+			log.Printf("ERROR: JSON marshal failed for task.AppData after step %d: %v", stepNum, err)
+			log.Printf("ERROR: AppData keys: %v", h.getMapKeys(task.AppData))
+		} else {
+			log.Printf("DEBUG: task.AppData JSON length after step %d: %d bytes", stepNum, len(jsonData))
+		}
+	}
+
+	// Try to JSON marshal task.DatabaseUpdateData
+	if len(task.DatabaseUpdateData) > 0 {
+		if jsonData, err := json.Marshal(task.DatabaseUpdateData); err != nil {
+			log.Printf("ERROR: JSON marshal failed for task.DatabaseUpdateData after step %d: %v", stepNum, err)
+			log.Printf("ERROR: DatabaseUpdateData keys: %v", h.getMapKeys(task.DatabaseUpdateData))
+		} else {
+			log.Printf("DEBUG: task.DatabaseUpdateData JSON length after step %d: %d bytes", stepNum, len(jsonData))
+		}
+	}
+}
+
+// getMapKeys safely extracts keys from a map for debugging
+func (h *Hydrator) getMapKeys(data map[string]interface{}) []string {
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // cleanupTaskResources cleans up resources associated with a task
@@ -500,7 +587,8 @@ func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfo
 		return make(map[string]interface{})
 	}
 
-	return map[string]interface{}{
+	// Create a safe map without potential circular references
+	result := map[string]interface{}{
 		"id":          entry.ID,
 		"name":        entry.Name,
 		"cfgType":     entry.CfgType,
@@ -554,8 +642,97 @@ func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfo
 
 		"screenshots": entry.Screenshots,
 		"tags":        entry.Tags,
-		"metadata":    entry.Metadata,
 		"updated_at":  entry.UpdatedAt,
+	}
+
+	// Safely copy metadata without potential circular references
+	if entry.Metadata != nil {
+		safeMetadata := h.createSafeMetadataCopy(entry.Metadata)
+		result["metadata"] = safeMetadata
+	}
+
+	return result
+}
+
+// createSafeMetadataCopy creates a safe copy of metadata to avoid circular references
+func (h *Hydrator) createSafeMetadataCopy(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+
+	safeCopy := make(map[string]interface{})
+	visited := make(map[uintptr]bool)
+
+	for key, value := range metadata {
+		// Skip potential circular reference keys
+		if key == "source_data" || key == "raw_data" || key == "app_info" ||
+			key == "parent" || key == "self" || key == "circular_ref" ||
+			key == "back_ref" || key == "loop" {
+			continue
+		}
+
+		safeCopy[key] = h.deepCopyValue(value, visited)
+	}
+
+	return safeCopy
+}
+
+// deepCopyValue performs a deep copy of a value while avoiding circular references
+func (h *Hydrator) deepCopyValue(value interface{}, visited map[uintptr]bool) interface{} {
+	if value == nil {
+		return nil
+	}
+
+	switch v := value.(type) {
+	case string, int, int64, float64, bool:
+		return v
+	case []string:
+		return append([]string{}, v...)
+	case []interface{}:
+		// Only copy simple types from interface slice
+		safeSlice := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			switch item.(type) {
+			case string, int, int64, float64, bool:
+				safeSlice = append(safeSlice, item)
+			default:
+				// Skip complex slice items to avoid circular references
+			}
+		}
+		return safeSlice
+	case map[string]interface{}:
+		// Check for circular references using pointer
+		ptr := reflect.ValueOf(v).Pointer()
+		if visited[ptr] {
+			return nil // Skip circular reference
+		}
+		visited[ptr] = true
+		defer delete(visited, ptr)
+
+		safeMap := make(map[string]interface{})
+		for k, val := range v {
+			// Skip potential circular reference keys
+			if k == "source_data" || k == "raw_data" || k == "app_info" ||
+				k == "parent" || k == "self" || k == "circular_ref" ||
+				k == "back_ref" || k == "loop" {
+				continue
+			}
+			safeMap[k] = h.deepCopyValue(val, visited)
+		}
+		return safeMap
+	case []map[string]interface{}:
+		safeSlice := make([]map[string]interface{}, 0, len(v))
+		for _, item := range v {
+			if itemCopy := h.deepCopyValue(item, visited); itemCopy != nil {
+				if itemMap, ok := itemCopy.(map[string]interface{}); ok {
+					safeSlice = append(safeSlice, itemMap)
+				}
+			}
+		}
+		return safeSlice
+	default:
+		// For other types, return nil to avoid potential circular references
+		return nil
 	}
 }
 
@@ -1447,4 +1624,16 @@ func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool 
 	}
 
 	return false
+}
+
+// ForceCheckPendingData immediately triggers checkForPendingData without waiting for the 30-second interval
+// This method can be called externally to force immediate processing of pending data
+func (h *Hydrator) ForceCheckPendingData() {
+	if !h.IsRunning() {
+		log.Printf("Hydrator is not running, cannot force check pending data")
+		return
+	}
+
+	log.Printf("Force checking pending data triggered externally")
+	h.checkForPendingData()
 }

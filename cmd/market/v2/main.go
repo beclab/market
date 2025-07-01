@@ -81,13 +81,17 @@ func main() {
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
 
-	// Pre-startup step: Setup app service data
+	// Pre-startup step: Setup app service data with retry mechanism
 	log.Println("=== Pre-startup: Setting up app service data ===")
-	if err := utils.SetupAppServiceData(); err != nil {
-		log.Printf("Warning: Failed to setup app service data: %v", err)
-		log.Println("Continuing with startup process...")
-	} else {
-		log.Println("App service data setup completed successfully")
+	for {
+		if err := utils.SetupAppServiceData(); err != nil {
+			log.Printf("Failed to setup app service data: %v", err)
+			log.Println("Retrying in 10 seconds...")
+			time.Sleep(10 * time.Second)
+		} else {
+			log.Println("App service data setup completed successfully")
+			break
+		}
 	}
 	log.Println("=== End pre-startup step ===")
 
@@ -142,6 +146,11 @@ func main() {
 	cacheManager := appInfoModule.GetCacheManager()
 	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
 
+	// Get hydrator for HTTP server
+	log.Printf("Getting hydrator for HTTP server...")
+	hydrator := appInfoModule.GetHydrator()
+	log.Printf("Hydrator obtained successfully: %v", hydrator != nil)
+
 	// 2. Initialize History Module
 	historyModule, err := history.NewHistoryModule()
 	if err != nil {
@@ -178,11 +187,12 @@ func main() {
 	log.Printf("Server configuration before creation:")
 	log.Printf("  - Port: 8080")
 	log.Printf("  - Cache Manager: %v", cacheManager != nil)
+	log.Printf("  - Hydrator: %v", hydrator != nil)
 	log.Printf("  - AppInfo Module: %v", appInfoModule != nil)
 	log.Printf("  - Task Module: %v", taskModule != nil)
 	log.Printf("  - History Module: %v", historyModule != nil)
 
-	server := api.NewServer("8080", cacheManager, taskModule, historyModule)
+	server := api.NewServer("8080", cacheManager, hydrator, taskModule, historyModule)
 	log.Printf("HTTP server instance created successfully")
 	log.Printf("Task module instance ID: %s", taskModule.GetInstanceID())
 

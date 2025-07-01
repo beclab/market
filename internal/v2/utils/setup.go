@@ -216,8 +216,8 @@ func processAppData(apps []AppServiceResponse) error {
 			}
 		}
 
-		// Create AppStateLatestData for this app
-		appStateData := createAppStateLatestData(app)
+		// Create AppStateLatestData for this app (startup process)
+		appStateData := createAppStateLatestData(app, true)
 
 		// Add to user's app state data only if creation was successful
 		if appStateData != nil {
@@ -332,7 +332,8 @@ func FetchAppEntranceUrls(appName string) (map[string]string, error) {
 }
 
 // createAppStateLatestData creates AppStateLatestData from AppServiceResponse
-func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData {
+// isStartupProcess indicates whether this is called during startup process
+func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) *types.AppStateLatestData {
 	data := map[string]interface{}{
 		"name":               app.Spec.Name,
 		"state":              app.Status.State,
@@ -350,51 +351,60 @@ func createAppStateLatestData(app AppServiceResponse) *types.AppStateLatestData 
 	}
 
 	// Check if any entrance status has empty URL
+	// During startup process, we don't enforce URL requirement
 	hasEmptyUrl := false
-	for _, entranceStatus := range app.Status.EntranceStatuses {
-		if url, exists := entranceUrls[entranceStatus.Name]; !exists || url == "" {
-			hasEmptyUrl = true
-			break
+	if !isStartupProcess {
+		for _, entranceStatus := range app.Status.EntranceStatuses {
+			if url, exists := entranceUrls[entranceStatus.Name]; !exists || url == "" {
+				hasEmptyUrl = true
+				break
+			}
 		}
-	}
 
-	// If any entrance has empty URL, ignore the entire app state data
-	if hasEmptyUrl {
-		log.Printf("Skipping app %s due to empty URL in entrance statuses", app.Spec.Name)
-		return nil
+		// If any entrance has empty URL, ignore the entire app state data
+		if hasEmptyUrl {
+			log.Printf("Skipping app %s due to empty URL in entrance statuses", app.Spec.Name)
+			return nil
+		}
+	} else {
+		log.Printf("Startup process detected - skipping URL validation for app %s", app.Spec.Name)
 	}
 
 	// Combine entrance statuses with URLs from spec.entrances
 	entrances := make([]interface{}, 0, len(app.Status.EntranceStatuses))
 	for _, entranceStatus := range app.Status.EntranceStatuses {
-		if url, exists := entranceUrls[entranceStatus.Name]; exists && url != "" {
-			// Extract ID from URL: split by "." and take the first segment
-			id := ""
-			if url != "" {
-				segments := strings.Split(url, ".")
-				if len(segments) > 0 {
-					id = segments[0]
-				}
-			}
+		url, exists := entranceUrls[entranceStatus.Name]
 
-			// Get invisible flag, default to false if not found
-			invisible := false
-			if invisibleFlag, exists := entranceInvisible[entranceStatus.Name]; exists {
-				invisible = invisibleFlag
-			}
-
-			entrances = append(entrances, map[string]interface{}{
-				"id":         id, // ID extracted from URL's first segment after splitting by "."
-				"name":       entranceStatus.Name,
-				"state":      entranceStatus.State,
-				"statusTime": entranceStatus.StatusTime,
-				"reason":     entranceStatus.Reason,
-				"url":        url,
-				"invisible":  invisible,
-			})
-		} else {
+		// In startup process, allow empty URLs; otherwise, skip entrances without URLs
+		if !isStartupProcess && (!exists || url == "") {
 			log.Printf("Skipping entrance %s for app %s due to missing URL", entranceStatus.Name, app.Spec.Name)
+			continue
 		}
+
+		// Extract ID from URL: split by "." and take the first segment
+		id := ""
+		if url != "" {
+			segments := strings.Split(url, ".")
+			if len(segments) > 0 {
+				id = segments[0]
+			}
+		}
+
+		// Get invisible flag, default to false if not found
+		invisible := false
+		if invisibleFlag, exists := entranceInvisible[entranceStatus.Name]; exists {
+			invisible = invisibleFlag
+		}
+
+		entrances = append(entrances, map[string]interface{}{
+			"id":         id, // ID extracted from URL's first segment after splitting by "."
+			"name":       entranceStatus.Name,
+			"state":      entranceStatus.State,
+			"statusTime": entranceStatus.StatusTime,
+			"reason":     entranceStatus.Reason,
+			"url":        url,
+			"invisible":  invisible,
+		})
 	}
 	data["entranceStatuses"] = entrances
 

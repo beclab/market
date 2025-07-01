@@ -3,6 +3,7 @@ package hydrationfn
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -82,6 +83,9 @@ func NewHydrationTask(userID, sourceID, appID string, appData map[string]interfa
 		appVersion = version
 	}
 
+	// Create a safe copy of app data to avoid circular references
+	safeAppData := createSafeAppDataCopy(appData)
+
 	return &HydrationTask{
 		ID:                 taskID,
 		UserID:             userID,
@@ -89,7 +93,7 @@ func NewHydrationTask(userID, sourceID, appID string, appData map[string]interfa
 		AppID:              appID,
 		AppName:            appName,
 		AppVersion:         appVersion,
-		AppData:            appData,
+		AppData:            safeAppData,
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
 		Status:             TaskStatusPending,
@@ -101,6 +105,88 @@ func NewHydrationTask(userID, sourceID, appID string, appData map[string]interfa
 		SettingsManager:    settingsManager,
 		ChartData:          make(map[string]interface{}),
 		DatabaseUpdateData: make(map[string]interface{}),
+	}
+}
+
+// createSafeAppDataCopy creates a safe copy of app data to avoid circular references
+func createSafeAppDataCopy(appData map[string]interface{}) map[string]interface{} {
+	if appData == nil {
+		return make(map[string]interface{})
+	}
+
+	safeCopy := make(map[string]interface{})
+	visited := make(map[uintptr]bool)
+
+	for key, value := range appData {
+		// Skip potential circular reference keys
+		if key == "source_data" || key == "raw_data" || key == "app_info" ||
+			key == "parent" || key == "self" || key == "circular_ref" ||
+			key == "back_ref" || key == "loop" {
+			continue
+		}
+
+		safeCopy[key] = deepCopyAppDataValue(value, visited)
+	}
+
+	return safeCopy
+}
+
+// deepCopyAppDataValue performs a deep copy of a value while avoiding circular references
+func deepCopyAppDataValue(value interface{}, visited map[uintptr]bool) interface{} {
+	if value == nil {
+		return nil
+	}
+
+	switch v := value.(type) {
+	case string, int, int64, float64, bool:
+		return v
+	case []string:
+		return append([]string{}, v...)
+	case []interface{}:
+		// Only copy simple types from interface slice
+		safeSlice := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			switch item.(type) {
+			case string, int, int64, float64, bool:
+				safeSlice = append(safeSlice, item)
+			default:
+				// Skip complex slice items to avoid circular references
+			}
+		}
+		return safeSlice
+	case map[string]interface{}:
+		// Check for circular references using pointer
+		ptr := reflect.ValueOf(v).Pointer()
+		if visited[ptr] {
+			return nil // Skip circular reference
+		}
+		visited[ptr] = true
+		defer delete(visited, ptr)
+
+		safeMap := make(map[string]interface{})
+		for k, val := range v {
+			// Skip potential circular reference keys
+			if k == "source_data" || k == "raw_data" || k == "app_info" ||
+				k == "parent" || k == "self" || k == "circular_ref" ||
+				k == "back_ref" || k == "loop" {
+				continue
+			}
+			safeMap[k] = deepCopyAppDataValue(val, visited)
+		}
+		return safeMap
+	case []map[string]interface{}:
+		safeSlice := make([]map[string]interface{}, 0, len(v))
+		for _, item := range v {
+			if itemCopy := deepCopyAppDataValue(item, visited); itemCopy != nil {
+				if itemMap, ok := itemCopy.(map[string]interface{}); ok {
+					safeSlice = append(safeSlice, itemMap)
+				}
+			}
+		}
+		return safeSlice
+	default:
+		// For other types, return nil to avoid potential circular references
+		return nil
 	}
 }
 

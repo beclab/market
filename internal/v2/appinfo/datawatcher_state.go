@@ -55,10 +55,11 @@ type DataWatcherState struct {
 	historyModule *history.HistoryModule // Add history module
 	cacheManager  *CacheManager          // Add cache manager reference
 	taskModule    *task.TaskModule       // Add task module reference
+	dataWatcher   *DataWatcher           // Add data watcher reference for hash calculation
 }
 
 // NewDataWatcherState creates a new DataWatcherState instance
-func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule, historyModule *history.HistoryModule) *DataWatcherState {
+func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule, historyModule *history.HistoryModule, dataWatcher *DataWatcher) *DataWatcherState {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dw := &DataWatcherState{
@@ -73,6 +74,7 @@ func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule
 		historyModule: historyModule,
 		cacheManager:  cacheManager, // Set cache manager reference
 		taskModule:    taskModule,   // Set task module reference
+		dataWatcher:   dataWatcher,  // Set data watcher reference
 	}
 
 	return dw
@@ -540,6 +542,18 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	} else {
 		log.Printf("Successfully stored app state to cache for user=%s, source=%s, app=%s, state=%s",
 			userID, sourceID, msg.Name, msg.State)
+
+		// Call ForceCalculateAllUsersHash for hash calculation after successful cache update
+		if dw.dataWatcher != nil {
+			log.Printf("Triggering hash recalculation for all users after cache update")
+			if err := dw.dataWatcher.ForceCalculateAllUsersHash(); err != nil {
+				log.Printf("Failed to force calculate all users hash: %v", err)
+			} else {
+				log.Printf("Successfully triggered hash recalculation for all users")
+			}
+		} else {
+			log.Printf("DataWatcher not available, skipping hash recalculation")
+		}
 	}
 }
 

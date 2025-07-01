@@ -43,17 +43,17 @@ type AppInfoLatestDataResponse struct {
 
 // AppsInfoResponse represents the response for /api/v2/apps
 type AppsInfoResponse struct {
-	Apps       []*AppInfoLatestDataResponse `json:"apps"`
-	TotalCount int                          `json:"total_count"`
-	NotFound   []AppQueryInfo               `json:"not_found,omitempty"`
+	Apps       []map[string]interface{} `json:"apps"`
+	TotalCount int                      `json:"total_count"`
+	NotFound   []AppQueryInfo           `json:"not_found,omitempty"`
 }
 
 // MarketInfoResponse represents the response structure for market information
 type MarketInfoResponse struct {
-	UsersData    map[string]*types.UserData `json:"users_data"`
-	CacheStats   map[string]interface{}     `json:"cache_stats"`
-	TotalUsers   int                        `json:"total_users"`
-	TotalSources int                        `json:"total_sources"`
+	UsersData    interface{}            `json:"users_data"`
+	CacheStats   map[string]interface{} `json:"cache_stats"`
+	TotalUsers   int                    `json:"total_users"`
+	TotalSources int                    `json:"total_sources"`
 }
 
 // FilteredSourceData represents filtered source data
@@ -131,9 +131,12 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 			cacheStats = make(map[string]interface{})
 		}
 
+		// Create safe copies to avoid circular references
+		safeUsersData := s.createSafeUsersDataCopy(allUsersData)
+
 		// Prepare response data
 		responseData := MarketInfoResponse{
-			UsersData:  allUsersData,
+			UsersData:  safeUsersData,
 			CacheStats: cacheStats,
 			TotalUsers: len(allUsersData),
 		}
@@ -154,7 +157,7 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Market information retrieved successfully: %d users", len(res.data.UsersData))
+		log.Printf("Market information retrieved successfully: %d users", res.data.TotalUsers)
 		s.sendResponse(w, http.StatusOK, true, "Market information retrieved successfully", res.data)
 	}
 }
@@ -210,7 +213,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 
 	// Create a channel to receive the result
 	type result struct {
-		response AppsInfoResponse
+		response map[string]interface{}
 		err      error
 	}
 	resultChan := make(chan result, 1)
@@ -232,7 +235,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var foundApps []*AppInfoLatestDataResponse
+		var foundApps []map[string]interface{}
 		var notFoundApps []AppQueryInfo
 
 		// Step 4: Find AppInfoLatestData for each requested app
@@ -276,19 +279,9 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 				if appID == appQuery.AppID || (appInfoData.RawData != nil && appInfoData.RawData.Name == appQuery.AppID) {
 					log.Printf("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
 
-					// Convert AppInfoLatestData to AppInfoLatestDataResponse (without raw_data)
-					responseData := &AppInfoLatestDataResponse{
-						Type:            appInfoData.Type,
-						Timestamp:       appInfoData.Timestamp,
-						Version:         appInfoData.Version,
-						RawPackage:      appInfoData.RawPackage,
-						Values:          appInfoData.Values,
-						AppInfo:         appInfoData.AppInfo,
-						RenderedPackage: appInfoData.RenderedPackage,
-						AppSimpleInfo:   appInfoData.AppSimpleInfo,
-					}
-
-					foundApps = append(foundApps, responseData)
+					// 使用 safe copy，避免循环引用
+					safeCopy := s.createSafeAppInfoLatestCopy(appInfoData)
+					foundApps = append(foundApps, safeCopy)
 					found = true
 					break
 				}
@@ -301,15 +294,13 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Step 5: Prepare response
-		response := AppsInfoResponse{
-			Apps:       foundApps,
-			TotalCount: len(foundApps),
+		response := map[string]interface{}{
+			"apps":        foundApps,
+			"total_count": len(foundApps),
 		}
-
 		if len(notFoundApps) > 0 {
-			response.NotFound = notFoundApps
+			response["not_found"] = notFoundApps
 		}
-
 		log.Printf("Apps info retrieval completed: %d found, %d not found", len(foundApps), len(notFoundApps))
 		resultChan <- result{response: response}
 	}()
@@ -334,26 +325,14 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Apps information retrieved successfully for user: %s", userID)
 
 		// Add debug logging to check response data
-		log.Printf("DEBUG: Response data structure:")
-		log.Printf("DEBUG: - Total apps found: %d", len(res.response.Apps))
-		log.Printf("DEBUG: - Total count: %d", res.response.TotalCount)
-		log.Printf("DEBUG: - Not found count: %d", len(res.response.NotFound))
-
-		// Log details of each found app
-		for i, app := range res.response.Apps {
-			log.Printf("DEBUG: App %d details:", i+1)
-			log.Printf("DEBUG:   - Type: %s", app.Type)
-			log.Printf("DEBUG:   - Timestamp: %d", app.Timestamp)
-			log.Printf("DEBUG:   - Version: %s", app.Version)
-			log.Printf("DEBUG:   - RawPackage: %s", app.RawPackage)
-			log.Printf("DEBUG:   - RenderedPackage: %s", app.RenderedPackage)
-			log.Printf("DEBUG:   - Values count: %d", len(app.Values))
-			log.Printf("DEBUG:   - AppInfo is nil: %v", app.AppInfo == nil)
-			log.Printf("DEBUG:   - AppSimpleInfo is nil: %v", app.AppSimpleInfo == nil)
-			if app.AppSimpleInfo != nil {
-				log.Printf("DEBUG:   - AppSimpleInfo.AppID: %s", app.AppSimpleInfo.AppID)
-				log.Printf("DEBUG:   - AppSimpleInfo.AppName: %s", app.AppSimpleInfo.AppName)
-			}
+		if apps, ok := res.response["apps"]; ok {
+			log.Printf("DEBUG: - Total apps found: %d", len(apps.([]map[string]interface{})))
+		}
+		if total, ok := res.response["total_count"]; ok {
+			log.Printf("DEBUG: - Total count: %d", total)
+		}
+		if notFound, ok := res.response["not_found"]; ok {
+			log.Printf("DEBUG: - Not found count: %d", len(notFound.([]AppQueryInfo)))
 		}
 
 		s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", res.response)
@@ -461,6 +440,9 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 
 	// Step 9: Process the uploaded package using LocalRepo
 	localRepo := appinfo.NewLocalRepo(s.cacheManager)
+	if s.hydrator != nil {
+		localRepo.SetHydrator(s.hydrator)
+	}
 	appInfo, err := localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token)
 	if err != nil {
 		log.Printf("Failed to process uploaded package: %v", err)
@@ -936,4 +918,403 @@ func (s *Server) cleanupInvalidPendingData(w http.ResponseWriter, r *http.Reques
 	s.sendResponse(w, http.StatusOK, true, "Cleanup completed successfully", map[string]interface{}{
 		"cleaned_count": cleanedCount,
 	})
+}
+
+// createSafeUsersDataCopy creates a safe copy of users data to avoid circular references
+func (s *Server) createSafeUsersDataCopy(usersData map[string]*types.UserData) map[string]interface{} {
+	if usersData == nil {
+		return nil
+	}
+
+	safeUsersData := make(map[string]interface{})
+	for userID, userData := range usersData {
+		if userData == nil {
+			continue
+		}
+
+		safeUserData := map[string]interface{}{
+			"hash": userData.Hash,
+		}
+
+		// Create safe copies of sources
+		if userData.Sources != nil {
+			safeSources := make(map[string]interface{})
+			for sourceID, sourceData := range userData.Sources {
+				if sourceData == nil {
+					continue
+				}
+				safeSources[sourceID] = s.createSafeSourceDataCopy(sourceData)
+			}
+			safeUserData["sources"] = safeSources
+		}
+
+		safeUsersData[userID] = safeUserData
+	}
+
+	return safeUsersData
+}
+
+// createSafeSourceDataCopy creates a safe copy of source data to avoid circular references
+func (s *Server) createSafeSourceDataCopy(sourceData *types.SourceData) map[string]interface{} {
+	if sourceData == nil {
+		return nil
+	}
+
+	safeSourceData := map[string]interface{}{
+		"type": sourceData.Type,
+	}
+
+	// Create safe copies of AppStateLatest
+	if len(sourceData.AppStateLatest) > 0 {
+		safeAppStateLatest := make([]map[string]interface{}, len(sourceData.AppStateLatest))
+		for i, data := range sourceData.AppStateLatest {
+			safeAppStateLatest[i] = s.createSafeAppStateLatestCopy(data)
+		}
+		safeSourceData["app_state_latest"] = safeAppStateLatest
+	}
+
+	// Create safe copies of AppInfoLatest
+	if len(sourceData.AppInfoLatest) > 0 {
+		safeAppInfoLatest := make([]map[string]interface{}, len(sourceData.AppInfoLatest))
+		for i, data := range sourceData.AppInfoLatest {
+			safeAppInfoLatest[i] = s.createSafeAppInfoLatestCopy(data)
+		}
+		safeSourceData["app_info_latest"] = safeAppInfoLatest
+	}
+
+	// Create safe copies of AppInfoLatestPending
+	if len(sourceData.AppInfoLatestPending) > 0 {
+		safeAppInfoLatestPending := make([]map[string]interface{}, len(sourceData.AppInfoLatestPending))
+		for i, data := range sourceData.AppInfoLatestPending {
+			safeAppInfoLatestPending[i] = s.createSafePendingDataCopy(data)
+		}
+		safeSourceData["app_info_latest_pending"] = safeAppInfoLatestPending
+	}
+
+	// Create safe copies of Others data
+	if sourceData.Others != nil {
+		safeSourceData["others"] = s.createSafeOthersCopy(sourceData.Others)
+	}
+
+	return safeSourceData
+}
+
+// createSafeAppStateLatestCopy creates a safe copy of AppStateLatestData to avoid circular references
+func (s *Server) createSafeAppStateLatestCopy(data *types.AppStateLatestData) map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"type":    data.Type,
+		"version": data.Version,
+		"status": map[string]interface{}{
+			"name":               data.Status.Name,
+			"state":              data.Status.State,
+			"updateTime":         data.Status.UpdateTime,
+			"statusTime":         data.Status.StatusTime,
+			"lastTransitionTime": data.Status.LastTransitionTime,
+			"progress":           data.Status.Progress,
+			"entranceStatuses":   data.Status.EntranceStatuses,
+		},
+	}
+}
+
+// createSafeAppInfoLatestCopy creates a safe copy of AppInfoLatestData to avoid circular references
+func (s *Server) createSafeAppInfoLatestCopy(data *types.AppInfoLatestData) map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{
+		"type":             data.Type,
+		"timestamp":        data.Timestamp,
+		"version":          data.Version,
+		"raw_package":      data.RawPackage,
+		"rendered_package": data.RenderedPackage,
+	}
+
+	// Only include basic information from RawData to avoid cycles
+	if data.RawData != nil {
+		safeCopy["raw_data"] = s.createSafeApplicationInfoEntryCopy(data.RawData)
+	}
+
+	// Only include basic information from AppInfo to avoid cycles
+	if data.AppInfo != nil {
+		safeCopy["app_info"] = s.createSafeAppInfoCopy(data.AppInfo)
+	}
+
+	// Include Values if they exist
+	if data.Values != nil {
+		safeCopy["values"] = data.Values
+	}
+
+	// Include AppSimpleInfo if it exists
+	if data.AppSimpleInfo != nil {
+		safeCopy["app_simple_info"] = s.createSafeAppSimpleInfoCopy(data.AppSimpleInfo)
+	}
+
+	return safeCopy
+}
+
+// createSafePendingDataCopy creates a safe copy of pending data to avoid circular references
+func (s *Server) createSafePendingDataCopy(pendingData *types.AppInfoLatestPendingData) map[string]interface{} {
+	if pendingData == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{
+		"type":             pendingData.Type,
+		"timestamp":        pendingData.Timestamp,
+		"version":          pendingData.Version,
+		"raw_package":      pendingData.RawPackage,
+		"rendered_package": pendingData.RenderedPackage,
+	}
+
+	// Only include basic information from RawData to avoid cycles
+	if pendingData.RawData != nil {
+		safeCopy["raw_data"] = s.createSafeApplicationInfoEntryCopy(pendingData.RawData)
+	}
+
+	// Only include basic information from AppInfo to avoid cycles
+	if pendingData.AppInfo != nil {
+		safeCopy["app_info"] = s.createSafeAppInfoCopy(pendingData.AppInfo)
+	}
+
+	// Include Values if they exist
+	if pendingData.Values != nil {
+		safeCopy["values"] = pendingData.Values
+	}
+
+	return safeCopy
+}
+
+// createSafeApplicationInfoEntryCopy creates a safe copy of ApplicationInfoEntry to avoid circular references
+func (s *Server) createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfoEntry) map[string]interface{} {
+	if entry == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"id":                 entry.ID,
+		"name":               entry.Name,
+		"cfgType":            entry.CfgType,
+		"chartName":          entry.ChartName,
+		"icon":               entry.Icon,
+		"description":        entry.Description,
+		"appID":              entry.AppID,
+		"title":              entry.Title,
+		"version":            entry.Version,
+		"categories":         entry.Categories,
+		"versionName":        entry.VersionName,
+		"fullDescription":    entry.FullDescription,
+		"upgradeDescription": entry.UpgradeDescription,
+		"promoteImage":       entry.PromoteImage,
+		"promoteVideo":       entry.PromoteVideo,
+		"subCategory":        entry.SubCategory,
+		"locale":             entry.Locale,
+		"developer":          entry.Developer,
+		"requiredMemory":     entry.RequiredMemory,
+		"requiredDisk":       entry.RequiredDisk,
+		"supportArch":        entry.SupportArch,
+		"requiredGPU":        entry.RequiredGPU,
+		"requiredCPU":        entry.RequiredCPU,
+		"rating":             entry.Rating,
+		"target":             entry.Target,
+		"submitter":          entry.Submitter,
+		"doc":                entry.Doc,
+		"website":            entry.Website,
+		"featuredImage":      entry.FeaturedImage,
+		"sourceCode":         entry.SourceCode,
+		"modelSize":          entry.ModelSize,
+		"namespace":          entry.Namespace,
+		"onlyAdmin":          entry.OnlyAdmin,
+		"lastCommitHash":     entry.LastCommitHash,
+		"createTime":         entry.CreateTime,
+		"updateTime":         entry.UpdateTime,
+		"appLabels":          entry.AppLabels,
+		"screenshots":        entry.Screenshots,
+		"tags":               entry.Tags,
+		"updated_at":         entry.UpdatedAt,
+		// Skip complex interface{} fields that might cause cycles
+		// "supportClient", "permission", "entrances", "middleware", "options", "license", "legal", "i18n", "count", "versionHistory", "metadata"
+	}
+}
+
+// createSafeAppInfoCopy creates a safe copy of AppInfo to avoid circular references
+func (s *Server) createSafeAppInfoCopy(appInfo *types.AppInfo) map[string]interface{} {
+	if appInfo == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{}
+
+	// Only include basic information from AppEntry to avoid cycles
+	if appInfo.AppEntry != nil {
+		safeCopy["app_entry"] = s.createSafeApplicationInfoEntryCopy(appInfo.AppEntry)
+	}
+
+	// Only include basic information from ImageAnalysis to avoid cycles
+	if appInfo.ImageAnalysis != nil {
+		safeCopy["image_analysis"] = map[string]interface{}{
+			"app_id":       appInfo.ImageAnalysis.AppID,
+			"user_id":      appInfo.ImageAnalysis.UserID,
+			"source_id":    appInfo.ImageAnalysis.SourceID,
+			"analyzed_at":  appInfo.ImageAnalysis.AnalyzedAt,
+			"total_images": appInfo.ImageAnalysis.TotalImages,
+			// Skip Images map to avoid cycles
+		}
+	}
+
+	return safeCopy
+}
+
+// createSafeAppSimpleInfoCopy creates a safe copy of AppSimpleInfo to avoid circular references
+func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[string]interface{} {
+	if info == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"app_id":          info.AppID,
+		"app_name":        info.AppName,
+		"app_icon":        info.AppIcon,
+		"app_description": info.AppDescription,
+		"app_version":     info.AppVersion,
+		"app_title":       info.AppTitle,
+		"categories":      info.Categories,
+	}
+}
+
+// createSafeOthersCopy creates a safe copy of Others data to avoid circular references
+func (s *Server) createSafeOthersCopy(others *types.Others) map[string]interface{} {
+	if others == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{
+		"hash":    others.Hash,
+		"version": others.Version,
+		"latest":  others.Latest,
+	}
+
+	// Create safe copies of Topics
+	if len(others.Topics) > 0 {
+		safeTopics := make([]map[string]interface{}, len(others.Topics))
+		for i, topic := range others.Topics {
+			safeTopics[i] = s.createSafeTopicCopy(topic)
+		}
+		safeCopy["topics"] = safeTopics
+	}
+
+	// Create safe copies of TopicLists
+	if len(others.TopicLists) > 0 {
+		safeTopicLists := make([]map[string]interface{}, len(others.TopicLists))
+		for i, topicList := range others.TopicLists {
+			safeTopicLists[i] = s.createSafeTopicListCopy(topicList)
+		}
+		safeCopy["topic_lists"] = safeTopicLists
+	}
+
+	// Create safe copies of Recommends
+	if len(others.Recommends) > 0 {
+		safeRecommends := make([]map[string]interface{}, len(others.Recommends))
+		for i, recommend := range others.Recommends {
+			safeRecommends[i] = s.createSafeRecommendCopy(recommend)
+		}
+		safeCopy["recommends"] = safeRecommends
+	}
+
+	// Create safe copies of Pages
+	if len(others.Pages) > 0 {
+		safePages := make([]map[string]interface{}, len(others.Pages))
+		for i, page := range others.Pages {
+			safePages[i] = s.createSafePageCopy(page)
+		}
+		safeCopy["pages"] = safePages
+	}
+
+	// Create safe copies of Tops
+	if len(others.Tops) > 0 {
+		safeTops := make([]map[string]interface{}, len(others.Tops))
+		for i, top := range others.Tops {
+			safeTops[i] = map[string]interface{}{
+				"appid": top.AppID,
+				"rank":  top.Rank,
+			}
+		}
+		safeCopy["tops"] = safeTops
+	}
+
+	return safeCopy
+}
+
+// createSafeTopicCopy creates a safe copy of Topic to avoid circular references
+func (s *Server) createSafeTopicCopy(topic *types.Topic) map[string]interface{} {
+	if topic == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"_id":           topic.ID,
+		"name":          topic.Name,
+		"name2":         topic.Name2,
+		"introduction":  topic.Introduction,
+		"introduction2": topic.Introduction2,
+		"des":           topic.Des,
+		"des2":          topic.Des2,
+		"iconimg":       topic.IconImg,
+		"detailimg":     topic.DetailImg,
+		"richtext":      topic.RichText,
+		"richtext2":     topic.RichText2,
+		"apps":          topic.Apps,
+		"isdelete":      topic.IsDelete,
+		"createdAt":     topic.CreatedAt,
+		"updated_at":    topic.UpdatedAt,
+	}
+}
+
+// createSafeTopicListCopy creates a safe copy of TopicList to avoid circular references
+func (s *Server) createSafeTopicListCopy(topicList *types.TopicList) map[string]interface{} {
+	if topicList == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"name":        topicList.Name,
+		"type":        topicList.Type,
+		"description": topicList.Description,
+		"content":     topicList.Content,
+		"createdAt":   topicList.CreatedAt,
+		"updated_at":  topicList.UpdatedAt,
+	}
+}
+
+// createSafeRecommendCopy creates a safe copy of Recommend to avoid circular references
+func (s *Server) createSafeRecommendCopy(recommend *types.Recommend) map[string]interface{} {
+	if recommend == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"name":        recommend.Name,
+		"description": recommend.Description,
+		"content":     recommend.Content,
+		"createdAt":   recommend.CreatedAt,
+		"updated_at":  recommend.UpdatedAt,
+	}
+}
+
+// createSafePageCopy creates a safe copy of Page to avoid circular references
+func (s *Server) createSafePageCopy(page *types.Page) map[string]interface{} {
+	if page == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"category":   page.Category,
+		"content":    page.Content,
+		"createdAt":  page.CreatedAt,
+		"updated_at": page.UpdatedAt,
+	}
 }

@@ -311,8 +311,18 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 
 // calculateAndSetUserHash calculates and sets the hash for user data (with tracking)
 func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.UserData) {
-	// Check if hash calculation is already in progress for this user
+	// Add a per-user calculation flag to prevent concurrent execution
+	var isCalculatingKey = "isCalculating_" + userID
+
+	// Use a map in DataWatcher to track per-user calculation state
+	if dw.activeHashCalculations[isCalculatingKey] {
+		glog.Infof("DataWatcher: Hash calculation already in progress for user %s (isCalculating), skipping", userID)
+		return
+	}
+
+	dw.activeHashCalculations[isCalculatingKey] = true
 	dw.hashMutex.Lock()
+	// Also keep the original tracking for compatibility
 	if dw.activeHashCalculations[userID] {
 		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
@@ -325,6 +335,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 		// Clean up tracking when done
 		dw.hashMutex.Lock()
 		delete(dw.activeHashCalculations, userID)
+		delete(dw.activeHashCalculations, isCalculatingKey)
 		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
 	}()
@@ -527,14 +538,14 @@ func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.Use
 			AppInfoLatest:  make([]interface{}, len(sourceData.AppInfoLatest)),
 		}
 
-		// Convert AppStateLatest
+		// Convert AppStateLatest with safe copy
 		for i, data := range sourceData.AppStateLatest {
-			sourceSnapshot.AppStateLatest[i] = data
+			sourceSnapshot.AppStateLatest[i] = dw.createSafeAppStateLatestCopy(data)
 		}
 
-		// Convert AppInfoLatest
+		// Convert AppInfoLatest with safe copy
 		for i, data := range sourceData.AppInfoLatest {
-			sourceSnapshot.AppInfoLatest[i] = data
+			sourceSnapshot.AppInfoLatest[i] = dw.createSafeAppInfoLatestCopy(data)
 		}
 
 		// Convert Others data
@@ -546,18 +557,18 @@ func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.Use
 				Pages:      make([]interface{}, len(sourceData.Others.Pages)),
 			}
 
-			// Convert each Others field
+			// Convert each Others field with safe copy
 			for i, topic := range sourceData.Others.Topics {
-				othersSnapshot.Topics[i] = topic
+				othersSnapshot.Topics[i] = dw.createSafeTopicCopy(topic)
 			}
 			for i, topicList := range sourceData.Others.TopicLists {
-				othersSnapshot.TopicLists[i] = topicList
+				othersSnapshot.TopicLists[i] = dw.createSafeTopicListCopy(topicList)
 			}
 			for i, recommend := range sourceData.Others.Recommends {
-				othersSnapshot.Recommends[i] = recommend
+				othersSnapshot.Recommends[i] = dw.createSafeRecommendCopy(recommend)
 			}
 			for i, page := range sourceData.Others.Pages {
-				othersSnapshot.Pages[i] = page
+				othersSnapshot.Pages[i] = dw.createSafePageCopy(page)
 			}
 
 			sourceSnapshot.Others = othersSnapshot
@@ -1272,5 +1283,230 @@ func (dw *DataWatcher) sendNewAppReadyNotification(userID string, completedApp *
 		glog.Errorf("DataWatcher: Failed to send new app ready notification for app %s: %v", appName, err)
 	} else {
 		glog.Infof("DataWatcher: Successfully sent new app ready notification for app %s (version: %s, source: %s)", appName, appVersion, sourceID)
+	}
+}
+
+// createSafeAppStateLatestCopy creates a safe copy of AppStateLatestData to avoid circular references
+func (dw *DataWatcher) createSafeAppStateLatestCopy(data *types.AppStateLatestData) map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"type":    data.Type,
+		"version": data.Version,
+		"status": map[string]interface{}{
+			"name":               data.Status.Name,
+			"state":              data.Status.State,
+			"updateTime":         data.Status.UpdateTime,
+			"statusTime":         data.Status.StatusTime,
+			"lastTransitionTime": data.Status.LastTransitionTime,
+			"progress":           data.Status.Progress,
+			"entranceStatuses":   data.Status.EntranceStatuses,
+		},
+	}
+}
+
+// createSafeAppInfoLatestCopy creates a safe copy of AppInfoLatestData to avoid circular references
+func (dw *DataWatcher) createSafeAppInfoLatestCopy(data *types.AppInfoLatestData) map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{
+		"type":             data.Type,
+		"timestamp":        data.Timestamp,
+		"version":          data.Version,
+		"raw_package":      data.RawPackage,
+		"rendered_package": data.RenderedPackage,
+	}
+
+	// Only include basic information from RawData to avoid cycles
+	if data.RawData != nil {
+		safeCopy["raw_data"] = dw.createSafeApplicationInfoEntryCopy(data.RawData)
+	}
+
+	// Only include basic information from AppInfo to avoid cycles
+	if data.AppInfo != nil {
+		safeCopy["app_info"] = dw.createSafeAppInfoCopy(data.AppInfo)
+	}
+
+	// Include Values if they exist
+	if data.Values != nil {
+		safeCopy["values"] = data.Values
+	}
+
+	// Include AppSimpleInfo if it exists
+	if data.AppSimpleInfo != nil {
+		safeCopy["app_simple_info"] = dw.createSafeAppSimpleInfoCopy(data.AppSimpleInfo)
+	}
+
+	return safeCopy
+}
+
+// createSafeApplicationInfoEntryCopy creates a safe copy of ApplicationInfoEntry to avoid circular references
+func (dw *DataWatcher) createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfoEntry) map[string]interface{} {
+	if entry == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"id":                 entry.ID,
+		"name":               entry.Name,
+		"cfgType":            entry.CfgType,
+		"chartName":          entry.ChartName,
+		"icon":               entry.Icon,
+		"description":        entry.Description,
+		"appID":              entry.AppID,
+		"title":              entry.Title,
+		"version":            entry.Version,
+		"categories":         entry.Categories,
+		"versionName":        entry.VersionName,
+		"fullDescription":    entry.FullDescription,
+		"upgradeDescription": entry.UpgradeDescription,
+		"promoteImage":       entry.PromoteImage,
+		"promoteVideo":       entry.PromoteVideo,
+		"subCategory":        entry.SubCategory,
+		"locale":             entry.Locale,
+		"developer":          entry.Developer,
+		"requiredMemory":     entry.RequiredMemory,
+		"requiredDisk":       entry.RequiredDisk,
+		"supportArch":        entry.SupportArch,
+		"requiredGPU":        entry.RequiredGPU,
+		"requiredCPU":        entry.RequiredCPU,
+		"rating":             entry.Rating,
+		"target":             entry.Target,
+		"submitter":          entry.Submitter,
+		"doc":                entry.Doc,
+		"website":            entry.Website,
+		"featuredImage":      entry.FeaturedImage,
+		"sourceCode":         entry.SourceCode,
+		"modelSize":          entry.ModelSize,
+		"namespace":          entry.Namespace,
+		"onlyAdmin":          entry.OnlyAdmin,
+		"lastCommitHash":     entry.LastCommitHash,
+		"createTime":         entry.CreateTime,
+		"updateTime":         entry.UpdateTime,
+		"appLabels":          entry.AppLabels,
+		"screenshots":        entry.Screenshots,
+		"tags":               entry.Tags,
+		"updated_at":         entry.UpdatedAt,
+		// Skip complex interface{} fields that might cause cycles
+		// "supportClient", "permission", "entrances", "middleware", "options", "license", "legal", "i18n", "count", "versionHistory", "metadata"
+	}
+}
+
+// createSafeAppInfoCopy creates a safe copy of AppInfo to avoid circular references
+func (dw *DataWatcher) createSafeAppInfoCopy(appInfo *types.AppInfo) map[string]interface{} {
+	if appInfo == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{}
+
+	// Only include basic information from AppEntry to avoid cycles
+	if appInfo.AppEntry != nil {
+		safeCopy["app_entry"] = dw.createSafeApplicationInfoEntryCopy(appInfo.AppEntry)
+	}
+
+	// Only include basic information from ImageAnalysis to avoid cycles
+	if appInfo.ImageAnalysis != nil {
+		safeCopy["image_analysis"] = map[string]interface{}{
+			"app_id":       appInfo.ImageAnalysis.AppID,
+			"user_id":      appInfo.ImageAnalysis.UserID,
+			"source_id":    appInfo.ImageAnalysis.SourceID,
+			"analyzed_at":  appInfo.ImageAnalysis.AnalyzedAt,
+			"total_images": appInfo.ImageAnalysis.TotalImages,
+			// Skip Images map to avoid cycles
+		}
+	}
+
+	return safeCopy
+}
+
+// createSafeAppSimpleInfoCopy creates a safe copy of AppSimpleInfo to avoid circular references
+func (dw *DataWatcher) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[string]interface{} {
+	if info == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"app_id":          info.AppID,
+		"app_name":        info.AppName,
+		"app_icon":        info.AppIcon,
+		"app_description": info.AppDescription,
+		"app_version":     info.AppVersion,
+		"app_title":       info.AppTitle,
+		"categories":      info.Categories,
+	}
+}
+
+// createSafeTopicCopy creates a safe copy of Topic to avoid circular references
+func (dw *DataWatcher) createSafeTopicCopy(topic *types.Topic) map[string]interface{} {
+	if topic == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"_id":           topic.ID,
+		"name":          topic.Name,
+		"name2":         topic.Name2,
+		"introduction":  topic.Introduction,
+		"introduction2": topic.Introduction2,
+		"des":           topic.Des,
+		"des2":          topic.Des2,
+		"iconimg":       topic.IconImg,
+		"detailimg":     topic.DetailImg,
+		"richtext":      topic.RichText,
+		"richtext2":     topic.RichText2,
+		"apps":          topic.Apps,
+		"isdelete":      topic.IsDelete,
+		"createdAt":     topic.CreatedAt,
+		"updated_at":    topic.UpdatedAt,
+	}
+}
+
+// createSafeTopicListCopy creates a safe copy of TopicList to avoid circular references
+func (dw *DataWatcher) createSafeTopicListCopy(topicList *types.TopicList) map[string]interface{} {
+	if topicList == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"name":        topicList.Name,
+		"type":        topicList.Type,
+		"description": topicList.Description,
+		"content":     topicList.Content,
+		"createdAt":   topicList.CreatedAt,
+		"updated_at":  topicList.UpdatedAt,
+	}
+}
+
+// createSafeRecommendCopy creates a safe copy of Recommend to avoid circular references
+func (dw *DataWatcher) createSafeRecommendCopy(recommend *types.Recommend) map[string]interface{} {
+	if recommend == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"name":        recommend.Name,
+		"description": recommend.Description,
+		"content":     recommend.Content,
+		"createdAt":   recommend.CreatedAt,
+		"updated_at":  recommend.UpdatedAt,
+	}
+}
+
+// createSafePageCopy creates a safe copy of Page to avoid circular references
+func (dw *DataWatcher) createSafePageCopy(page *types.Page) map[string]interface{} {
+	if page == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"category":   page.Category,
+		"content":    page.Content,
+		"createdAt":  page.CreatedAt,
+		"updated_at": page.UpdatedAt,
 	}
 }

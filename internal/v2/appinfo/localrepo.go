@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"market/internal/v2/appinfo/hydrationfn"
 	"market/internal/v2/types"
 
 	"gopkg.in/yaml.v3"
@@ -871,14 +870,16 @@ func (lr *LocalRepo) storeAppInfo(userID, sourceID string, appInfo *types.Applic
 	}
 
 	// Step 5: Create hydration task if hydrator is available
-	if lr.hydrator != nil {
-		if err := lr.createHydrationTask(userID, sourceID, safeAppInfo); err != nil {
-			log.Printf("Warning: failed to create hydration task for app %s: %v", appInfo.Name, err)
-			// Don't return error here as the main operation (storing app info) was successful
-		}
-	} else {
-		log.Printf("Warning: hydrator not set, skipping hydration task creation for app %s", appInfo.Name)
-	}
+	// if lr.hydrator != nil {
+	// 	if err := lr.createHydrationTask(userID, sourceID, safeAppInfo); err != nil {
+	// 		log.Printf("Warning: failed to create hydration task for app %s: %v", appInfo.Name, err)
+	// 		// Don't return error here as the main operation (storing app info) was successful
+	// 	}
+	// } else {
+	// 	log.Printf("Warning: hydrator not set, skipping hydration task creation for app %s", appInfo.Name)
+	// }
+
+	lr.hydrator.ForceCheckPendingData()
 
 	log.Printf("Successfully stored app info for %s in cache (user: %s, source: %s)", appInfo.Name, userID, sourceID)
 	return nil
@@ -1075,24 +1076,24 @@ func (lr *LocalRepo) copyFile(src, dst string) error {
 }
 
 // createHydrationTask creates a hydration task for the uploaded app
-func (lr *LocalRepo) createHydrationTask(userID, sourceID string, appInfo *types.ApplicationInfoEntry) error {
-	// Convert ApplicationInfoEntry to map for task creation
-	appDataMap := lr.convertApplicationInfoEntryToMap(appInfo)
+// func (lr *LocalRepo) createHydrationTask(userID, sourceID string, appInfo *types.ApplicationInfoEntry) error {
+// 	// Convert ApplicationInfoEntry to map for task creation
+// 	appDataMap := lr.convertApplicationInfoEntryToMap(appInfo)
 
-	// Create hydration task
-	task := hydrationfn.NewHydrationTask(
-		userID, sourceID, appInfo.AppID,
-		appDataMap, lr.cacheManager.cache, nil, // settingsManager will be nil for local tasks
-	)
+// 	// Create hydration task
+// 	task := hydrationfn.NewHydrationTask(
+// 		userID, sourceID, appInfo.AppID,
+// 		appDataMap, lr.cacheManager.cache, nil, // settingsManager will be nil for local tasks
+// 	)
 
-	// Enqueue the task
-	if err := lr.hydrator.EnqueueTask(task); err != nil {
-		return fmt.Errorf("failed to enqueue hydration task: %w", err)
-	}
+// 	// Enqueue the task
+// 	if err := lr.hydrator.EnqueueTask(task); err != nil {
+// 		return fmt.Errorf("failed to enqueue hydration task: %w", err)
+// 	}
 
-	log.Printf("Successfully created hydration task for app %s (user: %s, source: %s)", appInfo.Name, userID, sourceID)
-	return nil
-}
+// 	log.Printf("Successfully created hydration task for app %s (user: %s, source: %s)", appInfo.Name, userID, sourceID)
+// 	return nil
+// }
 
 // convertApplicationInfoEntryToMap converts ApplicationInfoEntry to map for task creation
 func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[string]interface{} {

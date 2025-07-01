@@ -2,6 +2,7 @@ package hydrationfn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -96,13 +97,23 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 		log.Printf("Warning: failed to extract entrances from rendered OlaresManifest.yaml: %v", err)
 	} else {
 		domainMap := map[string]string{}
+		// Create a new entrances map to avoid modifying the original and prevent cycles
+		processedEntrances := make(map[string]interface{})
+
 		for name, entrance := range entrances {
 			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+				// Create a deep copy of the entrance map to avoid cycles
+				entranceCopy := make(map[string]interface{})
+				for k, v := range entranceMap {
+					// Deep copy the value to avoid circular references
+					entranceCopy[k] = s.deepCopyEntranceValue(v)
+				}
+
 				// Try to get domain from entrance, fallback to host if domain is not available
 				var domain string
-				if domainVal, ok := entranceMap["domain"].(string); ok && domainVal != "" {
+				if domainVal, ok := entranceCopy["domain"].(string); ok && domainVal != "" {
 					domain = domainVal
-				} else if hostVal, ok := entranceMap["host"].(string); ok && hostVal != "" {
+				} else if hostVal, ok := entranceCopy["host"].(string); ok && hostVal != "" {
 					// Use host as domain if domain is not available
 					domain = hostVal
 					log.Printf("Using host '%s' as domain for entrance '%s'", hostVal, name)
@@ -112,16 +123,20 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 					log.Printf("Generated default domain '%s' for entrance '%s'", domain, name)
 				}
 
-				// Update both domainMap and the entrance object itself
+				// Update both domainMap and the entrance copy
 				domainMap[name] = domain
-				entranceMap["domain"] = domain
+				entranceCopy["domain"] = domain
 
-				// Update the entrance in the entrances map
-				entrances[name] = entranceMap
+				// Store the processed entrance in the new map
+				processedEntrances[name] = entranceCopy
 			}
 		}
 		templateData.Values["domain"] = domainMap
-		log.Printf("Extracted %d entrances from rendered OlaresManifest.yaml", len(entrances))
+		log.Printf("Extracted %d entrances from rendered OlaresManifest.yaml", len(processedEntrances))
+
+		// Log processed entrances and templateData after modification to check for cycles
+		s.logDataStructureCheck("processedEntrances", processedEntrances, "after entrance processing")
+		s.logDataStructureCheck("templateData.Values", templateData.Values, "after entrance processing")
 	}
 
 	// Render the entire chart package
@@ -138,7 +153,9 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	// Store rendered content in task
 	task.ChartData["rendered_manifest"] = renderedManifest
 	task.ChartData["rendered_chart"] = renderedChart
-	task.ChartData["template_data"] = templateData
+
+	// Log task.ChartData after storing rendered content
+	s.logDataStructureCheck("task.ChartData", task.ChartData, "after storing rendered content")
 
 	// Build rendered chart URL (optional, for compatibility)
 	// For local sources, use local file path instead of remote URL
@@ -169,6 +186,9 @@ func (s *RenderedChartStep) Execute(ctx context.Context, task *HydrationTask) er
 	if renderedChartDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
 		if err := s.updatePendingDataRenderedPackage(task, renderedChartDir); err != nil {
 			log.Printf("Warning: failed to update pending data rendered package: %v", err)
+		} else {
+			// Log pending data after update to check for cycles
+			s.logPendingDataAfterUpdateFromTask(task, "after rendered package update")
 		}
 	}
 
@@ -199,4 +219,130 @@ type AdminUsernameResponse struct {
 	Data struct {
 		Username string `json:"username"`
 	} `json:"data"`
+}
+
+// logDataStructureCheck logs data structure for debugging JSON cycle issues
+func (s *RenderedChartStep) logDataStructureCheck(dataName string, data interface{}, context string) {
+	log.Printf("DEBUG: %s structure check - %s", dataName, context)
+
+	if data == nil {
+		log.Printf("DEBUG: %s is nil", dataName)
+		return
+	}
+
+	if jsonData, err := json.Marshal(data); err != nil {
+		log.Printf("ERROR: JSON marshal failed for %s - %s: %v", dataName, context, err)
+
+		// Try to extract more information about the problematic data
+		if mapData, ok := data.(map[string]interface{}); ok {
+			log.Printf("ERROR: %s keys: %v", dataName, s.getMapKeys(mapData))
+		}
+	} else {
+		log.Printf("DEBUG: %s JSON length - %s: %d bytes", dataName, context, len(jsonData))
+	}
+}
+
+// logPendingDataAfterUpdateFromTask logs pending data after update to check for cycles
+func (s *RenderedChartStep) logPendingDataAfterUpdateFromTask(task *HydrationTask, context string) {
+	if task.Cache == nil {
+		log.Printf("DEBUG: Cache is nil, cannot log pending data")
+		return
+	}
+
+	// Use read lock to safely access cache
+	task.Cache.Mutex.RLock()
+	defer task.Cache.Mutex.RUnlock()
+
+	userData, userExists := task.Cache.Users[task.UserID]
+	if !userExists {
+		log.Printf("DEBUG: User %s not found in cache", task.UserID)
+		return
+	}
+
+	sourceData, sourceExists := userData.Sources[task.SourceID]
+	if !sourceExists {
+		log.Printf("DEBUG: Source %s not found for user %s", task.UserID, task.SourceID)
+		return
+	}
+
+	// Find and log the specific pending data for this task
+	for i, pendingData := range sourceData.AppInfoLatestPending {
+		if s.isTaskForPendingDataRendered(task, pendingData) {
+			log.Printf("DEBUG: Found pending data at index %d for task %s", i, task.ID)
+
+			// Create a safe copy of pending data for JSON marshaling to avoid cycles
+			safePendingData := s.createSafePendingDataCopy(pendingData)
+
+			// Try to JSON marshal the safe copy of pending data
+			if jsonData, err := json.Marshal(safePendingData); err != nil {
+				log.Printf("ERROR: JSON marshal failed for pending data - %s: %v", context, err)
+				log.Printf("ERROR: Pending data structure: RawData=%v, AppInfo=%v, RawPackage=%s, RenderedPackage=%s",
+					pendingData.RawData != nil, pendingData.AppInfo != nil, pendingData.RawPackage, pendingData.RenderedPackage)
+			} else {
+				log.Printf("DEBUG: Pending data JSON length - %s: %d bytes", context, len(jsonData))
+			}
+			break
+		}
+	}
+}
+
+// getMapKeys safely extracts keys from a map for debugging
+func (s *RenderedChartStep) getMapKeys(data map[string]interface{}) []string {
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// deepCopyEntranceValue performs a deep copy of entrance value while avoiding circular references
+func (s *RenderedChartStep) deepCopyEntranceValue(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+
+	switch v := value.(type) {
+	case string, int, int64, float64, bool:
+		return v
+	case []string:
+		return append([]string{}, v...)
+	case []interface{}:
+		// Only copy simple types from interface slice to avoid cycles
+		safeSlice := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			switch item.(type) {
+			case string, int, int64, float64, bool:
+				safeSlice = append(safeSlice, item)
+			default:
+				// Skip complex slice items to avoid circular references
+			}
+		}
+		return safeSlice
+	case map[string]interface{}:
+		// Create a safe copy of the map
+		safeMap := make(map[string]interface{})
+		for k, val := range v {
+			// Skip potential circular reference keys
+			if k == "parent" || k == "self" || k == "circular_ref" ||
+				k == "back_ref" || k == "loop" || k == "source_data" ||
+				k == "raw_data" || k == "app_info" {
+				continue
+			}
+			safeMap[k] = s.deepCopyEntranceValue(val)
+		}
+		return safeMap
+	case []map[string]interface{}:
+		safeSlice := make([]map[string]interface{}, 0, len(v))
+		for _, item := range v {
+			if itemCopy := s.deepCopyEntranceValue(item); itemCopy != nil {
+				if itemMap, ok := itemCopy.(map[string]interface{}); ok {
+					safeSlice = append(safeSlice, itemMap)
+				}
+			}
+		}
+		return safeSlice
+	default:
+		// For other types, return nil to avoid potential circular references
+		return nil
+	}
 }
