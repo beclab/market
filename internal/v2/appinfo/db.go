@@ -418,7 +418,13 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 	}
 
 	if len(appInfoLatest) > 0 {
-		infoJSON, err := json.Marshal(appInfoLatest)
+		// Create safe copies to avoid circular references
+		safeLatestData := make([]map[string]interface{}, len(appInfoLatest))
+		for i, latestData := range appInfoLatest {
+			safeLatestData[i] = r.createSafeAppInfoLatestCopy(latestData)
+		}
+
+		infoJSON, err := json.Marshal(safeLatestData)
 		if err != nil {
 			glog.Errorf("Failed to marshal app info latest for user=%s, source=%s: %v", userID, sourceID, err)
 		} else {
@@ -613,4 +619,58 @@ func (r *RedisClient) createSafeAppInfoCopy(appInfo *types.AppInfo) map[string]i
 	}
 
 	return safeCopy
+}
+
+// createSafeAppInfoLatestCopy creates a safe copy of AppInfoLatestData to avoid circular references
+func (r *RedisClient) createSafeAppInfoLatestCopy(data *types.AppInfoLatestData) map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+
+	safeCopy := map[string]interface{}{
+		"type":             data.Type,
+		"timestamp":        data.Timestamp,
+		"version":          data.Version,
+		"raw_package":      data.RawPackage,
+		"rendered_package": data.RenderedPackage,
+	}
+
+	// Only include basic information from RawData to avoid cycles
+	if data.RawData != nil {
+		safeCopy["raw_data"] = r.createSafeApplicationInfoEntryCopy(data.RawData)
+	}
+
+	// Only include basic information from AppInfo to avoid cycles
+	if data.AppInfo != nil {
+		safeCopy["app_info"] = r.createSafeAppInfoCopy(data.AppInfo)
+	}
+
+	// Include Values if they exist
+	if data.Values != nil {
+		safeCopy["values"] = data.Values
+	}
+
+	// Include AppSimpleInfo if it exists
+	if data.AppSimpleInfo != nil {
+		safeCopy["app_simple_info"] = r.createSafeAppSimpleInfoCopy(data.AppSimpleInfo)
+	}
+
+	return safeCopy
+}
+
+// createSafeAppSimpleInfoCopy creates a safe copy of AppSimpleInfo to avoid circular references
+func (r *RedisClient) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[string]interface{} {
+	if info == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"app_id":          info.AppID,
+		"app_name":        info.AppName,
+		"app_icon":        info.AppIcon,
+		"app_description": info.AppDescription,
+		"app_version":     info.AppVersion,
+		"app_title":       info.AppTitle,
+		"categories":      info.Categories,
+	}
 }
