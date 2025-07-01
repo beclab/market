@@ -43,9 +43,9 @@ type AppInfoLatestDataResponse struct {
 
 // AppsInfoResponse represents the response for /api/v2/apps
 type AppsInfoResponse struct {
-	Apps       []*AppInfoLatestDataResponse `json:"apps"`
-	TotalCount int                          `json:"total_count"`
-	NotFound   []AppQueryInfo               `json:"not_found,omitempty"`
+	Apps       []map[string]interface{} `json:"apps"`
+	TotalCount int                      `json:"total_count"`
+	NotFound   []AppQueryInfo           `json:"not_found,omitempty"`
 }
 
 // MarketInfoResponse represents the response structure for market information
@@ -213,7 +213,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 
 	// Create a channel to receive the result
 	type result struct {
-		response AppsInfoResponse
+		response map[string]interface{}
 		err      error
 	}
 	resultChan := make(chan result, 1)
@@ -235,7 +235,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var foundApps []*AppInfoLatestDataResponse
+		var foundApps []map[string]interface{}
 		var notFoundApps []AppQueryInfo
 
 		// Step 4: Find AppInfoLatestData for each requested app
@@ -279,19 +279,9 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 				if appID == appQuery.AppID || (appInfoData.RawData != nil && appInfoData.RawData.Name == appQuery.AppID) {
 					log.Printf("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
 
-					// Convert AppInfoLatestData to AppInfoLatestDataResponse (without raw_data)
-					responseData := &AppInfoLatestDataResponse{
-						Type:            appInfoData.Type,
-						Timestamp:       appInfoData.Timestamp,
-						Version:         appInfoData.Version,
-						RawPackage:      appInfoData.RawPackage,
-						Values:          appInfoData.Values,
-						AppInfo:         appInfoData.AppInfo,
-						RenderedPackage: appInfoData.RenderedPackage,
-						AppSimpleInfo:   appInfoData.AppSimpleInfo,
-					}
-
-					foundApps = append(foundApps, responseData)
+					// 使用 safe copy，避免循环引用
+					safeCopy := s.createSafeAppInfoLatestCopy(appInfoData)
+					foundApps = append(foundApps, safeCopy)
 					found = true
 					break
 				}
@@ -304,15 +294,13 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Step 5: Prepare response
-		response := AppsInfoResponse{
-			Apps:       foundApps,
-			TotalCount: len(foundApps),
+		response := map[string]interface{}{
+			"apps":        foundApps,
+			"total_count": len(foundApps),
 		}
-
 		if len(notFoundApps) > 0 {
-			response.NotFound = notFoundApps
+			response["not_found"] = notFoundApps
 		}
-
 		log.Printf("Apps info retrieval completed: %d found, %d not found", len(foundApps), len(notFoundApps))
 		resultChan <- result{response: response}
 	}()
@@ -337,26 +325,14 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Apps information retrieved successfully for user: %s", userID)
 
 		// Add debug logging to check response data
-		log.Printf("DEBUG: Response data structure:")
-		log.Printf("DEBUG: - Total apps found: %d", len(res.response.Apps))
-		log.Printf("DEBUG: - Total count: %d", res.response.TotalCount)
-		log.Printf("DEBUG: - Not found count: %d", len(res.response.NotFound))
-
-		// Log details of each found app
-		for i, app := range res.response.Apps {
-			log.Printf("DEBUG: App %d details:", i+1)
-			log.Printf("DEBUG:   - Type: %s", app.Type)
-			log.Printf("DEBUG:   - Timestamp: %d", app.Timestamp)
-			log.Printf("DEBUG:   - Version: %s", app.Version)
-			log.Printf("DEBUG:   - RawPackage: %s", app.RawPackage)
-			log.Printf("DEBUG:   - RenderedPackage: %s", app.RenderedPackage)
-			log.Printf("DEBUG:   - Values count: %d", len(app.Values))
-			log.Printf("DEBUG:   - AppInfo is nil: %v", app.AppInfo == nil)
-			log.Printf("DEBUG:   - AppSimpleInfo is nil: %v", app.AppSimpleInfo == nil)
-			if app.AppSimpleInfo != nil {
-				log.Printf("DEBUG:   - AppSimpleInfo.AppID: %s", app.AppSimpleInfo.AppID)
-				log.Printf("DEBUG:   - AppSimpleInfo.AppName: %s", app.AppSimpleInfo.AppName)
-			}
+		if apps, ok := res.response["apps"]; ok {
+			log.Printf("DEBUG: - Total apps found: %d", len(apps.([]map[string]interface{})))
+		}
+		if total, ok := res.response["total_count"]; ok {
+			log.Printf("DEBUG: - Total count: %d", total)
+		}
+		if notFound, ok := res.response["not_found"]; ok {
+			log.Printf("DEBUG: - Not found count: %d", len(notFound.([]AppQueryInfo)))
 		}
 
 		s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", res.response)
