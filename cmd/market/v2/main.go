@@ -81,13 +81,17 @@ func main() {
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
 
-	// Pre-startup step: Setup app service data
+	// Pre-startup step: Setup app service data with retry mechanism
 	log.Println("=== Pre-startup: Setting up app service data ===")
-	if err := utils.SetupAppServiceData(); err != nil {
-		log.Printf("Warning: Failed to setup app service data: %v", err)
-		log.Println("Continuing with startup process...")
-	} else {
-		log.Println("App service data setup completed successfully")
+	for {
+		if err := utils.SetupAppServiceData(); err != nil {
+			log.Printf("Failed to setup app service data: %v", err)
+			log.Println("Retrying in 10 seconds...")
+			time.Sleep(10 * time.Second)
+		} else {
+			log.Println("App service data setup completed successfully")
+			break
+		}
 	}
 	log.Println("=== End pre-startup step ===")
 
