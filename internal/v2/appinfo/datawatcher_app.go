@@ -311,8 +311,18 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 
 // calculateAndSetUserHash calculates and sets the hash for user data (with tracking)
 func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.UserData) {
-	// Check if hash calculation is already in progress for this user
+	// Add a per-user calculation flag to prevent concurrent execution
+	var isCalculatingKey = "isCalculating_" + userID
+
+	// Use a map in DataWatcher to track per-user calculation state
+	if dw.activeHashCalculations[isCalculatingKey] {
+		glog.Infof("DataWatcher: Hash calculation already in progress for user %s (isCalculating), skipping", userID)
+		return
+	}
+
+	dw.activeHashCalculations[isCalculatingKey] = true
 	dw.hashMutex.Lock()
+	// Also keep the original tracking for compatibility
 	if dw.activeHashCalculations[userID] {
 		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
@@ -325,6 +335,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 		// Clean up tracking when done
 		dw.hashMutex.Lock()
 		delete(dw.activeHashCalculations, userID)
+		delete(dw.activeHashCalculations, isCalculatingKey)
 		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
 	}()
