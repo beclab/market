@@ -1137,7 +1137,8 @@ func (s *Server) createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfo
 		"tags":               entry.Tags,
 		"updated_at":         entry.UpdatedAt,
 		// Skip complex interface{} fields that might cause cycles
-		// "supportClient", "permission", "entrances", "middleware", "options", "license", "legal", "i18n", "count", "versionHistory", "metadata"
+		// "supportClient", "permission", "entrances", "middleware", "license", "legal", "i18n", "count", "versionHistory", "metadata"
+		"options": entry.Options,
 	}
 }
 
@@ -1154,19 +1155,105 @@ func (s *Server) createSafeAppInfoCopy(appInfo *types.AppInfo) map[string]interf
 		safeCopy["app_entry"] = s.createSafeApplicationInfoEntryCopy(appInfo.AppEntry)
 	}
 
-	// Only include basic information from ImageAnalysis to avoid cycles
+	// Deep copy ImageAnalysis, including Images map
 	if appInfo.ImageAnalysis != nil {
-		safeCopy["image_analysis"] = map[string]interface{}{
+		imageAnalysisCopy := map[string]interface{}{
 			"app_id":       appInfo.ImageAnalysis.AppID,
 			"user_id":      appInfo.ImageAnalysis.UserID,
 			"source_id":    appInfo.ImageAnalysis.SourceID,
 			"analyzed_at":  appInfo.ImageAnalysis.AnalyzedAt,
 			"total_images": appInfo.ImageAnalysis.TotalImages,
-			// Skip Images map to avoid cycles
 		}
+		// Deep copy Images map
+		if appInfo.ImageAnalysis.Images != nil {
+			imagesMap := make(map[string]interface{}, len(appInfo.ImageAnalysis.Images))
+			for k, v := range appInfo.ImageAnalysis.Images {
+				if v != nil {
+					imagesMap[k] = s.createSafeImageInfoCopy(v)
+				}
+			}
+			imageAnalysisCopy["images"] = imagesMap
+		}
+		safeCopy["image_analysis"] = imageAnalysisCopy
 	}
 
 	return safeCopy
+}
+
+// createSafeImageInfoCopy creates a safe copy of ImageInfo to avoid circular references
+func (s *Server) createSafeImageInfoCopy(info *types.ImageInfo) map[string]interface{} {
+	if info == nil {
+		return nil
+	}
+	copy := map[string]interface{}{
+		"name":              info.Name,
+		"tag":               info.Tag,
+		"architecture":      info.Architecture,
+		"total_size":        info.TotalSize,
+		"downloaded_size":   info.DownloadedSize,
+		"download_progress": info.DownloadProgress,
+		"layer_count":       info.LayerCount,
+		"downloaded_layers": info.DownloadedLayers,
+		"created_at":        info.CreatedAt,
+		"analyzed_at":       info.AnalyzedAt,
+		"status":            info.Status,
+		"error_message":     info.ErrorMessage,
+	}
+	// Deep copy Nodes
+	if info.Nodes != nil {
+		nodesArr := make([]map[string]interface{}, 0, len(info.Nodes))
+		for _, n := range info.Nodes {
+			if n != nil {
+				nodesArr = append(nodesArr, s.createSafeNodeInfoCopy(n))
+			}
+		}
+		copy["nodes"] = nodesArr
+	}
+	return copy
+}
+
+// createSafeNodeInfoCopy creates a safe copy of NodeInfo to avoid circular references
+func (s *Server) createSafeNodeInfoCopy(node *types.NodeInfo) map[string]interface{} {
+	if node == nil {
+		return nil
+	}
+	copy := map[string]interface{}{
+		"node_name":         node.NodeName,
+		"architecture":      node.Architecture,
+		"variant":           node.Variant,
+		"os":                node.OS,
+		"downloaded_size":   node.DownloadedSize,
+		"downloaded_layers": node.DownloadedLayers,
+		"total_size":        node.TotalSize,
+		"layer_count":       node.LayerCount,
+	}
+	// Deep copy Layers
+	if node.Layers != nil {
+		layersArr := make([]map[string]interface{}, 0, len(node.Layers))
+		for _, l := range node.Layers {
+			if l != nil {
+				layersArr = append(layersArr, s.createSafeLayerInfoCopy(l))
+			}
+		}
+		copy["layers"] = layersArr
+	}
+	return copy
+}
+
+// createSafeLayerInfoCopy creates a safe copy of LayerInfo to avoid circular references
+func (s *Server) createSafeLayerInfoCopy(layer *types.LayerInfo) map[string]interface{} {
+	if layer == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"digest":     layer.Digest,
+		"size":       layer.Size,
+		"media_type": layer.MediaType,
+		"offset":     layer.Offset,
+		"downloaded": layer.Downloaded,
+		"progress":   layer.Progress,
+		"local_path": layer.LocalPath,
+	}
 }
 
 // createSafeAppSimpleInfoCopy creates a safe copy of AppSimpleInfo to avoid circular references
