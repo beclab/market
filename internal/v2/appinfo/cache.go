@@ -629,7 +629,7 @@ func (cm *CacheManager) requestSync(req SyncRequest) {
 func (cm *CacheManager) ForceSync() error {
 	glog.Infof("[LOCK] cm.mutex.RLock() @617 Start")
 	cm.mutex.RLock()
-	defer cm.mutex.Unlock()
+	defer cm.mutex.RUnlock()
 
 	glog.Infof("Force syncing all cache data to Redis")
 
