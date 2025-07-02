@@ -27,6 +27,16 @@ type CacheManager struct {
 	syncChannel       chan SyncRequest
 	stopChannel       chan bool
 	isRunning         bool
+
+	// Lock monitoring
+	lockStats struct {
+		sync.Mutex
+		lastLockTime   time.Time
+		lastUnlockTime time.Time
+		lockDuration   time.Duration
+		lockCount      int64
+		unlockCount    int64
+	}
 }
 
 // SyncRequest represents a request to sync data to Redis
@@ -276,8 +286,13 @@ func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState
 // SetAppData sets app data in cache using single global lock
 func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @269 Start")
+	cm.updateLockStats("lock")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	defer func() {
+		cm.mutex.Unlock()
+		cm.updateLockStats("unlock")
+		glog.Infof("[LOCK] cm.mutex.Unlock() @269 End")
+	}()
 
 	if !cm.isRunning {
 		return fmt.Errorf("cache manager is not running")
@@ -644,30 +659,49 @@ func (cm *CacheManager) ForceSync() error {
 	return nil
 }
 
-// GetAllUsersData returns all users data from cache using single global lock
+// GetAllUsersData returns all users data from cache using single global lock with timeout
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
-	glog.Infof("[LOCK] cm.mutex.RLock() @635 Start")
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
+	// Use timeout to prevent blocking indefinitely
+	timeout := 10 * time.Second
+	done := make(chan map[string]*UserData, 1)
 
-	// Return shallow copy of data directly without nested locks
-	result := make(map[string]*UserData)
-	for userID, userData := range cm.cache.Users {
-		// Create shallow copy
-		userDataCopy := &UserData{
-			Sources: make(map[string]*SourceData),
-			Hash:    userData.Hash,
+	go func() {
+		glog.Infof("[LOCK] cm.mutex.RLock() @635 Start")
+		cm.updateLockStats("lock")
+		cm.mutex.RLock()
+		defer func() {
+			cm.mutex.RUnlock()
+			cm.updateLockStats("unlock")
+			glog.Infof("[LOCK] cm.mutex.RUnlock() @635 End")
+		}()
+
+		// Return shallow copy of data directly without nested locks
+		result := make(map[string]*UserData)
+		for userID, userData := range cm.cache.Users {
+			// Create shallow copy
+			userDataCopy := &UserData{
+				Sources: make(map[string]*SourceData),
+				Hash:    userData.Hash,
+			}
+
+			// Copy source data references
+			for sourceID, sourceData := range userData.Sources {
+				userDataCopy.Sources[sourceID] = sourceData
+			}
+
+			result[userID] = userDataCopy
 		}
 
-		// Copy source data references
-		for sourceID, sourceData := range userData.Sources {
-			userDataCopy.Sources[sourceID] = sourceData
-		}
+		done <- result
+	}()
 
-		result[userID] = userDataCopy
+	select {
+	case result := <-done:
+		return result
+	case <-time.After(timeout):
+		glog.Errorf("GetAllUsersData: Timeout after %v, returning empty result", timeout)
+		return make(map[string]*UserData)
 	}
-
-	return result
 }
 
 // UpdateUserConfig updates the user configuration and ensures all users have data structures
@@ -938,4 +972,64 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{})
 	}
 
 	return enhancedData
+}
+
+// GetLockStats returns current lock statistics for monitoring
+func (cm *CacheManager) GetLockStats() map[string]interface{} {
+	glog.V(2).Infof("[LOCK] cm.lockStats.Lock() GetLockStats Start")
+	cm.lockStats.Lock()
+	defer func() {
+		cm.lockStats.Unlock()
+		glog.V(2).Infof("[LOCK] cm.lockStats.Unlock() GetLockStats End")
+	}()
+
+	stats := make(map[string]interface{})
+	stats["last_lock_time"] = cm.lockStats.lastLockTime
+	stats["last_unlock_time"] = cm.lockStats.lastUnlockTime
+	stats["lock_duration"] = cm.lockStats.lockDuration
+	stats["lock_count"] = cm.lockStats.lockCount
+	stats["unlock_count"] = cm.lockStats.unlockCount
+
+	// Check for potential lock issues
+	if cm.lockStats.lockCount > cm.lockStats.unlockCount {
+		stats["lock_imbalance"] = cm.lockStats.lockCount - cm.lockStats.unlockCount
+		stats["potential_deadlock"] = true
+	} else {
+		stats["lock_imbalance"] = 0
+		stats["potential_deadlock"] = false
+	}
+
+	// Check if lock has been held for too long
+	if !cm.lockStats.lastLockTime.IsZero() && cm.lockStats.lockDuration > 30*time.Second {
+		stats["long_lock_duration"] = true
+		stats["current_lock_duration"] = time.Since(cm.lockStats.lastLockTime)
+	} else {
+		stats["long_lock_duration"] = false
+	}
+
+	return stats
+}
+
+// updateLockStats updates lock statistics
+func (cm *CacheManager) updateLockStats(lockType string) {
+	glog.V(2).Infof("[LOCK] cm.lockStats.Lock() Start")
+	cm.lockStats.Lock()
+	defer func() {
+		cm.lockStats.Unlock()
+		glog.V(2).Infof("[LOCK] cm.lockStats.Unlock() End")
+	}()
+
+	now := time.Now()
+	if lockType == "lock" {
+		cm.lockStats.lastLockTime = now
+		cm.lockStats.lockCount++
+		glog.V(2).Infof("[LOCK] Lock stats updated - lock count: %d", cm.lockStats.lockCount)
+	} else if lockType == "unlock" {
+		cm.lockStats.lastUnlockTime = now
+		cm.lockStats.unlockCount++
+		if !cm.lockStats.lastLockTime.IsZero() {
+			cm.lockStats.lockDuration = now.Sub(cm.lockStats.lastLockTime)
+		}
+		glog.V(2).Infof("[LOCK] Lock stats updated - unlock count: %d, duration: %v", cm.lockStats.unlockCount, cm.lockStats.lockDuration)
+	}
 }
