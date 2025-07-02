@@ -355,47 +355,8 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		return
 	}
 
-	// Use global lock with timeout to avoid deadlock
-	lockTimeout := 5 * time.Second
-	lockAcquired := make(chan bool, 1)
-	lockError := make(chan error, 1)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("DataWatcher: Panic during lock acquisition for user %s: %v", userID, r)
-				lockError <- fmt.Errorf("panic during lock acquisition: %v", r)
-			}
-		}()
-
-		glog.Infof("DataWatcher: Attempting to acquire global cache lock for user %s", userID)
-		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @371 Start")
-		dw.cacheManager.mutex.RLock()
-		glog.Infof("DataWatcher: Global cache read lock acquired for user %s", userID)
-		lockAcquired <- true
-	}()
-
-	select {
-	case <-lockAcquired:
-		// Lock acquired successfully
-		glog.Infof("DataWatcher: Global cache lock acquired for user %s", userID)
-	case err := <-lockError:
-		glog.Errorf("DataWatcher: Error acquiring global cache lock for user %s: %v", userID, err)
-		return
-	case <-time.After(lockTimeout):
-		glog.Errorf("DataWatcher: Timeout acquiring global cache lock for hash calculation, user %s", userID)
-		return
-	}
-
-	// Ensure we release the read lock when done with read operations
-	defer func() {
-		glog.Infof("DataWatcher: Releasing global cache read lock for user %s", userID)
-		glog.Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @391 Start")
-		dw.cacheManager.mutex.RUnlock()
-	}()
-
+	// Create snapshot for hash calculation without holding any locks
 	glog.Infof("DataWatcher: Creating user data snapshot for user %s", userID)
-	// Create snapshot for hash calculation
 	snapshot, err := dw.createUserDataSnapshot(userID, originalUserData)
 	if err != nil {
 		glog.Errorf("DataWatcher: Failed to create user data snapshot for user %s: %v", userID, err)
@@ -421,13 +382,8 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	glog.Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
 
-	// Release read lock before acquiring write lock to avoid deadlock
-	glog.Infof("DataWatcher: Releasing read lock to acquire write lock for user %s", userID)
-	glog.Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @423 Start")
-	dw.cacheManager.mutex.RUnlock()
-
-	// Acquire write lock for hash update
-	writeTimeout := 3 * time.Second
+	// Use a single write lock acquisition with timeout to avoid deadlock
+	writeTimeout := 5 * time.Second
 	writeLockAcquired := make(chan bool, 1)
 	writeLockError := make(chan error, 1)
 
@@ -443,6 +399,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Start")
 		dw.cacheManager.mutex.Lock()
 		glog.Infof("DataWatcher: Write lock acquired for user %s", userID)
+		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Success")
 		writeLockAcquired <- true
 	}()
 
@@ -461,22 +418,12 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	case err := <-writeLockError:
 		glog.Errorf("DataWatcher: Error acquiring write lock for user %s: %v", userID, err)
-		// Re-acquire read lock for the defer statement since we released it earlier
-		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @459 Start")
-		dw.cacheManager.mutex.RLock()
 		return
 
 	case <-time.After(writeTimeout):
 		glog.Errorf("DataWatcher: Timeout acquiring write lock for hash update, user %s", userID)
-		// Re-acquire read lock for the defer statement since we released it earlier
-		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @465 Start")
-		dw.cacheManager.mutex.RLock()
 		return
 	}
-
-	// Re-acquire read lock for the defer statement since we released it earlier
-	glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @470 Start")
-	dw.cacheManager.mutex.RLock()
 
 	glog.Infof("DataWatcher: Hash updated for user %s", userID)
 
@@ -668,7 +615,10 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	func() {
 		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @660 Start")
 		dw.cacheManager.mutex.RLock()
-		defer dw.cacheManager.mutex.RUnlock()
+		defer func() {
+			dw.cacheManager.mutex.RUnlock()
+			glog.Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @660 End")
+		}()
 
 		// Quick check - if no pending apps, exit early
 		if len(sourceData.AppInfoLatestPending) == 0 {
@@ -725,6 +675,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	go func() {
 		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Start")
 		dw.cacheManager.mutex.Lock()
+		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Success")
 		writeLockChan <- true
 	}()
 

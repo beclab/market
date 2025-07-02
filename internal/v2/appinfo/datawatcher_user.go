@@ -121,14 +121,19 @@ func (dw *DataWatcherUser) connectToNATS() error {
 	opts := []nats.Option{
 		nats.Name("DataWatcherUser"),
 		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			log.Printf("NATS disconnected: %v", err)
+			log.Printf("[NATS] Disconnected: %v", err)
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			log.Printf("NATS reconnected to %v", nc.ConnectedUrl())
+			log.Printf("[NATS] Reconnected to %v", nc.ConnectedUrl())
 		}),
 		nats.ClosedHandler(func(nc *nats.Conn) {
-			log.Printf("NATS connection closed")
+			log.Printf("[NATS] Connection closed")
 		}),
+		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
+			log.Printf("[NATS] Error: %v", err)
+		}),
+		nats.MaxReconnects(60),
+		nats.ReconnectWait(2 * time.Second),
 	}
 
 	// Add authentication if provided

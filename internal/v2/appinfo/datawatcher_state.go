@@ -132,6 +132,23 @@ func (dw *DataWatcherState) startNatsConnection() error {
 		opts = append(opts, nats.UserInfo(dw.natsUser, dw.natsPass))
 	}
 
+	opts = append(opts,
+		nats.DisconnectHandler(func(nc *nats.Conn) {
+			log.Printf("[NATS] Disconnected from %s", nc.ConnectedUrl())
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			log.Printf("[NATS] Reconnected to %s", nc.ConnectedUrl())
+		}),
+		nats.ClosedHandler(func(nc *nats.Conn) {
+			log.Printf("[NATS] Connection closed: %v", nc.LastError())
+		}),
+		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
+			log.Printf("[NATS] Error: %v", err)
+		}),
+		nats.MaxReconnects(60),
+		nats.ReconnectWait(2*time.Second),
+	)
+
 	nc, err := nats.Connect(natsURL, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS at %s: %w", natsURL, err)
