@@ -35,7 +35,7 @@ type StatusChange struct {
 	UserID          string                 `json:"user_id"`
 	SourceID        string                 `json:"source_id"`
 	AppName         string                 `json:"app_name"`
-	ChangeType      string                 `json:"change_type"` // "state_change", "app_disappeared", "app_appeared"
+	ChangeType      string                 `json:"change_type"` // "state_change", "app_disappeared", "app_appeared", "state_inconsistency"
 	OldState        string                 `json:"old_state"`
 	NewState        string                 `json:"new_state"`
 	EntranceChanges []EntranceStatusChange `json:"entrance_changes,omitempty"`
@@ -409,6 +409,50 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 		}
 	}
 
+	// 4. Check for state inconsistency (all entrances are running but app state is not running)
+	for _, app := range latestStatus {
+		userID := app.Spec.Owner
+		appName := app.Spec.Name
+
+		// Find matching cached app by searching through all sources
+		var cachedApp *types.AppStateLatestData
+		var sourceID string
+
+		for key, cached := range cachedApps {
+			if cached.Status.Name == appName {
+				// Extract user and source from key
+				parts := strings.SplitN(key, ":", 3)
+				if len(parts) == 3 && parts[0] == userID {
+					cachedApp = cached
+					sourceID = parts[1]
+					break
+				}
+			}
+		}
+
+		if cachedApp == nil {
+			// This case is already handled in step 1 (new app)
+			continue
+		}
+
+		// Check for state inconsistency
+		if scc.isStateInconsistent(app) {
+			change := StatusChange{
+				UserID:     userID,
+				SourceID:   sourceID,
+				AppName:    appName,
+				ChangeType: "state_inconsistency",
+				OldState:   cachedApp.Status.State,
+				NewState:   "running", // Should be corrected to running
+				Timestamp:  time.Now(),
+			}
+			changes = append(changes, change)
+
+			glog.Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running",
+				appName, userID, sourceID, app.Status.State)
+		}
+	}
+
 	return changes
 }
 
@@ -481,27 +525,34 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				continue
 			}
 
-			// Create app state data from the latest status
-			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
-			if appStateData == nil {
-				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
-				continue
-			}
+			// Log the appeared app but don't add to cache
+			glog.Infof("New app appeared detected: %s (user: %s, state: %s) - not adding to cache",
+				change.AppName, change.UserID, appToUpdate.Status.State)
 
-			// Add the new app to cache (use a default source if unknown)
-			sourceID := change.SourceID
-			if sourceID == "unknown" {
-				sourceID = "Official-Market-Sources" // Default source for new apps
-			}
+			// Comment out cache update - only detect and log
+			/*
+				// Create app state data from the latest status
+				appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+				if appStateData == nil {
+					glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
+					continue
+				}
 
-			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
-				glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
-					change.AppName, change.UserID, sourceID, err)
-			} else {
-				glog.Infof("Successfully added appeared app %s to cache (user: %s, source: %s)",
-					change.AppName, change.UserID, sourceID)
-			}
+				// Add the new app to cache (use a default source if unknown)
+				sourceID := change.SourceID
+				if sourceID == "unknown" {
+					sourceID = "Official-Market-Sources" // Default source for new apps
+				}
+
+				stateData := scc.createStateDataFromAppStateData(appStateData)
+				if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+					glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
+						change.AppName, change.UserID, sourceID, err)
+				} else {
+					glog.Infof("Successfully added appeared app %s to cache (user: %s, source: %s)",
+						change.AppName, change.UserID, sourceID)
+				}
+			*/
 
 		case "state_change":
 			// Find the corresponding app in latest status
@@ -518,24 +569,75 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				continue
 			}
 
-			// Create app state data from the latest status
-			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
-			if appStateData == nil {
-				glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
+			// Log the state change but don't update cache
+			glog.Infof("State change detected for app %s (user: %s, source: %s): %s -> %s - not updating cache",
+				change.AppName, change.UserID, change.SourceID, change.OldState, change.NewState)
+
+			// Comment out cache update - only detect and log
+			/*
+				// Create app state data from the latest status
+				appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+				if appStateData == nil {
+					glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
+					continue
+				}
+
+				// Update the cache with the corrected status
+				stateData := scc.createStateDataFromAppStateData(appStateData)
+
+				// Update the cache
+				if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
+					glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
+						change.AppName, change.UserID, change.SourceID, err)
+				} else {
+					glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
+						change.AppName, change.UserID, change.SourceID)
+				}
+			*/
+
+		case "state_inconsistency":
+			// Find the corresponding app in latest status
+			var appToUpdate *utils.AppServiceResponse
+			for _, app := range latestStatus {
+				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
+					appToUpdate = &app
+					break
+				}
+			}
+
+			if appToUpdate == nil {
+				glog.Warningf("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
 				continue
 			}
 
-			// Update the cache with the corrected status
-			stateData := scc.createStateDataFromAppStateData(appStateData)
+			// Log the state inconsistency but don't correct it
+			glog.Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running - not correcting",
+				change.AppName, change.UserID, change.SourceID, appToUpdate.Status.State)
 
-			// Update the cache
-			if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
-				glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
-					change.AppName, change.UserID, change.SourceID, err)
-			} else {
-				glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
-					change.AppName, change.UserID, change.SourceID)
-			}
+			// Comment out cache update - only detect and log
+			/*
+				// Create app state data from the latest status but correct the app state to "running"
+				appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+				if appStateData == nil {
+					glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
+					continue
+				}
+
+				// Correct the app state to "running" since all entrances are running
+				appStateData.Status.State = "running"
+
+				// Update the cache with the corrected status
+				stateData := scc.createStateDataFromAppStateData(appStateData)
+
+				// Update the cache
+				if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
+					glog.Errorf("Failed to update cache with corrected state for inconsistent app %s (user: %s, source: %s): %v",
+						change.AppName, change.UserID, change.SourceID, err)
+				} else {
+					glog.Infof("Successfully corrected inconsistent state for app %s (user: %s, source: %s): %s -> running",
+						change.AppName, change.UserID, change.SourceID, change.OldState)
+				}
+			*/
 
 		default:
 			glog.Warningf("Unknown change type: %s for app %s (user: %s)", change.ChangeType, change.AppName, change.UserID)
@@ -669,4 +771,28 @@ func (scc *StatusCorrectionChecker) SetCheckInterval(interval time.Duration) {
 	defer scc.mutex.Unlock()
 	scc.checkInterval = interval
 	glog.Infof("Status correction check interval updated to: %v", interval)
+}
+
+// isStateInconsistent checks if the app state is inconsistent with the entrance statuses
+// Returns true if all entrances are running but the app state is not running
+func (scc *StatusCorrectionChecker) isStateInconsistent(app utils.AppServiceResponse) bool {
+	// If app state is already running, no inconsistency
+	if app.Status.State == "running" {
+		return false
+	}
+
+	// If no entrances, no inconsistency
+	if len(app.Status.EntranceStatuses) == 0 {
+		return false
+	}
+
+	// Check if all entrances are running
+	for _, entrance := range app.Status.EntranceStatuses {
+		if entrance.State != "running" {
+			return false
+		}
+	}
+
+	// All entrances are running but app state is not running - this is inconsistent
+	return true
 }
