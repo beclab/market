@@ -315,27 +315,25 @@ func (tm *TaskModule) executeTask(task *Task) {
 		// Execute app cancel - cancel running install tasks
 		log.Printf("Executing app cancel for task: %s, app: %s", task.ID, task.AppName)
 
-		// Get version and source from task metadata
-		version := ""
-		source := ""
-		if v, ok := task.Metadata["version"].(string); ok {
-			version = v
-		}
-		if s, ok := task.Metadata["source"].(string); ok {
-			source = s
-		}
-
-		// Call InstallTaskCanceled to cancel running install tasks
-		err = tm.InstallTaskCanceled(task.AppName, version, source, task.User)
+		// First, call AppCancel to send cancel request to app service
+		result, err = tm.AppCancel(task)
 		if err != nil {
 			log.Printf("App cancel failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Cancel failed: %v", err)
-			tm.recordTaskResult(task, "Cancel operation failed", err)
+			tm.recordTaskResult(task, result, err)
 			return
 		}
 
-		result = "Install task canceled successfully"
+		// Then, call InstallTaskCanceled to mark the task as canceled in our system
+		err = tm.InstallTaskCanceled(task.AppName, "", "", task.User)
+		if err != nil {
+			log.Printf("InstallTaskCanceled failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
+			// Don't fail the entire operation if InstallTaskCanceled fails
+			// Just log the error and continue
+			log.Printf("Warning: InstallTaskCanceled failed but AppCancel succeeded for task: %s", task.ID)
+		}
+
 		log.Printf("App cancel completed successfully for task: %s, app: %s", task.ID, task.AppName)
 
 	case UpgradeApp:
