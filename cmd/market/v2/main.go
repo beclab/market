@@ -128,6 +128,8 @@ func main() {
 		log.Fatalf("Failed to create Redis client: %v", err)
 	}
 
+	utils.SetRedisClient(redisClient.GetRawClient())
+
 	settingsManager := settings.NewSettingsManager(redisClient)
 	if err := settingsManager.Initialize(); err != nil {
 		log.Fatalf("Failed to initialize Settings module: %v", err)

@@ -78,3 +78,8 @@ func (r *RedisClientImpl) HGetAll(key string) (map[string]string, error) {
 func (r *RedisClientImpl) Close() error {
 	return r.client.Close()
 }
+
+// GetRawClient returns the underlying *redis.Client instance
+func (r *RedisClientImpl) GetRawClient() *redis.Client {
+	return r.client
+}
