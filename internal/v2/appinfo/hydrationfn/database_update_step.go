@@ -908,7 +908,6 @@ func (s *DatabaseUpdateStep) createSafePendingDataCopy(pendingData *types.AppInf
 			"name":   pendingData.RawData.Name,
 			"app_id": pendingData.RawData.AppID,
 		}
-		// Marshal each field separately to locate cycle
 		fields := []struct {
 			name string
 			val  interface{}
@@ -923,9 +922,20 @@ func (s *DatabaseUpdateStep) createSafePendingDataCopy(pendingData *types.AppInf
 		for _, f := range fields {
 			if f.val != nil {
 				if _, err := json.Marshal(f.val); err != nil {
-					log.Printf("DEBUG: JSON marshal failed for RawData.%s: %v", f.name, err)
+					if f.name == "metadata" {
+						log.Printf("DEBUG: JSON marshal failed for RawData.%s: %v", f.name, err)
+						log.Printf("DEBUG: RawData.metadata content: %s", fmt.Sprintf("%#v", f.val))
+						continue // skip metadata if cycle detected
+					} else {
+						log.Printf("DEBUG: JSON marshal failed for RawData.%s: %v", f.name, err)
+					}
 				} else {
 					log.Printf("DEBUG: JSON marshal success for RawData.%s", f.name)
+				}
+			}
+			if f.name == "metadata" {
+				if _, err := json.Marshal(f.val); err != nil {
+					continue // skip metadata if marshal failed
 				}
 			}
 			rawDataMap[f.name] = convertToStringMapDBUSWithLog(f.val, "RawData."+f.name)
@@ -954,9 +964,20 @@ func (s *DatabaseUpdateStep) createSafePendingDataCopy(pendingData *types.AppInf
 		for _, f := range fields {
 			if f.val != nil {
 				if _, err := json.Marshal(f.val); err != nil {
-					log.Printf("DEBUG: JSON marshal failed for AppEntry.%s: %v", f.name, err)
+					if f.name == "metadata" {
+						log.Printf("DEBUG: JSON marshal failed for AppEntry.%s: %v", f.name, err)
+						log.Printf("DEBUG: AppEntry.metadata content: %s", fmt.Sprintf("%#v", f.val))
+						continue // skip metadata if cycle detected
+					} else {
+						log.Printf("DEBUG: JSON marshal failed for AppEntry.%s: %v", f.name, err)
+					}
 				} else {
 					log.Printf("DEBUG: JSON marshal success for AppEntry.%s", f.name)
+				}
+			}
+			if f.name == "metadata" {
+				if _, err := json.Marshal(f.val); err != nil {
+					continue // skip metadata if marshal failed
 				}
 			}
 			appEntryMap[f.name] = convertToStringMapDBUSWithLog(f.val, "AppEntry."+f.name)
