@@ -81,20 +81,6 @@ func main() {
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
 
-	// Pre-startup step: Setup app service data with retry mechanism
-	log.Println("=== Pre-startup: Setting up app service data ===")
-	for {
-		if err := utils.SetupAppServiceData(); err != nil {
-			log.Printf("Failed to setup app service data: %v", err)
-			log.Println("Retrying in 10 seconds...")
-			time.Sleep(10 * time.Second)
-		} else {
-			log.Println("App service data setup completed successfully")
-			break
-		}
-	}
-	log.Println("=== End pre-startup step ===")
-
 	// 0. Initialize Settings Module (Required for API)
 	redisHost := utils.GetEnvOrDefault("REDIS_HOST", "localhost")
 	redisPort := utils.GetEnvOrDefault("REDIS_PORT", "6379")
@@ -109,6 +95,40 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create Redis client: %v", err)
 	}
+
+	utils.SetRedisClient(redisClient.GetRawClient())
+
+	// Pre-startup step: Setup app service data with retry mechanism
+	log.Println("=== Pre-startup: Setting up app service data ===")
+	for {
+		err := utils.SetupAppServiceData()
+		if err != nil {
+			log.Printf("Failed to setup app service data: %v", err)
+			log.Println("Retrying in 10 seconds...")
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		extractedUsers := utils.GetExtractedUsers()
+		allUserAppStateData := utils.GetAllUserAppStateData()
+
+		userCount := len(extractedUsers)
+		appCount := 0
+		for _, appList := range allUserAppStateData {
+			appCount += len(appList)
+		}
+
+		if userCount == 0 || appCount == 0 {
+			log.Printf("App service data not ready: user count = %d, app count = %d", userCount, appCount)
+			log.Println("Retrying in 10 seconds...")
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		log.Println("App service data setup completed successfully")
+		break
+	}
+	log.Println("=== End pre-startup step ===")
 
 	settingsManager := settings.NewSettingsManager(redisClient)
 	if err := settingsManager.Initialize(); err != nil {
@@ -135,6 +155,14 @@ func main() {
 		log.Fatalf("Failed to start AppInfo module: %v", err)
 	}
 	log.Println("AppInfo module started successfully")
+
+	// Log StatusCorrectionChecker status
+	statusChecker := appInfoModule.GetStatusCorrectionChecker()
+	if statusChecker != nil {
+		log.Printf("StatusCorrectionChecker started successfully: %v", statusChecker.IsRunning())
+	} else {
+		log.Println("Warning: StatusCorrectionChecker not available")
+	}
 
 	// Load app state data into user's official source
 	log.Println("Loading app state data into user's official source...")

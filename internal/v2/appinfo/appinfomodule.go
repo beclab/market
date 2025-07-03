@@ -19,37 +19,39 @@ import (
 
 // AppInfoModule represents the main application info module
 type AppInfoModule struct {
-	config           *ModuleConfig
-	cacheManager     *CacheManager
-	redisClient      *RedisClient
-	syncer           *Syncer
-	hydrator         *Hydrator
-	dataWatcher      *DataWatcher
-	dataWatcherState *DataWatcherState
-	dataWatcherUser  *DataWatcherUser
-	dataSender       *DataSender
-	ctx              context.Context
-	cancel           context.CancelFunc
-	mutex            sync.RWMutex
-	isStarted        bool
-	taskModule       *task.TaskModule
-	historyModule    *history.HistoryModule
+	config                  *ModuleConfig
+	cacheManager            *CacheManager
+	redisClient             *RedisClient
+	syncer                  *Syncer
+	hydrator                *Hydrator
+	dataWatcher             *DataWatcher
+	dataWatcherState        *DataWatcherState
+	dataWatcherUser         *DataWatcherUser
+	dataSender              *DataSender
+	statusCorrectionChecker *StatusCorrectionChecker
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	mutex                   sync.RWMutex
+	isStarted               bool
+	taskModule              *task.TaskModule
+	historyModule           *history.HistoryModule
 }
 
 // ModuleConfig holds configuration for the AppInfo module
 type ModuleConfig struct {
-	Redis                  *RedisConfig    `json:"redis"`
-	Syncer                 *SyncerConfig   `json:"syncer"`
-	Cache                  *CacheConfig    `json:"cache"`
-	User                   *UserConfig     `json:"user"`
-	Hydrator               *HydratorConfig `json:"hydrator"`
-	EnableSync             bool            `json:"enable_sync"`
-	EnableCache            bool            `json:"enable_cache"`
-	EnableHydrator         bool            `json:"enable_hydrator"`
-	EnableDataWatcher      bool            `json:"enable_data_watcher"`
-	EnableDataWatcherState bool            `json:"enable_data_watcher_state"`
-	EnableDataWatcherUser  bool            `json:"enable_data_watcher_user"`
-	StartTimeout           time.Duration   `json:"start_timeout"`
+	Redis                         *RedisConfig    `json:"redis"`
+	Syncer                        *SyncerConfig   `json:"syncer"`
+	Cache                         *CacheConfig    `json:"cache"`
+	User                          *UserConfig     `json:"user"`
+	Hydrator                      *HydratorConfig `json:"hydrator"`
+	EnableSync                    bool            `json:"enable_sync"`
+	EnableCache                   bool            `json:"enable_cache"`
+	EnableHydrator                bool            `json:"enable_hydrator"`
+	EnableDataWatcher             bool            `json:"enable_data_watcher"`
+	EnableDataWatcherState        bool            `json:"enable_data_watcher_state"`
+	EnableDataWatcherUser         bool            `json:"enable_data_watcher_user"`
+	EnableStatusCorrectionChecker bool            `json:"enable_status_correction_checker"`
+	StartTimeout                  time.Duration   `json:"start_timeout"`
 }
 
 // CacheConfig holds cache-specific configuration
@@ -187,6 +189,13 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
+	// Initialize StatusCorrectionChecker if enabled and cache manager is available
+	if m.config.EnableStatusCorrectionChecker && m.config.EnableCache {
+		if err := m.initStatusCorrectionChecker(); err != nil {
+			return fmt.Errorf("failed to initialize StatusCorrectionChecker: %w", err)
+		}
+	}
+
 	// Set up hydration notifier connection if both cache and hydrator are enabled
 	if m.config.EnableCache && m.config.EnableHydrator && m.cacheManager != nil && m.hydrator != nil {
 		m.cacheManager.SetHydrationNotifier(m.hydrator)
@@ -230,6 +239,12 @@ func (m *AppInfoModule) Stop() error {
 	if m.dataWatcherUser != nil {
 		m.dataWatcherUser.Stop()
 		glog.Infof("DataWatcherUser stopped")
+	}
+
+	// Stop StatusCorrectionChecker
+	if m.statusCorrectionChecker != nil {
+		m.statusCorrectionChecker.Stop()
+		glog.Infof("StatusCorrectionChecker stopped")
 	}
 
 	// Close DataSender
@@ -314,6 +329,13 @@ func (m *AppInfoModule) GetDataSender() *DataSender {
 	return m.dataSender
 }
 
+// GetStatusCorrectionChecker returns the StatusCorrectionChecker instance (can be nil)
+func (m *AppInfoModule) GetStatusCorrectionChecker() *StatusCorrectionChecker {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.statusCorrectionChecker
+}
+
 // GetRedisClient returns the Redis client instance
 func (m *AppInfoModule) GetRedisClient() *RedisClient {
 	m.mutex.RLock()
@@ -341,22 +363,24 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	defer m.mutex.RUnlock()
 
 	status := map[string]interface{}{
-		"is_started":                m.isStarted,
-		"enable_sync":               m.config.EnableSync,
-		"enable_cache":              m.config.EnableCache,
-		"enable_hydrator":           m.config.EnableHydrator,
-		"enable_data_watcher":       m.config.EnableDataWatcher,
-		"enable_data_watcher_state": m.config.EnableDataWatcherState,
-		"enable_data_watcher_user":  m.config.EnableDataWatcherUser,
+		"is_started":                       m.isStarted,
+		"enable_sync":                      m.config.EnableSync,
+		"enable_cache":                     m.config.EnableCache,
+		"enable_hydrator":                  m.config.EnableHydrator,
+		"enable_data_watcher":              m.config.EnableDataWatcher,
+		"enable_data_watcher_state":        m.config.EnableDataWatcherState,
+		"enable_data_watcher_user":         m.config.EnableDataWatcherUser,
+		"enable_status_correction_checker": m.config.EnableStatusCorrectionChecker,
 		"components": map[string]interface{}{
-			"redis_client":       m.redisClient != nil,
-			"cache_manager":      m.cacheManager != nil,
-			"syncer":             m.syncer != nil,
-			"hydrator":           m.hydrator != nil,
-			"data_watcher":       m.dataWatcher != nil,
-			"data_watcher_state": m.dataWatcherState != nil,
-			"data_watcher_user":  m.dataWatcherUser != nil,
-			"data_sender":        m.dataSender != nil,
+			"redis_client":              m.redisClient != nil,
+			"cache_manager":             m.cacheManager != nil,
+			"syncer":                    m.syncer != nil,
+			"hydrator":                  m.hydrator != nil,
+			"data_watcher":              m.dataWatcher != nil,
+			"data_watcher_state":        m.dataWatcherState != nil,
+			"data_watcher_user":         m.dataWatcherUser != nil,
+			"data_sender":               m.dataSender != nil,
+			"status_correction_checker": m.statusCorrectionChecker != nil,
 		},
 	}
 
@@ -386,6 +410,11 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	if m.dataWatcherUser != nil {
 		status["data_watcher_user_healthy"] = m.dataWatcherUser.IsHealthy()
 		status["data_watcher_user_status"] = m.dataWatcherUser.GetStatus()
+	}
+
+	// Add StatusCorrectionChecker status
+	if m.statusCorrectionChecker != nil {
+		status["status_correction_checker_stats"] = m.statusCorrectionChecker.GetStats()
 	}
 
 	return status
@@ -568,6 +597,25 @@ func (m *AppInfoModule) initDataWatcherUser() error {
 	return nil
 }
 
+// initStatusCorrectionChecker initializes the StatusCorrectionChecker
+func (m *AppInfoModule) initStatusCorrectionChecker() error {
+	glog.Infof("Initializing StatusCorrectionChecker...")
+
+	if m.cacheManager == nil {
+		return fmt.Errorf("cache manager is required for StatusCorrectionChecker")
+	}
+
+	m.statusCorrectionChecker = NewStatusCorrectionChecker(m.cacheManager)
+
+	// Start StatusCorrectionChecker
+	if err := m.statusCorrectionChecker.Start(); err != nil {
+		return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
+	}
+
+	glog.Infof("StatusCorrectionChecker initialized successfully")
+	return nil
+}
+
 // validateConfig validates the module configuration
 func validateConfig(config *ModuleConfig) error {
 	if config.EnableCache && config.Redis == nil {
@@ -714,6 +762,11 @@ func DefaultModuleConfig() *ModuleConfig {
 		enableDataWatcherUser = true
 	}
 
+	enableStatusCorrectionChecker, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_STATUS_CORRECTION_CHECKER"))
+	if err != nil {
+		enableStatusCorrectionChecker = true
+	}
+
 	startTimeout, err := time.ParseDuration(os.Getenv("MODULE_START_TIMEOUT"))
 	if err != nil || startTimeout <= 0 {
 		startTimeout = 30 * time.Second
@@ -848,13 +901,14 @@ func DefaultModuleConfig() *ModuleConfig {
 			DefaultPermissions:    defaultPermissions,
 			ClearCache:            clearCache,
 		},
-		EnableSync:             enableSync,
-		EnableCache:            enableCache,
-		EnableHydrator:         enableHydrator,
-		EnableDataWatcher:      enableDataWatcher,
-		EnableDataWatcherState: enableDataWatcherState,
-		EnableDataWatcherUser:  enableDataWatcherUser,
-		StartTimeout:           startTimeout,
+		EnableSync:                    enableSync,
+		EnableCache:                   enableCache,
+		EnableHydrator:                enableHydrator,
+		EnableDataWatcher:             enableDataWatcher,
+		EnableDataWatcherState:        enableDataWatcherState,
+		EnableDataWatcherUser:         enableDataWatcherUser,
+		EnableStatusCorrectionChecker: enableStatusCorrectionChecker,
+		StartTimeout:                  startTimeout,
 	}
 }
 
@@ -1255,6 +1309,11 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 			glog.Infof("DataWatcherState re-initialized successfully with task module")
 		}
 	}
+
+	if m.statusCorrectionChecker != nil {
+		m.statusCorrectionChecker.SetTaskModule(taskModule)
+		glog.Infof("Task module reference set in StatusCorrectionChecker")
+	}
 }
 
 // SetHistoryModule sets the history module reference
@@ -1303,6 +1362,11 @@ func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
 		} else {
 			glog.Infof("DataWatcherUser re-initialized successfully with history module")
 		}
+	}
+
+	if m.statusCorrectionChecker != nil {
+		m.statusCorrectionChecker.SetHistoryModule(historyModule)
+		glog.Infof("History module reference set in StatusCorrectionChecker")
 	}
 }
 

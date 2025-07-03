@@ -1033,3 +1033,46 @@ func (cm *CacheManager) updateLockStats(lockType string) {
 		glog.V(2).Infof("[LOCK] Lock stats updated - unlock count: %d, duration: %v", cm.lockStats.unlockCount, cm.lockStats.lockDuration)
 	}
 }
+
+// RemoveAppStateData removes a specific app from AppStateLatest for a user and source
+func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppStateData Start")
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if !cm.isRunning {
+		return fmt.Errorf("cache manager is not running")
+	}
+
+	userData, userExists := cm.cache.Users[userID]
+	if !userExists {
+		return fmt.Errorf("user %s not found", userID)
+	}
+
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return fmt.Errorf("source %s not found for user %s", sourceID, userID)
+	}
+
+	originalCount := len(sourceData.AppStateLatest)
+	newList := make([]*types.AppStateLatestData, 0, originalCount)
+	for _, appState := range sourceData.AppStateLatest {
+		if appState == nil || appState.Status.Name != appName {
+			newList = append(newList, appState)
+		}
+	}
+	sourceData.AppStateLatest = newList
+
+	if len(newList) < originalCount {
+		glog.Infof("Removed app %s from AppStateLatest for user=%s, source=%s", appName, userID, sourceID)
+		cm.requestSync(SyncRequest{
+			UserID:   userID,
+			SourceID: sourceID,
+			Type:     SyncSource,
+		})
+	} else {
+		glog.Infof("App %s not found in AppStateLatest for user=%s, source=%s", appName, userID, sourceID)
+	}
+
+	return nil
+}

@@ -411,11 +411,12 @@ type AppInfoUpdate struct {
 }
 
 type MarketSystemUpdate struct {
-	Timestamp  int64             `json:"timestamp"`
-	User       string            `json:"user"`
-	NotifyType string            `json:"notify_type"`
-	Point      string            `json:"point"`
-	Extensions map[string]string `json:"extensions,omitempty"` // Additional extension information
+	Timestamp     int64                  `json:"timestamp"`
+	User          string                 `json:"user"`
+	NotifyType    string                 `json:"notify_type"`
+	Point         string                 `json:"point"`
+	Extensions    map[string]string      `json:"extensions,omitempty"`     // Additional extension information
+	ExtensionsObj map[string]interface{} `json:"extensions_obj,omitempty"` // Additional extension information
 }
 
 // NewCacheData creates a new cache data structure
@@ -484,7 +485,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 	// Extract status information from data
 	var name, state, updateTime, statusTime, lastTransitionTime, progress string
 	var entranceStatuses []struct {
-		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
+		ID         string `json:"id"`
 		Name       string `json:"name"`
 		State      string `json:"state"`
 		StatusTime string `json:"statusTime"`
@@ -632,28 +633,23 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 
 	log.Printf("DEBUG: NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
 
-	// Get version from download record using GetAppVersionFromDownloadRecord
+	// Version assignment logic
 	version := ""
-	if userID != "" && name != "" && getVersionFunc != nil {
-		// Try to get version from data first
-		if versionVal, ok := data["version"].(string); ok && versionVal != "" {
-			version = versionVal
-			log.Printf("DEBUG: NewAppStateLatestData - using version from data: %s", version)
-		} else {
-			// Get version from download record using the provided function
-			versionFromRecord, err := getVersionFunc(userID, name)
-			if err != nil {
-				log.Printf("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
-			} else if versionFromRecord != "" {
-				version = versionFromRecord
-				log.Printf("DEBUG: NewAppStateLatestData - using version from download record: %s", version)
-			} else {
-				log.Printf("WARNING: NewAppStateLatestData - no version found in download record")
-			}
+	if versionVal, ok := data["version"].(string); ok && versionVal != "" {
+		version = versionVal
+		log.Printf("DEBUG: NewAppStateLatestData - using version from data: %s", version)
+	}
+	// If version is still empty, and getVersionFunc is available, and userID/name are not empty, try to get from record
+	if version == "" && getVersionFunc != nil && userID != "" && name != "" {
+		versionFromRecord, err := getVersionFunc(userID, name)
+		if err != nil {
+			log.Printf("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
+		} else if versionFromRecord != "" {
+			version = versionFromRecord
+			log.Printf("DEBUG: NewAppStateLatestData - using version from download record: %s", version)
 		}
 	}
-
-	// If version is still empty, we cannot create the object
+	// If version is still empty, log error and return nil
 	// if version == "" {
 	// 	log.Printf("ERROR: NewAppStateLatestData - version is empty, cannot create AppStateLatestData")
 	// 	return nil
@@ -670,7 +666,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 			LastTransitionTime string `json:"lastTransitionTime"`
 			Progress           string `json:"progress"`
 			EntranceStatuses   []struct {
-				ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
+				ID         string `json:"id"`
 				Name       string `json:"name"`
 				State      string `json:"state"`
 				StatusTime string `json:"statusTime"`
@@ -989,7 +985,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	ValidateAndFixAppLabels(appData, rawData)
 
 	// Store the complete app data in metadata for later processing
-	rawData.Metadata["source_app_data"] = appData
+	// rawData.Metadata["source_app_data"] = appData
 	rawData.Metadata["validation_status"] = "validated"
 
 	pendingData.RawData = rawData
