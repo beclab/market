@@ -411,11 +411,12 @@ type AppInfoUpdate struct {
 }
 
 type MarketSystemUpdate struct {
-	Timestamp  int64             `json:"timestamp"`
-	User       string            `json:"user"`
-	NotifyType string            `json:"notify_type"`
-	Point      string            `json:"point"`
-	Extensions map[string]string `json:"extensions,omitempty"` // Additional extension information
+	Timestamp     int64                  `json:"timestamp"`
+	User          string                 `json:"user"`
+	NotifyType    string                 `json:"notify_type"`
+	Point         string                 `json:"point"`
+	Extensions    map[string]string      `json:"extensions,omitempty"`     // Additional extension information
+	ExtensionsObj map[string]interface{} `json:"extensions_obj,omitempty"` // Additional extension information
 }
 
 // NewCacheData creates a new cache data structure

@@ -1231,13 +1231,17 @@ func (dw *DataWatcher) sendNewAppReadyNotification(userID string, completedApp *
 	extensions["app_version"] = appVersion
 	extensions["source"] = sourceID
 
+	extensionsObj := make(map[string]interface{})
+	extensionsObj["app_info"] = completedApp
+
 	// Create market system update
 	update := &types.MarketSystemUpdate{
-		Timestamp:  time.Now().Unix(),
-		User:       userID,
-		NotifyType: "market_system_point",
-		Point:      "new_app_ready",
-		Extensions: extensions,
+		Timestamp:     time.Now().Unix(),
+		User:          userID,
+		NotifyType:    "market_system_point",
+		Point:         "new_app_ready",
+		Extensions:    extensions,
+		ExtensionsObj: extensionsObj,
 	}
 
 	// Send the notification
