@@ -649,10 +649,10 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 		}
 	}
 	// If version is still empty, log error and return nil
-	if version == "" {
-		log.Printf("ERROR: NewAppStateLatestData - version is empty, cannot create AppStateLatestData")
-		return nil
-	}
+	// if version == "" {
+	// 	log.Printf("ERROR: NewAppStateLatestData - version is empty, cannot create AppStateLatestData")
+	// 	return nil
+	// }
 
 	return &AppStateLatestData{
 		Type:    AppStateLatest,
