@@ -136,6 +136,14 @@ func main() {
 	}
 	log.Println("AppInfo module started successfully")
 
+	// Log StatusCorrectionChecker status
+	statusChecker := appInfoModule.GetStatusCorrectionChecker()
+	if statusChecker != nil {
+		log.Printf("StatusCorrectionChecker started successfully: %v", statusChecker.IsRunning())
+	} else {
+		log.Println("Warning: StatusCorrectionChecker not available")
+	}
+
 	// Load app state data into user's official source
 	log.Println("Loading app state data into user's official source...")
 	loadAppStateDataToUserSource(appInfoModule)

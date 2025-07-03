@@ -88,6 +88,7 @@ func (scc *StatusCorrectionChecker) Start() error {
 	scc.lastCheckTime = time.Time{} // Zero time indicates no checks yet
 	scc.checkCount = 0
 	scc.correctionCount = 0
+	scc.stopChan = make(chan struct{}) // Recreate stopChan for each start
 
 	glog.Infof("Starting status correction checker with interval: %v", scc.checkInterval)
 	glog.Infof("App service endpoint: http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort)
@@ -108,7 +109,12 @@ func (scc *StatusCorrectionChecker) Stop() {
 	}
 
 	scc.isRunning = false
-	close(scc.stopChan)
+	select {
+	case <-scc.stopChan:
+		// Channel already closed, do nothing
+	default:
+		close(scc.stopChan)
+	}
 	glog.Infof("Status correction checker stopped")
 }
 
