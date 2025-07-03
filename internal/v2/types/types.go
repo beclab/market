@@ -985,7 +985,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	ValidateAndFixAppLabels(appData, rawData)
 
 	// Store the complete app data in metadata for later processing
-	rawData.Metadata["source_app_data"] = appData
+	// rawData.Metadata["source_app_data"] = appData
 	rawData.Metadata["validation_status"] = "validated"
 
 	pendingData.RawData = rawData
