@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"market/internal/v2/history"
+	"market/internal/v2/task"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -31,6 +32,7 @@ type StatusCorrectionChecker struct {
 	correctionCount int64
 
 	historyModule *history.HistoryModule
+	taskModule    *task.TaskModule
 }
 
 // StatusChange represents a detected status change
@@ -284,42 +286,34 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 	}
 
 	// 1. Check for new apps (appeared in latest but not in cache)
+	// Build a set of all user+appName combinations in cache
+	cacheAppKeys := make(map[string]struct{})
+	for key := range cachedApps {
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) == 3 {
+			cacheAppKeys[parts[0]+":"+parts[2]] = struct{}{}
+		}
+	}
+
 	for _, app := range latestStatus {
 		userID := app.Spec.Owner
 		appName := app.Spec.Name
+		key := userID + ":" + appName
 
-		// 查找真实sourceID
-		sourceID := ""
-		for key, cached := range cachedApps {
-			if cached.Status.Name == appName {
-				parts := strings.SplitN(key, ":", 3)
-				if len(parts) == 3 && parts[0] == userID {
-					sourceID = parts[1]
-					break
-				}
+		if _, exists := cacheAppKeys[key]; !exists {
+			// New app appeared, SourceID will be determined during correction
+			change := StatusChange{
+				UserID:     userID,
+				SourceID:   "",
+				AppName:    appName,
+				ChangeType: "app_appeared",
+				OldState:   "unknown",
+				NewState:   app.Status.State,
+				Timestamp:  time.Now(),
 			}
+			changes = append(changes, change)
+			glog.Infof("New app appeared: %s (user: %s, state: %s)", appName, userID, app.Status.State)
 		}
-
-		foundInCache := sourceID != ""
-
-		if !foundInCache {
-			// 没有sourceID，跳过该变更
-			continue
-		}
-
-		// New app appeared
-		change := StatusChange{
-			UserID:     userID,
-			SourceID:   sourceID,
-			AppName:    appName,
-			ChangeType: "app_appeared",
-			OldState:   "unknown",
-			NewState:   app.Status.State,
-			Timestamp:  time.Now(),
-		}
-		changes = append(changes, change)
-
-		glog.Infof("New app appeared: %s (user: %s, source: %s, state: %s)", appName, userID, sourceID, app.Status.State)
 	}
 
 	// 2. Check for disappeared apps (in cache but not in latest)
@@ -563,13 +557,44 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					glog.Warningf("Failed to store app appeared history record: %v", err)
 				}
 			}
-
+			// Dynamically determine sourceID
+			sourceID := ""
+			// 1. Check cache
+			if scc.cacheManager != nil {
+				userData := scc.cacheManager.GetUserData(change.UserID)
+				if userData != nil {
+					for srcID, srcData := range userData.Sources {
+						if srcData == nil || srcData.AppStateLatest == nil {
+							continue
+						}
+						for _, appState := range srcData.AppStateLatest {
+							if appState != nil && appState.Status.Name == change.AppName {
+								sourceID = srcID
+								break
+							}
+						}
+						if sourceID != "" {
+							break
+						}
+					}
+				}
+			}
+			// 2. Check taskModule
+			if sourceID == "" && scc.taskModule != nil {
+				_, src, found := scc.taskModule.GetLatestTaskByAppNameAndUser(change.AppName, change.UserID)
+				if found && src != "" {
+					sourceID = src
+				}
+			}
+			// 3. Fallback
+			if sourceID == "" {
+				sourceID = "Official-Market-Sources"
+			}
 			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
 				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
-			sourceID := change.SourceID
 			stateData := scc.createStateDataFromAppStateData(appStateData)
 			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
 				glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
@@ -827,4 +852,11 @@ func (scc *StatusCorrectionChecker) SetHistoryModule(hm *history.HistoryModule) 
 	scc.mutex.Lock()
 	defer scc.mutex.Unlock()
 	scc.historyModule = hm
+}
+
+// SetTaskModule sets the task module for status correction checker
+func (scc *StatusCorrectionChecker) SetTaskModule(tm *task.TaskModule) {
+	scc.mutex.Lock()
+	defer scc.mutex.Unlock()
+	scc.taskModule = tm
 }

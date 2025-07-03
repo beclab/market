@@ -1309,6 +1309,11 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 			glog.Infof("DataWatcherState re-initialized successfully with task module")
 		}
 	}
+
+	if m.statusCorrectionChecker != nil {
+		m.statusCorrectionChecker.SetTaskModule(taskModule)
+		glog.Infof("Task module reference set in StatusCorrectionChecker")
+	}
 }
 
 // SetHistoryModule sets the history module reference
