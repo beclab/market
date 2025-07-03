@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -602,23 +603,57 @@ func (r *RedisClient) createSafeApplicationInfoEntryCopy(entry *types.Applicatio
 	}
 }
 
-// convertToStringMapDB 工具函数，兼容 map[string]interface{} 和 map[interface{}]interface{}，RedisClient专用
 func convertToStringMapDB(val interface{}) map[string]interface{} {
+	return convertToStringMapDBWithVisited(val, make(map[uintptr]bool))
+}
+
+func convertToStringMapDBWithVisited(val interface{}, visited map[uintptr]bool) map[string]interface{} {
 	switch v := val.(type) {
 	case map[string]interface{}:
-		return v
+		ptr := reflect.ValueOf(v).Pointer()
+		if visited[ptr] {
+			return nil // 避免循环引用
+		}
+		visited[ptr] = true
+		defer delete(visited, ptr)
+
+		converted := make(map[string]interface{})
+		for k, v2 := range v {
+			converted[k] = convertValueDB(v2, visited)
+		}
+		return converted
 	case map[interface{}]interface{}:
+		ptr := reflect.ValueOf(v).Pointer()
+		if visited[ptr] {
+			return nil
+		}
+		visited[ptr] = true
+		defer delete(visited, ptr)
+
 		converted := make(map[string]interface{})
 		for k, v2 := range v {
 			if ks, ok := k.(string); ok {
-				converted[ks] = v2
+				converted[ks] = convertValueDB(v2, visited)
 			}
 		}
 		return converted
-	case nil:
-		return nil
 	default:
 		return nil
+	}
+}
+
+func convertValueDB(val interface{}, visited map[uintptr]bool) interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}, map[interface{}]interface{}:
+		return convertToStringMapDBWithVisited(v, visited)
+	case []interface{}:
+		slice := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			slice = append(slice, convertValueDB(item, visited))
+		}
+		return slice
+	default:
+		return v
 	}
 }
 
