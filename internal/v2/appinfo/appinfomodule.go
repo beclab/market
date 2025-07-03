@@ -1358,6 +1358,11 @@ func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
 			glog.Infof("DataWatcherUser re-initialized successfully with history module")
 		}
 	}
+
+	if m.statusCorrectionChecker != nil {
+		m.statusCorrectionChecker.SetHistoryModule(historyModule)
+		glog.Infof("History module reference set in StatusCorrectionChecker")
+	}
 }
 
 // GetTaskModule returns the task module instance

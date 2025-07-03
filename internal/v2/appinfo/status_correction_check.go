@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/history"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -28,6 +29,8 @@ type StatusCorrectionChecker struct {
 	lastCheckTime   time.Time
 	checkCount      int64
 	correctionCount int64
+
+	historyModule *history.HistoryModule
 }
 
 // StatusChange represents a detected status change
@@ -285,34 +288,38 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 		userID := app.Spec.Owner
 		appName := app.Spec.Name
 
-		// Check if this app exists in cache
-		foundInCache := false
+		// 查找真实sourceID
+		sourceID := ""
 		for key, cached := range cachedApps {
 			if cached.Status.Name == appName {
-				// Extract user and source from key
 				parts := strings.SplitN(key, ":", 3)
 				if len(parts) == 3 && parts[0] == userID {
-					foundInCache = true
+					sourceID = parts[1]
 					break
 				}
 			}
 		}
 
-		if !foundInCache {
-			// New app appeared
-			change := StatusChange{
-				UserID:     userID,
-				SourceID:   "unknown", // We don't know the source for new apps
-				AppName:    appName,
-				ChangeType: "app_appeared",
-				OldState:   "unknown",
-				NewState:   app.Status.State,
-				Timestamp:  time.Now(),
-			}
-			changes = append(changes, change)
+		foundInCache := sourceID != ""
 
-			glog.Infof("New app appeared: %s (user: %s, state: %s)", appName, userID, app.Status.State)
+		if !foundInCache {
+			// 没有sourceID，跳过该变更
+			continue
 		}
+
+		// New app appeared
+		change := StatusChange{
+			UserID:     userID,
+			SourceID:   sourceID,
+			AppName:    appName,
+			ChangeType: "app_appeared",
+			OldState:   "unknown",
+			NewState:   app.Status.State,
+			Timestamp:  time.Now(),
+		}
+		changes = append(changes, change)
+
+		glog.Infof("New app appeared: %s (user: %s, source: %s, state: %s)", appName, userID, sourceID, app.Status.State)
 	}
 
 	// 2. Check for disappeared apps (in cache but not in latest)
@@ -506,12 +513,30 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 	for _, change := range changes {
 		switch change.ChangeType {
 		case "app_disappeared":
-			// Just log the disappeared app, don't remove from cache
-			glog.Infof("App disappeared detected: %s (user: %s, source: %s, last state: %s) - keeping in cache",
+			glog.Infof("App disappeared detected: %s (user: %s, source: %s, last state: %s) - fixing in cache",
 				change.AppName, change.UserID, change.SourceID, change.OldState)
+			if scc.historyModule != nil {
+				record := &history.HistoryRecord{
+					Type:     history.TypeSystem,
+					Message:  fmt.Sprintf("App disappeared: %s (user: %s, source: %s, last state: %s)", change.AppName, change.UserID, change.SourceID, change.OldState),
+					Time:     time.Now().Unix(),
+					App:      change.AppName,
+					Account:  change.UserID,
+					Extended: "",
+				}
+				if err := scc.historyModule.StoreRecord(record); err != nil {
+					glog.Warningf("Failed to store app disappeared history record: %v", err)
+				}
+			}
+			if err := scc.cacheManager.RemoveAppStateData(change.UserID, change.SourceID, change.AppName); err != nil {
+				glog.Errorf("Failed to remove disappeared app %s from cache (user: %s, source: %s): %v",
+					change.AppName, change.UserID, change.SourceID, err)
+			} else {
+				glog.Infof("Successfully removed disappeared app %s from cache (user: %s, source: %s)",
+					change.AppName, change.UserID, change.SourceID)
+			}
 
 		case "app_appeared":
-			// Find the corresponding app in latest status
 			var appToUpdate *utils.AppServiceResponse
 			for _, app := range latestStatus {
 				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
@@ -519,43 +544,42 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					break
 				}
 			}
-
 			if appToUpdate == nil {
 				glog.Warningf("Could not find appeared app %s for user %s in latest status", change.AppName, change.UserID)
 				continue
 			}
-
-			// Log the appeared app but don't add to cache
-			glog.Infof("New app appeared detected: %s (user: %s, state: %s) - not adding to cache",
+			glog.Infof("New app appeared detected: %s (user: %s, state: %s) - fixing in cache",
 				change.AppName, change.UserID, appToUpdate.Status.State)
-
-			// Comment out cache update - only detect and log
-			/*
-				// Create app state data from the latest status
-				appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
-				if appStateData == nil {
-					glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
-					continue
+			if scc.historyModule != nil {
+				record := &history.HistoryRecord{
+					Type:     history.TypeSystem,
+					Message:  fmt.Sprintf("App appeared: %s (user: %s, state: %s)", change.AppName, change.UserID, appToUpdate.Status.State),
+					Time:     time.Now().Unix(),
+					App:      change.AppName,
+					Account:  change.UserID,
+					Extended: "",
 				}
-
-				// Add the new app to cache (use a default source if unknown)
-				sourceID := change.SourceID
-				if sourceID == "unknown" {
-					sourceID = "Official-Market-Sources" // Default source for new apps
+				if err := scc.historyModule.StoreRecord(record); err != nil {
+					glog.Warningf("Failed to store app appeared history record: %v", err)
 				}
-
-				stateData := scc.createStateDataFromAppStateData(appStateData)
-				if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
-					glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
-						change.AppName, change.UserID, sourceID, err)
-				} else {
-					glog.Infof("Successfully added appeared app %s to cache (user: %s, source: %s)",
-						change.AppName, change.UserID, sourceID)
-				}
-			*/
+			}
+\
+			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			if appStateData == nil {
+				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
+				continue
+			}
+			sourceID := change.SourceID
+			stateData := scc.createStateDataFromAppStateData(appStateData)
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+				glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
+					change.AppName, change.UserID, sourceID, err)
+			} else {
+				glog.Infof("Successfully added appeared app %s to cache (user: %s, source: %s)",
+					change.AppName, change.UserID, sourceID)
+			}
 
 		case "state_change":
-			// Find the corresponding app in latest status
 			var appToUpdate *utils.AppServiceResponse
 			for _, app := range latestStatus {
 				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
@@ -563,40 +587,41 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					break
 				}
 			}
-
 			if appToUpdate == nil {
 				glog.Warningf("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
 				continue
 			}
-
-			// Log the state change but don't update cache
-			glog.Infof("State change detected for app %s (user: %s, source: %s): %s -> %s - not updating cache",
+			glog.Infof("State change detected for app %s (user: %s, source: %s): %s -> %s - fixing in cache",
 				change.AppName, change.UserID, change.SourceID, change.OldState, change.NewState)
-
-			// Comment out cache update - only detect and log
-			/*
-				// Create app state data from the latest status
-				appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
-				if appStateData == nil {
-					glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
-					continue
+			if scc.historyModule != nil {
+				record := &history.HistoryRecord{
+					Type:     history.TypeSystem,
+					Message:  fmt.Sprintf("App state changed: %s (user: %s, source: %s): %s -> %s", change.AppName, change.UserID, change.SourceID, change.OldState, change.NewState),
+					Time:     time.Now().Unix(),
+					App:      change.AppName,
+					Account:  change.UserID,
+					Extended: "",
 				}
-
-				// Update the cache with the corrected status
-				stateData := scc.createStateDataFromAppStateData(appStateData)
-
-				// Update the cache
-				if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
-					glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
-						change.AppName, change.UserID, change.SourceID, err)
-				} else {
-					glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
-						change.AppName, change.UserID, change.SourceID)
+				if err := scc.historyModule.StoreRecord(record); err != nil {
+					glog.Warningf("Failed to store state change history record: %v", err)
 				}
-			*/
+			}
+
+			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			if appStateData == nil {
+				glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
+				continue
+			}
+			stateData := scc.createStateDataFromAppStateData(appStateData)
+			if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
+				glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
+					change.AppName, change.UserID, change.SourceID, err)
+			} else {
+				glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
+					change.AppName, change.UserID, change.SourceID)
+			}
 
 		case "state_inconsistency":
-			// Find the corresponding app in latest status
 			var appToUpdate *utils.AppServiceResponse
 			for _, app := range latestStatus {
 				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
@@ -604,40 +629,40 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					break
 				}
 			}
-
 			if appToUpdate == nil {
 				glog.Warningf("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
 				continue
 			}
-
-			// Log the state inconsistency but don't correct it
-			glog.Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running - not correcting",
+			glog.Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running - fixing in cache",
 				change.AppName, change.UserID, change.SourceID, appToUpdate.Status.State)
-
-			// Comment out cache update - only detect and log
-			/*
-				// Create app state data from the latest status but correct the app state to "running"
-				appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
-				if appStateData == nil {
-					glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
-					continue
+			if scc.historyModule != nil {
+				record := &history.HistoryRecord{
+					Type:     history.TypeSystem,
+					Message:  fmt.Sprintf("App state inconsistency: %s (user: %s, source: %s), app state: %s, all entrances are running", change.AppName, change.UserID, change.SourceID, appToUpdate.Status.State),
+					Time:     time.Now().Unix(),
+					App:      change.AppName,
+					Account:  change.UserID,
+					Extended: "",
 				}
-
-				// Correct the app state to "running" since all entrances are running
-				appStateData.Status.State = "running"
-
-				// Update the cache with the corrected status
-				stateData := scc.createStateDataFromAppStateData(appStateData)
-
-				// Update the cache
-				if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
-					glog.Errorf("Failed to update cache with corrected state for inconsistent app %s (user: %s, source: %s): %v",
-						change.AppName, change.UserID, change.SourceID, err)
-				} else {
-					glog.Infof("Successfully corrected inconsistent state for app %s (user: %s, source: %s): %s -> running",
-						change.AppName, change.UserID, change.SourceID, change.OldState)
+				if err := scc.historyModule.StoreRecord(record); err != nil {
+					glog.Warningf("Failed to store state inconsistency history record: %v", err)
 				}
-			*/
+			}
+
+			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			if appStateData == nil {
+				glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
+				continue
+			}
+			appStateData.Status.State = "running"
+			stateData := scc.createStateDataFromAppStateData(appStateData)
+			if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
+				glog.Errorf("Failed to update cache with corrected state for inconsistent app %s (user: %s, source: %s): %v",
+					change.AppName, change.UserID, change.SourceID, err)
+			} else {
+				glog.Infof("Successfully corrected inconsistent state for app %s (user: %s, source: %s): %s -> running",
+					change.AppName, change.UserID, change.SourceID, change.OldState)
+			}
 
 		default:
 			glog.Warningf("Unknown change type: %s for app %s (user: %s)", change.ChangeType, change.AppName, change.UserID)
@@ -795,4 +820,11 @@ func (scc *StatusCorrectionChecker) isStateInconsistent(app utils.AppServiceResp
 
 	// All entrances are running but app state is not running - this is inconsistent
 	return true
+}
+
+// SetHistoryModule sets the history module for status correction checker
+func (scc *StatusCorrectionChecker) SetHistoryModule(hm *history.HistoryModule) {
+	scc.mutex.Lock()
+	defer scc.mutex.Unlock()
+	scc.historyModule = hm
 }
