@@ -563,7 +563,7 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					glog.Warningf("Failed to store app appeared history record: %v", err)
 				}
 			}
-\
+
 			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
 				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
