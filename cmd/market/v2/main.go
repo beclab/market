@@ -84,14 +84,32 @@ func main() {
 	// Pre-startup step: Setup app service data with retry mechanism
 	log.Println("=== Pre-startup: Setting up app service data ===")
 	for {
-		if err := utils.SetupAppServiceData(); err != nil {
+		err := utils.SetupAppServiceData()
+		if err != nil {
 			log.Printf("Failed to setup app service data: %v", err)
 			log.Println("Retrying in 10 seconds...")
 			time.Sleep(10 * time.Second)
-		} else {
-			log.Println("App service data setup completed successfully")
-			break
+			continue
 		}
+
+		extractedUsers := utils.GetExtractedUsers()
+		allUserAppStateData := utils.GetAllUserAppStateData()
+
+		userCount := len(extractedUsers)
+		appCount := 0
+		for _, appList := range allUserAppStateData {
+			appCount += len(appList)
+		}
+
+		if userCount == 0 || appCount == 0 {
+			log.Printf("App service data not ready: user count = %d, app count = %d", userCount, appCount)
+			log.Println("Retrying in 10 seconds...")
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		log.Println("App service data setup completed successfully")
+		break
 	}
 	log.Println("=== End pre-startup step ===")
 
