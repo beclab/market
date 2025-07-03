@@ -81,6 +81,23 @@ func main() {
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
 
+	// 0. Initialize Settings Module (Required for API)
+	redisHost := utils.GetEnvOrDefault("REDIS_HOST", "localhost")
+	redisPort := utils.GetEnvOrDefault("REDIS_PORT", "6379")
+	redisPassword := utils.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDBStr := utils.GetEnvOrDefault("REDIS_DB", "0")
+	redisDB, err := strconv.Atoi(redisDBStr)
+	if err != nil {
+		log.Fatalf("Invalid REDIS_DB value: %v", err)
+	}
+
+	redisClient, err := settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
+	if err != nil {
+		log.Fatalf("Failed to create Redis client: %v", err)
+	}
+
+	utils.SetRedisClient(redisClient.GetRawClient())
+
 	// Pre-startup step: Setup app service data with retry mechanism
 	log.Println("=== Pre-startup: Setting up app service data ===")
 	for {
@@ -112,23 +129,6 @@ func main() {
 		break
 	}
 	log.Println("=== End pre-startup step ===")
-
-	// 0. Initialize Settings Module (Required for API)
-	redisHost := utils.GetEnvOrDefault("REDIS_HOST", "localhost")
-	redisPort := utils.GetEnvOrDefault("REDIS_PORT", "6379")
-	redisPassword := utils.GetEnvOrDefault("REDIS_PASSWORD", "")
-	redisDBStr := utils.GetEnvOrDefault("REDIS_DB", "0")
-	redisDB, err := strconv.Atoi(redisDBStr)
-	if err != nil {
-		log.Fatalf("Invalid REDIS_DB value: %v", err)
-	}
-
-	redisClient, err := settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
-	if err != nil {
-		log.Fatalf("Failed to create Redis client: %v", err)
-	}
-
-	utils.SetRedisClient(redisClient.GetRawClient())
 
 	settingsManager := settings.NewSettingsManager(redisClient)
 	if err := settingsManager.Initialize(); err != nil {
