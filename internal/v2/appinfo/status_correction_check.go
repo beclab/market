@@ -35,6 +35,7 @@ type StatusChange struct {
 	UserID          string                 `json:"user_id"`
 	SourceID        string                 `json:"source_id"`
 	AppName         string                 `json:"app_name"`
+	ChangeType      string                 `json:"change_type"` // "state_change", "app_disappeared", "app_appeared"
 	OldState        string                 `json:"old_state"`
 	NewState        string                 `json:"new_state"`
 	EntranceChanges []EntranceStatusChange `json:"entrance_changes,omitempty"`
@@ -264,6 +265,94 @@ func (scc *StatusCorrectionChecker) getCachedStatus() map[string]*types.AppState
 func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServiceResponse, cachedStatus map[string]*types.AppStateLatestData) []StatusChange {
 	var changes []StatusChange
 
+	// Create maps for easier lookup
+	latestApps := make(map[string]*utils.AppServiceResponse)
+	for i := range latestStatus {
+		app := &latestStatus[i]
+		key := fmt.Sprintf("%s:%s", app.Spec.Owner, app.Spec.Name)
+		latestApps[key] = app
+	}
+
+	cachedApps := make(map[string]*types.AppStateLatestData)
+	var cachedAppKeys []string
+	for key, cached := range cachedStatus {
+		cachedApps[key] = cached
+		cachedAppKeys = append(cachedAppKeys, key)
+	}
+
+	// 1. Check for new apps (appeared in latest but not in cache)
+	for _, app := range latestStatus {
+		userID := app.Spec.Owner
+		appName := app.Spec.Name
+
+		// Check if this app exists in cache
+		foundInCache := false
+		for key, cached := range cachedApps {
+			if cached.Status.Name == appName {
+				// Extract user and source from key
+				parts := strings.SplitN(key, ":", 3)
+				if len(parts) == 3 && parts[0] == userID {
+					foundInCache = true
+					break
+				}
+			}
+		}
+
+		if !foundInCache {
+			// New app appeared
+			change := StatusChange{
+				UserID:     userID,
+				SourceID:   "unknown", // We don't know the source for new apps
+				AppName:    appName,
+				ChangeType: "app_appeared",
+				OldState:   "unknown",
+				NewState:   app.Status.State,
+				Timestamp:  time.Now(),
+			}
+			changes = append(changes, change)
+
+			glog.Infof("New app appeared: %s (user: %s, state: %s)", appName, userID, app.Status.State)
+		}
+	}
+
+	// 2. Check for disappeared apps (in cache but not in latest)
+	for key, cached := range cachedApps {
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		userID := parts[0]
+		sourceID := parts[1]
+		appName := cached.Status.Name
+
+		// Check if this app still exists in latest status
+		foundInLatest := false
+		for _, app := range latestStatus {
+			if app.Spec.Owner == userID && app.Spec.Name == appName {
+				foundInLatest = true
+				break
+			}
+		}
+
+		if !foundInLatest {
+			// App disappeared
+			change := StatusChange{
+				UserID:     userID,
+				SourceID:   sourceID,
+				AppName:    appName,
+				ChangeType: "app_disappeared",
+				OldState:   cached.Status.State,
+				NewState:   "unknown",
+				Timestamp:  time.Now(),
+			}
+			changes = append(changes, change)
+
+			glog.Infof("App disappeared: %s (user: %s, source: %s, last state: %s)",
+				appName, userID, sourceID, cached.Status.State)
+		}
+	}
+
+	// 3. Check for state changes in existing apps
 	for _, app := range latestStatus {
 		userID := app.Spec.Owner
 		appName := app.Spec.Name
@@ -272,7 +361,7 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 		var cachedApp *types.AppStateLatestData
 		var sourceID string
 
-		for key, cached := range cachedStatus {
+		for key, cached := range cachedApps {
 			if cached.Status.Name == appName {
 				// Extract user and source from key
 				parts := strings.SplitN(key, ":", 3)
@@ -285,7 +374,7 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 		}
 
 		if cachedApp == nil {
-			glog.V(2).Infof("No cached status found for app: %s (user: %s)", appName, userID)
+			// This case is already handled in step 1 (new app)
 			continue
 		}
 
@@ -300,6 +389,7 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 				UserID:          userID,
 				SourceID:        sourceID,
 				AppName:         appName,
+				ChangeType:      "state_change",
 				OldState:        cachedApp.Status.State,
 				NewState:        app.Status.State,
 				EntranceChanges: entranceChanges,
@@ -370,59 +460,85 @@ func (scc *StatusCorrectionChecker) compareEntranceStatuses(cachedEntrances []st
 // applyCorrections applies the detected status changes to the cache
 func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, latestStatus []utils.AppServiceResponse) {
 	for _, change := range changes {
-		// Find the corresponding app in latest status
-		var appToUpdate *utils.AppServiceResponse
-		for _, app := range latestStatus {
-			if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
-				appToUpdate = &app
-				break
+		switch change.ChangeType {
+		case "app_disappeared":
+			// Just log the disappeared app, don't remove from cache
+			glog.Infof("App disappeared detected: %s (user: %s, source: %s, last state: %s) - keeping in cache",
+				change.AppName, change.UserID, change.SourceID, change.OldState)
+
+		case "app_appeared":
+			// Find the corresponding app in latest status
+			var appToUpdate *utils.AppServiceResponse
+			for _, app := range latestStatus {
+				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
+					appToUpdate = &app
+					break
+				}
 			}
-		}
 
-		if appToUpdate == nil {
-			glog.Warningf("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
-			continue
-		}
-
-		// Create app state data from the latest status
-		appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
-		if appStateData == nil {
-			glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
-			continue
-		}
-
-		// Update the cache with the corrected status
-		stateData := map[string]interface{}{
-			"name":               appStateData.Status.Name,
-			"state":              appStateData.Status.State,
-			"updateTime":         appStateData.Status.UpdateTime,
-			"statusTime":         appStateData.Status.StatusTime,
-			"lastTransitionTime": appStateData.Status.LastTransitionTime,
-			"progress":           appStateData.Status.Progress,
-		}
-
-		// Convert entrance statuses to interface{} slice
-		entranceStatuses := make([]interface{}, len(appStateData.Status.EntranceStatuses))
-		for i, entrance := range appStateData.Status.EntranceStatuses {
-			entranceStatuses[i] = map[string]interface{}{
-				"id":         entrance.ID,
-				"name":       entrance.Name,
-				"state":      entrance.State,
-				"statusTime": entrance.StatusTime,
-				"reason":     entrance.Reason,
-				"url":        entrance.Url,
-				"invisible":  entrance.Invisible,
+			if appToUpdate == nil {
+				glog.Warningf("Could not find appeared app %s for user %s in latest status", change.AppName, change.UserID)
+				continue
 			}
-		}
-		stateData["entranceStatuses"] = entranceStatuses
 
-		// Update the cache
-		if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
-			glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
-				change.AppName, change.UserID, change.SourceID, err)
-		} else {
-			glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
-				change.AppName, change.UserID, change.SourceID)
+			// Create app state data from the latest status
+			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			if appStateData == nil {
+				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
+				continue
+			}
+
+			// Add the new app to cache (use a default source if unknown)
+			sourceID := change.SourceID
+			if sourceID == "unknown" {
+				sourceID = "Official-Market-Sources" // Default source for new apps
+			}
+
+			stateData := scc.createStateDataFromAppStateData(appStateData)
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+				glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
+					change.AppName, change.UserID, sourceID, err)
+			} else {
+				glog.Infof("Successfully added appeared app %s to cache (user: %s, source: %s)",
+					change.AppName, change.UserID, sourceID)
+			}
+
+		case "state_change":
+			// Find the corresponding app in latest status
+			var appToUpdate *utils.AppServiceResponse
+			for _, app := range latestStatus {
+				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
+					appToUpdate = &app
+					break
+				}
+			}
+
+			if appToUpdate == nil {
+				glog.Warningf("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
+				continue
+			}
+
+			// Create app state data from the latest status
+			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			if appStateData == nil {
+				glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
+				continue
+			}
+
+			// Update the cache with the corrected status
+			stateData := scc.createStateDataFromAppStateData(appStateData)
+
+			// Update the cache
+			if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
+				glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
+					change.AppName, change.UserID, change.SourceID, err)
+			} else {
+				glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
+					change.AppName, change.UserID, change.SourceID)
+			}
+
+		default:
+			glog.Warningf("Unknown change type: %s for app %s (user: %s)", change.ChangeType, change.AppName, change.UserID)
 		}
 	}
 }
@@ -505,6 +621,35 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			EntranceStatuses:   entranceStatuses,
 		},
 	}
+}
+
+// createStateDataFromAppStateData creates a state data from AppStateLatestData
+func (scc *StatusCorrectionChecker) createStateDataFromAppStateData(appStateData *types.AppStateLatestData) map[string]interface{} {
+	stateData := map[string]interface{}{
+		"name":               appStateData.Status.Name,
+		"state":              appStateData.Status.State,
+		"updateTime":         appStateData.Status.UpdateTime,
+		"statusTime":         appStateData.Status.StatusTime,
+		"lastTransitionTime": appStateData.Status.LastTransitionTime,
+		"progress":           appStateData.Status.Progress,
+	}
+
+	// Convert entrance statuses to interface{} slice
+	entranceStatuses := make([]interface{}, len(appStateData.Status.EntranceStatuses))
+	for i, entrance := range appStateData.Status.EntranceStatuses {
+		entranceStatuses[i] = map[string]interface{}{
+			"id":         entrance.ID,
+			"name":       entrance.Name,
+			"state":      entrance.State,
+			"statusTime": entrance.StatusTime,
+			"reason":     entrance.Reason,
+			"url":        entrance.Url,
+			"invisible":  entrance.Invisible,
+		}
+	}
+	stateData["entranceStatuses"] = entranceStatuses
+
+	return stateData
 }
 
 // ForceCheck performs an immediate status check
