@@ -703,7 +703,7 @@ func (tm *TaskModule) InstallTaskFailed(opID string, errorMsg string) error {
 	return nil
 }
 
-// InstallTaskCanceled marks an install task as canceled by app name, version, source, and user
+// InstallTaskCanceled marks an install task as canceled by app name, source, and user
 func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -712,21 +712,18 @@ func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user stri
 	var targetTask *Task
 	for _, task := range tm.runningTasks {
 		if task.Type == InstallApp && task.AppName == appName && task.User == user {
-			// Check if version matches
-			if version, ok := task.Metadata["version"].(string); ok && version == appVersion {
-				// Check if source matches
-				if taskSource, ok := task.Metadata["source"].(string); ok && taskSource == source {
-					targetTask = task
-					break
-				}
+			// Check if source matches
+			if taskSource, ok := task.Metadata["source"].(string); ok && taskSource == source {
+				targetTask = task
+				break
 			}
 		}
 	}
 
 	if targetTask == nil {
-		log.Printf("[%s] InstallTaskCanceled - No running install task found with appName: %s, version: %s, source: %s, user: %s",
-			tm.instanceID, appName, appVersion, source, user)
-		return fmt.Errorf("no running install task found with appName: %s, version: %s, source: %s, user: %s", appName, appVersion, source, user)
+		log.Printf("[%s] InstallTaskCanceled - No running install task found with appName: %s, source: %s, user: %s",
+			tm.instanceID, appName, source, user)
+		return fmt.Errorf("no running install task found with appName: %s, source: %s, user: %s", appName, source, user)
 	}
 
 	// Mark task as canceled
@@ -735,8 +732,8 @@ func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user stri
 	targetTask.CompletedAt = &now
 	targetTask.ErrorMsg = "Installation canceled via external signal"
 
-	log.Printf("[%s] InstallTaskCanceled - Task marked as canceled: ID=%s, AppName=%s, Version=%s, Source=%s, User=%s, Duration=%v",
-		tm.instanceID, targetTask.ID, appName, appVersion, source, user, now.Sub(*targetTask.StartedAt))
+	log.Printf("[%s] InstallTaskCanceled - Task marked as canceled: ID=%s, AppName=%s, Source=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, appName, source, user, now.Sub(*targetTask.StartedAt))
 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
