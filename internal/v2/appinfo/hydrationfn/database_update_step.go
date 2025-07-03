@@ -935,7 +935,10 @@ func (s *DatabaseUpdateStep) createSafePendingDataCopy(pendingData *types.AppInf
 			}
 			if f.name == "metadata" {
 				if _, err := json.Marshal(f.val); err != nil {
-					continue // skip metadata if marshal failed
+					safeMeta := SafeMapStringInterfaceOneLevel(f.val)
+					rawDataMap[f.name] = safeMeta
+					log.Printf("DEBUG: RawData.metadata fallback to one-level map, keys: %d", len(safeMeta))
+					continue
 				}
 			}
 			rawDataMap[f.name] = convertToStringMapDBUSWithLog(f.val, "RawData."+f.name)
@@ -977,7 +980,10 @@ func (s *DatabaseUpdateStep) createSafePendingDataCopy(pendingData *types.AppInf
 			}
 			if f.name == "metadata" {
 				if _, err := json.Marshal(f.val); err != nil {
-					continue // skip metadata if marshal failed
+					safeMeta := SafeMapStringInterfaceOneLevel(f.val)
+					appEntryMap[f.name] = safeMeta
+					log.Printf("DEBUG: AppEntry.metadata fallback to one-level map, keys: %d", len(safeMeta))
+					continue
 				}
 			}
 			appEntryMap[f.name] = convertToStringMapDBUSWithLog(f.val, "AppEntry."+f.name)
@@ -1024,4 +1030,21 @@ func convertToStringMapDBUS(val interface{}) map[string]interface{} {
 	default:
 		return nil
 	}
+}
+
+func SafeMapStringInterfaceOneLevel(val interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+	m, ok := val.(map[string]interface{})
+	if !ok {
+		return result
+	}
+	for k, v := range m {
+		switch v := v.(type) {
+		case string, int, int64, float64, bool, nil:
+			result[k] = v
+		default:
+			result[k] = fmt.Sprintf("<%T>", v)
+		}
+	}
+	return result
 }
