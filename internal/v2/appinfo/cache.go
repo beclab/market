@@ -268,6 +268,12 @@ func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState
 	found := false
 	for i, existingAppState := range sourceData.AppStateLatest {
 		if existingAppState != nil && existingAppState.Status.Name == newAppState.Status.Name {
+			// If new app state has empty EntranceStatuses, preserve the old ones
+			if len(newAppState.Status.EntranceStatuses) == 0 && len(existingAppState.Status.EntranceStatuses) > 0 {
+				glog.Infof("New app state for %s has empty EntranceStatuses, preserving old entrance statuses", newAppState.Status.Name)
+				newAppState.Status.EntranceStatuses = existingAppState.Status.EntranceStatuses
+			}
+
 			// Update existing app state
 			sourceData.AppStateLatest[i] = newAppState
 			glog.V(2).Infof("Updated existing app state for app: %s", newAppState.Status.Name)
