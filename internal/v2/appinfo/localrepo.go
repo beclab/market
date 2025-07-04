@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"market/internal/v2/types"
+	"market/internal/v2/utils"
 
 	"gopkg.in/yaml.v3"
 )
@@ -570,9 +571,10 @@ func (lr *LocalRepo) renderManifest(content, token string) (string, error) {
 		Capabilities: make(map[string]interface{}),
 	}
 
-	// Get admin username - try to get from environment or use default
-	adminUsername := os.Getenv("ADMIN_USERNAME")
-	if adminUsername == "" {
+	// Get admin username using utils function
+	adminUsername, err := utils.GetAdminUsername("")
+	if err != nil {
+		log.Printf("Warning: failed to get admin username, using default: %v", err)
 		adminUsername = "admin" // fallback to default
 	}
 
@@ -629,85 +631,85 @@ func (lr *LocalRepo) renderManifest(content, token string) (string, error) {
 }
 
 // renderManifestWithCustomData renders the manifest with custom template data
-func (lr *LocalRepo) renderManifestWithCustomData(content string, customValues map[string]interface{}, userID string) (string, error) {
-	// Check if content contains template syntax
-	if !strings.Contains(content, "{{") {
-		log.Printf("No template syntax found, returning content as-is")
-		return content, nil
-	}
+// func (lr *LocalRepo) renderManifestWithCustomData(content string, customValues map[string]interface{}, userID string) (string, error) {
+// 	// Check if content contains template syntax
+// 	if !strings.Contains(content, "{{") {
+// 		log.Printf("No template syntax found, returning content as-is")
+// 		return content, nil
+// 	}
 
-	log.Printf("Rendering manifest with custom template data for user: %s", userID)
+// 	log.Printf("Rendering manifest with custom template data for user: %s", userID)
 
-	// Create template data similar to rendered_chart_step.go
-	templateData := &TemplateData{
-		Values:       make(map[string]interface{}),
-		Release:      make(map[string]interface{}),
-		Chart:        make(map[string]interface{}),
-		Capabilities: make(map[string]interface{}),
-	}
+// 	// Create template data similar to rendered_chart_step.go
+// 	templateData := &TemplateData{
+// 		Values:       make(map[string]interface{}),
+// 		Release:      make(map[string]interface{}),
+// 		Chart:        make(map[string]interface{}),
+// 		Capabilities: make(map[string]interface{}),
+// 	}
 
-	// Get admin username - try to get from environment or use default
-	adminUsername := os.Getenv("ADMIN_USERNAME")
-	if adminUsername == "" {
-		adminUsername = "admin" // fallback to default
-	}
+// 	// Get admin username - try to get from environment or use default
+// 	adminUsername := os.Getenv("ADMIN_USERNAME")
+// 	if adminUsername == "" {
+// 		adminUsername = "admin" // fallback to default
+// 	}
 
-	// Set basic template values
-	templateData.Values["admin"] = adminUsername
-	templateData.Values["bfl"] = map[string]interface{}{
-		"username": userID,
-	}
-	templateData.Values["user"] = map[string]interface{}{
-		"zone": fmt.Sprintf("user-space-%s", userID),
-	}
+// 	// Set basic template values
+// 	templateData.Values["admin"] = adminUsername
+// 	templateData.Values["bfl"] = map[string]interface{}{
+// 		"username": userID,
+// 	}
+// 	templateData.Values["user"] = map[string]interface{}{
+// 		"zone": fmt.Sprintf("user-space-%s", userID),
+// 	}
 
-	// Merge custom values into template data
-	for key, value := range customValues {
-		templateData.Values[key] = value
-	}
+// 	// Merge custom values into template data
+// 	for key, value := range customValues {
+// 		templateData.Values[key] = value
+// 	}
 
-	// Add Helm standard template variables
-	templateData.Release = map[string]interface{}{
-		"Name":      "chart",
-		"Namespace": fmt.Sprintf("chart-%s", userID),
-		"Service":   "Helm",
-	}
+// 	// Add Helm standard template variables
+// 	templateData.Release = map[string]interface{}{
+// 		"Name":      "chart",
+// 		"Namespace": fmt.Sprintf("chart-%s", userID),
+// 		"Service":   "Helm",
+// 	}
 
-	// Add Chart information
-	templateData.Chart = map[string]interface{}{
-		"Name":    "chart",
-		"Version": "0.0.1",
-	}
+// 	// Add Chart information
+// 	templateData.Chart = map[string]interface{}{
+// 		"Name":    "chart",
+// 		"Version": "0.0.1",
+// 	}
 
-	// Add Capabilities information for Helm template compatibility
-	templateData.Capabilities = map[string]interface{}{
-		"KubeVersion": map[string]interface{}{
-			"Major": "1",
-			"Minor": "28",
-		},
-		"APIVersions": map[string]interface{}{
-			"Has": func(apiVersion string) bool {
-				return true
-			},
-		},
-		"Supports": map[string]interface{}{
-			"CRD": func(apiVersion string) bool {
-				return true
-			},
-		},
-	}
+// 	// Add Capabilities information for Helm template compatibility
+// 	templateData.Capabilities = map[string]interface{}{
+// 		"KubeVersion": map[string]interface{}{
+// 			"Major": "1",
+// 			"Minor": "28",
+// 		},
+// 		"APIVersions": map[string]interface{}{
+// 			"Has": func(apiVersion string) bool {
+// 				return true
+// 			},
+// 		},
+// 		"Supports": map[string]interface{}{
+// 			"CRD": func(apiVersion string) bool {
+// 				return true
+// 			},
+// 		},
+// 	}
 
-	// Render the template using the same logic as rendered_chart_step.go
-	renderedContent, err := lr.renderTemplate(content, templateData)
-	if err != nil {
-		return "", fmt.Errorf("failed to render template: %w", err)
-	}
+// 	// Render the template using the same logic as rendered_chart_step.go
+// 	renderedContent, err := lr.renderTemplate(content, templateData)
+// 	if err != nil {
+// 		return "", fmt.Errorf("failed to render template: %w", err)
+// 	}
 
-	log.Printf("Template rendered successfully with custom data - Original length: %d, Rendered length: %d",
-		len(content), len(renderedContent))
+// 	log.Printf("Template rendered successfully with custom data - Original length: %d, Rendered length: %d",
+// 		len(content), len(renderedContent))
 
-	return renderedContent, nil
-}
+// 	return renderedContent, nil
+// }
 
 // TemplateData holds data for rendering templates (copied from rendered_chart_step.go)
 type TemplateData struct {
@@ -1837,159 +1839,159 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 	return appInfo, nil
 }
 
-// parseAppInfoWithCustomData parses app information from the chart with custom template data
-func (lr *LocalRepo) parseAppInfoWithCustomData(chartDir string, customValues map[string]interface{}, userID string) (*types.ApplicationInfoEntry, error) {
-	appCfgFile := filepath.Join(chartDir, AppCfgFileName)
+// // parseAppInfoWithCustomData parses app information from the chart with custom template data
+// func (lr *LocalRepo) parseAppInfoWithCustomData(chartDir string, customValues map[string]interface{}, userID string) (*types.ApplicationInfoEntry, error) {
+// 	appCfgFile := filepath.Join(chartDir, AppCfgFileName)
 
-	// Read the configuration file
-	content, err := os.ReadFile(appCfgFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", AppCfgFileName, err)
-	}
+// 	// Read the configuration file
+// 	content, err := os.ReadFile(appCfgFile)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to read %s: %w", AppCfgFileName, err)
+// 	}
 
-	// Render the manifest with custom template data
-	renderedContent, err := lr.renderManifestWithCustomData(string(content), customValues, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to render manifest with custom data: %w", err)
-	}
+// 	// Render the manifest with custom template data
+// 	renderedContent, err := lr.renderManifestWithCustomData(string(content), customValues, userID)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to render manifest with custom data: %w", err)
+// 	}
 
-	// Parse the rendered configuration - using the correct structure that matches OlaresManifest.yaml
-	var appCfg struct {
-		ConfigVersion string `yaml:"olaresManifest.version"`
-		ConfigType    string `yaml:"olaresManifest.type"`
-		Metadata      struct {
-			Name        string   `yaml:"name"`
-			Icon        string   `yaml:"icon"`
-			Description string   `yaml:"description"`
-			AppID       string   `yaml:"appid"`
-			Title       string   `yaml:"title"`
-			Version     string   `yaml:"version"`
-			Categories  []string `yaml:"categories"`
-			Rating      float32  `yaml:"rating"`
-			Target      string   `yaml:"target"`
-		} `yaml:"metadata"`
-		Spec struct {
-			VersionName        string         `yaml:"versionName"`
-			FullDescription    string         `yaml:"fullDescription"`
-			UpgradeDescription string         `yaml:"upgradeDescription"`
-			PromoteImage       []string       `yaml:"promoteImage"`
-			PromoteVideo       string         `yaml:"promoteVideo"`
-			SubCategory        string         `yaml:"subCategory"`
-			Developer          string         `yaml:"developer"`
-			RequiredMemory     string         `yaml:"requiredMemory"`
-			RequiredDisk       string         `yaml:"requiredDisk"`
-			SupportClient      *SupportClient `yaml:"supportClient"`
-			SupportArch        []string       `yaml:"supportArch"`
-			RequiredGPU        string         `yaml:"requiredGPU"`
-			RequiredCPU        string         `yaml:"requiredCPU"`
-			Locale             []string       `yaml:"locale"`
-			Submitter          string         `yaml:"submitter"`
-			Doc                string         `yaml:"doc"`
-			Website            string         `yaml:"website"`
-			FeatureImage       string         `yaml:"featuredImage"`
-			SourceCode         string         `yaml:"sourceCode"`
-			ModelSize          string         `yaml:"modelSize"`
-			Namespace          string         `yaml:"namespace"`
-			OnlyAdmin          bool           `yaml:"onlyAdmin"`
-		} `yaml:"spec"`
-		Permission *Permission `yaml:"permission"`
-		Middleware *Middleware `yaml:"middleware"`
-		Options    *Options    `yaml:"options"`
-		Entrances  []*Entrance `yaml:"entrances"`
-	}
+// 	// Parse the rendered configuration - using the correct structure that matches OlaresManifest.yaml
+// 	var appCfg struct {
+// 		ConfigVersion string `yaml:"olaresManifest.version"`
+// 		ConfigType    string `yaml:"olaresManifest.type"`
+// 		Metadata      struct {
+// 			Name        string   `yaml:"name"`
+// 			Icon        string   `yaml:"icon"`
+// 			Description string   `yaml:"description"`
+// 			AppID       string   `yaml:"appid"`
+// 			Title       string   `yaml:"title"`
+// 			Version     string   `yaml:"version"`
+// 			Categories  []string `yaml:"categories"`
+// 			Rating      float32  `yaml:"rating"`
+// 			Target      string   `yaml:"target"`
+// 		} `yaml:"metadata"`
+// 		Spec struct {
+// 			VersionName        string         `yaml:"versionName"`
+// 			FullDescription    string         `yaml:"fullDescription"`
+// 			UpgradeDescription string         `yaml:"upgradeDescription"`
+// 			PromoteImage       []string       `yaml:"promoteImage"`
+// 			PromoteVideo       string         `yaml:"promoteVideo"`
+// 			SubCategory        string         `yaml:"subCategory"`
+// 			Developer          string         `yaml:"developer"`
+// 			RequiredMemory     string         `yaml:"requiredMemory"`
+// 			RequiredDisk       string         `yaml:"requiredDisk"`
+// 			SupportClient      *SupportClient `yaml:"supportClient"`
+// 			SupportArch        []string       `yaml:"supportArch"`
+// 			RequiredGPU        string         `yaml:"requiredGPU"`
+// 			RequiredCPU        string         `yaml:"requiredCPU"`
+// 			Locale             []string       `yaml:"locale"`
+// 			Submitter          string         `yaml:"submitter"`
+// 			Doc                string         `yaml:"doc"`
+// 			Website            string         `yaml:"website"`
+// 			FeatureImage       string         `yaml:"featuredImage"`
+// 			SourceCode         string         `yaml:"sourceCode"`
+// 			ModelSize          string         `yaml:"modelSize"`
+// 			Namespace          string         `yaml:"namespace"`
+// 			OnlyAdmin          bool           `yaml:"onlyAdmin"`
+// 		} `yaml:"spec"`
+// 		Permission *Permission `yaml:"permission"`
+// 		Middleware *Middleware `yaml:"middleware"`
+// 		Options    *Options    `yaml:"options"`
+// 		Entrances  []*Entrance `yaml:"entrances"`
+// 	}
 
-	if err := yaml.Unmarshal([]byte(renderedContent), &appCfg); err != nil {
-		return nil, fmt.Errorf("failed to parse rendered %s: %w", AppCfgFileName, err)
-	}
+// 	if err := yaml.Unmarshal([]byte(renderedContent), &appCfg); err != nil {
+// 		return nil, fmt.Errorf("failed to parse rendered %s: %w", AppCfgFileName, err)
+// 	}
 
-	// Validate required fields
-	if appCfg.Metadata.Name == "" {
-		return nil, fmt.Errorf("metadata.name is required")
-	}
-	if appCfg.Metadata.AppID == "" {
-		return nil, fmt.Errorf("metadata.appid is required")
-	}
-	if appCfg.Metadata.Version == "" {
-		return nil, fmt.Errorf("metadata.version is required")
-	}
+// 	// Validate required fields
+// 	if appCfg.Metadata.Name == "" {
+// 		return nil, fmt.Errorf("metadata.name is required")
+// 	}
+// 	if appCfg.Metadata.AppID == "" {
+// 		return nil, fmt.Errorf("metadata.appid is required")
+// 	}
+// 	if appCfg.Metadata.Version == "" {
+// 		return nil, fmt.Errorf("metadata.version is required")
+// 	}
 
-	// Create ApplicationInfoEntry with proper field mapping
-	appInfo := &types.ApplicationInfoEntry{
-		ID:                 appCfg.Metadata.AppID, // Use AppID as the primary ID
-		AppID:              appCfg.Metadata.AppID,
-		Name:               appCfg.Metadata.Name,
-		CfgType:            appCfg.ConfigType,
-		ChartName:          appCfg.Metadata.Name,
-		Icon:               appCfg.Metadata.Icon,
-		Description:        map[string]string{"en-US": appCfg.Metadata.Description},
-		Title:              map[string]string{"en-US": appCfg.Metadata.Title},
-		Version:            appCfg.Metadata.Version,
-		Categories:         appCfg.Metadata.Categories,
-		VersionName:        appCfg.Spec.VersionName,
-		FullDescription:    map[string]string{"en-US": appCfg.Spec.FullDescription},
-		UpgradeDescription: map[string]string{"en-US": appCfg.Spec.UpgradeDescription},
-		PromoteImage:       appCfg.Spec.PromoteImage,
-		PromoteVideo:       appCfg.Spec.PromoteVideo,
-		SubCategory:        appCfg.Spec.SubCategory,
-		Developer:          appCfg.Spec.Developer,
-		RequiredMemory:     appCfg.Spec.RequiredMemory,
-		RequiredDisk:       appCfg.Spec.RequiredDisk,
-		SupportArch:        appCfg.Spec.SupportArch,
-		RequiredGPU:        appCfg.Spec.RequiredGPU,
-		RequiredCPU:        appCfg.Spec.RequiredCPU,
-		Rating:             appCfg.Metadata.Rating,
-		Target:             appCfg.Metadata.Target,
-		Locale:             appCfg.Spec.Locale,
-		Submitter:          appCfg.Spec.Submitter,
-		Doc:                appCfg.Spec.Doc,
-		Website:            appCfg.Spec.Website,
-		FeaturedImage:      appCfg.Spec.FeatureImage,
-		SourceCode:         appCfg.Spec.SourceCode,
-		ModelSize:          appCfg.Spec.ModelSize,
-		Namespace:          appCfg.Spec.Namespace,
-		OnlyAdmin:          appCfg.Spec.OnlyAdmin,
-		CreateTime:         time.Now().Unix(),
-		UpdateTime:         time.Now().Unix(),
-		Metadata:           lr.createInitialMetadata(appCfg.ConfigVersion, appCfg.ConfigType),
-	}
+// 	// Create ApplicationInfoEntry with proper field mapping
+// 	appInfo := &types.ApplicationInfoEntry{
+// 		ID:                 appCfg.Metadata.AppID, // Use AppID as the primary ID
+// 		AppID:              appCfg.Metadata.AppID,
+// 		Name:               appCfg.Metadata.Name,
+// 		CfgType:            appCfg.ConfigType,
+// 		ChartName:          appCfg.Metadata.Name,
+// 		Icon:               appCfg.Metadata.Icon,
+// 		Description:        map[string]string{"en-US": appCfg.Metadata.Description},
+// 		Title:              map[string]string{"en-US": appCfg.Metadata.Title},
+// 		Version:            appCfg.Metadata.Version,
+// 		Categories:         appCfg.Metadata.Categories,
+// 		VersionName:        appCfg.Spec.VersionName,
+// 		FullDescription:    map[string]string{"en-US": appCfg.Spec.FullDescription},
+// 		UpgradeDescription: map[string]string{"en-US": appCfg.Spec.UpgradeDescription},
+// 		PromoteImage:       appCfg.Spec.PromoteImage,
+// 		PromoteVideo:       appCfg.Spec.PromoteVideo,
+// 		SubCategory:        appCfg.Spec.SubCategory,
+// 		Developer:          appCfg.Spec.Developer,
+// 		RequiredMemory:     appCfg.Spec.RequiredMemory,
+// 		RequiredDisk:       appCfg.Spec.RequiredDisk,
+// 		SupportArch:        appCfg.Spec.SupportArch,
+// 		RequiredGPU:        appCfg.Spec.RequiredGPU,
+// 		RequiredCPU:        appCfg.Spec.RequiredCPU,
+// 		Rating:             appCfg.Metadata.Rating,
+// 		Target:             appCfg.Metadata.Target,
+// 		Locale:             appCfg.Spec.Locale,
+// 		Submitter:          appCfg.Spec.Submitter,
+// 		Doc:                appCfg.Spec.Doc,
+// 		Website:            appCfg.Spec.Website,
+// 		FeaturedImage:      appCfg.Spec.FeatureImage,
+// 		SourceCode:         appCfg.Spec.SourceCode,
+// 		ModelSize:          appCfg.Spec.ModelSize,
+// 		Namespace:          appCfg.Spec.Namespace,
+// 		OnlyAdmin:          appCfg.Spec.OnlyAdmin,
+// 		CreateTime:         time.Now().Unix(),
+// 		UpdateTime:         time.Now().Unix(),
+// 		Metadata:           lr.createInitialMetadata(appCfg.ConfigVersion, appCfg.ConfigType),
+// 	}
 
-	// Store only essential metadata to avoid circular references
-	appInfo.Metadata["config_version"] = appCfg.ConfigVersion
-	appInfo.Metadata["config_type"] = appCfg.ConfigType
-	appInfo.Metadata["parsed_at"] = time.Now().Unix()
+// 	// Store only essential metadata to avoid circular references
+// 	appInfo.Metadata["config_version"] = appCfg.ConfigVersion
+// 	appInfo.Metadata["config_type"] = appCfg.ConfigType
+// 	appInfo.Metadata["parsed_at"] = time.Now().Unix()
 
-	// Convert SupportClient to map[string]interface{} for compatibility
-	if appCfg.Spec.SupportClient != nil {
-		appInfo.SupportClient = lr.convertSupportClientToMap(appCfg.Spec.SupportClient)
-	}
+// 	// Convert SupportClient to map[string]interface{} for compatibility
+// 	if appCfg.Spec.SupportClient != nil {
+// 		appInfo.SupportClient = lr.convertSupportClientToMap(appCfg.Spec.SupportClient)
+// 	}
 
-	// Convert Permission to map[string]interface{} for compatibility
-	if appCfg.Permission != nil {
-		appInfo.Permission = lr.convertPermissionToMap(appCfg.Permission)
-	}
+// 	// Convert Permission to map[string]interface{} for compatibility
+// 	if appCfg.Permission != nil {
+// 		appInfo.Permission = lr.convertPermissionToMap(appCfg.Permission)
+// 	}
 
-	// Convert Middleware to map[string]interface{} for compatibility
-	if appCfg.Middleware != nil {
-		appInfo.Middleware = lr.convertMiddlewareToMap(appCfg.Middleware)
-	}
+// 	// Convert Middleware to map[string]interface{} for compatibility
+// 	if appCfg.Middleware != nil {
+// 		appInfo.Middleware = lr.convertMiddlewareToMap(appCfg.Middleware)
+// 	}
 
-	// Convert Options to map[string]interface{} for compatibility
-	if appCfg.Options != nil {
-		appInfo.Options = lr.convertOptionsToMap(appCfg.Options)
-	}
+// 	// Convert Options to map[string]interface{} for compatibility
+// 	if appCfg.Options != nil {
+// 		appInfo.Options = lr.convertOptionsToMap(appCfg.Options)
+// 	}
 
-	// Convert Entrances to []map[string]interface{} for compatibility
-	if appCfg.Entrances != nil {
-		appInfo.Entrances = lr.convertEntrancesToMapSlice(appCfg.Entrances)
-	}
+// 	// Convert Entrances to []map[string]interface{} for compatibility
+// 	if appCfg.Entrances != nil {
+// 		appInfo.Entrances = lr.convertEntrancesToMapSlice(appCfg.Entrances)
+// 	}
 
-	// Load i18n information if available
-	if err := lr.loadI18nInfo(appInfo, chartDir); err != nil {
-		log.Printf("Warning: failed to load i18n info: %v", err)
-	}
+// 	// Load i18n information if available
+// 	if err := lr.loadI18nInfo(appInfo, chartDir); err != nil {
+// 		log.Printf("Warning: failed to load i18n info: %v", err)
+// 	}
 
-	return appInfo, nil
-}
+// 	return appInfo, nil
+// }
 
 // loadI18nInfo loads internationalization information
 func (lr *LocalRepo) loadI18nInfo(appInfo *types.ApplicationInfoEntry, chartDir string) error {
