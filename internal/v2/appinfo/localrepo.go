@@ -174,11 +174,36 @@ type AppMetaData struct {
 	Target      string   `yaml:"target"`
 }
 
+type Spec struct {
+	VersionName     string   `yaml:"versionName"`     // version name
+	FullDescription string   `yaml:"fullDescription"` // full description
+	Developer       string   `yaml:"developer"`       // developer
+	Website         string   `yaml:"website"`         // website
+	SourceCode      string   `yaml:"sourceCode"`      // source code
+	Submitter       string   `yaml:"submitter"`       // submitter
+	Locale          []string `yaml:"locale"`          // supported locales
+	Doc             string   `yaml:"doc"`             // documentation url
+	License         []struct {
+		Text string `yaml:"text"`
+		URL  string `yaml:"url"`
+	} `yaml:"license"` // license info
+	RequiredMemory string   `yaml:"requiredMemory"` // required memory
+	LimitedMemory  string   `yaml:"limitedMemory"`  // limited memory
+	RequiredDisk   string   `yaml:"requiredDisk"`   // required disk
+	LimitedDisk    string   `yaml:"limitedDisk"`    // limited disk
+	RequiredCpu    string   `yaml:"requiredCpu"`    // required cpu
+	LimitedCpu     string   `yaml:"limitedCpu"`     // limited cpu
+	RequiredGpu    string   `yaml:"requiredGpu"`    // required gpu
+	LimitedGpu     string   `yaml:"limitedGpu"`     // limited gpu
+	SupportArch    []string `yaml:"supportArch"`    // supported architectures
+}
+
 // AppConfiguration represents the OlaresManifest.yaml structure
 type AppConfiguration struct {
 	ConfigVersion string      `yaml:"olaresManifest.version"`
 	ConfigType    string      `yaml:"olaresManifest.type"`
 	Metadata      AppMetaData `yaml:"metadata"`
+	Spec          Spec        `yaml:"spec"`
 }
 
 // RenderResponse represents the response from render manifest API
