@@ -11,10 +11,11 @@ import (
 
 // UpgradeOptions represents the options for app upgrade.
 type UpgradeOptions struct {
-	RepoUrl string `json:"repoUrl,omitempty"`
-	Version string `json:"version,omitempty"`
-	User    string `json:"x_market_user,omitempty"`
-	Source  string `json:"x_market_source,omitempty"`
+	RepoUrl      string `json:"repoUrl,omitempty"`
+	Version      string `json:"version,omitempty"`
+	User         string `json:"x_market_user,omitempty"`
+	Source       string `json:"source,omitempty"`
+	MarketSource string `json:"x_market_source,omitempty"`
 }
 
 // AppUpgrade upgrades an application using the app service.
@@ -57,10 +58,11 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
 
 	upgradeInfo := &UpgradeOptions{
-		RepoUrl: getRepoUrl(),
-		Version: version,
-		User:    user,
-		Source:  apiSource,
+		RepoUrl:      getRepoUrl(),
+		Version:      version,
+		User:         user,
+		Source:       apiSource,
+		MarketSource: source,
 	}
 	ms, err := json.Marshal(upgradeInfo)
 	if err != nil {
