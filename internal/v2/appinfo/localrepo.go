@@ -395,6 +395,8 @@ func (lr *LocalRepo) checkChartFolder(folder string, token string, userID string
 		return fmt.Errorf("foldername %s in reserved foldername list, invalid", folderName)
 	}
 
+	log.Printf("DEBUG: rendered manifest: %s", renderedContent)
+
 	return nil
 }
 
