@@ -2,6 +2,7 @@ package appinfo
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -11,10 +12,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"market/internal/v2/types"
+	"market/internal/v2/utils"
 
 	"gopkg.in/yaml.v3"
 )
@@ -170,11 +174,36 @@ type AppMetaData struct {
 	Target      string   `yaml:"target"`
 }
 
+type Spec struct {
+	VersionName     string   `yaml:"versionName"`     // version name
+	FullDescription string   `yaml:"fullDescription"` // full description
+	Developer       string   `yaml:"developer"`       // developer
+	Website         string   `yaml:"website"`         // website
+	SourceCode      string   `yaml:"sourceCode"`      // source code
+	Submitter       string   `yaml:"submitter"`       // submitter
+	Locale          []string `yaml:"locale"`          // supported locales
+	Doc             string   `yaml:"doc"`             // documentation url
+	License         []struct {
+		Text string `yaml:"text"`
+		URL  string `yaml:"url"`
+	} `yaml:"license"` // license info
+	RequiredMemory string   `yaml:"requiredMemory"` // required memory
+	LimitedMemory  string   `yaml:"limitedMemory"`  // limited memory
+	RequiredDisk   string   `yaml:"requiredDisk"`   // required disk
+	LimitedDisk    string   `yaml:"limitedDisk"`    // limited disk
+	RequiredCpu    string   `yaml:"requiredCpu"`    // required cpu
+	LimitedCpu     string   `yaml:"limitedCpu"`     // limited cpu
+	RequiredGpu    string   `yaml:"requiredGpu"`    // required gpu
+	LimitedGpu     string   `yaml:"limitedGpu"`     // limited gpu
+	SupportArch    []string `yaml:"supportArch"`    // supported architectures
+}
+
 // AppConfiguration represents the OlaresManifest.yaml structure
 type AppConfiguration struct {
 	ConfigVersion string      `yaml:"olaresManifest.version"`
 	ConfigType    string      `yaml:"olaresManifest.type"`
 	Metadata      AppMetaData `yaml:"metadata"`
+	Spec          Spec        `yaml:"spec"`
 }
 
 // RenderResponse represents the response from render manifest API
@@ -234,12 +263,12 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	}
 
 	// Step 5: Validate chart structure and configuration
-	if err := lr.validateChart(chartDir, token); err != nil {
+	if err := lr.validateChart(chartDir, token, userID); err != nil {
 		return nil, fmt.Errorf("chart validation failed: %w", err)
 	}
 
 	// Step 6: Parse app information from chart
-	appInfo, err := lr.parseAppInfo(chartDir, token)
+	appInfo, err := lr.parseAppInfo(chartDir, token, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse app info: %w", err)
 	}
@@ -286,9 +315,9 @@ func (lr *LocalRepo) findChartPath(extractDir string) string {
 }
 
 // validateChart validates the chart structure and configuration
-func (lr *LocalRepo) validateChart(chartDir string, token string) error {
+func (lr *LocalRepo) validateChart(chartDir string, token string, userID string) error {
 	// First, parse app info to get cfgType for validation logic
-	appInfo, err := lr.parseAppInfo(chartDir, token)
+	appInfo, err := lr.parseAppInfo(chartDir, token, userID)
 	if err != nil {
 		return fmt.Errorf("failed to parse app info for validation: %w", err)
 	}
@@ -307,12 +336,12 @@ func (lr *LocalRepo) validateChart(chartDir string, token string) error {
 	}
 
 	// Perform chart folder validation
-	if err := lr.checkChartFolder(chartDir, token); err != nil {
+	if err := lr.checkChartFolder(chartDir, token, userID); err != nil {
 		return fmt.Errorf("chart folder validation failed: %w", err)
 	}
 
 	// Perform app configuration validation
-	if err := lr.checkAppCfg(chartDir, token); err != nil {
+	if err := lr.checkAppCfg(chartDir, token, userID); err != nil {
 		return fmt.Errorf("app configuration validation failed: %w", err)
 	}
 
@@ -325,7 +354,7 @@ func (lr *LocalRepo) validateChart(chartDir string, token string) error {
 }
 
 // checkChartFolder validates the chart folder structure
-func (lr *LocalRepo) checkChartFolder(folder string, token string) error {
+func (lr *LocalRepo) checkChartFolder(folder string, token string, userID string) error {
 	folderName := filepath.Base(folder)
 	// if !lr.isValidFolderName(folderName) {
 	// 	return fmt.Errorf("invalid folder name: '%s' must '^[a-z0-9]{1,30}$'", folder)
@@ -373,7 +402,7 @@ func (lr *LocalRepo) checkChartFolder(folder string, token string) error {
 		return fmt.Errorf("failed to read %s in folder '%s': %v", AppCfgFileName, folder, err)
 	}
 
-	renderedContent, err := lr.renderManifest(string(appCfgContent), token)
+	renderedContent, err := lr.renderManifest(string(appCfgContent), token, userID)
 	if err != nil {
 		return fmt.Errorf("failed to render %s in folder '%s': %v", AppCfgFileName, folder, err)
 	}
@@ -391,11 +420,13 @@ func (lr *LocalRepo) checkChartFolder(folder string, token string) error {
 		return fmt.Errorf("foldername %s in reserved foldername list, invalid", folderName)
 	}
 
+	log.Printf("DEBUG: rendered manifest: %s", renderedContent)
+
 	return nil
 }
 
 // checkAppCfg validates the app configuration
-func (lr *LocalRepo) checkAppCfg(chartDir string, token string) error {
+func (lr *LocalRepo) checkAppCfg(chartDir string, token string, userID string) error {
 	// Basic validation - check if OlaresManifest.yaml exists and is valid
 	appCfgFile := filepath.Join(chartDir, AppCfgFileName)
 	if !lr.fileExists(appCfgFile) {
@@ -408,7 +439,7 @@ func (lr *LocalRepo) checkAppCfg(chartDir string, token string) error {
 	}
 
 	// Try to render and parse the manifest
-	renderedContent, err := lr.renderManifest(string(content), token)
+	renderedContent, err := lr.renderManifest(string(content), token, userID)
 	if err != nil {
 		return fmt.Errorf("failed to render manifest: %w", err)
 	}
@@ -549,12 +580,1048 @@ func (lr *LocalRepo) isValidMetadataFields(metadata AppMetaData, chart Chart, fo
 	return nil
 }
 
-// renderManifest renders the manifest using app service
-func (lr *LocalRepo) renderManifest(content, token string) (string, error) {
-	// For local development, we'll return the content as-is
-	// In production, you would call the app service API
-	log.Printf("Rendering manifest for local development")
-	return content, nil
+// renderManifest renders the manifest using template rendering functionality
+func (lr *LocalRepo) renderManifest(content, token, userID string) (string, error) {
+	// Check if content contains template syntax
+	if !strings.Contains(content, "{{") {
+		log.Printf("No template syntax found, returning content as-is")
+		return content, nil
+	}
+
+	log.Printf("Rendering manifest with template syntax")
+
+	// Create template data similar to rendered_chart_step.go
+	templateData := &TemplateData{
+		Values:       make(map[string]interface{}),
+		Release:      make(map[string]interface{}),
+		Chart:        make(map[string]interface{}),
+		Capabilities: make(map[string]interface{}),
+	}
+
+	// Get admin username using utils function
+	adminUsername, err := utils.GetAdminUsername(token)
+	if err != nil {
+		log.Printf("Warning: failed to get admin username, using default: %v", err)
+		adminUsername = "admin" // fallback to default
+	}
+
+	// Set basic template values
+	templateData.Values["admin"] = adminUsername
+	templateData.Values["bfl"] = map[string]interface{}{
+		"username": userID, // Set to the user who submitted the task
+	}
+	templateData.Values["user"] = map[string]interface{}{
+		"zone": "user-space-default",
+	}
+
+	// Add Helm standard template variables
+	templateData.Release = map[string]interface{}{
+		"Name":      "chart",
+		"Namespace": "default",
+		"Service":   "Helm",
+	}
+
+	// Add Chart information
+	templateData.Chart = map[string]interface{}{
+		"Name":    "chart",
+		"Version": "0.0.1",
+	}
+
+	// Add Capabilities information for Helm template compatibility
+	templateData.Capabilities = map[string]interface{}{
+		"KubeVersion": map[string]interface{}{
+			"Major": "1",
+			"Minor": "28",
+		},
+		"APIVersions": map[string]interface{}{
+			"Has": func(apiVersion string) bool {
+				return true
+			},
+		},
+		"Supports": map[string]interface{}{
+			"CRD": func(apiVersion string) bool {
+				return true
+			},
+		},
+	}
+
+	// Render the template using the same logic as rendered_chart_step.go
+	renderedContent, err := lr.renderTemplate(content, templateData)
+	if err != nil {
+		return "", fmt.Errorf("failed to render template: %w", err)
+	}
+
+	log.Printf("Template rendered successfully - Original length: %d, Rendered length: %d",
+		len(content), len(renderedContent))
+
+	return renderedContent, nil
+}
+
+// renderManifestWithCustomData renders the manifest with custom template data
+// func (lr *LocalRepo) renderManifestWithCustomData(content string, customValues map[string]interface{}, userID string) (string, error) {
+// 	// Check if content contains template syntax
+// 	if !strings.Contains(content, "{{") {
+// 		log.Printf("No template syntax found, returning content as-is")
+// 		return content, nil
+// 	}
+
+// 	log.Printf("Rendering manifest with custom template data for user: %s", userID)
+
+// 	// Create template data similar to rendered_chart_step.go
+// 	templateData := &TemplateData{
+// 		Values:       make(map[string]interface{}),
+// 		Release:      make(map[string]interface{}),
+// 		Chart:        make(map[string]interface{}),
+// 		Capabilities: make(map[string]interface{}),
+// 	}
+
+// 	// Get admin username - try to get from environment or use default
+// 	adminUsername := os.Getenv("ADMIN_USERNAME")
+// 	if adminUsername == "" {
+// 		adminUsername = "admin" // fallback to default
+// 	}
+
+// 	// Set basic template values
+// 	templateData.Values["admin"] = adminUsername
+// 	templateData.Values["bfl"] = map[string]interface{}{
+// 		"username": userID,
+// 	}
+// 	templateData.Values["user"] = map[string]interface{}{
+// 		"zone": fmt.Sprintf("user-space-%s", userID),
+// 	}
+
+// 	// Merge custom values into template data
+// 	for key, value := range customValues {
+// 		templateData.Values[key] = value
+// 	}
+
+// 	// Add Helm standard template variables
+// 	templateData.Release = map[string]interface{}{
+// 		"Name":      "chart",
+// 		"Namespace": fmt.Sprintf("chart-%s", userID),
+// 		"Service":   "Helm",
+// 	}
+
+// 	// Add Chart information
+// 	templateData.Chart = map[string]interface{}{
+// 		"Name":    "chart",
+// 		"Version": "0.0.1",
+// 	}
+
+// 	// Add Capabilities information for Helm template compatibility
+// 	templateData.Capabilities = map[string]interface{}{
+// 		"KubeVersion": map[string]interface{}{
+// 			"Major": "1",
+// 			"Minor": "28",
+// 		},
+// 		"APIVersions": map[string]interface{}{
+// 			"Has": func(apiVersion string) bool {
+// 				return true
+// 			},
+// 		},
+// 		"Supports": map[string]interface{}{
+// 			"CRD": func(apiVersion string) bool {
+// 				return true
+// 			},
+// 		},
+// 	}
+
+// 	// Render the template using the same logic as rendered_chart_step.go
+// 	renderedContent, err := lr.renderTemplate(content, templateData)
+// 	if err != nil {
+// 		return "", fmt.Errorf("failed to render template: %w", err)
+// 	}
+
+// 	log.Printf("Template rendered successfully with custom data - Original length: %d, Rendered length: %d",
+// 		len(content), len(renderedContent))
+
+// 	return renderedContent, nil
+// }
+
+// TemplateData holds data for rendering templates (copied from rendered_chart_step.go)
+type TemplateData struct {
+	Values       map[string]interface{} `yaml:"Values" json:"Values"`
+	Release      map[string]interface{} `yaml:"Release" json:"Release"`
+	Chart        map[string]interface{} `yaml:"Chart" json:"Chart"`
+	Capabilities map[string]interface{} `yaml:"Capabilities" json:"Capabilities"`
+}
+
+// renderTemplate renders a template string with the given data (copied from rendered_chart_step.go)
+func (lr *LocalRepo) renderTemplate(templateContent string, data *TemplateData) (string, error) {
+	// Check if content actually contains template syntax
+	if !strings.Contains(templateContent, "{{") {
+		return templateContent, nil
+	}
+
+	// Log template data for debugging (limit output size)
+	log.Printf("Template rendering - Starting template execution")
+	if adminVal, exists := data.Values["admin"]; exists {
+		log.Printf("Template rendering - admin value: %v", adminVal)
+	}
+	if bflVal, exists := data.Values["bfl"]; exists {
+		log.Printf("Template rendering - bfl value: %+v", bflVal)
+	}
+
+	// Create template with custom functions (similar to Helm)
+	tmpl, err := template.New("chart").
+		Option("missingkey=zero"). // Use zero value for missing keys (more forgiving)
+		Funcs(lr.getTemplateFunctions()).
+		Parse(templateContent)
+	if err != nil {
+		log.Printf("Template parsing failed - Error: %v", err)
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	// Execute template
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		log.Printf("Template execution failed - Error: %v", err)
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	renderedContent := buf.String()
+	log.Printf("Template rendered successfully - Original length: %d, Rendered length: %d",
+		len(templateContent), len(renderedContent))
+
+	return renderedContent, nil
+}
+
+// getTemplateFunctions returns template functions for rendering (copied from rendered_chart_step.go)
+func (lr *LocalRepo) getTemplateFunctions() template.FuncMap {
+	// Helper function for boolean conversion
+	toBoolHelper := func(v interface{}) bool {
+		switch val := v.(type) {
+		case bool:
+			return val
+		case string:
+			return val != ""
+		case int:
+			return val != 0
+		case float64:
+			return val != 0
+		case nil:
+			return false
+		default:
+			return true
+		}
+	}
+
+	return template.FuncMap{
+		// Basic functions
+		"default": func(defaultValue interface{}, value interface{}) interface{} {
+			if value == nil {
+				return defaultValue
+			}
+
+			// Check for empty string
+			if str, ok := value.(string); ok && str == "" {
+				return defaultValue
+			}
+
+			// Check for zero values
+			switch v := value.(type) {
+			case int, int8, int16, int32, int64:
+				if v == 0 {
+					return defaultValue
+				}
+			case uint, uint8, uint16, uint32, uint64:
+				if v == 0 {
+					return defaultValue
+				}
+			case float32, float64:
+				if v == 0.0 {
+					return defaultValue
+				}
+			case bool:
+				if !v {
+					return defaultValue
+				}
+			}
+
+			return value
+		},
+		"empty": func(value interface{}) bool {
+			return value == nil || value == "" || value == 0
+		},
+		"required": func(warn string, val interface{}) (interface{}, error) {
+			if val == nil || val == "" {
+				return val, fmt.Errorf(warn)
+			}
+			return val, nil
+		},
+		"coalesce": func(values ...interface{}) interface{} {
+			for _, value := range values {
+				if value == nil {
+					continue
+				}
+
+				// Check for empty string
+				if str, ok := value.(string); ok && str == "" {
+					continue
+				}
+
+				// Check for zero values
+				switch v := value.(type) {
+				case int, int8, int16, int32, int64:
+					if v == 0 {
+						continue
+					}
+				case uint, uint8, uint16, uint32, uint64:
+					if v == 0 {
+						continue
+					}
+				case float32, float64:
+					if v == 0.0 {
+						continue
+					}
+				case bool:
+					if !v {
+						continue
+					}
+				}
+
+				return value
+			}
+			return nil
+		},
+		"dig": func(data interface{}, keys ...string) interface{} {
+			if data == nil {
+				return nil
+			}
+
+			current := data
+			for _, key := range keys {
+				if current == nil {
+					return nil
+				}
+
+				switch v := current.(type) {
+				case map[string]interface{}:
+					if val, exists := v[key]; exists {
+						current = val
+					} else {
+						return nil
+					}
+				case map[interface{}]interface{}:
+					if val, exists := v[key]; exists {
+						current = val
+					} else {
+						return nil
+					}
+				default:
+					return nil
+				}
+			}
+
+			return current
+		},
+
+		// String functions
+		"lower": strings.ToLower,
+		"upper": strings.ToUpper,
+		"title": strings.Title,
+		"untitle": func(str string) string {
+			if len(str) == 0 {
+				return str
+			}
+			return strings.ToLower(str[:1]) + str[1:]
+		},
+		"trim": strings.TrimSpace,
+		"trimAll": func(cutset, s string) string {
+			return strings.Trim(s, cutset)
+		},
+		"trimPrefix": func(prefix, s string) string {
+			return strings.TrimPrefix(s, prefix)
+		},
+		"trimSuffix": func(suffix, s string) string {
+			return strings.TrimSuffix(s, suffix)
+		},
+		"quote": func(v interface{}) string {
+			if v == nil {
+				return `""`
+			}
+			return fmt.Sprintf("%q", fmt.Sprintf("%v", v))
+		},
+		"squote": func(v interface{}) string {
+			if v == nil {
+				return "''"
+			}
+			return fmt.Sprintf("'%v'", v)
+		},
+		"replace": func(old, new, src string) string {
+			return strings.ReplaceAll(src, old, new)
+		},
+		"split": func(sep, s string) []string {
+			return strings.Split(s, sep)
+		},
+		"splitList": func(sep, str string) []string {
+			if str == "" {
+				return []string{}
+			}
+			return strings.Split(str, sep)
+		},
+		"join": func(sep string, a interface{}) string {
+			if a == nil {
+				return ""
+			}
+			v := reflect.ValueOf(a)
+			if v.Kind() != reflect.Slice {
+				return fmt.Sprintf("%v", a)
+			}
+			if v.Len() == 0 {
+				return ""
+			}
+			var b strings.Builder
+			for i := 0; i < v.Len(); i++ {
+				if i > 0 {
+					b.WriteString(sep)
+				}
+				b.WriteString(fmt.Sprintf("%v", v.Index(i).Interface()))
+			}
+			return b.String()
+		},
+		"contains": func(substr, str string) bool {
+			return strings.Contains(str, substr)
+		},
+		"hasPrefix": func(prefix, s string) bool {
+			return strings.HasPrefix(s, prefix)
+		},
+		"hasSuffix": func(suffix, s string) bool {
+			return strings.HasSuffix(s, suffix)
+		},
+		"repeat": func(count int, str string) string {
+			return strings.Repeat(str, count)
+		},
+		"nospace": func(str string) string {
+			return strings.ReplaceAll(str, " ", "")
+		},
+		"indent": func(spaces int, str string) string {
+			prefix := strings.Repeat(" ", spaces)
+			lines := strings.Split(str, "\n")
+			for i, line := range lines {
+				if line != "" {
+					lines[i] = prefix + line
+				}
+			}
+			return strings.Join(lines, "\n")
+		},
+		"nindent": func(spaces int, str string) string {
+			prefix := strings.Repeat(" ", spaces)
+			lines := strings.Split(str, "\n")
+			for i, line := range lines {
+				lines[i] = prefix + line
+			}
+			return strings.Join(lines, "\n")
+		},
+
+		// Math functions
+		"add": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					return av + bv
+				case float64:
+					return float64(av) + bv
+				}
+			case float64:
+				switch bv := b.(type) {
+				case int:
+					return av + float64(bv)
+				case float64:
+					return av + bv
+				}
+			}
+			return nil
+		},
+		"sub": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					return av - bv
+				case float64:
+					return float64(av) - bv
+				}
+			case float64:
+				switch bv := b.(type) {
+				case int:
+					return av - float64(bv)
+				case float64:
+					return av - bv
+				}
+			}
+			return nil
+		},
+		"mul": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					return av * bv
+				case float64:
+					return float64(av) * bv
+				}
+			case float64:
+				switch bv := b.(type) {
+				case int:
+					return av * float64(bv)
+				case float64:
+					return av * bv
+				}
+			}
+			return nil
+		},
+		"div": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					if bv == 0 {
+						return nil
+					}
+					return av / bv
+				case float64:
+					if bv == 0 {
+						return nil
+					}
+					return float64(av) / bv
+				}
+			case float64:
+				switch bv := b.(type) {
+				case int:
+					if bv == 0 {
+						return nil
+					}
+					return av / float64(bv)
+				case float64:
+					if bv == 0 {
+						return nil
+					}
+					return av / bv
+				}
+			}
+			return nil
+		},
+		"mod": func(a, b interface{}) interface{} {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					if bv == 0 {
+						return nil
+					}
+					return av % bv
+				}
+			}
+			return nil
+		},
+
+		// List functions
+		"list": func(values ...interface{}) []interface{} {
+			return values
+		},
+		"first": func(list interface{}) interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice || v.Len() == 0 {
+				return nil
+			}
+			return v.Index(0).Interface()
+		},
+		"last": func(list interface{}) interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice || v.Len() == 0 {
+				return nil
+			}
+			return v.Index(v.Len() - 1).Interface()
+		},
+		"initial": func(list interface{}) []interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice || v.Len() <= 1 {
+				return []interface{}{}
+			}
+			result := make([]interface{}, v.Len()-1)
+			for i := 0; i < v.Len()-1; i++ {
+				result[i] = v.Index(i).Interface()
+			}
+			return result
+		},
+		"rest": func(list interface{}) []interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice || v.Len() <= 1 {
+				return []interface{}{}
+			}
+			result := make([]interface{}, v.Len()-1)
+			for i := 1; i < v.Len(); i++ {
+				result[i-1] = v.Index(i).Interface()
+			}
+			return result
+		},
+		"append": func(list interface{}, values ...interface{}) []interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice {
+				return append([]interface{}{list}, values...)
+			}
+			result := make([]interface{}, v.Len()+len(values))
+			for i := 0; i < v.Len(); i++ {
+				result[i] = v.Index(i).Interface()
+			}
+			for i, val := range values {
+				result[v.Len()+i] = val
+			}
+			return result
+		},
+		"prepend": func(list interface{}, values ...interface{}) []interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice {
+				return append(values, list)
+			}
+			result := make([]interface{}, len(values)+v.Len())
+			for i, val := range values {
+				result[i] = val
+			}
+			for i := 0; i < v.Len(); i++ {
+				result[len(values)+i] = v.Index(i).Interface()
+			}
+			return result
+		},
+		"concat": func(lists ...interface{}) []interface{} {
+			var result []interface{}
+			for _, list := range lists {
+				v := reflect.ValueOf(list)
+				if v.Kind() != reflect.Slice {
+					result = append(result, list)
+					continue
+				}
+				for i := 0; i < v.Len(); i++ {
+					result = append(result, v.Index(i).Interface())
+				}
+			}
+			return result
+		},
+		"reverse": func(list interface{}) []interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice {
+				return []interface{}{list}
+			}
+			result := make([]interface{}, v.Len())
+			for i := 0; i < v.Len(); i++ {
+				result[v.Len()-1-i] = v.Index(i).Interface()
+			}
+			return result
+		},
+		"uniq": func(list interface{}) []interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice {
+				return []interface{}{list}
+			}
+			seen := make(map[interface{}]bool)
+			var result []interface{}
+			for i := 0; i < v.Len(); i++ {
+				item := v.Index(i).Interface()
+				if !seen[item] {
+					seen[item] = true
+					result = append(result, item)
+				}
+			}
+			return result
+		},
+		"without": func(list interface{}, values ...interface{}) []interface{} {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice {
+				return []interface{}{list}
+			}
+			exclude := make(map[interface{}]bool)
+			for _, val := range values {
+				exclude[val] = true
+			}
+			var result []interface{}
+			for i := 0; i < v.Len(); i++ {
+				item := v.Index(i).Interface()
+				if !exclude[item] {
+					result = append(result, item)
+				}
+			}
+			return result
+		},
+		"has": func(list interface{}, item interface{}) bool {
+			v := reflect.ValueOf(list)
+			if v.Kind() != reflect.Slice {
+				return false
+			}
+			for i := 0; i < v.Len(); i++ {
+				if reflect.DeepEqual(v.Index(i).Interface(), item) {
+					return true
+				}
+			}
+			return false
+		},
+
+		// Type conversion functions
+		"int": func(v interface{}) int {
+			switch val := v.(type) {
+			case int:
+				return val
+			case int8:
+				return int(val)
+			case int16:
+				return int(val)
+			case int32:
+				return int(val)
+			case int64:
+				return int(val)
+			case uint:
+				return int(val)
+			case uint8:
+				return int(val)
+			case uint16:
+				return int(val)
+			case uint32:
+				return int(val)
+			case uint64:
+				return int(val)
+			case float32:
+				return int(val)
+			case float64:
+				return int(val)
+			case string:
+				if i, err := strconv.Atoi(val); err == nil {
+					return i
+				}
+			}
+			return 0
+		},
+		"float64": func(v interface{}) float64 {
+			switch val := v.(type) {
+			case int:
+				return float64(val)
+			case int8:
+				return float64(val)
+			case int16:
+				return float64(val)
+			case int32:
+				return float64(val)
+			case int64:
+				return float64(val)
+			case uint:
+				return float64(val)
+			case uint8:
+				return float64(val)
+			case uint16:
+				return float64(val)
+			case uint32:
+				return float64(val)
+			case uint64:
+				return float64(val)
+			case float32:
+				return float64(val)
+			case float64:
+				return val
+			case string:
+				if f, err := strconv.ParseFloat(val, 64); err == nil {
+					return f
+				}
+			}
+			return 0.0
+		},
+		"string": func(v interface{}) string {
+			if v == nil {
+				return ""
+			}
+			return fmt.Sprintf("%v", v)
+		},
+		"bool": func(v interface{}) bool {
+			return toBoolHelper(v)
+		},
+
+		// Logical functions
+		"and": func(values ...interface{}) bool {
+			for _, v := range values {
+				if !toBoolHelper(v) {
+					return false
+				}
+			}
+			return true
+		},
+		"or": func(values ...interface{}) bool {
+			for _, v := range values {
+				if toBoolHelper(v) {
+					return true
+				}
+			}
+			return false
+		},
+		"not": func(v interface{}) bool {
+			return !toBoolHelper(v)
+		},
+
+		// Comparison functions
+		"eq": func(a, b interface{}) bool {
+			return reflect.DeepEqual(a, b)
+		},
+		"ne": func(a, b interface{}) bool {
+			return !reflect.DeepEqual(a, b)
+		},
+		"lt": func(a, b interface{}) bool {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					return av < bv
+				case float64:
+					return float64(av) < bv
+				}
+			case float64:
+				switch bv := b.(type) {
+				case int:
+					return av < float64(bv)
+				case float64:
+					return av < bv
+				}
+			case string:
+				if bv, ok := b.(string); ok {
+					return av < bv
+				}
+			}
+			return false
+		},
+		"le": func(a, b interface{}) bool {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					return av <= bv
+				case float64:
+					return float64(av) <= bv
+				}
+			case float64:
+				switch bv := b.(type) {
+				case int:
+					return av <= float64(bv)
+				case float64:
+					return av <= bv
+				}
+			case string:
+				if bv, ok := b.(string); ok {
+					return av <= bv
+				}
+			}
+			return false
+		},
+		"gt": func(a, b interface{}) bool {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					return av > bv
+				case float64:
+					return float64(av) > bv
+				}
+			case float64:
+				switch bv := b.(type) {
+				case int:
+					return av > float64(bv)
+				case float64:
+					return av > bv
+				}
+			case string:
+				if bv, ok := b.(string); ok {
+					return av > bv
+				}
+			}
+			return false
+		},
+		"ge": func(a, b interface{}) bool {
+			switch av := a.(type) {
+			case int:
+				switch bv := b.(type) {
+				case int:
+					return av >= bv
+				case float64:
+					return float64(av) >= bv
+				}
+			case float64:
+				switch bv := b.(type) {
+				case int:
+					return av >= float64(bv)
+				case float64:
+					return av >= bv
+				}
+			case string:
+				if bv, ok := b.(string); ok {
+					return av >= bv
+				}
+			}
+			return false
+		},
+
+		// Conditional functions
+		"if": func(condition interface{}, trueVal, falseVal interface{}) interface{} {
+			if toBoolHelper(condition) {
+				return trueVal
+			}
+			return falseVal
+		},
+
+		// Regular expression functions
+		"regexMatch": func(pattern, str string) bool {
+			matched, err := regexp.MatchString(pattern, str)
+			if err != nil {
+				return false
+			}
+			return matched
+		},
+		"regexFind": func(pattern, str string) string {
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				return ""
+			}
+			matches := re.FindString(str)
+			return matches
+		},
+		"regexFindAll": func(pattern, str string, n int) []string {
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				return []string{}
+			}
+			matches := re.FindAllString(str, n)
+			return matches
+		},
+		"regexReplace": func(pattern, replacement, str string) string {
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				return str
+			}
+			return re.ReplaceAllString(str, replacement)
+		},
+		"regexSplit": func(pattern, str string) []string {
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				return []string{str}
+			}
+			return re.Split(str, -1)
+		},
+
+		// Time functions
+		"now": func() time.Time {
+			return time.Now()
+		},
+		"date": func(format string, t time.Time) string {
+			return t.Format(format)
+		},
+		"unixEpoch": func(t time.Time) int64 {
+			return t.Unix()
+		},
+
+		// JSON functions
+		"toJson": func(v interface{}) string {
+			data, err := json.Marshal(v)
+			if err != nil {
+				return ""
+			}
+			return string(data)
+		},
+		"toPrettyJson": func(v interface{}) string {
+			data, err := json.MarshalIndent(v, "", "  ")
+			if err != nil {
+				return ""
+			}
+			return string(data)
+		},
+		"fromJson": func(str string) interface{} {
+			var v interface{}
+			if err := json.Unmarshal([]byte(str), &v); err != nil {
+				return nil
+			}
+			return v
+		},
+
+		// YAML functions
+		"toYaml": func(v interface{}) string {
+			data, err := yaml.Marshal(v)
+			if err != nil {
+				return ""
+			}
+			return string(data)
+		},
+		"fromYaml": func(str string) interface{} {
+			var v interface{}
+			if err := yaml.Unmarshal([]byte(str), &v); err != nil {
+				return nil
+			}
+			return v
+		},
+
+		// Environment and OS functions
+		"env": func(key string) string {
+			return os.Getenv(key)
+		},
+		"expandenv": func(str string) string {
+			return os.ExpandEnv(str)
+		},
+
+		// File path functions
+		"base":  filepath.Base,
+		"dir":   filepath.Dir,
+		"clean": filepath.Clean,
+		"ext":   filepath.Ext,
+		"isAbs": filepath.IsAbs,
+
+		// Custom index function for accessing nested values
+		"index": lr.customIndexFunc,
+	}
+}
+
+// customIndexFunc provides custom indexing functionality for templates
+func (lr *LocalRepo) customIndexFunc(item interface{}, indices ...interface{}) (interface{}, error) {
+	if item == nil {
+		return nil, nil
+	}
+
+	v := reflect.ValueOf(item)
+	for _, index := range indices {
+		switch v.Kind() {
+		case reflect.Array, reflect.Slice:
+			i, err := lr.intValue(reflect.ValueOf(index))
+			if err != nil {
+				return nil, err
+			}
+			if i < 0 || i >= v.Len() {
+				return nil, nil
+			}
+			v = v.Index(i)
+		case reflect.Map:
+			key := reflect.ValueOf(index)
+			if key.Kind() != reflect.String {
+				return nil, fmt.Errorf("map key must be string, got %v", key.Kind())
+			}
+			v = v.MapIndex(key)
+			if !v.IsValid() {
+				return nil, nil
+			}
+		default:
+			return nil, fmt.Errorf("cannot index into %v", v.Kind())
+		}
+	}
+
+	return v.Interface(), nil
+}
+
+// intValue converts a reflect.Value to int
+func (lr *LocalRepo) intValue(v reflect.Value) (int, error) {
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return int(v.Int()), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return int(v.Uint()), nil
+	case reflect.Float32, reflect.Float64:
+		return int(v.Float()), nil
+	case reflect.String:
+		if i, err := strconv.Atoi(v.String()); err == nil {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("cannot convert %v to int", v.Kind())
 }
 
 // unArchive extracts files from an archive (copied from utils.UnArchive)
@@ -646,7 +1713,7 @@ func (lr *LocalRepo) extractFile(tr *tar.Reader, target string, mode os.FileMode
 }
 
 // parseAppInfo parses app information from the chart
-func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.ApplicationInfoEntry, error) {
+func (lr *LocalRepo) parseAppInfo(chartDir string, token string, userID string) (*types.ApplicationInfoEntry, error) {
 	appCfgFile := filepath.Join(chartDir, AppCfgFileName)
 
 	// Read the configuration file
@@ -655,8 +1722,8 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 		return nil, fmt.Errorf("failed to read %s: %w", AppCfgFileName, err)
 	}
 
-	// Render the manifest
-	renderedContent, err := lr.renderManifest(string(content), token)
+	// Render the manifest with basic template data
+	renderedContent, err := lr.renderManifest(string(content), token, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render manifest: %w", err)
 	}
@@ -685,7 +1752,13 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 			SubCategory        string         `yaml:"subCategory"`
 			Developer          string         `yaml:"developer"`
 			RequiredMemory     string         `yaml:"requiredMemory"`
+			LimitedMemory      string         `yaml:"limitedMemory"`
 			RequiredDisk       string         `yaml:"requiredDisk"`
+			LimitedDisk        string         `yaml:"limitedDisk"`
+			RequiredCpu        string         `yaml:"requiredCpu"`
+			LimitedCpu         string         `yaml:"limitedCpu"`
+			RequiredGpu        string         `yaml:"requiredGpu"`
+			LimitedGpu         string         `yaml:"limitedGpu"`
 			SupportClient      *SupportClient `yaml:"supportClient"`
 			SupportArch        []string       `yaml:"supportArch"`
 			RequiredGPU        string         `yaml:"requiredGPU"`
@@ -699,6 +1772,10 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 			ModelSize          string         `yaml:"modelSize"`
 			Namespace          string         `yaml:"namespace"`
 			OnlyAdmin          bool           `yaml:"onlyAdmin"`
+			License            []struct {
+				Text string `yaml:"text"`
+				URL  string `yaml:"url"`
+			} `yaml:"license"`
 		} `yaml:"spec"`
 		Permission *Permission `yaml:"permission"`
 		Middleware *Middleware `yaml:"middleware"`
@@ -709,6 +1786,13 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 	if err := yaml.Unmarshal([]byte(renderedContent), &appCfg); err != nil {
 		return nil, fmt.Errorf("failed to parse rendered %s: %w", AppCfgFileName, err)
 	}
+
+	// Debug: Log the parsed appCfg structure
+	log.Printf("DEBUG: parseAppInfo - appCfg.ConfigVersion: %s", appCfg.ConfigVersion)
+	log.Printf("DEBUG: parseAppInfo - appCfg.ConfigType: %s", appCfg.ConfigType)
+	log.Printf("DEBUG: parseAppInfo - appCfg.Metadata.Name: %s", appCfg.Metadata.Name)
+	log.Printf("DEBUG: parseAppInfo - appCfg.Spec.SupportArch: %+v", appCfg.Spec.SupportArch)
+	log.Printf("DEBUG: parseAppInfo - appCfg.Spec.SupportArch length: %d", len(appCfg.Spec.SupportArch))
 
 	// Validate required fields
 	if appCfg.Metadata.Name == "" {
@@ -742,7 +1826,7 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 		Developer:          appCfg.Spec.Developer,
 		RequiredMemory:     appCfg.Spec.RequiredMemory,
 		RequiredDisk:       appCfg.Spec.RequiredDisk,
-		SupportArch:        appCfg.Spec.SupportArch,
+		SupportArch:        appCfg.Spec.SupportArch, // Copy from spec.supportArch to outer SupportArch
 		RequiredGPU:        appCfg.Spec.RequiredGPU,
 		RequiredCPU:        appCfg.Spec.RequiredCPU,
 		Rating:             appCfg.Metadata.Rating,
@@ -765,6 +1849,10 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 	appInfo.Metadata["config_version"] = appCfg.ConfigVersion
 	appInfo.Metadata["config_type"] = appCfg.ConfigType
 	appInfo.Metadata["parsed_at"] = time.Now().Unix()
+
+	// Debug: Log SupportArch mapping
+	log.Printf("DEBUG: parseAppInfo - appCfg.Spec.SupportArch: %+v", appCfg.Spec.SupportArch)
+	log.Printf("DEBUG: parseAppInfo - appInfo.SupportArch: %+v", appInfo.SupportArch)
 
 	// Convert SupportClient to map[string]interface{} for compatibility
 	if appCfg.Spec.SupportClient != nil {
@@ -1103,6 +2191,7 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 	}
 
 	log.Printf("DEBUG: Converting ApplicationInfoEntry to map for app: %s", entry.Name)
+	log.Printf("DEBUG: convertApplicationInfoEntryToMap - entry.SupportArch: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
 
 	result := map[string]interface{}{
 		"id":          entry.ID,

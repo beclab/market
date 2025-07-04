@@ -47,12 +47,22 @@ func NewDataSender() (*DataSender, error) {
 	// Connect to NATS
 	conn, err := nats.Connect(natsURL,
 		nats.ReconnectWait(2*time.Second),
-		nats.MaxReconnects(10),
+		nats.MaxReconnects(-1), // -1 means unlimited reconnection attempts
+		nats.ReconnectJitter(100*time.Millisecond, 1*time.Second),
+		nats.Timeout(10*time.Second),
+		nats.PingInterval(30*time.Second),
+		nats.MaxPingsOutstanding(5),
 		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
 			log.Printf("NATS disconnected: %v", err)
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
 			log.Printf("NATS reconnected to %s", nc.ConnectedUrl())
+		}),
+		nats.ClosedHandler(func(nc *nats.Conn) {
+			log.Printf("NATS connection closed")
+		}),
+		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
+			log.Printf("NATS error: %v", err)
 		}),
 	)
 

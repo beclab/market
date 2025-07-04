@@ -23,6 +23,7 @@ type CacheManager struct {
 	userConfig        *UserConfig
 	hydrationNotifier HydrationNotifier   // Notifier for hydration updates
 	stateMonitor      *utils.StateMonitor // State monitor for change detection
+	dataSender        *DataSender         // Direct data sender for bypassing state monitor
 	mutex             sync.RWMutex
 	syncChannel       chan SyncRequest
 	stopChannel       chan bool
@@ -57,13 +58,16 @@ const (
 
 // NewCacheManager creates a new cache manager
 func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheManager {
-	// Initialize state monitor
+	// Initialize data sender
 	dataSender, err := NewDataSender()
-	var stateMonitor *utils.StateMonitor
 	if err != nil {
-		glog.Warningf("Failed to initialize DataSender for state monitor: %v", err)
-		// Continue without state monitor
-	} else {
+		glog.Warningf("Failed to initialize DataSender: %v", err)
+		// Continue without data sender
+	}
+
+	// Initialize state monitor
+	var stateMonitor *utils.StateMonitor
+	if dataSender != nil {
 		stateMonitor = utils.NewStateMonitor(dataSender)
 	}
 
@@ -72,6 +76,7 @@ func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheMan
 		redisClient:  redisClient,
 		userConfig:   userConfig,
 		stateMonitor: stateMonitor,
+		dataSender:   dataSender,
 		syncChannel:  make(chan SyncRequest, 1000), // Buffer for async sync requests
 		stopChannel:  make(chan bool, 1),
 		isRunning:    false,
@@ -239,7 +244,7 @@ func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
 }
 
 // updateAppStateLatest updates or adds a single app state based on name matching
-func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState *types.AppStateLatestData) {
+func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData *SourceData, newAppState *types.AppStateLatestData) {
 	if newAppState == nil {
 		glog.Errorf("Invalid app state data: app state is nil")
 		return
@@ -268,6 +273,41 @@ func (cm *CacheManager) updateAppStateLatest(sourceData *SourceData, newAppState
 	found := false
 	for i, existingAppState := range sourceData.AppStateLatest {
 		if existingAppState != nil && existingAppState.Status.Name == newAppState.Status.Name {
+			// If new app state has empty EntranceStatuses, preserve the old ones
+			if len(newAppState.Status.EntranceStatuses) == 0 && len(existingAppState.Status.EntranceStatuses) > 0 {
+				glog.Infof("New app state for %s has empty EntranceStatuses, preserving old entrance statuses", newAppState.Status.Name)
+				newAppState.Status.EntranceStatuses = existingAppState.Status.EntranceStatuses
+
+				// Directly send app info update without state change detection
+				if cm.dataSender != nil {
+					// Find corresponding AppInfoLatestData
+					var appInfoLatest *types.AppInfoLatestData
+					for _, appInfo := range sourceData.AppInfoLatest {
+						if appInfo != nil && appInfo.RawData != nil && appInfo.RawData.Name == newAppState.Status.Name {
+							appInfoLatest = appInfo
+							break
+						}
+					}
+
+					// Create and send update directly
+					update := types.AppInfoUpdate{
+						AppStateLatest: newAppState,
+						AppInfoLatest:  appInfoLatest,
+						Timestamp:      time.Now().Unix(),
+						User:           userID,
+						AppName:        newAppState.Status.Name,
+						NotifyType:     "app_state_change",
+						Source:         sourceID,
+					}
+
+					if err := cm.dataSender.SendAppInfoUpdate(update); err != nil {
+						glog.Warningf("Force push state update for app %s failed: %v", newAppState.Status.Name, err)
+					} else {
+						glog.Infof("Force pushed state update for app %s due to EntranceStatuses fallback", newAppState.Status.Name)
+					}
+				}
+			}
+
 			// Update existing app state
 			sourceData.AppStateLatest[i] = newAppState
 			glog.V(2).Infof("Updated existing app state for app: %s", newAppState.Status.Name)
@@ -380,7 +420,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			// Update each app state individually using name matching
 			for _, appState := range appStatesData {
 				if appState != nil {
-					cm.updateAppStateLatest(sourceData, appState)
+					cm.updateAppStateLatest(userID, sourceID, sourceData, appState)
 				}
 			}
 			glog.Infof("Updated %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
@@ -421,7 +461,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			}
 
 			// Update or add the app state using name matching
-			cm.updateAppStateLatest(sourceData, appData)
+			cm.updateAppStateLatest(userID, sourceID, sourceData, appData)
 			glog.Infof("Updated single app state for user=%s, source=%s", userID, sourceID)
 		}
 	case AppInfoLatest:

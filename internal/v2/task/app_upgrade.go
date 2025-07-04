@@ -11,10 +11,11 @@ import (
 
 // UpgradeOptions represents the options for app upgrade.
 type UpgradeOptions struct {
-	RepoUrl string `json:"repoUrl,omitempty"`
-	Version string `json:"version,omitempty"`
-	User    string `json:"x_market_user,omitempty"`
-	Source  string `json:"x_market_source,omitempty"`
+	RepoUrl      string `json:"repoUrl,omitempty"`
+	Version      string `json:"version,omitempty"`
+	User         string `json:"x_market_user,omitempty"`
+	Source       string `json:"source,omitempty"`
+	MarketSource string `json:"x_market_source,omitempty"`
 }
 
 // AppUpgrade upgrades an application using the app service.
@@ -32,9 +33,17 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 
 	source, ok := task.Metadata["source"].(string)
 	if !ok {
-		source = "store" // Default source
-		log.Printf("Using default source 'store' for task: %s", task.ID)
+		log.Printf("undefine source for task: %s", task.ID)
 	}
+
+	var apiSource string
+	if source == "local" {
+		apiSource = "custom"
+	} else {
+		apiSource = "market"
+	}
+
+	log.Printf("App source: %s, API source: %s: %s for task: %s", source, apiSource, task.ID)
 
 	version, ok := task.Metadata["version"].(string)
 	if !ok {
@@ -49,10 +58,11 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
 
 	upgradeInfo := &UpgradeOptions{
-		RepoUrl: getRepoUrl(),
-		Version: version,
-		User:    user,
-		Source:  source,
+		RepoUrl:      getRepoUrl(),
+		Version:      version,
+		User:         user,
+		Source:       apiSource,
+		MarketSource: source,
 	}
 	ms, err := json.Marshal(upgradeInfo)
 	if err != nil {
@@ -62,6 +72,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	log.Printf("Upgrade request prepared: url=%s, upgradeInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
 
 	headers := map[string]string{
+		"Accept":          "*/*",
 		"X-Authorization": token,
 		"Content-Type":    "application/json",
 		"X-Market-User":   user,
@@ -79,6 +90,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 			"app_name":  appName,
 			"user":      user,
 			"source":    source,
+			"apiSource": apiSource,
 			"version":   version,
 			"url":       urlStr,
 			"error":     err.Error(),
@@ -96,6 +108,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		"app_name":  appName,
 		"user":      user,
 		"source":    source,
+		"apiSource": apiSource,
 		"version":   version,
 		"url":       urlStr,
 		"response":  response,

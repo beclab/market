@@ -782,7 +782,7 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	mapAllApplicationInfoEntryFields(data, rawData)
 
 	// Store the original data in metadata for later processing
-	rawData.Metadata["source_data"] = data
+	// rawData.Metadata["source_data"] = data
 
 	appInfoLatest.RawData = rawData
 	appInfoLatest.AppInfo = &AppInfo{
@@ -1086,12 +1086,24 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 			}
 		}
 	}
+	// Handle supportArch - check both []interface{} and []string types
 	if val, ok := sourceData["supportArch"].([]interface{}); ok {
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
 		entry.SupportArch = make([]string, len(val))
 		for i, arch := range val {
 			if archStr, ok := arch.(string); ok {
 				entry.SupportArch[i] = archStr
 			}
+		}
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
+	} else if val, ok := sourceData["supportArch"].([]string); ok {
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch as []string in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
+		entry.SupportArch = append([]string{}, val...)
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
+	} else {
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - supportArch not found in sourceData or wrong type")
+		if supportArchVal, exists := sourceData["supportArch"]; exists {
+			log.Printf("DEBUG: mapAllApplicationInfoEntryFields - supportArch value exists but wrong type: %+v (type: %T)", supportArchVal, supportArchVal)
 		}
 	}
 	if val, ok := sourceData["promoteImage"].([]interface{}); ok {

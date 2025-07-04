@@ -150,7 +150,6 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 		appServicePort = port
 	}
 
-	// 使用 utils.GetTokenFromRequest 获取 token
 	restfulReq := &restful.Request{Request: r}
 	token := utils.GetTokenFromRequest(restfulReq)
 
