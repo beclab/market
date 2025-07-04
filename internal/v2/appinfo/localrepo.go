@@ -1752,7 +1752,13 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string, userID string) 
 			SubCategory        string         `yaml:"subCategory"`
 			Developer          string         `yaml:"developer"`
 			RequiredMemory     string         `yaml:"requiredMemory"`
+			LimitedMemory      string         `yaml:"limitedMemory"`
 			RequiredDisk       string         `yaml:"requiredDisk"`
+			LimitedDisk        string         `yaml:"limitedDisk"`
+			RequiredCpu        string         `yaml:"requiredCpu"`
+			LimitedCpu         string         `yaml:"limitedCpu"`
+			RequiredGpu        string         `yaml:"requiredGpu"`
+			LimitedGpu         string         `yaml:"limitedGpu"`
 			SupportClient      *SupportClient `yaml:"supportClient"`
 			SupportArch        []string       `yaml:"supportArch"`
 			RequiredGPU        string         `yaml:"requiredGPU"`
@@ -1766,6 +1772,10 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string, userID string) 
 			ModelSize          string         `yaml:"modelSize"`
 			Namespace          string         `yaml:"namespace"`
 			OnlyAdmin          bool           `yaml:"onlyAdmin"`
+			License            []struct {
+				Text string `yaml:"text"`
+				URL  string `yaml:"url"`
+			} `yaml:"license"`
 		} `yaml:"spec"`
 		Permission *Permission `yaml:"permission"`
 		Middleware *Middleware `yaml:"middleware"`
@@ -1776,6 +1786,13 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string, userID string) 
 	if err := yaml.Unmarshal([]byte(renderedContent), &appCfg); err != nil {
 		return nil, fmt.Errorf("failed to parse rendered %s: %w", AppCfgFileName, err)
 	}
+
+	// Debug: Log the parsed appCfg structure
+	log.Printf("DEBUG: parseAppInfo - appCfg.ConfigVersion: %s", appCfg.ConfigVersion)
+	log.Printf("DEBUG: parseAppInfo - appCfg.ConfigType: %s", appCfg.ConfigType)
+	log.Printf("DEBUG: parseAppInfo - appCfg.Metadata.Name: %s", appCfg.Metadata.Name)
+	log.Printf("DEBUG: parseAppInfo - appCfg.Spec.SupportArch: %+v", appCfg.Spec.SupportArch)
+	log.Printf("DEBUG: parseAppInfo - appCfg.Spec.SupportArch length: %d", len(appCfg.Spec.SupportArch))
 
 	// Validate required fields
 	if appCfg.Metadata.Name == "" {
@@ -1809,7 +1826,7 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string, userID string) 
 		Developer:          appCfg.Spec.Developer,
 		RequiredMemory:     appCfg.Spec.RequiredMemory,
 		RequiredDisk:       appCfg.Spec.RequiredDisk,
-		SupportArch:        appCfg.Spec.SupportArch,
+		SupportArch:        appCfg.Spec.SupportArch, // Copy from spec.supportArch to outer SupportArch
 		RequiredGPU:        appCfg.Spec.RequiredGPU,
 		RequiredCPU:        appCfg.Spec.RequiredCPU,
 		Rating:             appCfg.Metadata.Rating,
@@ -1832,6 +1849,10 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string, userID string) 
 	appInfo.Metadata["config_version"] = appCfg.ConfigVersion
 	appInfo.Metadata["config_type"] = appCfg.ConfigType
 	appInfo.Metadata["parsed_at"] = time.Now().Unix()
+
+	// Debug: Log SupportArch mapping
+	log.Printf("DEBUG: parseAppInfo - appCfg.Spec.SupportArch: %+v", appCfg.Spec.SupportArch)
+	log.Printf("DEBUG: parseAppInfo - appInfo.SupportArch: %+v", appInfo.SupportArch)
 
 	// Convert SupportClient to map[string]interface{} for compatibility
 	if appCfg.Spec.SupportClient != nil {
@@ -2170,6 +2191,7 @@ func (lr *LocalRepo) convertApplicationInfoEntryToMap(entry *types.ApplicationIn
 	}
 
 	log.Printf("DEBUG: Converting ApplicationInfoEntry to map for app: %s", entry.Name)
+	log.Printf("DEBUG: convertApplicationInfoEntryToMap - entry.SupportArch: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
 
 	result := map[string]interface{}{
 		"id":          entry.ID,

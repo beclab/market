@@ -1087,11 +1087,18 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 		}
 	}
 	if val, ok := sourceData["supportArch"].([]interface{}); ok {
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
 		entry.SupportArch = make([]string, len(val))
 		for i, arch := range val {
 			if archStr, ok := arch.(string); ok {
 				entry.SupportArch[i] = archStr
 			}
+		}
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
+	} else {
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - supportArch not found in sourceData or wrong type")
+		if supportArchVal, exists := sourceData["supportArch"]; exists {
+			log.Printf("DEBUG: mapAllApplicationInfoEntryFields - supportArch value exists but wrong type: %+v (type: %T)", supportArchVal, supportArchVal)
 		}
 	}
 	if val, ok := sourceData["promoteImage"].([]interface{}); ok {
