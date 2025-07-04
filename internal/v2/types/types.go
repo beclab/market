@@ -1086,6 +1086,7 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 			}
 		}
 	}
+	// Handle supportArch - check both []interface{} and []string types
 	if val, ok := sourceData["supportArch"].([]interface{}); ok {
 		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
 		entry.SupportArch = make([]string, len(val))
@@ -1094,6 +1095,10 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 				entry.SupportArch[i] = archStr
 			}
 		}
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
+	} else if val, ok := sourceData["supportArch"].([]string); ok {
+		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch as []string in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
+		entry.SupportArch = append([]string{}, val...)
 		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
 	} else {
 		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - supportArch not found in sourceData or wrong type")
