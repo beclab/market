@@ -782,7 +782,7 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	mapAllApplicationInfoEntryFields(data, rawData)
 
 	// Store the original data in metadata for later processing
-	rawData.Metadata["source_data"] = data
+	// rawData.Metadata["source_data"] = data
 
 	appInfoLatest.RawData = rawData
 	appInfoLatest.AppInfo = &AppInfo{

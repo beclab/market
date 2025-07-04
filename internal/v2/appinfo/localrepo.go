@@ -238,12 +238,12 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	}
 
 	// Step 5: Validate chart structure and configuration
-	if err := lr.validateChart(chartDir, token); err != nil {
+	if err := lr.validateChart(chartDir, token, userID); err != nil {
 		return nil, fmt.Errorf("chart validation failed: %w", err)
 	}
 
 	// Step 6: Parse app information from chart
-	appInfo, err := lr.parseAppInfo(chartDir, token)
+	appInfo, err := lr.parseAppInfo(chartDir, token, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse app info: %w", err)
 	}
@@ -290,9 +290,9 @@ func (lr *LocalRepo) findChartPath(extractDir string) string {
 }
 
 // validateChart validates the chart structure and configuration
-func (lr *LocalRepo) validateChart(chartDir string, token string) error {
+func (lr *LocalRepo) validateChart(chartDir string, token string, userID string) error {
 	// First, parse app info to get cfgType for validation logic
-	appInfo, err := lr.parseAppInfo(chartDir, token)
+	appInfo, err := lr.parseAppInfo(chartDir, token, userID)
 	if err != nil {
 		return fmt.Errorf("failed to parse app info for validation: %w", err)
 	}
@@ -311,12 +311,12 @@ func (lr *LocalRepo) validateChart(chartDir string, token string) error {
 	}
 
 	// Perform chart folder validation
-	if err := lr.checkChartFolder(chartDir, token); err != nil {
+	if err := lr.checkChartFolder(chartDir, token, userID); err != nil {
 		return fmt.Errorf("chart folder validation failed: %w", err)
 	}
 
 	// Perform app configuration validation
-	if err := lr.checkAppCfg(chartDir, token); err != nil {
+	if err := lr.checkAppCfg(chartDir, token, userID); err != nil {
 		return fmt.Errorf("app configuration validation failed: %w", err)
 	}
 
@@ -329,7 +329,7 @@ func (lr *LocalRepo) validateChart(chartDir string, token string) error {
 }
 
 // checkChartFolder validates the chart folder structure
-func (lr *LocalRepo) checkChartFolder(folder string, token string) error {
+func (lr *LocalRepo) checkChartFolder(folder string, token string, userID string) error {
 	folderName := filepath.Base(folder)
 	// if !lr.isValidFolderName(folderName) {
 	// 	return fmt.Errorf("invalid folder name: '%s' must '^[a-z0-9]{1,30}$'", folder)
@@ -377,7 +377,7 @@ func (lr *LocalRepo) checkChartFolder(folder string, token string) error {
 		return fmt.Errorf("failed to read %s in folder '%s': %v", AppCfgFileName, folder, err)
 	}
 
-	renderedContent, err := lr.renderManifest(string(appCfgContent), token)
+	renderedContent, err := lr.renderManifest(string(appCfgContent), token, userID)
 	if err != nil {
 		return fmt.Errorf("failed to render %s in folder '%s': %v", AppCfgFileName, folder, err)
 	}
@@ -399,7 +399,7 @@ func (lr *LocalRepo) checkChartFolder(folder string, token string) error {
 }
 
 // checkAppCfg validates the app configuration
-func (lr *LocalRepo) checkAppCfg(chartDir string, token string) error {
+func (lr *LocalRepo) checkAppCfg(chartDir string, token string, userID string) error {
 	// Basic validation - check if OlaresManifest.yaml exists and is valid
 	appCfgFile := filepath.Join(chartDir, AppCfgFileName)
 	if !lr.fileExists(appCfgFile) {
@@ -412,7 +412,7 @@ func (lr *LocalRepo) checkAppCfg(chartDir string, token string) error {
 	}
 
 	// Try to render and parse the manifest
-	renderedContent, err := lr.renderManifest(string(content), token)
+	renderedContent, err := lr.renderManifest(string(content), token, userID)
 	if err != nil {
 		return fmt.Errorf("failed to render manifest: %w", err)
 	}
@@ -554,7 +554,7 @@ func (lr *LocalRepo) isValidMetadataFields(metadata AppMetaData, chart Chart, fo
 }
 
 // renderManifest renders the manifest using template rendering functionality
-func (lr *LocalRepo) renderManifest(content, token string) (string, error) {
+func (lr *LocalRepo) renderManifest(content, token, userID string) (string, error) {
 	// Check if content contains template syntax
 	if !strings.Contains(content, "{{") {
 		log.Printf("No template syntax found, returning content as-is")
@@ -581,7 +581,7 @@ func (lr *LocalRepo) renderManifest(content, token string) (string, error) {
 	// Set basic template values
 	templateData.Values["admin"] = adminUsername
 	templateData.Values["bfl"] = map[string]interface{}{
-		"username": "user", // Default user for local development
+		"username": userID, // Set to the user who submitted the task
 	}
 	templateData.Values["user"] = map[string]interface{}{
 		"zone": "user-space-default",
@@ -1686,7 +1686,7 @@ func (lr *LocalRepo) extractFile(tr *tar.Reader, target string, mode os.FileMode
 }
 
 // parseAppInfo parses app information from the chart
-func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.ApplicationInfoEntry, error) {
+func (lr *LocalRepo) parseAppInfo(chartDir string, token string, userID string) (*types.ApplicationInfoEntry, error) {
 	appCfgFile := filepath.Join(chartDir, AppCfgFileName)
 
 	// Read the configuration file
@@ -1696,7 +1696,7 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 	}
 
 	// Render the manifest with basic template data
-	renderedContent, err := lr.renderManifest(string(content), token)
+	renderedContent, err := lr.renderManifest(string(content), token, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render manifest: %w", err)
 	}
@@ -1838,160 +1838,6 @@ func (lr *LocalRepo) parseAppInfo(chartDir string, token string) (*types.Applica
 
 	return appInfo, nil
 }
-
-// // parseAppInfoWithCustomData parses app information from the chart with custom template data
-// func (lr *LocalRepo) parseAppInfoWithCustomData(chartDir string, customValues map[string]interface{}, userID string) (*types.ApplicationInfoEntry, error) {
-// 	appCfgFile := filepath.Join(chartDir, AppCfgFileName)
-
-// 	// Read the configuration file
-// 	content, err := os.ReadFile(appCfgFile)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to read %s: %w", AppCfgFileName, err)
-// 	}
-
-// 	// Render the manifest with custom template data
-// 	renderedContent, err := lr.renderManifestWithCustomData(string(content), customValues, userID)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to render manifest with custom data: %w", err)
-// 	}
-
-// 	// Parse the rendered configuration - using the correct structure that matches OlaresManifest.yaml
-// 	var appCfg struct {
-// 		ConfigVersion string `yaml:"olaresManifest.version"`
-// 		ConfigType    string `yaml:"olaresManifest.type"`
-// 		Metadata      struct {
-// 			Name        string   `yaml:"name"`
-// 			Icon        string   `yaml:"icon"`
-// 			Description string   `yaml:"description"`
-// 			AppID       string   `yaml:"appid"`
-// 			Title       string   `yaml:"title"`
-// 			Version     string   `yaml:"version"`
-// 			Categories  []string `yaml:"categories"`
-// 			Rating      float32  `yaml:"rating"`
-// 			Target      string   `yaml:"target"`
-// 		} `yaml:"metadata"`
-// 		Spec struct {
-// 			VersionName        string         `yaml:"versionName"`
-// 			FullDescription    string         `yaml:"fullDescription"`
-// 			UpgradeDescription string         `yaml:"upgradeDescription"`
-// 			PromoteImage       []string       `yaml:"promoteImage"`
-// 			PromoteVideo       string         `yaml:"promoteVideo"`
-// 			SubCategory        string         `yaml:"subCategory"`
-// 			Developer          string         `yaml:"developer"`
-// 			RequiredMemory     string         `yaml:"requiredMemory"`
-// 			RequiredDisk       string         `yaml:"requiredDisk"`
-// 			SupportClient      *SupportClient `yaml:"supportClient"`
-// 			SupportArch        []string       `yaml:"supportArch"`
-// 			RequiredGPU        string         `yaml:"requiredGPU"`
-// 			RequiredCPU        string         `yaml:"requiredCPU"`
-// 			Locale             []string       `yaml:"locale"`
-// 			Submitter          string         `yaml:"submitter"`
-// 			Doc                string         `yaml:"doc"`
-// 			Website            string         `yaml:"website"`
-// 			FeatureImage       string         `yaml:"featuredImage"`
-// 			SourceCode         string         `yaml:"sourceCode"`
-// 			ModelSize          string         `yaml:"modelSize"`
-// 			Namespace          string         `yaml:"namespace"`
-// 			OnlyAdmin          bool           `yaml:"onlyAdmin"`
-// 		} `yaml:"spec"`
-// 		Permission *Permission `yaml:"permission"`
-// 		Middleware *Middleware `yaml:"middleware"`
-// 		Options    *Options    `yaml:"options"`
-// 		Entrances  []*Entrance `yaml:"entrances"`
-// 	}
-
-// 	if err := yaml.Unmarshal([]byte(renderedContent), &appCfg); err != nil {
-// 		return nil, fmt.Errorf("failed to parse rendered %s: %w", AppCfgFileName, err)
-// 	}
-
-// 	// Validate required fields
-// 	if appCfg.Metadata.Name == "" {
-// 		return nil, fmt.Errorf("metadata.name is required")
-// 	}
-// 	if appCfg.Metadata.AppID == "" {
-// 		return nil, fmt.Errorf("metadata.appid is required")
-// 	}
-// 	if appCfg.Metadata.Version == "" {
-// 		return nil, fmt.Errorf("metadata.version is required")
-// 	}
-
-// 	// Create ApplicationInfoEntry with proper field mapping
-// 	appInfo := &types.ApplicationInfoEntry{
-// 		ID:                 appCfg.Metadata.AppID, // Use AppID as the primary ID
-// 		AppID:              appCfg.Metadata.AppID,
-// 		Name:               appCfg.Metadata.Name,
-// 		CfgType:            appCfg.ConfigType,
-// 		ChartName:          appCfg.Metadata.Name,
-// 		Icon:               appCfg.Metadata.Icon,
-// 		Description:        map[string]string{"en-US": appCfg.Metadata.Description},
-// 		Title:              map[string]string{"en-US": appCfg.Metadata.Title},
-// 		Version:            appCfg.Metadata.Version,
-// 		Categories:         appCfg.Metadata.Categories,
-// 		VersionName:        appCfg.Spec.VersionName,
-// 		FullDescription:    map[string]string{"en-US": appCfg.Spec.FullDescription},
-// 		UpgradeDescription: map[string]string{"en-US": appCfg.Spec.UpgradeDescription},
-// 		PromoteImage:       appCfg.Spec.PromoteImage,
-// 		PromoteVideo:       appCfg.Spec.PromoteVideo,
-// 		SubCategory:        appCfg.Spec.SubCategory,
-// 		Developer:          appCfg.Spec.Developer,
-// 		RequiredMemory:     appCfg.Spec.RequiredMemory,
-// 		RequiredDisk:       appCfg.Spec.RequiredDisk,
-// 		SupportArch:        appCfg.Spec.SupportArch,
-// 		RequiredGPU:        appCfg.Spec.RequiredGPU,
-// 		RequiredCPU:        appCfg.Spec.RequiredCPU,
-// 		Rating:             appCfg.Metadata.Rating,
-// 		Target:             appCfg.Metadata.Target,
-// 		Locale:             appCfg.Spec.Locale,
-// 		Submitter:          appCfg.Spec.Submitter,
-// 		Doc:                appCfg.Spec.Doc,
-// 		Website:            appCfg.Spec.Website,
-// 		FeaturedImage:      appCfg.Spec.FeatureImage,
-// 		SourceCode:         appCfg.Spec.SourceCode,
-// 		ModelSize:          appCfg.Spec.ModelSize,
-// 		Namespace:          appCfg.Spec.Namespace,
-// 		OnlyAdmin:          appCfg.Spec.OnlyAdmin,
-// 		CreateTime:         time.Now().Unix(),
-// 		UpdateTime:         time.Now().Unix(),
-// 		Metadata:           lr.createInitialMetadata(appCfg.ConfigVersion, appCfg.ConfigType),
-// 	}
-
-// 	// Store only essential metadata to avoid circular references
-// 	appInfo.Metadata["config_version"] = appCfg.ConfigVersion
-// 	appInfo.Metadata["config_type"] = appCfg.ConfigType
-// 	appInfo.Metadata["parsed_at"] = time.Now().Unix()
-
-// 	// Convert SupportClient to map[string]interface{} for compatibility
-// 	if appCfg.Spec.SupportClient != nil {
-// 		appInfo.SupportClient = lr.convertSupportClientToMap(appCfg.Spec.SupportClient)
-// 	}
-
-// 	// Convert Permission to map[string]interface{} for compatibility
-// 	if appCfg.Permission != nil {
-// 		appInfo.Permission = lr.convertPermissionToMap(appCfg.Permission)
-// 	}
-
-// 	// Convert Middleware to map[string]interface{} for compatibility
-// 	if appCfg.Middleware != nil {
-// 		appInfo.Middleware = lr.convertMiddlewareToMap(appCfg.Middleware)
-// 	}
-
-// 	// Convert Options to map[string]interface{} for compatibility
-// 	if appCfg.Options != nil {
-// 		appInfo.Options = lr.convertOptionsToMap(appCfg.Options)
-// 	}
-
-// 	// Convert Entrances to []map[string]interface{} for compatibility
-// 	if appCfg.Entrances != nil {
-// 		appInfo.Entrances = lr.convertEntrancesToMapSlice(appCfg.Entrances)
-// 	}
-
-// 	// Load i18n information if available
-// 	if err := lr.loadI18nInfo(appInfo, chartDir); err != nil {
-// 		log.Printf("Warning: failed to load i18n info: %v", err)
-// 	}
-
-// 	return appInfo, nil
-// }
 
 // loadI18nInfo loads internationalization information
 func (lr *LocalRepo) loadI18nInfo(appInfo *types.ApplicationInfoEntry, chartDir string) error {
