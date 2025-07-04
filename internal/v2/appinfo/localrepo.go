@@ -572,7 +572,7 @@ func (lr *LocalRepo) renderManifest(content, token string) (string, error) {
 	}
 
 	// Get admin username using utils function
-	adminUsername, err := utils.GetAdminUsername("")
+	adminUsername, err := utils.GetAdminUsername(token)
 	if err != nil {
 		log.Printf("Warning: failed to get admin username, using default: %v", err)
 		adminUsername = "admin" // fallback to default
