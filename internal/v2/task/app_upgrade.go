@@ -44,7 +44,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-	urlStr := fmt.Sprintf("http://%s:%s/api/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
+	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
 
 	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
 
