@@ -32,7 +32,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 
 	source, ok := task.Metadata["source"].(string)
 	if !ok {
-		source = "store" // Default source
+		source = "market" // Default source
 		log.Printf("Using default source 'store' for task: %s", task.ID)
 	}
 
