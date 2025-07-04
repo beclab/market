@@ -474,7 +474,12 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 			}
 
 			// Check if app already exists in latest queue before creating new task
-			if h.isAppInLatestQueue(userID, sourceID, appID) {
+			// Extract version from pending data for version comparison
+			version := ""
+			if pendingData.RawData != nil {
+				version = pendingData.RawData.Version
+			}
+			if h.isAppInLatestQueue(userID, sourceID, appID, version) {
 				// log.Printf("App already exists in latest queue for app: %s (user: %s, source: %s), skipping task creation",
 				// 	appID, userID, sourceID)
 				return
@@ -1047,7 +1052,14 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 				}
 
 				// Check if app hydration is already complete before creating new task
-				if h.isAppInLatestQueue(userID, sourceID, appID) {
+				// Extract version from app data for version comparison
+				version := ""
+				if versionValue, exists := appMap["version"]; exists && versionValue != nil {
+					if versionStr, ok := versionValue.(string); ok {
+						version = versionStr
+					}
+				}
+				if h.isAppInLatestQueue(userID, sourceID, appID, version) {
 					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
 					// 	appID, userID, sourceID)
 					continue
@@ -1408,8 +1420,8 @@ func (h *Hydrator) cleanupOldTasks() {
 	}
 }
 
-// isAppInLatestQueue checks if an app already exists in the AppInfoLatest queue
-func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID string) bool {
+// isAppInLatestQueue checks if an app already exists in the AppInfoLatest queue with version comparison
+func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) bool {
 	// Get the source data from cache using global lock
 	h.cache.Mutex.RLock()
 	defer h.cache.Mutex.RUnlock()
@@ -1435,6 +1447,13 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID string) bool {
 			if latestData.RawData.ID == appID ||
 				latestData.RawData.AppID == appID ||
 				latestData.RawData.Name == appID {
+				// Add version comparison - only return true if versions match
+				if version != "" && latestData.RawData.Version != version {
+					log.Printf("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
+						appID, version, latestData.RawData.Version)
+					continue
+				}
+				log.Printf("App %s found in latest queue with matching version: %s", appID, version)
 				return true
 			}
 		}
@@ -1444,6 +1463,13 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID string) bool {
 			if latestData.AppInfo.AppEntry.ID == appID ||
 				latestData.AppInfo.AppEntry.AppID == appID ||
 				latestData.AppInfo.AppEntry.Name == appID {
+				// Add version comparison - only return true if versions match
+				if version != "" && latestData.AppInfo.AppEntry.Version != version {
+					log.Printf("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
+						appID, version, latestData.AppInfo.AppEntry.Version)
+					continue
+				}
+				log.Printf("App %s found in latest queue with matching version: %s", appID, version)
 				return true
 			}
 		}
@@ -1452,7 +1478,14 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID string) bool {
 		if latestData.AppSimpleInfo != nil {
 			if latestData.AppSimpleInfo.AppID == appID ||
 				latestData.AppSimpleInfo.AppName == appID {
-				return true
+				// For AppSimpleInfo, we may not have version info, so only check if version is empty
+				if version == "" {
+					log.Printf("App %s found in latest queue (AppSimpleInfo)", appID)
+					return true
+				}
+				// If version is provided but AppSimpleInfo doesn't have version, skip
+				log.Printf("App %s found in latest queue but AppSimpleInfo has no version info, skipping", appID)
+				continue
 			}
 		}
 	}
