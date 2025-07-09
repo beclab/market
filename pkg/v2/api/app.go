@@ -1452,14 +1452,14 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	log.Println("DELETE /api/v2/apps/delete - Deleting local source application")
 
 	// Step 1: Get user information from request
-	// restfulReq := s.httpToRestfulRequest(r)
-	// userID, err := utils.GetUserInfoFromRequest(restfulReq)
-	// if err != nil {
-	// 	log.Printf("Failed to get user from request: %v", err)
-	// 	s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
-	// 	return
-	// }
-	userID := "saidevgp03"
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	// userID := "saidevgp03"
 	log.Printf("Retrieved user ID for delete request: %s", userID)
 
 	// Step 2: Check if cache manager is available
