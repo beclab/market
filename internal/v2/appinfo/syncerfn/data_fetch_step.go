@@ -288,16 +288,25 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 		others.Latest = data.LatestData.Data.Latest
 	}
 
-	// Extract tags data
+	// Extract tags data - handle object format
 	if data.LatestData.Data.Tags != nil {
-		for _, tagData := range data.LatestData.Data.Tags {
+		keys := make([]string, 0, len(data.LatestData.Data.Tags))
+		for k := range data.LatestData.Data.Tags {
+			keys = append(keys, k)
+		}
+		log.Printf("DEBUG: Processing tags data, type: %T, keys: %v", data.LatestData.Data.Tags, keys)
+		for tagKey, tagData := range data.LatestData.Data.Tags {
 			if tagMap, ok := tagData.(map[string]interface{}); ok {
 				tag := d.mapToTag(tagMap)
 				if tag != nil {
 					others.Tags = append(others.Tags, tag)
+					log.Printf("DEBUG: Added tag %s to others", tagKey)
 				}
 			}
 		}
+		log.Printf("DEBUG: Extracted %d tags from response", len(others.Tags))
+	} else {
+		log.Printf("DEBUG: No tags data found in response")
 	}
 
 	// Update Others in the cache for current source
