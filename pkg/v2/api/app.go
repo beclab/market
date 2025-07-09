@@ -812,6 +812,7 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 			Pages:      sourceData.Others.Pages,
 			Tops:       sourceData.Others.Tops,
 			Latest:     sourceData.Others.Latest,
+			Tags:       sourceData.Others.Tags,
 		}
 	}
 
@@ -1333,6 +1334,15 @@ func (s *Server) createSafeOthersCopy(others *types.Others) map[string]interface
 		safeCopy["tops"] = safeTops
 	}
 
+	// Create safe copies of Tags
+	if len(others.Tags) > 0 {
+		safeTags := make([]map[string]interface{}, len(others.Tags))
+		for i, tag := range others.Tags {
+			safeTags[i] = s.createSafeTagCopy(tag)
+		}
+		safeCopy["tags"] = safeTags
+	}
+
 	return safeCopy
 }
 
@@ -1411,5 +1421,22 @@ func (s *Server) createSafePageCopy(page *types.Page) map[string]interface{} {
 		"content":    page.Content,
 		"createdAt":  page.CreatedAt,
 		"updated_at": page.UpdatedAt,
+	}
+}
+
+// createSafeTagCopy creates a safe copy of Tag to avoid circular references
+func (s *Server) createSafeTagCopy(tag *types.Tag) map[string]interface{} {
+	if tag == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"_id":        tag.ID,
+		"name":       tag.Name,
+		"title":      tag.Title,
+		"icon":       tag.Icon,
+		"source":     tag.Source,
+		"createdAt":  tag.CreatedAt,
+		"updated_at": tag.UpdatedAt,
 	}
 }
