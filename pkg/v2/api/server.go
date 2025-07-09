@@ -148,6 +148,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps/version-history", s.getAppVersionHistory).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/apps/version-history")
 
+	// 21. Delete local source application
+	api.HandleFunc("/apps/delete", s.deleteLocalApp).Methods("DELETE")
+	log.Printf("Route configured: DELETE /app-store/api/v2/apps/delete")
+
 	log.Printf("All routes configured successfully")
 }
 

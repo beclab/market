@@ -1125,3 +1125,69 @@ func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) err
 
 	return nil
 }
+
+// RemoveAppInfoLatestData removes a specific app from AppInfoLatest for a user and source
+func (cm *CacheManager) RemoveAppInfoLatestData(userID, sourceID, appName string) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppInfoLatestData Start")
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if !cm.isRunning {
+		return fmt.Errorf("cache manager is not running")
+	}
+
+	userData, userExists := cm.cache.Users[userID]
+	if !userExists {
+		return fmt.Errorf("user %s not found", userID)
+	}
+
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return fmt.Errorf("source %s not found for user %s", sourceID, userID)
+	}
+
+	originalCount := len(sourceData.AppInfoLatest)
+	newList := make([]*types.AppInfoLatestData, 0, originalCount)
+	for _, appInfo := range sourceData.AppInfoLatest {
+		if appInfo == nil {
+			continue
+		}
+
+		// Check multiple possible ID fields for matching
+		var appID string
+		if appInfo.RawData != nil {
+			// Priority: ID > AppID > Name
+			if appInfo.RawData.ID != "" {
+				appID = appInfo.RawData.ID
+			} else if appInfo.RawData.AppID != "" {
+				appID = appInfo.RawData.AppID
+			} else if appInfo.RawData.Name != "" {
+				appID = appInfo.RawData.Name
+			}
+		}
+
+		// Also check AppSimpleInfo if available
+		if appID == "" && appInfo.AppSimpleInfo != nil {
+			appID = appInfo.AppSimpleInfo.AppID
+		}
+
+		// Match the requested app name
+		if appID != appName && (appInfo.RawData == nil || appInfo.RawData.Name != appName) {
+			newList = append(newList, appInfo)
+		}
+	}
+	sourceData.AppInfoLatest = newList
+
+	if len(newList) < originalCount {
+		glog.Infof("Removed app %s from AppInfoLatest for user=%s, source=%s", appName, userID, sourceID)
+		cm.requestSync(SyncRequest{
+			UserID:   userID,
+			SourceID: sourceID,
+			Type:     SyncSource,
+		})
+	} else {
+		glog.Infof("App %s not found in AppInfoLatest for user=%s, source=%s", appName, userID, sourceID)
+	}
+
+	return nil
+}

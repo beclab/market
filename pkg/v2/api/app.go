@@ -1440,3 +1440,187 @@ func (s *Server) createSafeTagCopy(tag *types.Tag) map[string]interface{} {
 		"updated_at": tag.UpdatedAt,
 	}
 }
+
+// DeleteLocalAppRequest represents the request body for /api/v2/apps/delete
+type DeleteLocalAppRequest struct {
+	AppName    string `json:"app_name"`
+	AppVersion string `json:"app_version"`
+}
+
+// deleteLocalApp handles DELETE /api/v2/apps/delete
+func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
+	log.Println("DELETE /api/v2/apps/delete - Deleting local source application")
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for delete request: %s", userID)
+
+	// Step 2: Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Printf("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Step 3: Parse JSON request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+	defer r.Body.Close()
+
+	var request DeleteLocalAppRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		log.Printf("Failed to parse JSON request: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
+		return
+	}
+
+	// Step 4: Validate request parameters
+	if request.AppName == "" {
+		log.Printf("App name is required")
+		s.sendResponse(w, http.StatusBadRequest, false, "App name is required", nil)
+		return
+	}
+
+	if request.AppVersion == "" {
+		log.Printf("App version is required")
+		s.sendResponse(w, http.StatusBadRequest, false, "App version is required", nil)
+		return
+	}
+
+	log.Printf("Received delete request for app: %s, version: %s from user: %s", request.AppName, request.AppVersion, userID)
+
+	// Step 5: Check if app exists in local source
+	userData := s.cacheManager.GetUserData(userID)
+	if userData == nil {
+		log.Printf("User data not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+		return
+	}
+
+	sourceData, exists := userData.Sources["local"]
+	if !exists {
+		log.Printf("Local source not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "Local source not found", nil)
+		return
+	}
+
+	// Step 6: Check if app exists in AppInfoLatest
+	appExists := false
+	for _, app := range sourceData.AppInfoLatest {
+		if app == nil {
+			continue
+		}
+
+		// Check multiple possible ID fields for matching
+		var appID string
+		if app.RawData != nil {
+			// Priority: ID > AppID > Name
+			if app.RawData.ID != "" {
+				appID = app.RawData.ID
+			} else if app.RawData.AppID != "" {
+				appID = app.RawData.AppID
+			} else if app.RawData.Name != "" {
+				appID = app.RawData.Name
+			}
+		}
+
+		// Also check AppSimpleInfo if available
+		if appID == "" && app.AppSimpleInfo != nil {
+			appID = app.AppSimpleInfo.AppID
+		}
+
+		// Match the requested app name and version
+		if (appID == request.AppName || (app.RawData != nil && app.RawData.Name == request.AppName)) &&
+			app.Version == request.AppVersion {
+			appExists = true
+			break
+		}
+	}
+
+	if !appExists {
+		log.Printf("App %s version %s not found in local source for user: %s", request.AppName, request.AppVersion, userID)
+		s.sendResponse(w, http.StatusNotFound, false, "App not found in local source", nil)
+		return
+	}
+
+	// Step 7: Delete chart files using LocalRepo
+	localRepo := appinfo.NewLocalRepo(s.cacheManager)
+	if s.hydrator != nil {
+		localRepo.SetHydrator(s.hydrator)
+	}
+
+	// Delete chart package file
+	if err := localRepo.DeleteAppChart(userID, "local", request.AppName, request.AppVersion); err != nil {
+		log.Printf("Failed to delete chart package: %v", err)
+		// Continue with deletion even if chart file doesn't exist
+	}
+
+	// Delete rendered chart directory
+	if err := localRepo.DeleteRenderedChart(userID, "local", request.AppName, request.AppVersion); err != nil {
+		log.Printf("Failed to delete rendered chart directory: %v", err)
+		// Continue with deletion even if rendered directory doesn't exist
+	}
+
+	// Step 8: Remove app from AppStateLatest
+	if err := s.cacheManager.RemoveAppStateData(userID, "local", request.AppName); err != nil {
+		log.Printf("Failed to remove app from AppStateLatest: %v", err)
+		// Continue with deletion even if app state doesn't exist
+	}
+
+	// Step 9: Remove app from AppInfoLatest
+	if err := s.cacheManager.RemoveAppInfoLatestData(userID, "local", request.AppName); err != nil {
+		log.Printf("Failed to remove app from AppInfoLatest: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to remove app from cache", nil)
+		return
+	}
+
+	// Step 10: Send deletion notification
+	dataSender, err := appinfo.NewDataSender()
+	if err != nil {
+		log.Printf("Failed to create data sender: %v", err)
+		// Don't fail the request if data sender creation fails
+	} else {
+		update := &types.MarketSystemUpdate{
+			Timestamp:  time.Now().Unix(),
+			User:       userID,
+			NotifyType: "market_system_point",
+			Point:      "local_app_delete",
+			Extensions: map[string]string{
+				"app_name":    request.AppName,
+				"app_version": request.AppVersion,
+				"source":      "local",
+			},
+		}
+
+		if err := dataSender.SendMarketSystemUpdate(*update); err != nil {
+			log.Printf("Failed to send deletion notification: %v", err)
+			// Don't fail the request if notification fails
+		}
+
+		// Close data sender
+		dataSender.Close()
+	}
+
+	log.Printf("Successfully deleted app: %s version: %s from local source for user: %s", request.AppName, request.AppVersion, userID)
+
+	// Step 11: Prepare response
+	responseData := map[string]interface{}{
+		"app_name":    request.AppName,
+		"app_version": request.AppVersion,
+		"user_id":     userID,
+		"source":      "local",
+		"deleted_at":  time.Now().Unix(),
+	}
+
+	s.sendResponse(w, http.StatusOK, true, "App deleted successfully from local source", responseData)
+}

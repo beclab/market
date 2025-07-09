@@ -2931,3 +2931,62 @@ func (lr *LocalRepo) safeCopyCount(count interface{}) interface{} {
 		return nil
 	}
 }
+
+// DeleteAppChart deletes the chart package file for a specific app
+func (lr *LocalRepo) DeleteAppChart(userID, sourceID, appName, appVersion string) error {
+	log.Printf("Deleting chart package for app: %s, version: %s, user: %s, source: %s", appName, appVersion, userID, sourceID)
+
+	// Get CHART_ROOT environment variable
+	chartRoot := os.Getenv("CHART_ROOT")
+	if chartRoot == "" {
+		return fmt.Errorf("CHART_ROOT environment variable is not set")
+	}
+
+	// Build chart package filename: appName-appVersion.tgz
+	chartFileName := fmt.Sprintf("%s-%s.tgz", appName, appVersion)
+	chartPackagePath := filepath.Join(chartRoot, sourceID, chartFileName)
+
+	// Check if chart package exists
+	if _, err := os.Stat(chartPackagePath); os.IsNotExist(err) {
+		log.Printf("Chart package not found: %s", chartPackagePath)
+		return fmt.Errorf("chart package not found: %s", chartPackagePath)
+	}
+
+	// Delete the chart package file
+	if err := os.Remove(chartPackagePath); err != nil {
+		log.Printf("Failed to delete chart package: %v", err)
+		return fmt.Errorf("failed to delete chart package: %w", err)
+	}
+
+	log.Printf("Successfully deleted chart package: %s", chartPackagePath)
+	return nil
+}
+
+// DeleteRenderedChart deletes the rendered chart directory for a specific app
+func (lr *LocalRepo) DeleteRenderedChart(userID, sourceID, appName, appVersion string) error {
+	log.Printf("Deleting rendered chart directory for app: %s, version: %s, user: %s, source: %s", appName, appVersion, userID, sourceID)
+
+	// Get CHART_ROOT environment variable
+	chartRoot := os.Getenv("CHART_ROOT")
+	if chartRoot == "" {
+		return fmt.Errorf("CHART_ROOT environment variable is not set")
+	}
+
+	// Build rendered chart directory path: {basePath}/{username}/{source name}/{app name}-{version}/
+	chartDir := filepath.Join(chartRoot, userID, sourceID, fmt.Sprintf("%s-%s", appName, appVersion))
+
+	// Check if rendered chart directory exists
+	if _, err := os.Stat(chartDir); os.IsNotExist(err) {
+		log.Printf("Rendered chart directory not found: %s", chartDir)
+		return fmt.Errorf("rendered chart directory not found: %s", chartDir)
+	}
+
+	// Delete the rendered chart directory
+	if err := os.RemoveAll(chartDir); err != nil {
+		log.Printf("Failed to delete rendered chart directory: %v", err)
+		return fmt.Errorf("failed to delete rendered chart directory: %w", err)
+	}
+
+	log.Printf("Successfully deleted rendered chart directory: %s", chartDir)
+	return nil
+}
