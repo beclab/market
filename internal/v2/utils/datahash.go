@@ -39,6 +39,7 @@ type OthersInterface interface {
 	GetTopicLists() []interface{}
 	GetRecommends() []interface{}
 	GetPages() []interface{}
+	GetTags() []interface{}
 }
 
 // CalculateUserDataHash calculates hash for entire user data
@@ -132,7 +133,7 @@ func CalculateSourceDataHashWithSize(sourceData SourceDataInterface) (string, in
 		marshalWithSizeCheck(appInfoLatest, "AppInfoLatest")
 	}
 
-	// 3. Others data (Topics, TopicLists, Recommends, Pages)
+	// 3. Others data (Topics, TopicLists, Recommends, Pages, Tags)
 	others := sourceData.GetOthers()
 	if others != nil {
 		// Topics
@@ -157,6 +158,12 @@ func CalculateSourceDataHashWithSize(sourceData SourceDataInterface) (string, in
 		pages := others.GetPages()
 		if len(pages) > 0 {
 			marshalWithSizeCheck(pages, "Pages")
+		}
+
+		// Tags
+		tags := others.GetTags()
+		if len(tags) > 0 {
+			marshalWithSizeCheck(tags, "Tags")
 		}
 	}
 

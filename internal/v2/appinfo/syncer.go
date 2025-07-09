@@ -386,6 +386,47 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 						if content, ok := recMap["content"].(string); ok {
 							recommend.Content = content
 						}
+
+						// Handle I18n field
+						if i18nData, ok := recMap["i18n"].(map[string]interface{}); ok {
+							recommend.I18n = &types.RecommendI18n{}
+
+							if title, ok := i18nData["title"].(map[string]interface{}); ok {
+								recommend.I18n.Title = make(map[string]string)
+								for k, v := range title {
+									if str, ok := v.(string); ok {
+										recommend.I18n.Title[k] = str
+									}
+								}
+							}
+
+							if description, ok := i18nData["description"].(map[string]interface{}); ok {
+								recommend.I18n.Description = make(map[string]string)
+								for k, v := range description {
+									if str, ok := v.(string); ok {
+										recommend.I18n.Description[k] = str
+									}
+								}
+							}
+						}
+
+						// Handle Source field
+						if source, ok := recMap["source"].(string); ok {
+							recommend.Source = source
+						}
+
+						// Handle time fields
+						if createdAt, ok := recMap["createdAt"].(string); ok {
+							if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+								recommend.CreatedAt = t
+							}
+						}
+						if updatedAt, ok := recMap["updated_at"].(string); ok {
+							if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+								recommend.UpdatedAt = t
+							}
+						}
+
 						others.Recommends[i] = recommend
 					}
 				}
@@ -421,26 +462,43 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 						if name, ok := topicMap["name"].(string); ok {
 							topicObj.Name = name
 						}
-						if intro, ok := topicMap["introduction"].(string); ok {
-							topicObj.Introduction = intro
+						if data, ok := topicMap["data"].(map[string]interface{}); ok {
+							topicObj.Data = make(map[string]*types.TopicData)
+							for lang, topicDataInterface := range data {
+								if topicDataMap, ok := topicDataInterface.(map[string]interface{}); ok {
+									topicData := &types.TopicData{}
+
+									if group, ok := topicDataMap["group"].(string); ok {
+										topicData.Group = group
+									}
+									if title, ok := topicDataMap["title"].(string); ok {
+										topicData.Title = title
+									}
+									if des, ok := topicDataMap["des"].(string); ok {
+										topicData.Des = des
+									}
+									if iconImg, ok := topicDataMap["iconimg"].(string); ok {
+										topicData.IconImg = iconImg
+									}
+									if detailImg, ok := topicDataMap["detailimg"].(string); ok {
+										topicData.DetailImg = detailImg
+									}
+									if richText, ok := topicDataMap["richtext"].(string); ok {
+										topicData.RichText = richText
+									}
+									if apps, ok := topicDataMap["apps"].(string); ok {
+										topicData.Apps = apps
+									}
+									if isDelete, ok := topicDataMap["isdelete"].(bool); ok {
+										topicData.IsDelete = isDelete
+									}
+
+									topicObj.Data[lang] = topicData
+								}
+							}
 						}
-						if desc, ok := topicMap["des"].(string); ok {
-							topicObj.Des = desc
-						}
-						if iconImg, ok := topicMap["iconimg"].(string); ok {
-							topicObj.IconImg = iconImg
-						}
-						if detailImg, ok := topicMap["detailimg"].(string); ok {
-							topicObj.DetailImg = detailImg
-						}
-						if richText, ok := topicMap["richtext"].(string); ok {
-							topicObj.RichText = richText
-						}
-						if apps, ok := topicMap["apps"].(string); ok {
-							topicObj.Apps = apps
-						}
-						if isDelete, ok := topicMap["isdelete"].(bool); ok {
-							topicObj.IsDelete = isDelete
+						if source, ok := topicMap["source"].(string); ok {
+							topicObj.Source = source
 						}
 						others.Topics[i] = topicObj
 					}
@@ -466,6 +524,17 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 						}
 						if content, ok := topicListMap["content"].(string); ok {
 							topicListObj.Content = content
+						}
+						if title, ok := topicListMap["title"].(map[string]interface{}); ok {
+							topicListObj.Title = make(map[string]string)
+							for k, v := range title {
+								if str, ok := v.(string); ok {
+									topicListObj.Title[k] = str
+								}
+							}
+						}
+						if source, ok := topicListMap["source"].(string); ok {
+							topicListObj.Source = source
 						}
 						others.TopicLists[i] = topicListObj
 					}

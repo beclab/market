@@ -501,10 +501,19 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 						if name, ok := topicMap["name"].(string); ok {
 							topic.Name = name
 						}
-						if apps, ok := topicMap["apps"].(string); ok {
-							topic.Apps = apps
+						// Extract topic data if present
+						if data, ok := topicMap["data"].(map[string]interface{}); ok {
+							topic.Data = make(map[string]*types.TopicData)
+							for lang, topicDataInterface := range data {
+								if topicDataMap, ok := topicDataInterface.(map[string]interface{}); ok {
+									topicData := &types.TopicData{}
+									if apps, ok := topicDataMap["apps"].(string); ok {
+										topicData.Apps = apps
+									}
+									topic.Data[lang] = topicData
+								}
+							}
 						}
-						// ... extract other topic fields as needed
 						others.Topics = append(others.Topics, topic)
 					}
 				}

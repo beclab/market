@@ -37,13 +37,21 @@ const (
 	SourceDataTypeRemote SourceDataType = "remote" // Remote source data
 )
 
+// RecommendI18n represents i18n configuration for recommend
+type RecommendI18n struct {
+	Title       map[string]string `json:"title,omitempty"`
+	Description map[string]string `json:"description,omitempty"`
+}
+
 // Recommend represents recommendation configuration
 type Recommend struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Content     string    `json:"content"` // Comma-separated app names
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Content     string         `json:"content"` // Comma-separated app names
+	I18n        *RecommendI18n `json:"i18n,omitempty"`
+	Source      string         `json:"source,omitempty"` // Data source identifier
+	CreatedAt   time.Time      `json:"createdAt"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 // Page represents page configuration
@@ -54,39 +62,55 @@ type Page struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// TopicData represents topic data for specific language
+type TopicData struct {
+	Group     string `json:"group"`
+	Title     string `json:"title"`
+	Des       string `json:"des"`
+	IconImg   string `json:"iconimg"`
+	DetailImg string `json:"detailimg"`
+	RichText  string `json:"richtext"`
+	Apps      string `json:"apps"`
+	IsDelete  bool   `json:"isdelete"`
+}
+
 // Topic represents topic configuration
 type Topic struct {
-	ID            string            `json:"_id"`
-	Name          string            `json:"name"`
-	Name2         map[string]string `json:"name2"`
-	Introduction  string            `json:"introduction"`
-	Introduction2 map[string]string `json:"introduction2"`
-	Des           string            `json:"des"` // Description
-	Des2          map[string]string `json:"des2"`
-	IconImg       string            `json:"iconimg"`   // Icon image URL
-	DetailImg     string            `json:"detailimg"` // Detail image URL
-	RichText      string            `json:"richtext"`  // Rich text content
-	RichText2     map[string]string `json:"richtext2"`
-	Apps          string            `json:"apps"` // Comma-separated app names
-	IsDelete      bool              `json:"isdelete"`
-	CreatedAt     time.Time         `json:"createdAt"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	ID        string                `json:"_id"`
+	Name      string                `json:"name"`
+	Data      map[string]*TopicData `json:"data"` // i18n data by language
+	Source    string                `json:"source"`
+	UpdatedAt time.Time             `json:"updated_at"`
+	CreatedAt time.Time             `json:"createdAt"`
 }
 
 // TopicList represents topic list configuration
 type TopicList struct {
-	Name        string    `json:"name"`
-	Type        string    `json:"type"` // Topic list type
-	Description string    `json:"description"`
-	Content     string    `json:"content"` // Comma-separated topic IDs
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"` // Topic list type
+	Description string            `json:"description"`
+	Content     string            `json:"content"` // Comma-separated topic IDs
+	Title       map[string]string `json:"title"`   // i18n title mapping
+	Source      string            `json:"source"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+	CreatedAt   time.Time         `json:"createdAt"`
 }
 
 // AppStoreTopItem represents an item in the tops list from appstore
 type AppStoreTopItem struct {
 	AppID string `json:"appid"`
 	Rank  int    `json:"rank"`
+}
+
+// Tag represents tag configuration
+type Tag struct {
+	ID        string            `json:"_id"`
+	Name      string            `json:"name"`
+	Title     map[string]string `json:"title"` // i18n title mapping
+	Icon      string            `json:"icon"`
+	Source    string            `json:"source"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	CreatedAt time.Time         `json:"createdAt"`
 }
 
 // Others contains additional data for AppInfoLatestPendingData
@@ -99,6 +123,7 @@ type Others struct {
 	Pages      []*Page            `json:"pages"`
 	Tops       []*AppStoreTopItem `json:"tops"`
 	Latest     []string           `json:"latest"`
+	Tags       []*Tag             `json:"tags"`
 }
 
 // AppData contains the actual data and metadata

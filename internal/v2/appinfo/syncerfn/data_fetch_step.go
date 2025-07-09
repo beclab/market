@@ -288,13 +288,25 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 		others.Latest = data.LatestData.Data.Latest
 	}
 
+	// Extract tags data
+	if data.LatestData.Data.Tags != nil {
+		for _, tagData := range data.LatestData.Data.Tags {
+			if tagMap, ok := tagData.(map[string]interface{}); ok {
+				tag := d.mapToTag(tagMap)
+				if tag != nil {
+					others.Tags = append(others.Tags, tag)
+				}
+			}
+		}
+	}
+
 	// Update Others in the cache for current source
 	if data.Cache != nil && data.MarketSource != nil {
 		d.updateOthersInCache(data, others)
 	}
 
-	log.Printf("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest",
-		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages), len(others.Tops), len(others.Latest))
+	log.Printf("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest, %d tags",
+		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages), len(others.Tops), len(others.Latest), len(others.Tags))
 }
 
 // mapToTopic converts a map to Topic struct
@@ -307,58 +319,43 @@ func (d *DataFetchStep) mapToTopic(m map[string]interface{}) *types.Topic {
 	if name, ok := m["name"].(string); ok {
 		topic.Name = name
 	}
-	if name2, ok := m["name2"].(map[string]interface{}); ok {
-		topic.Name2 = make(map[string]string)
-		for k, v := range name2 {
-			if str, ok := v.(string); ok {
-				topic.Name2[k] = str
+	if data, ok := m["data"].(map[string]interface{}); ok {
+		topic.Data = make(map[string]*types.TopicData)
+		for lang, topicDataInterface := range data {
+			if topicDataMap, ok := topicDataInterface.(map[string]interface{}); ok {
+				topicData := &types.TopicData{}
+
+				if group, ok := topicDataMap["group"].(string); ok {
+					topicData.Group = group
+				}
+				if title, ok := topicDataMap["title"].(string); ok {
+					topicData.Title = title
+				}
+				if des, ok := topicDataMap["des"].(string); ok {
+					topicData.Des = des
+				}
+				if iconImg, ok := topicDataMap["iconimg"].(string); ok {
+					topicData.IconImg = iconImg
+				}
+				if detailImg, ok := topicDataMap["detailimg"].(string); ok {
+					topicData.DetailImg = detailImg
+				}
+				if richText, ok := topicDataMap["richtext"].(string); ok {
+					topicData.RichText = richText
+				}
+				if apps, ok := topicDataMap["apps"].(string); ok {
+					topicData.Apps = apps
+				}
+				if isDelete, ok := topicDataMap["isdelete"].(bool); ok {
+					topicData.IsDelete = isDelete
+				}
+
+				topic.Data[lang] = topicData
 			}
 		}
 	}
-	if introduction, ok := m["introduction"].(string); ok {
-		topic.Introduction = introduction
-	}
-	if introduction2, ok := m["introduction2"].(map[string]interface{}); ok {
-		topic.Introduction2 = make(map[string]string)
-		for k, v := range introduction2 {
-			if str, ok := v.(string); ok {
-				topic.Introduction2[k] = str
-			}
-		}
-	}
-	if des, ok := m["des"].(string); ok {
-		topic.Des = des
-	}
-	if des2, ok := m["des2"].(map[string]interface{}); ok {
-		topic.Des2 = make(map[string]string)
-		for k, v := range des2 {
-			if str, ok := v.(string); ok {
-				topic.Des2[k] = str
-			}
-		}
-	}
-	if iconImg, ok := m["iconimg"].(string); ok {
-		topic.IconImg = iconImg
-	}
-	if detailImg, ok := m["detailimg"].(string); ok {
-		topic.DetailImg = detailImg
-	}
-	if richText, ok := m["richtext"].(string); ok {
-		topic.RichText = richText
-	}
-	if richText2, ok := m["richtext2"].(map[string]interface{}); ok {
-		topic.RichText2 = make(map[string]string)
-		for k, v := range richText2 {
-			if str, ok := v.(string); ok {
-				topic.RichText2[k] = str
-			}
-		}
-	}
-	if apps, ok := m["apps"].(string); ok {
-		topic.Apps = apps
-	}
-	if isDelete, ok := m["isdelete"].(bool); ok {
-		topic.IsDelete = isDelete
+	if source, ok := m["source"].(string); ok {
+		topic.Source = source
 	}
 	if createdAt, ok := m["createdAt"].(string); ok {
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -389,6 +386,17 @@ func (d *DataFetchStep) mapToTopicList(m map[string]interface{}) *types.TopicLis
 	}
 	if content, ok := m["content"].(string); ok {
 		topicList.Content = content
+	}
+	if title, ok := m["title"].(map[string]interface{}); ok {
+		topicList.Title = make(map[string]string)
+		for k, v := range title {
+			if str, ok := v.(string); ok {
+				topicList.Title[k] = str
+			}
+		}
+	}
+	if source, ok := m["source"].(string); ok {
+		topicList.Source = source
 	}
 	if createdAt, ok := m["createdAt"].(string); ok {
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -426,6 +434,34 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
 			recommend.UpdatedAt = t
 		}
+	}
+
+	// Handle I18n field
+	if i18nData, ok := m["i18n"].(map[string]interface{}); ok {
+		recommend.I18n = &types.RecommendI18n{}
+
+		if title, ok := i18nData["title"].(map[string]interface{}); ok {
+			recommend.I18n.Title = make(map[string]string)
+			for k, v := range title {
+				if str, ok := v.(string); ok {
+					recommend.I18n.Title[k] = str
+				}
+			}
+		}
+
+		if description, ok := i18nData["description"].(map[string]interface{}); ok {
+			recommend.I18n.Description = make(map[string]string)
+			for k, v := range description {
+				if str, ok := v.(string); ok {
+					recommend.I18n.Description[k] = str
+				}
+			}
+		}
+	}
+
+	// Handle Source field
+	if source, ok := m["source"].(string); ok {
+		recommend.Source = source
 	}
 
 	return recommend
@@ -467,6 +503,44 @@ func (d *DataFetchStep) mapToTopItem(m map[string]interface{}) *types.AppStoreTo
 	}
 
 	return topItem
+}
+
+// mapToTag converts a map to Tag struct
+func (d *DataFetchStep) mapToTag(m map[string]interface{}) *types.Tag {
+	tag := &types.Tag{}
+
+	if id, ok := m["_id"].(string); ok {
+		tag.ID = id
+	}
+	if name, ok := m["name"].(string); ok {
+		tag.Name = name
+	}
+	if title, ok := m["title"].(map[string]interface{}); ok {
+		tag.Title = make(map[string]string)
+		for k, v := range title {
+			if str, ok := v.(string); ok {
+				tag.Title[k] = str
+			}
+		}
+	}
+	if icon, ok := m["icon"].(string); ok {
+		tag.Icon = icon
+	}
+	if source, ok := m["source"].(string); ok {
+		tag.Source = source
+	}
+	if createdAt, ok := m["createdAt"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			tag.CreatedAt = t
+		}
+	}
+	if updatedAt, ok := m["updated_at"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+			tag.UpdatedAt = t
+		}
+	}
+
+	return tag
 }
 
 // updateOthersInCache updates Others data in the cache for the current source

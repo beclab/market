@@ -1343,21 +1343,12 @@ func (s *Server) createSafeTopicCopy(topic *types.Topic) map[string]interface{} 
 	}
 
 	return map[string]interface{}{
-		"_id":           topic.ID,
-		"name":          topic.Name,
-		"name2":         topic.Name2,
-		"introduction":  topic.Introduction,
-		"introduction2": topic.Introduction2,
-		"des":           topic.Des,
-		"des2":          topic.Des2,
-		"iconimg":       topic.IconImg,
-		"detailimg":     topic.DetailImg,
-		"richtext":      topic.RichText,
-		"richtext2":     topic.RichText2,
-		"apps":          topic.Apps,
-		"isdelete":      topic.IsDelete,
-		"createdAt":     topic.CreatedAt,
-		"updated_at":    topic.UpdatedAt,
+		"_id":        topic.ID,
+		"name":       topic.Name,
+		"data":       topic.Data,
+		"source":     topic.Source,
+		"createdAt":  topic.CreatedAt,
+		"updated_at": topic.UpdatedAt,
 	}
 }
 
@@ -1372,6 +1363,8 @@ func (s *Server) createSafeTopicListCopy(topicList *types.TopicList) map[string]
 		"type":        topicList.Type,
 		"description": topicList.Description,
 		"content":     topicList.Content,
+		"title":       topicList.Title,
+		"source":      topicList.Source,
 		"createdAt":   topicList.CreatedAt,
 		"updated_at":  topicList.UpdatedAt,
 	}
@@ -1383,13 +1376,28 @@ func (s *Server) createSafeRecommendCopy(recommend *types.Recommend) map[string]
 		return nil
 	}
 
-	return map[string]interface{}{
+	copy := map[string]interface{}{
 		"name":        recommend.Name,
 		"description": recommend.Description,
 		"content":     recommend.Content,
 		"createdAt":   recommend.CreatedAt,
 		"updated_at":  recommend.UpdatedAt,
 	}
+
+	// Add I18n field if present
+	if recommend.I18n != nil {
+		copy["i18n"] = map[string]interface{}{
+			"title":       recommend.I18n.Title,
+			"description": recommend.I18n.Description,
+		}
+	}
+
+	// Add Source field if present
+	if recommend.Source != "" {
+		copy["source"] = recommend.Source
+	}
+
+	return copy
 }
 
 // createSafePageCopy creates a safe copy of Page to avoid circular references
