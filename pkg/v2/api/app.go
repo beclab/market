@@ -1394,11 +1394,11 @@ func (s *Server) createSafeRecommendCopy(recommend *types.Recommend) map[string]
 		"updated_at":  recommend.UpdatedAt,
 	}
 
-	// Add I18n field if present
-	if recommend.I18n != nil {
-		copy["i18n"] = map[string]interface{}{
-			"title":       recommend.I18n.Title,
-			"description": recommend.I18n.Description,
+	// Add Data field if present
+	if recommend.Data != nil {
+		copy["data"] = map[string]interface{}{
+			"title":       recommend.Data.Title,
+			"description": recommend.Data.Description,
 		}
 	}
 

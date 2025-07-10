@@ -37,8 +37,8 @@ const (
 	SourceDataTypeRemote SourceDataType = "remote" // Remote source data
 )
 
-// RecommendI18n represents i18n configuration for recommend
-type RecommendI18n struct {
+// RecommendData represents data configuration for recommend
+type RecommendData struct {
 	Title       map[string]string `json:"title,omitempty"`
 	Description map[string]string `json:"description,omitempty"`
 }
@@ -48,7 +48,7 @@ type Recommend struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Content     string         `json:"content"` // Comma-separated app names
-	I18n        *RecommendI18n `json:"i18n,omitempty"`
+	Data        *RecommendData `json:"data,omitempty"`
 	Source      string         `json:"source,omitempty"` // Data source identifier
 	CreatedAt   time.Time      `json:"createdAt"`
 	UpdatedAt   time.Time      `json:"updated_at"`

@@ -445,24 +445,24 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 		}
 	}
 
-	// Handle I18n field
-	if i18nData, ok := m["i18n"].(map[string]interface{}); ok {
-		recommend.I18n = &types.RecommendI18n{}
+	// Handle Data field
+	if dataField, ok := m["data"].(map[string]interface{}); ok {
+		recommend.Data = &types.RecommendData{}
 
-		if title, ok := i18nData["title"].(map[string]interface{}); ok {
-			recommend.I18n.Title = make(map[string]string)
+		if title, ok := dataField["title"].(map[string]interface{}); ok {
+			recommend.Data.Title = make(map[string]string)
 			for k, v := range title {
 				if str, ok := v.(string); ok {
-					recommend.I18n.Title[k] = str
+					recommend.Data.Title[k] = str
 				}
 			}
 		}
 
-		if description, ok := i18nData["description"].(map[string]interface{}); ok {
-			recommend.I18n.Description = make(map[string]string)
+		if description, ok := dataField["description"].(map[string]interface{}); ok {
+			recommend.Data.Description = make(map[string]string)
 			for k, v := range description {
 				if str, ok := v.(string); ok {
-					recommend.I18n.Description[k] = str
+					recommend.Data.Description[k] = str
 				}
 			}
 		}
