@@ -510,6 +510,7 @@ func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.Use
 				TopicLists: make([]interface{}, len(sourceData.Others.TopicLists)),
 				Recommends: make([]interface{}, len(sourceData.Others.Recommends)),
 				Pages:      make([]interface{}, len(sourceData.Others.Pages)),
+				Tags:       make([]interface{}, len(sourceData.Others.Tags)),
 			}
 
 			// Convert each Others field with safe copy
@@ -524,6 +525,9 @@ func (dw *DataWatcher) createUserDataSnapshot(userID string, userData *types.Use
 			}
 			for i, page := range sourceData.Others.Pages {
 				othersSnapshot.Pages[i] = dw.createSafePageCopy(page)
+			}
+			for i, tag := range sourceData.Others.Tags {
+				othersSnapshot.Tags[i] = dw.createSafeTagCopy(tag)
 			}
 
 			sourceSnapshot.Others = othersSnapshot
@@ -584,6 +588,7 @@ type OthersSnapshot struct {
 	TopicLists []interface{}
 	Recommends []interface{}
 	Pages      []interface{}
+	Tags       []interface{}
 }
 
 func (s *OthersSnapshot) GetTopics() []interface{} {
@@ -600,6 +605,10 @@ func (s *OthersSnapshot) GetRecommends() []interface{} {
 
 func (s *OthersSnapshot) GetPages() []interface{} {
 	return s.Pages
+}
+
+func (s *OthersSnapshot) GetTags() []interface{} {
+	return s.Tags
 }
 
 // processSourceData processes a single source's data for completed hydration
@@ -1444,21 +1453,12 @@ func (dw *DataWatcher) createSafeTopicCopy(topic *types.Topic) map[string]interf
 	}
 
 	return map[string]interface{}{
-		"_id":           topic.ID,
-		"name":          topic.Name,
-		"name2":         topic.Name2,
-		"introduction":  topic.Introduction,
-		"introduction2": topic.Introduction2,
-		"des":           topic.Des,
-		"des2":          topic.Des2,
-		"iconimg":       topic.IconImg,
-		"detailimg":     topic.DetailImg,
-		"richtext":      topic.RichText,
-		"richtext2":     topic.RichText2,
-		"apps":          topic.Apps,
-		"isdelete":      topic.IsDelete,
-		"createdAt":     topic.CreatedAt,
-		"updated_at":    topic.UpdatedAt,
+		"_id":        topic.ID,
+		"name":       topic.Name,
+		"data":       topic.Data,
+		"source":     topic.Source,
+		"createdAt":  topic.CreatedAt,
+		"updated_at": topic.UpdatedAt,
 	}
 }
 
@@ -1473,6 +1473,8 @@ func (dw *DataWatcher) createSafeTopicListCopy(topicList *types.TopicList) map[s
 		"type":        topicList.Type,
 		"description": topicList.Description,
 		"content":     topicList.Content,
+		"title":       topicList.Title,
+		"source":      topicList.Source,
 		"createdAt":   topicList.CreatedAt,
 		"updated_at":  topicList.UpdatedAt,
 	}
@@ -1484,13 +1486,28 @@ func (dw *DataWatcher) createSafeRecommendCopy(recommend *types.Recommend) map[s
 		return nil
 	}
 
-	return map[string]interface{}{
+	copy := map[string]interface{}{
 		"name":        recommend.Name,
 		"description": recommend.Description,
 		"content":     recommend.Content,
 		"createdAt":   recommend.CreatedAt,
 		"updated_at":  recommend.UpdatedAt,
 	}
+
+	// Add Data field if present
+	if recommend.Data != nil {
+		copy["data"] = map[string]interface{}{
+			"title":       recommend.Data.Title,
+			"description": recommend.Data.Description,
+		}
+	}
+
+	// Add Source field if present
+	if recommend.Source != "" {
+		copy["source"] = recommend.Source
+	}
+
+	return copy
 }
 
 // createSafePageCopy creates a safe copy of Page to avoid circular references
@@ -1504,5 +1521,23 @@ func (dw *DataWatcher) createSafePageCopy(page *types.Page) map[string]interface
 		"content":    page.Content,
 		"createdAt":  page.CreatedAt,
 		"updated_at": page.UpdatedAt,
+	}
+}
+
+// createSafeTagCopy creates a safe copy of Tag to avoid circular references
+func (dw *DataWatcher) createSafeTagCopy(tag *types.Tag) map[string]interface{} {
+	if tag == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"_id":        tag.ID,
+		"name":       tag.Name,
+		"title":      tag.Title,
+		"icon":       tag.Icon,
+		"sort":       tag.Sort,
+		"source":     tag.Source,
+		"createdAt":  tag.CreatedAt,
+		"updated_at": tag.UpdatedAt,
 	}
 }

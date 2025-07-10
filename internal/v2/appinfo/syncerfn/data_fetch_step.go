@@ -203,8 +203,18 @@ func isDevelopmentEnvironment() bool {
 	return env == "dev" || env == "development" || env == ""
 }
 
+// getMapKeys returns the keys of a map as a slice of strings
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // extractAndUpdateOthers extracts and updates Others data in SourceData
 func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
+	log.Printf("DEBUG: Starting extractAndUpdateOthers")
 	// Check if we have valid response data
 	if data.LatestData == nil {
 		log.Printf("Warning: no latest data found for Others extraction")
@@ -249,14 +259,33 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 
 	// Extract recommends data
 	if data.LatestData.Data.Recommends != nil {
-		for _, recommendData := range data.LatestData.Data.Recommends {
+		log.Printf("DEBUG: Processing recommends data, count: %d", len(data.LatestData.Data.Recommends))
+		for i, recommendData := range data.LatestData.Data.Recommends {
 			if recommendMap, ok := recommendData.(map[string]interface{}); ok {
+				log.Printf("DEBUG: Processing recommend[%d], keys: %v", i, getMapKeys(recommendMap))
+				if dataField, exists := recommendMap["data"]; exists {
+					log.Printf("DEBUG: Recommend[%d] has data field, type: %T, value: %+v", i, dataField, dataField)
+				} else {
+					log.Printf("DEBUG: Recommend[%d] missing data field", i)
+				}
 				recommend := d.mapToRecommend(recommendMap)
 				if recommend != nil {
+					log.Printf("DEBUG: Recommend[%d] mapped successfully, has Data: %v", i, recommend.Data != nil)
+					if recommend.Data != nil {
+						log.Printf("DEBUG: Recommend[%d] Data.Title count: %d, Data.Description count: %d",
+							i, len(recommend.Data.Title), len(recommend.Data.Description))
+					}
 					others.Recommends = append(others.Recommends, recommend)
+				} else {
+					log.Printf("DEBUG: Recommend[%d] mapping failed", i)
 				}
+			} else {
+				log.Printf("DEBUG: Recommend[%d] is not a map, type: %T", i, recommendData)
 			}
 		}
+		log.Printf("DEBUG: Extracted %d recommends from response", len(others.Recommends))
+	} else {
+		log.Printf("DEBUG: No recommends data found in response")
 	}
 
 	// Extract pages data
@@ -288,13 +317,48 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 		others.Latest = data.LatestData.Data.Latest
 	}
 
+	// Extract tags data - handle object format
+	if data.LatestData.Data.Tags != nil {
+		keys := make([]string, 0, len(data.LatestData.Data.Tags))
+		for k := range data.LatestData.Data.Tags {
+			keys = append(keys, k)
+		}
+		log.Printf("DEBUG: Processing tags data, type: %T, keys: %v", data.LatestData.Data.Tags, keys)
+		for tagKey, tagData := range data.LatestData.Data.Tags {
+			if tagMap, ok := tagData.(map[string]interface{}); ok {
+				tag := d.mapToTag(tagMap)
+				if tag != nil {
+					others.Tags = append(others.Tags, tag)
+					log.Printf("DEBUG: Added tag %s to others", tagKey)
+				}
+			}
+		}
+		log.Printf("DEBUG: Extracted %d tags from response", len(others.Tags))
+	} else {
+		log.Printf("DEBUG: No tags data found in response")
+	}
+
 	// Update Others in the cache for current source
 	if data.Cache != nil && data.MarketSource != nil {
 		d.updateOthersInCache(data, others)
 	}
 
-	log.Printf("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest",
-		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages), len(others.Tops), len(others.Latest))
+	log.Printf("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest, %d tags",
+		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages), len(others.Tops), len(others.Latest), len(others.Tags))
+
+	// Log detailed summary of recommends data
+	if len(others.Recommends) > 0 {
+		log.Printf("DEBUG: Final recommends summary - total: %d", len(others.Recommends))
+		for i, rec := range others.Recommends {
+			log.Printf("DEBUG: Final recommend[%d] '%s', has Data: %v", i, rec.Name, rec.Data != nil)
+			if rec.Data != nil {
+				log.Printf("DEBUG: Final recommend[%d] Data.Title count: %d, Data.Description count: %d",
+					i, len(rec.Data.Title), len(rec.Data.Description))
+			}
+		}
+	} else {
+		log.Printf("DEBUG: No recommends data in final Others structure")
+	}
 }
 
 // mapToTopic converts a map to Topic struct
@@ -307,58 +371,43 @@ func (d *DataFetchStep) mapToTopic(m map[string]interface{}) *types.Topic {
 	if name, ok := m["name"].(string); ok {
 		topic.Name = name
 	}
-	if name2, ok := m["name2"].(map[string]interface{}); ok {
-		topic.Name2 = make(map[string]string)
-		for k, v := range name2 {
-			if str, ok := v.(string); ok {
-				topic.Name2[k] = str
+	if data, ok := m["data"].(map[string]interface{}); ok {
+		topic.Data = make(map[string]*types.TopicData)
+		for lang, topicDataInterface := range data {
+			if topicDataMap, ok := topicDataInterface.(map[string]interface{}); ok {
+				topicData := &types.TopicData{}
+
+				if group, ok := topicDataMap["group"].(string); ok {
+					topicData.Group = group
+				}
+				if title, ok := topicDataMap["title"].(string); ok {
+					topicData.Title = title
+				}
+				if des, ok := topicDataMap["des"].(string); ok {
+					topicData.Des = des
+				}
+				if iconImg, ok := topicDataMap["iconimg"].(string); ok {
+					topicData.IconImg = iconImg
+				}
+				if detailImg, ok := topicDataMap["detailimg"].(string); ok {
+					topicData.DetailImg = detailImg
+				}
+				if richText, ok := topicDataMap["richtext"].(string); ok {
+					topicData.RichText = richText
+				}
+				if apps, ok := topicDataMap["apps"].(string); ok {
+					topicData.Apps = apps
+				}
+				if isDelete, ok := topicDataMap["isdelete"].(bool); ok {
+					topicData.IsDelete = isDelete
+				}
+
+				topic.Data[lang] = topicData
 			}
 		}
 	}
-	if introduction, ok := m["introduction"].(string); ok {
-		topic.Introduction = introduction
-	}
-	if introduction2, ok := m["introduction2"].(map[string]interface{}); ok {
-		topic.Introduction2 = make(map[string]string)
-		for k, v := range introduction2 {
-			if str, ok := v.(string); ok {
-				topic.Introduction2[k] = str
-			}
-		}
-	}
-	if des, ok := m["des"].(string); ok {
-		topic.Des = des
-	}
-	if des2, ok := m["des2"].(map[string]interface{}); ok {
-		topic.Des2 = make(map[string]string)
-		for k, v := range des2 {
-			if str, ok := v.(string); ok {
-				topic.Des2[k] = str
-			}
-		}
-	}
-	if iconImg, ok := m["iconimg"].(string); ok {
-		topic.IconImg = iconImg
-	}
-	if detailImg, ok := m["detailimg"].(string); ok {
-		topic.DetailImg = detailImg
-	}
-	if richText, ok := m["richtext"].(string); ok {
-		topic.RichText = richText
-	}
-	if richText2, ok := m["richtext2"].(map[string]interface{}); ok {
-		topic.RichText2 = make(map[string]string)
-		for k, v := range richText2 {
-			if str, ok := v.(string); ok {
-				topic.RichText2[k] = str
-			}
-		}
-	}
-	if apps, ok := m["apps"].(string); ok {
-		topic.Apps = apps
-	}
-	if isDelete, ok := m["isdelete"].(bool); ok {
-		topic.IsDelete = isDelete
+	if source, ok := m["source"].(string); ok {
+		topic.Source = source
 	}
 	if createdAt, ok := m["createdAt"].(string); ok {
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -389,6 +438,17 @@ func (d *DataFetchStep) mapToTopicList(m map[string]interface{}) *types.TopicLis
 	}
 	if content, ok := m["content"].(string); ok {
 		topicList.Content = content
+	}
+	if title, ok := m["title"].(map[string]interface{}); ok {
+		topicList.Title = make(map[string]string)
+		for k, v := range title {
+			if str, ok := v.(string); ok {
+				topicList.Title[k] = str
+			}
+		}
+	}
+	if source, ok := m["source"].(string); ok {
+		topicList.Source = source
 	}
 	if createdAt, ok := m["createdAt"].(string); ok {
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -428,6 +488,51 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 		}
 	}
 
+	// Handle Data field
+	log.Printf("DEBUG: mapToRecommend - checking for data field, available keys: %v", getMapKeys(m))
+	if dataField, ok := m["data"].(map[string]interface{}); ok {
+		log.Printf("DEBUG: mapToRecommend - found data field, type: %T, keys: %v", dataField, getMapKeys(dataField))
+		recommend.Data = &types.RecommendData{}
+
+		if title, ok := dataField["title"].(map[string]interface{}); ok {
+			log.Printf("DEBUG: mapToRecommend - found title field, keys: %v", getMapKeys(title))
+			recommend.Data.Title = make(map[string]string)
+			for k, v := range title {
+				if str, ok := v.(string); ok {
+					recommend.Data.Title[k] = str
+				} else {
+					log.Printf("DEBUG: mapToRecommend - title[%s] is not string, type: %T, value: %v", k, v, v)
+				}
+			}
+			log.Printf("DEBUG: mapToRecommend - processed title, count: %d", len(recommend.Data.Title))
+		} else {
+			log.Printf("DEBUG: mapToRecommend - title field not found or not a map")
+		}
+
+		if description, ok := dataField["description"].(map[string]interface{}); ok {
+			log.Printf("DEBUG: mapToRecommend - found description field, keys: %v", getMapKeys(description))
+			recommend.Data.Description = make(map[string]string)
+			for k, v := range description {
+				if str, ok := v.(string); ok {
+					recommend.Data.Description[k] = str
+				} else {
+					log.Printf("DEBUG: mapToRecommend - description[%s] is not string, type: %T, value: %v", k, v, v)
+				}
+			}
+			log.Printf("DEBUG: mapToRecommend - processed description, count: %d", len(recommend.Data.Description))
+		} else {
+			log.Printf("DEBUG: mapToRecommend - description field not found or not a map")
+		}
+	} else {
+		log.Printf("DEBUG: mapToRecommend - data field not found or not a map, type: %T", m["data"])
+	}
+
+	// Handle Source field
+	if source, ok := m["source"].(string); ok {
+		recommend.Source = source
+	}
+
+	log.Printf("DEBUG: mapToRecommend - final result, has Data: %v", recommend.Data != nil)
 	return recommend
 }
 
@@ -467,6 +572,47 @@ func (d *DataFetchStep) mapToTopItem(m map[string]interface{}) *types.AppStoreTo
 	}
 
 	return topItem
+}
+
+// mapToTag converts a map to Tag struct
+func (d *DataFetchStep) mapToTag(m map[string]interface{}) *types.Tag {
+	tag := &types.Tag{}
+
+	if id, ok := m["_id"].(string); ok {
+		tag.ID = id
+	}
+	if name, ok := m["name"].(string); ok {
+		tag.Name = name
+	}
+	if title, ok := m["title"].(map[string]interface{}); ok {
+		tag.Title = make(map[string]string)
+		for k, v := range title {
+			if str, ok := v.(string); ok {
+				tag.Title[k] = str
+			}
+		}
+	}
+	if icon, ok := m["icon"].(string); ok {
+		tag.Icon = icon
+	}
+	if sort, ok := m["sort"].(float64); ok {
+		tag.Sort = int(sort)
+	}
+	if source, ok := m["source"].(string); ok {
+		tag.Source = source
+	}
+	if createdAt, ok := m["createdAt"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			tag.CreatedAt = t
+		}
+	}
+	if updatedAt, ok := m["updated_at"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+			tag.UpdatedAt = t
+		}
+	}
+
+	return tag
 }
 
 // updateOthersInCache updates Others data in the cache for the current source
@@ -524,6 +670,22 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 
 		// Update Others in SourceData
 		sourceData.Others = others
+
+		// Log details about the saved recommends data
+		if sourceData.Others != nil && len(sourceData.Others.Recommends) > 0 {
+			log.Printf("DEBUG: Saved %d recommends to cache for user %s, source %s",
+				len(sourceData.Others.Recommends), userID, sourceID)
+			for i, rec := range sourceData.Others.Recommends {
+				log.Printf("DEBUG: Saved recommend[%d] '%s', has Data: %v",
+					i, rec.Name, rec.Data != nil)
+				if rec.Data != nil {
+					log.Printf("DEBUG: Saved recommend[%d] Data.Title count: %d, Data.Description count: %d",
+						i, len(rec.Data.Title), len(rec.Data.Description))
+				}
+			}
+		} else {
+			log.Printf("DEBUG: No recommends data saved to cache for user %s, source %s", userID, sourceID)
+		}
 
 		log.Printf("Updated Others data in cache for user %s, source %s", userID, sourceID)
 	}

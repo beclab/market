@@ -812,6 +812,7 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 			Pages:      sourceData.Others.Pages,
 			Tops:       sourceData.Others.Tops,
 			Latest:     sourceData.Others.Latest,
+			Tags:       sourceData.Others.Tags,
 		}
 	}
 
@@ -1333,6 +1334,15 @@ func (s *Server) createSafeOthersCopy(others *types.Others) map[string]interface
 		safeCopy["tops"] = safeTops
 	}
 
+	// Create safe copies of Tags
+	if len(others.Tags) > 0 {
+		safeTags := make([]map[string]interface{}, len(others.Tags))
+		for i, tag := range others.Tags {
+			safeTags[i] = s.createSafeTagCopy(tag)
+		}
+		safeCopy["tags"] = safeTags
+	}
+
 	return safeCopy
 }
 
@@ -1343,21 +1353,12 @@ func (s *Server) createSafeTopicCopy(topic *types.Topic) map[string]interface{} 
 	}
 
 	return map[string]interface{}{
-		"_id":           topic.ID,
-		"name":          topic.Name,
-		"name2":         topic.Name2,
-		"introduction":  topic.Introduction,
-		"introduction2": topic.Introduction2,
-		"des":           topic.Des,
-		"des2":          topic.Des2,
-		"iconimg":       topic.IconImg,
-		"detailimg":     topic.DetailImg,
-		"richtext":      topic.RichText,
-		"richtext2":     topic.RichText2,
-		"apps":          topic.Apps,
-		"isdelete":      topic.IsDelete,
-		"createdAt":     topic.CreatedAt,
-		"updated_at":    topic.UpdatedAt,
+		"_id":        topic.ID,
+		"name":       topic.Name,
+		"data":       topic.Data,
+		"source":     topic.Source,
+		"createdAt":  topic.CreatedAt,
+		"updated_at": topic.UpdatedAt,
 	}
 }
 
@@ -1372,6 +1373,8 @@ func (s *Server) createSafeTopicListCopy(topicList *types.TopicList) map[string]
 		"type":        topicList.Type,
 		"description": topicList.Description,
 		"content":     topicList.Content,
+		"title":       topicList.Title,
+		"source":      topicList.Source,
 		"createdAt":   topicList.CreatedAt,
 		"updated_at":  topicList.UpdatedAt,
 	}
@@ -1383,13 +1386,28 @@ func (s *Server) createSafeRecommendCopy(recommend *types.Recommend) map[string]
 		return nil
 	}
 
-	return map[string]interface{}{
+	copy := map[string]interface{}{
 		"name":        recommend.Name,
 		"description": recommend.Description,
 		"content":     recommend.Content,
 		"createdAt":   recommend.CreatedAt,
 		"updated_at":  recommend.UpdatedAt,
 	}
+
+	// Add Data field if present
+	if recommend.Data != nil {
+		copy["data"] = map[string]interface{}{
+			"title":       recommend.Data.Title,
+			"description": recommend.Data.Description,
+		}
+	}
+
+	// Add Source field if present
+	if recommend.Source != "" {
+		copy["source"] = recommend.Source
+	}
+
+	return copy
 }
 
 // createSafePageCopy creates a safe copy of Page to avoid circular references
@@ -1404,4 +1422,207 @@ func (s *Server) createSafePageCopy(page *types.Page) map[string]interface{} {
 		"createdAt":  page.CreatedAt,
 		"updated_at": page.UpdatedAt,
 	}
+}
+
+// createSafeTagCopy creates a safe copy of Tag to avoid circular references
+func (s *Server) createSafeTagCopy(tag *types.Tag) map[string]interface{} {
+	if tag == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"_id":        tag.ID,
+		"name":       tag.Name,
+		"title":      tag.Title,
+		"icon":       tag.Icon,
+		"sort":       tag.Sort,
+		"source":     tag.Source,
+		"createdAt":  tag.CreatedAt,
+		"updated_at": tag.UpdatedAt,
+	}
+}
+
+// DeleteLocalAppRequest represents the request body for /api/v2/apps/delete
+type DeleteLocalAppRequest struct {
+	AppName    string `json:"app_name"`
+	AppVersion string `json:"app_version"`
+}
+
+// deleteLocalApp handles DELETE /api/v2/apps/delete
+func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
+	log.Println("DELETE /api/v2/apps/delete - Deleting local source application")
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	// userID := "saidevgp03"
+	log.Printf("Retrieved user ID for delete request: %s", userID)
+
+	// Step 2: Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Printf("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Step 3: Parse JSON request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+	defer r.Body.Close()
+
+	var request DeleteLocalAppRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		log.Printf("Failed to parse JSON request: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
+		return
+	}
+
+	// Step 4: Validate request parameters
+	if request.AppName == "" {
+		log.Printf("App name is required")
+		s.sendResponse(w, http.StatusBadRequest, false, "App name is required", nil)
+		return
+	}
+
+	if request.AppVersion == "" {
+		log.Printf("App version is required")
+		s.sendResponse(w, http.StatusBadRequest, false, "App version is required", nil)
+		return
+	}
+
+	log.Printf("Received delete request for app: %s, version: %s from user: %s", request.AppName, request.AppVersion, userID)
+
+	// Step 5: Check if app exists in local source
+	userData := s.cacheManager.GetUserData(userID)
+	if userData == nil {
+		log.Printf("User data not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+		return
+	}
+
+	sourceData, exists := userData.Sources["local"]
+	if !exists {
+		log.Printf("Local source not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "Local source not found", nil)
+		return
+	}
+
+	// Step 6: Check if app exists in AppInfoLatest
+	appExists := false
+	for _, app := range sourceData.AppInfoLatest {
+		if app == nil {
+			continue
+		}
+
+		// Check multiple possible ID fields for matching
+		var appID string
+		if app.RawData != nil {
+			// Priority: ID > AppID > Name
+			if app.RawData.ID != "" {
+				appID = app.RawData.ID
+			} else if app.RawData.AppID != "" {
+				appID = app.RawData.AppID
+			} else if app.RawData.Name != "" {
+				appID = app.RawData.Name
+			}
+		}
+
+		// Also check AppSimpleInfo if available
+		if appID == "" && app.AppSimpleInfo != nil {
+			appID = app.AppSimpleInfo.AppID
+		}
+
+		// Match the requested app name and version
+		if (appID == request.AppName || (app.RawData != nil && app.RawData.Name == request.AppName)) &&
+			app.Version == request.AppVersion {
+			appExists = true
+			break
+		}
+	}
+
+	if !appExists {
+		log.Printf("App %s version %s not found in local source for user: %s", request.AppName, request.AppVersion, userID)
+		s.sendResponse(w, http.StatusNotFound, false, "App not found in local source", nil)
+		return
+	}
+
+	// Step 7: Delete chart files using LocalRepo
+	localRepo := appinfo.NewLocalRepo(s.cacheManager)
+	if s.hydrator != nil {
+		localRepo.SetHydrator(s.hydrator)
+	}
+
+	// Delete chart package file
+	if err := localRepo.DeleteAppChart(userID, "local", request.AppName, request.AppVersion); err != nil {
+		log.Printf("Failed to delete chart package: %v", err)
+		// Continue with deletion even if chart file doesn't exist
+	}
+
+	// Delete rendered chart directory
+	if err := localRepo.DeleteRenderedChart(userID, "local", request.AppName, request.AppVersion); err != nil {
+		log.Printf("Failed to delete rendered chart directory: %v", err)
+		// Continue with deletion even if rendered directory doesn't exist
+	}
+
+	// Step 8: Remove app from AppStateLatest
+	if err := s.cacheManager.RemoveAppStateData(userID, "local", request.AppName); err != nil {
+		log.Printf("Failed to remove app from AppStateLatest: %v", err)
+		// Continue with deletion even if app state doesn't exist
+	}
+
+	// Step 9: Remove app from AppInfoLatest
+	if err := s.cacheManager.RemoveAppInfoLatestData(userID, "local", request.AppName); err != nil {
+		log.Printf("Failed to remove app from AppInfoLatest: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to remove app from cache", nil)
+		return
+	}
+
+	// Step 10: Send deletion notification
+	dataSender, err := appinfo.NewDataSender()
+	if err != nil {
+		log.Printf("Failed to create data sender: %v", err)
+		// Don't fail the request if data sender creation fails
+	} else {
+		update := &types.MarketSystemUpdate{
+			Timestamp:  time.Now().Unix(),
+			User:       userID,
+			NotifyType: "market_system_point",
+			Point:      "local_app_delete",
+			Extensions: map[string]string{
+				"app_name":    request.AppName,
+				"app_version": request.AppVersion,
+				"source":      "local",
+			},
+		}
+
+		if err := dataSender.SendMarketSystemUpdate(*update); err != nil {
+			log.Printf("Failed to send deletion notification: %v", err)
+			// Don't fail the request if notification fails
+		}
+
+		// Close data sender
+		dataSender.Close()
+	}
+
+	log.Printf("Successfully deleted app: %s version: %s from local source for user: %s", request.AppName, request.AppVersion, userID)
+
+	// Step 11: Prepare response
+	responseData := map[string]interface{}{
+		"app_name":    request.AppName,
+		"app_version": request.AppVersion,
+		"user_id":     userID,
+		"source":      "local",
+		"deleted_at":  time.Now().Unix(),
+	}
+
+	s.sendResponse(w, http.StatusOK, true, "App deleted successfully from local source", responseData)
 }

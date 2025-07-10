@@ -41,6 +41,7 @@ type AppStoreDataSection struct {
 	TopicLists map[string]interface{} `json:"topic_lists"`
 	Tops       []interface{}          `json:"tops"`
 	Latest     []string               `json:"latest"`
+	Tags       map[string]interface{} `json:"tags"`
 }
 
 // SyncContext holds the context data for the entire sync process
