@@ -108,6 +108,7 @@ type Tag struct {
 	Name      string            `json:"name"`
 	Title     map[string]string `json:"title"` // i18n title mapping
 	Icon      string            `json:"icon"`
+	Sort      int               `json:"sort"` // sort order for tag
 	Source    string            `json:"source"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	CreatedAt time.Time         `json:"createdAt"`

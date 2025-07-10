@@ -595,6 +595,9 @@ func (d *DataFetchStep) mapToTag(m map[string]interface{}) *types.Tag {
 	if icon, ok := m["icon"].(string); ok {
 		tag.Icon = icon
 	}
+	if sort, ok := m["sort"].(float64); ok {
+		tag.Sort = int(sort)
+	}
 	if source, ok := m["source"].(string); ok {
 		tag.Source = source
 	}

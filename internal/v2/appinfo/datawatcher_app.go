@@ -1535,6 +1535,7 @@ func (dw *DataWatcher) createSafeTagCopy(tag *types.Tag) map[string]interface{} 
 		"name":       tag.Name,
 		"title":      tag.Title,
 		"icon":       tag.Icon,
+		"sort":       tag.Sort,
 		"source":     tag.Source,
 		"createdAt":  tag.CreatedAt,
 		"updated_at": tag.UpdatedAt,
