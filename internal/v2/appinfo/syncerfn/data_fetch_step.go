@@ -203,8 +203,18 @@ func isDevelopmentEnvironment() bool {
 	return env == "dev" || env == "development" || env == ""
 }
 
+// getMapKeys returns the keys of a map as a slice of strings
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // extractAndUpdateOthers extracts and updates Others data in SourceData
 func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
+	log.Printf("DEBUG: Starting extractAndUpdateOthers")
 	// Check if we have valid response data
 	if data.LatestData == nil {
 		log.Printf("Warning: no latest data found for Others extraction")
@@ -249,14 +259,33 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 
 	// Extract recommends data
 	if data.LatestData.Data.Recommends != nil {
-		for _, recommendData := range data.LatestData.Data.Recommends {
+		log.Printf("DEBUG: Processing recommends data, count: %d", len(data.LatestData.Data.Recommends))
+		for i, recommendData := range data.LatestData.Data.Recommends {
 			if recommendMap, ok := recommendData.(map[string]interface{}); ok {
+				log.Printf("DEBUG: Processing recommend[%d], keys: %v", i, getMapKeys(recommendMap))
+				if dataField, exists := recommendMap["data"]; exists {
+					log.Printf("DEBUG: Recommend[%d] has data field, type: %T, value: %+v", i, dataField, dataField)
+				} else {
+					log.Printf("DEBUG: Recommend[%d] missing data field", i)
+				}
 				recommend := d.mapToRecommend(recommendMap)
 				if recommend != nil {
+					log.Printf("DEBUG: Recommend[%d] mapped successfully, has Data: %v", i, recommend.Data != nil)
+					if recommend.Data != nil {
+						log.Printf("DEBUG: Recommend[%d] Data.Title count: %d, Data.Description count: %d",
+							i, len(recommend.Data.Title), len(recommend.Data.Description))
+					}
 					others.Recommends = append(others.Recommends, recommend)
+				} else {
+					log.Printf("DEBUG: Recommend[%d] mapping failed", i)
 				}
+			} else {
+				log.Printf("DEBUG: Recommend[%d] is not a map, type: %T", i, recommendData)
 			}
 		}
+		log.Printf("DEBUG: Extracted %d recommends from response", len(others.Recommends))
+	} else {
+		log.Printf("DEBUG: No recommends data found in response")
 	}
 
 	// Extract pages data
@@ -316,6 +345,20 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 
 	log.Printf("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest, %d tags",
 		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages), len(others.Tops), len(others.Latest), len(others.Tags))
+
+	// Log detailed summary of recommends data
+	if len(others.Recommends) > 0 {
+		log.Printf("DEBUG: Final recommends summary - total: %d", len(others.Recommends))
+		for i, rec := range others.Recommends {
+			log.Printf("DEBUG: Final recommend[%d] '%s', has Data: %v", i, rec.Name, rec.Data != nil)
+			if rec.Data != nil {
+				log.Printf("DEBUG: Final recommend[%d] Data.Title count: %d, Data.Description count: %d",
+					i, len(rec.Data.Title), len(rec.Data.Description))
+			}
+		}
+	} else {
+		log.Printf("DEBUG: No recommends data in final Others structure")
+	}
 }
 
 // mapToTopic converts a map to Topic struct
@@ -446,26 +489,42 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 	}
 
 	// Handle Data field
+	log.Printf("DEBUG: mapToRecommend - checking for data field, available keys: %v", getMapKeys(m))
 	if dataField, ok := m["data"].(map[string]interface{}); ok {
+		log.Printf("DEBUG: mapToRecommend - found data field, type: %T, keys: %v", dataField, getMapKeys(dataField))
 		recommend.Data = &types.RecommendData{}
 
 		if title, ok := dataField["title"].(map[string]interface{}); ok {
+			log.Printf("DEBUG: mapToRecommend - found title field, keys: %v", getMapKeys(title))
 			recommend.Data.Title = make(map[string]string)
 			for k, v := range title {
 				if str, ok := v.(string); ok {
 					recommend.Data.Title[k] = str
+				} else {
+					log.Printf("DEBUG: mapToRecommend - title[%s] is not string, type: %T, value: %v", k, v, v)
 				}
 			}
+			log.Printf("DEBUG: mapToRecommend - processed title, count: %d", len(recommend.Data.Title))
+		} else {
+			log.Printf("DEBUG: mapToRecommend - title field not found or not a map")
 		}
 
 		if description, ok := dataField["description"].(map[string]interface{}); ok {
+			log.Printf("DEBUG: mapToRecommend - found description field, keys: %v", getMapKeys(description))
 			recommend.Data.Description = make(map[string]string)
 			for k, v := range description {
 				if str, ok := v.(string); ok {
 					recommend.Data.Description[k] = str
+				} else {
+					log.Printf("DEBUG: mapToRecommend - description[%s] is not string, type: %T, value: %v", k, v, v)
 				}
 			}
+			log.Printf("DEBUG: mapToRecommend - processed description, count: %d", len(recommend.Data.Description))
+		} else {
+			log.Printf("DEBUG: mapToRecommend - description field not found or not a map")
 		}
+	} else {
+		log.Printf("DEBUG: mapToRecommend - data field not found or not a map, type: %T", m["data"])
 	}
 
 	// Handle Source field
@@ -473,6 +532,7 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 		recommend.Source = source
 	}
 
+	log.Printf("DEBUG: mapToRecommend - final result, has Data: %v", recommend.Data != nil)
 	return recommend
 }
 
@@ -607,6 +667,22 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 
 		// Update Others in SourceData
 		sourceData.Others = others
+
+		// Log details about the saved recommends data
+		if sourceData.Others != nil && len(sourceData.Others.Recommends) > 0 {
+			log.Printf("DEBUG: Saved %d recommends to cache for user %s, source %s",
+				len(sourceData.Others.Recommends), userID, sourceID)
+			for i, rec := range sourceData.Others.Recommends {
+				log.Printf("DEBUG: Saved recommend[%d] '%s', has Data: %v",
+					i, rec.Name, rec.Data != nil)
+				if rec.Data != nil {
+					log.Printf("DEBUG: Saved recommend[%d] Data.Title count: %d, Data.Description count: %d",
+						i, len(rec.Data.Title), len(rec.Data.Description))
+				}
+			}
+		} else {
+			log.Printf("DEBUG: No recommends data saved to cache for user %s, source %s", userID, sourceID)
+		}
 
 		log.Printf("Updated Others data in cache for user %s, source %s", userID, sourceID)
 	}
