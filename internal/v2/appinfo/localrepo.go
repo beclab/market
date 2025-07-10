@@ -350,6 +350,11 @@ func (lr *LocalRepo) validateChart(chartDir string, token string, userID string)
 		return fmt.Errorf("service account role validation failed: %w", err)
 	}
 
+	// Perform version comparison validation for local sources
+	if err := lr.checkVersionForLocalSource(appInfo, userID); err != nil {
+		return fmt.Errorf("version validation failed: %w", err)
+	}
+
 	return nil
 }
 
@@ -2989,4 +2994,147 @@ func (lr *LocalRepo) DeleteRenderedChart(userID, sourceID, appName, appVersion s
 
 	log.Printf("Successfully deleted rendered chart directory: %s", chartDir)
 	return nil
+}
+
+// checkVersionForLocalSource checks if the new version is higher than the current version in local source
+func (lr *LocalRepo) checkVersionForLocalSource(newAppInfo *types.ApplicationInfoEntry, userID string) error {
+	// Get current app info from cache for the same app name
+	currentAppInfo := lr.getCurrentAppInfoFromCache(newAppInfo.Name, userID)
+	if currentAppInfo == nil {
+		log.Printf("No existing app found with name %s in local source, allowing upload", newAppInfo.Name)
+		return nil
+	}
+
+	// Compare versions using semver
+	if !lr.isNewVersionHigher(currentAppInfo.Version, newAppInfo.Version) {
+		return fmt.Errorf("new version %s is not higher than current version %s for app %s",
+			newAppInfo.Version, currentAppInfo.Version, newAppInfo.Name)
+	}
+
+	log.Printf("Version validation passed: new version %s is higher than current version %s for app %s",
+		newAppInfo.Version, currentAppInfo.Version, newAppInfo.Name)
+	return nil
+}
+
+// getCurrentAppInfoFromCache retrieves current app info from cache for the given app name and user
+func (lr *LocalRepo) getCurrentAppInfoFromCache(appName, userID string) *types.ApplicationInfoEntry {
+	if lr.cacheManager == nil {
+		log.Printf("Cache manager not available, skipping version check")
+		return nil
+	}
+
+	// Get all users data from cache
+	allUsersData := lr.cacheManager.GetAllUsersData()
+	if allUsersData == nil {
+		log.Printf("No users data found in cache")
+		return nil
+	}
+
+	// Look for the app in the user's local sources only
+	userData, exists := allUsersData[userID]
+	if !exists {
+		log.Printf("User %s not found in cache", userID)
+		return nil
+	}
+
+	// Search through local sources for the app
+	// Local sources are typically identified by specific source IDs or patterns
+	for sourceID, sourceData := range userData.Sources {
+		if sourceData == nil {
+			continue
+		}
+
+		// Check if this is a local source
+		// Local sources are typically identified by specific patterns or configurations
+		if !lr.isLocalSource(sourceID) {
+			continue
+		}
+
+		// Check AppInfoLatest for the app
+		for _, appInfo := range sourceData.AppInfoLatest {
+			if appInfo != nil && appInfo.RawData != nil && appInfo.RawData.Name == appName {
+				log.Printf("Found existing app %s in local source %s with version %s",
+					appName, sourceID, appInfo.RawData.Version)
+				return &types.ApplicationInfoEntry{
+					Name:    appInfo.RawData.Name,
+					Version: appInfo.RawData.Version,
+				}
+			}
+		}
+
+		// Check AppInfoLatestPending for the app
+		for _, appInfo := range sourceData.AppInfoLatestPending {
+			if appInfo != nil && appInfo.RawData != nil && appInfo.RawData.Name == appName {
+				log.Printf("Found existing pending app %s in local source %s with version %s",
+					appName, sourceID, appInfo.RawData.Version)
+				return &types.ApplicationInfoEntry{
+					Name:    appInfo.RawData.Name,
+					Version: appInfo.RawData.Version,
+				}
+			}
+		}
+	}
+
+	log.Printf("No existing app found with name %s in user %s local sources", appName, userID)
+	return nil
+}
+
+// isLocalSource checks if the given source ID represents a local source
+func (lr *LocalRepo) isLocalSource(sourceID string) bool {
+	// Local source is identified by the name "local"
+	return sourceID == "local"
+}
+
+// isNewVersionHigher compares two version strings and returns true if newVersion is higher than currentVersion
+func (lr *LocalRepo) isNewVersionHigher(currentVersion, newVersion string) bool {
+	// Import semver package for version comparison
+	// Note: This is a simplified version comparison, in production you might want to use a proper semver library
+	// For now, we'll use a basic string comparison approach
+
+	// Split versions into parts
+	currentParts := strings.Split(currentVersion, ".")
+	newParts := strings.Split(newVersion, ".")
+
+	// Get the maximum length for comparison
+	maxLen := len(currentParts)
+	if len(newParts) > maxLen {
+		maxLen = len(newParts)
+	}
+
+	// Compare each part
+	for i := 0; i < maxLen; i++ {
+		currentPart := "0"
+		newPart := "0"
+
+		if i < len(currentParts) {
+			currentPart = currentParts[i]
+		}
+		if i < len(newParts) {
+			newPart = newParts[i]
+		}
+
+		// Convert to integers for comparison
+		currentNum, currentErr := strconv.Atoi(currentPart)
+		newNum, newErr := strconv.Atoi(newPart)
+
+		// If either conversion fails, do string comparison
+		if currentErr != nil || newErr != nil {
+			if currentPart < newPart {
+				return true
+			} else if currentPart > newPart {
+				return false
+			}
+			continue
+		}
+
+		// Compare numbers
+		if newNum > currentNum {
+			return true
+		} else if newNum < currentNum {
+			return false
+		}
+	}
+
+	// If all parts are equal, new version is not higher
+	return false
 }
