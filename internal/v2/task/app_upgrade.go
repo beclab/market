@@ -36,6 +36,13 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		log.Printf("undefine source for task: %s", task.ID)
 	}
 
+	// Get cfgType from metadata
+	cfgType, ok := task.Metadata["cfgType"].(string)
+	if !ok {
+		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
+		cfgType = "app" // Default to app type
+	}
+
 	var apiSource string
 	if source == "local" {
 		apiSource = "custom"
@@ -53,9 +60,14 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
 
-	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+	if cfgType == "recommend" {
+		urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/upgrade", appServiceHost, appServicePort, appName)
+		log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+	} else {
+		urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
+		log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+	}
 
 	upgradeInfo := &UpgradeOptions{
 		RepoUrl:      getRepoUrl(),
