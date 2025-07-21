@@ -136,6 +136,10 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		return fmt.Errorf("task or cache is nil")
 	}
 
+	// Add global cache lock to ensure consistency between write and read
+	task.Cache.Mutex.Lock()
+	defer task.Cache.Mutex.Unlock()
+
 	// Convert appData to AppInfoLatestData
 	var appInfoLatest *types.AppInfoLatestData
 	if appDataMap, ok := appData.(map[string]interface{}); ok {
@@ -181,6 +185,9 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		return fmt.Errorf("pendingData not found in cache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	}
 
+	// Debug: print address and RawPackage before assignment
+	log.Printf("[DEBUG] Before update: pendingData addr=%p, RawPackage=%s", pendingData, pendingData.RawPackage)
+
 	// Overwrite all fields of pendingData (keep the pointer address, update all contents)
 	pendingData.Type = appInfoLatest.Type
 	pendingData.Timestamp = appInfoLatest.Timestamp
@@ -190,6 +197,9 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	pendingData.Values = appInfoLatest.Values
 	pendingData.AppInfo = appInfoLatest.AppInfo
 	pendingData.RenderedPackage = appInfoLatest.RenderedPackage
+
+	// Debug: print address and RawPackage after assignment
+	log.Printf("[DEBUG] After update: pendingData addr=%p, RawPackage=%s", pendingData, pendingData.RawPackage)
 
 	log.Printf("Updated AppInfoLatestPendingData in cache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	log.Printf("Type=%s, Version=%s, RawPackage=%s, RenderedPackage=%s", pendingData.Type, pendingData.Version, pendingData.RawPackage, pendingData.RenderedPackage)
