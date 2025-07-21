@@ -9,6 +9,7 @@ import (
 type MarketSource struct {
 	ID          string    `json:"id" redis:"id"`               // Unique identifier for the source
 	Name        string    `json:"name" redis:"name"`           // Display name of the source
+	Type        string    `json:"type" redis:"type"`           // Type of the source (local, remote)
 	BaseURL     string    `json:"base_url" redis:"base_url"`   // Base URL of the market source
 	Priority    int       `json:"priority" redis:"priority"`   // Priority for selection (higher = more priority)
 	IsActive    bool      `json:"is_active" redis:"is_active"` // Whether this source is active

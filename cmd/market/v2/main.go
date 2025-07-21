@@ -18,7 +18,6 @@ import (
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 	"market/pkg/v2/api"
-	"market/pkg/v2/helm"
 
 	"github.com/golang/glog"
 )
@@ -164,6 +163,16 @@ func main() {
 		log.Println("Warning: StatusCorrectionChecker not available")
 	}
 
+	// 1.5. Sync Market Source Configuration with Chart Repository Service
+	log.Println("=== Step 1.5: Syncing market source configuration with chart repository service ===")
+	if err := settings.SyncMarketSourceConfigWithChartRepo(); err != nil {
+		log.Printf("Warning: Failed to sync market source configuration: %v", err)
+		// Don't fail the startup, just log the warning
+	} else {
+		log.Println("Market source configuration sync completed successfully")
+	}
+	log.Println("=== End Step 1.5 ===")
+
 	// Load app state data into user's official source
 	log.Println("Loading app state data into user's official source...")
 	loadAppStateDataToUserSource(appInfoModule)
@@ -262,28 +271,6 @@ func main() {
 	log.Println("  POST   /api/v2/apps/upload               - Upload application installation package")
 	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
-
-	// 4. Initialize Helm Repository Service
-	// Start Helm Repository server in a goroutine
-	go func() {
-		log.Println("Starting Helm Repository server on port 82...")
-		// Get Redis client from AppInfo module to set up download history tracking
-		redisClient := appInfoModule.GetRedisClient()
-		if redisClient != nil {
-			// Use Redis configuration for download history tracking
-			redisConfig := appInfoModule.GetRedisConfig()
-			if err := helm.StartHelmRepositoryServerWithRedis(cacheManager, redisConfig); err != nil {
-				log.Printf("Failed to start Helm Repository server: %v", err)
-			}
-		} else {
-			// Fallback to cache manager only if Redis is not available
-			log.Printf("Warning: Redis client not available, starting Helm Repository server without download history tracking")
-			if err := helm.StartHelmRepositoryServerWithCacheManager(cacheManager); err != nil {
-				log.Printf("Failed to start Helm Repository server: %v", err)
-			}
-		}
-	}()
-	log.Println("Helm Repository service initialized successfully")
 
 	// Add history record for successful market setup
 	log.Println("Recording market setup completion in history...")

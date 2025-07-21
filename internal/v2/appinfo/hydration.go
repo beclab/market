@@ -71,11 +71,14 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 	}
 
 	// Add default steps
-	hydrator.AddStep(hydrationfn.NewSourceChartStep())
-	hydrator.AddStep(hydrationfn.NewRenderedChartStep())
-	hydrator.AddStep(hydrationfn.NewCustomParamsUpdateStep())
-	hydrator.AddStep(hydrationfn.NewImageAnalysisStep())
-	hydrator.AddStep(hydrationfn.NewDatabaseUpdateStep())
+
+	hydrator.AddStep(hydrationfn.NewTaskForApiStep())
+
+	// hydrator.AddStep(hydrationfn.NewSourceChartStep())
+	// hydrator.AddStep(hydrationfn.NewRenderedChartStep())
+	// hydrator.AddStep(hydrationfn.NewCustomParamsUpdateStep())
+	// hydrator.AddStep(hydrationfn.NewImageAnalysisStep())
+	// hydrator.AddStep(hydrationfn.NewDatabaseUpdateStep())
 
 	return hydrator
 }

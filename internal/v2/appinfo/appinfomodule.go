@@ -2,8 +2,10 @@ package appinfo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"market/internal/v2/settings"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -151,6 +153,12 @@ func (m *AppInfoModule) Start() error {
 	if m.config.EnableCache {
 		if err := m.initCacheManager(); err != nil {
 			return fmt.Errorf("failed to initialize cache manager: %w", err)
+		}
+		// After cache manager is initialized, correct cache data with chart repo
+		if err := m.correctCacheWithChartRepo(); err != nil {
+			glog.Warningf("Failed to correct cache with chart repo: %v", err)
+		} else {
+			glog.Infof("Cache correction with chart repo completed successfully")
 		}
 	}
 
@@ -613,6 +621,117 @@ func (m *AppInfoModule) initStatusCorrectionChecker() error {
 	}
 
 	glog.Infof("StatusCorrectionChecker initialized successfully")
+	return nil
+}
+
+// correctCacheWithChartRepo corrects the cache by removing apps in AppInfoLatest array that do not exist in chart repo
+func (m *AppInfoModule) correctCacheWithChartRepo() error {
+	// Get chart repo service host from env, fallback to default
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		chartRepoHost = "http://localhost:8080"
+	}
+	chartRepoBaseURL := chartRepoHost + "/chart-repo/api/v2"
+
+	glog.Infof("Correcting cache with chart repo data via %s...", chartRepoBaseURL)
+
+	// Only use /repo/data GET, and expect a structure like { user_data: { sources: { sourceID: { app_info_latest: [...] } } } }
+	type AppSimpleInfo struct {
+		AppID string `json:"app_id"`
+		// ... other fields omitted
+	}
+	type FilteredAppInfoLatestData struct {
+		AppSimpleInfo *AppSimpleInfo `json:"app_simple_info"`
+	}
+	type FilteredSourceData struct {
+		AppInfoLatest []*FilteredAppInfoLatestData `json:"app_info_latest"`
+	}
+	type FilteredUserData struct {
+		Sources map[string]*FilteredSourceData `json:"sources"`
+	}
+	type RepoDataResponse struct {
+		UserData *FilteredUserData `json:"user_data"`
+	}
+
+	// Build GET request for /repo/data
+	req, err := http.NewRequest("GET", chartRepoBaseURL+"/repo/data", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	// Optionally: add authentication header/cookie if有需要
+	// req.Header.Set("Authorization", "Bearer ...")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to request chart repo /repo/data: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var repoResp RepoDataResponse
+	if err := json.NewDecoder(resp.Body).Decode(&repoResp); err != nil {
+		return fmt.Errorf("failed to decode chart repo response: %w", err)
+	}
+
+	// Build a set of all valid appIDs per source
+	validApps := make(map[string]map[string]struct{}) // sourceID -> appID set
+	if repoResp.UserData != nil {
+		for sourceID, src := range repoResp.UserData.Sources {
+			if src == nil {
+				continue
+			}
+			if _, ok := validApps[sourceID]; !ok {
+				validApps[sourceID] = make(map[string]struct{})
+			}
+			for _, app := range src.AppInfoLatest {
+				if app != nil && app.AppSimpleInfo != nil && app.AppSimpleInfo.AppID != "" {
+					validApps[sourceID][app.AppSimpleInfo.AppID] = struct{}{}
+				}
+			}
+		}
+	}
+
+	if m.cacheManager == nil {
+		return fmt.Errorf("cache manager not available")
+	}
+
+	m.cacheManager.mutex.Lock()
+	defer m.cacheManager.mutex.Unlock()
+	removedCount := 0
+	for userID, userData := range m.cacheManager.cache.Users {
+		for sourceID, sourceData := range userData.Sources {
+			newLatest := sourceData.AppInfoLatest[:0]
+			for _, app := range sourceData.AppInfoLatest {
+				var appID string
+				if app != nil && app.RawData != nil {
+					if app.RawData.ID != "" {
+						appID = app.RawData.ID
+					} else if app.RawData.AppID != "" {
+						appID = app.RawData.AppID
+					} else if app.RawData.Name != "" {
+						appID = app.RawData.Name
+					}
+				}
+				if appID != "" && validApps[sourceID] != nil {
+					if _, ok := validApps[sourceID][appID]; ok {
+						newLatest = append(newLatest, app)
+					} else {
+						removedCount++
+						glog.Infof("Removed app from cache: user=%s source=%s appID=%s", userID, sourceID, appID)
+					}
+				} else {
+					// If appID is empty, treat as invalid and remove
+					removedCount++
+					glog.Infof("Removed app from cache (empty appID): user=%s source=%s", userID, sourceID)
+				}
+			}
+			sourceData.AppInfoLatest = newLatest
+		}
+	}
+	glog.Infof("Cache correction finished, removed %d apps not in chart repo", removedCount)
 	return nil
 }
 
