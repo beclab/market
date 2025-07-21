@@ -143,6 +143,34 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		if appInfoLatest == nil {
 			return fmt.Errorf("failed to create AppInfoLatestData from response data")
 		}
+		if rawPkg, ok := appDataMap["raw_package"].(string); ok {
+			appInfoLatest.RawPackage = rawPkg
+		}
+		if renderedPkg, ok := appDataMap["rendered_package"].(string); ok {
+			appInfoLatest.RenderedPackage = renderedPkg
+		}
+		if values, ok := appDataMap["values"].([]interface{}); ok {
+			parsedValues := make([]*types.Values, 0, len(values))
+			for _, v := range values {
+				if vMap, ok := v.(map[string]interface{}); ok {
+					val := &types.Values{}
+					if fileName, ok := vMap["file_name"].(string); ok {
+						val.FileName = fileName
+					}
+					if modifyType, ok := vMap["modify_type"].(string); ok {
+						val.ModifyType = types.ModifyType(modifyType)
+					}
+					if modifyKey, ok := vMap["modify_key"].(string); ok {
+						val.ModifyKey = modifyKey
+					}
+					if modifyValue, ok := vMap["modify_value"].(string); ok {
+						val.ModifyValue = modifyValue
+					}
+					parsedValues = append(parsedValues, val)
+				}
+			}
+			appInfoLatest.Values = parsedValues
+		}
 	} else {
 		return fmt.Errorf("app_data is not in expected format")
 	}
