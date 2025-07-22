@@ -308,7 +308,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 		appDataMap := utils.ConvertApplicationInfoEntryToMap(response.Data.AppData)
 
 		// Add to cache with local source type and "market-local" name
-		if err := lr.cacheManager.SetAppData(userID, "market-local", types.AppInfoLatestPending, appDataMap); err != nil {
+		if err := lr.cacheManager.SetAppData(userID, "local", types.AppInfoLatestPending, appDataMap); err != nil {
 			log.Printf("Warning: Failed to add app data to cache: %v", err)
 			// Don't return error here as the upload was successful, just log the warning
 		} else {
