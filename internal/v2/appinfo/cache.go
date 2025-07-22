@@ -612,6 +612,73 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 	return nil
 }
 
+func (cm *CacheManager) SetLocalAppData(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @SetLocalAppData Start")
+	cm.updateLockStats("lock")
+	cm.mutex.Lock()
+	defer func() {
+		cm.mutex.Unlock()
+		cm.updateLockStats("unlock")
+		glog.Infof("[LOCK] cm.mutex.Unlock() @SetLocalAppData End")
+	}()
+
+	if !cm.isRunning {
+		return fmt.Errorf("cache manager is not running")
+	}
+	if cm.cache == nil {
+		return fmt.Errorf("cache is not initialized")
+	}
+
+	if _, exists := cm.cache.Users[userID]; !exists {
+		cm.cache.Users[userID] = NewUserData()
+	}
+	userData := cm.cache.Users[userID]
+	if _, exists := userData.Sources[sourceID]; !exists {
+		userData.Sources[sourceID] = NewSourceData()
+	}
+
+	pending := &types.AppInfoLatestPendingData{
+		Type:            types.AppInfoLatestPending,
+		Timestamp:       data.Timestamp,
+		Version:         data.Version,
+		RawData:         data.RawData,
+		RawPackage:      data.RawPackage,
+		Values:          data.Values,
+		AppInfo:         data.AppInfo,
+		RenderedPackage: data.RenderedPackage,
+	}
+	sourceData := userData.Sources[sourceID]
+
+	found := false
+	for i, exist := range sourceData.AppInfoLatestPending {
+		if exist != nil && exist.RawData != nil && pending.RawData != nil {
+			nameEqual := exist.RawData.Name == pending.RawData.Name && exist.RawData.Name != ""
+			appIDEqual := exist.RawData.AppID == pending.RawData.AppID && exist.RawData.AppID != ""
+			if nameEqual || appIDEqual {
+				existVer := exist.Version
+				newVer := pending.Version
+				if existVer == newVer || newVer > existVer {
+					sourceData.AppInfoLatestPending[i] = pending
+				}
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, pending)
+	}
+
+	cm.requestSync(SyncRequest{
+		UserID:   userID,
+		SourceID: sourceID,
+		Type:     SyncSource,
+	})
+
+	glog.Infof("SetLocalAppData: added AppInfoLatestPending for user=%s, source=%s", userID, sourceID)
+	return nil
+}
+
 // GetAppData retrieves app data from cache using single global lock
 func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
 	glog.Infof("[LOCK] cm.mutex.RLock() @543 Start")

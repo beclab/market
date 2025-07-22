@@ -301,7 +301,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 
 	log.Printf("Successfully processed chart package via chart repo service: %s", filename)
 
-	var appDataMap map[string]interface{}
+	// var appDataMap map[string]interface{}
 	var latest types.AppInfoLatestData
 
 	if response.Data.AppData != nil {
@@ -309,19 +309,19 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 
 		if err := json.Unmarshal(b, &latest); err == nil && latest.RawData != nil {
 
-			var m map[string]interface{}
-			if bb, err := json.Marshal(latest); err == nil {
-				_ = json.Unmarshal(bb, &m)
-				appDataMap = m
-			}
+			// var m map[string]interface{}
+			// if bb, err := json.Marshal(latest); err == nil {
+			// 	_ = json.Unmarshal(bb, &m)
+			// 	appDataMap = m
+			// }
 		}
 	}
 
-	if appDataMap != nil {
-		if err := lr.cacheManager.SetAppData(userID, "local", types.AppInfoLatestPending, appDataMap); err != nil {
-			log.Printf("Warning: Failed to add app data to cache: %v", err)
-		}
+	// if appDataMap != nil {
+	if err := lr.cacheManager.SetLocalAppData(userID, "local", types.AppInfoLatestPending, latest); err != nil {
+		log.Printf("Warning: Failed to add app data to cache: %v", err)
 	}
+	// }
 
 	return latest.RawData, nil
 }
