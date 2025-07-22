@@ -120,7 +120,7 @@ func SyncMarketSourceConfigWithChartRepo() error {
 		}
 
 		remoteSource := &ChartRepoMarketSource{
-			ID:          "official-market-sources",
+			ID:          "Official-Market-Sources",
 			Name:        "Official-Market-Sources",
 			Type:        "remote",
 			BaseURL:     baseURL,
