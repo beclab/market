@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"market/internal/v2/utils"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -288,7 +287,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 		Success bool   `json:"success"`
 		Message string `json:"message"`
 		Data    struct {
-			AppData *types.ApplicationInfoEntry `json:"app_data"`
+			AppData interface{} `json:"app_data"`
 		} `json:"data"`
 	}
 
@@ -302,21 +301,29 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 
 	log.Printf("Successfully processed chart package via chart repo service: %s", filename)
 
-	// Add AppData to cache for local source with name "market-local"
-	if response.Data.AppData != nil {
-		// Convert ApplicationInfoEntry to map[string]interface{} for cache storage
-		appDataMap := utils.ConvertApplicationInfoEntryToMap(response.Data.AppData)
+	var appDataMap map[string]interface{}
+	var latest types.AppInfoLatestData
 
-		// Add to cache with local source type and "market-local" name
-		if err := lr.cacheManager.SetAppData(userID, "local", types.AppInfoLatestPending, appDataMap); err != nil {
-			log.Printf("Warning: Failed to add app data to cache: %v", err)
-			// Don't return error here as the upload was successful, just log the warning
-		} else {
-			log.Printf("Successfully added app data to cache for user: %s, source: market-local, app: %s", userID, response.Data.AppData.AppID)
+	if response.Data.AppData != nil {
+		b, _ := json.Marshal(response.Data.AppData)
+
+		if err := json.Unmarshal(b, &latest); err == nil && latest.RawData != nil {
+
+			var m map[string]interface{}
+			if bb, err := json.Marshal(latest); err == nil {
+				_ = json.Unmarshal(bb, &m)
+				appDataMap = m
+			}
 		}
 	}
 
-	return response.Data.AppData, nil
+	if appDataMap != nil {
+		if err := lr.cacheManager.SetAppData(userID, "local", types.AppInfoLatestPending, appDataMap); err != nil {
+			log.Printf("Warning: Failed to add app data to cache: %v", err)
+		}
+	}
+
+	return latest.RawData, nil
 }
 
 // DeleteAppChart deletes the chart package file for a specific app
