@@ -106,6 +106,11 @@ func (r *RedisClientAdapter) HGetAll(key string) (map[string]string, error) {
 	return r.client.client.HGetAll(r.client.ctx, key).Result()
 }
 
+// Del implements settings.RedisClient.Del
+func (r *RedisClientAdapter) Del(key string) error {
+	return r.client.client.Del(r.client.ctx, key).Err()
+}
+
 // NewAppInfoModule creates a new AppInfo module instance
 func NewAppInfoModule(config *ModuleConfig) (*AppInfoModule, error) {
 	if config == nil {
