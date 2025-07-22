@@ -8,7 +8,6 @@ import (
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 	"net/http"
-	"os"
 	"path/filepath"
 
 	"github.com/gorilla/mux"
@@ -99,11 +98,11 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
 	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
 
-	if _, err := os.Stat(chartPath); err != nil {
-		log.Printf("Chart package not found at path: %s", chartPath)
-		s.sendResponse(w, http.StatusNotFound, false, "Chart package not found", nil)
-		return
-	}
+	// if _, err := os.Stat(chartPath); err != nil {
+	// 	log.Printf("Chart package not found at path: %s", chartPath)
+	// 	s.sendResponse(w, http.StatusNotFound, false, "Chart package not found", nil)
+	// 	return
+	// }
 
 	// Step 9: Get app cfgType from cache
 	var cfgType string
@@ -376,11 +375,11 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
 	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
 
-	if _, err := os.Stat(chartPath); err != nil {
-		log.Printf("Chart package not found at path: %s", chartPath)
-		s.sendResponse(w, http.StatusNotFound, false, "Chart package not found", nil)
-		return
-	}
+	// if _, err := os.Stat(chartPath); err != nil {
+	// 	log.Printf("Chart package not found at path: %s", chartPath)
+	// 	s.sendResponse(w, http.StatusNotFound, false, "Chart package not found", nil)
+	// 	return
+	// }
 
 	// Step 9: Get app cfgType from cache
 	var cfgType string
