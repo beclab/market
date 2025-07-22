@@ -165,7 +165,7 @@ func main() {
 
 	// 1.5. Sync Market Source Configuration with Chart Repository Service
 	log.Println("=== Step 1.5: Syncing market source configuration with chart repository service ===")
-	if err := settings.SyncMarketSourceConfigWithChartRepo(); err != nil {
+	if err := settings.SyncMarketSourceConfigWithChartRepo(redisClient); err != nil {
 		log.Printf("Warning: Failed to sync market source configuration: %v", err)
 		// Don't fail the startup, just log the warning
 	} else {

@@ -74,6 +74,11 @@ func (r *RedisClientImpl) HGetAll(key string) (map[string]string, error) {
 	return result, nil
 }
 
+// Del deletes a key from Redis
+func (r *RedisClientImpl) Del(key string) error {
+	return r.client.Del(r.ctx, key).Err()
+}
+
 // Close closes the Redis connection
 func (r *RedisClientImpl) Close() error {
 	return r.client.Close()

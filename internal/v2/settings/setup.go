@@ -40,8 +40,18 @@ type ChartRepoResponse struct {
 // SyncMarketSourceConfigWithChartRepo synchronizes market source configuration with chart repository service
 // This function is called after AppInfo module initialization to ensure chart repo service
 // has the latest market source configuration
-func SyncMarketSourceConfigWithChartRepo() error {
+func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 	log.Println("=== Syncing market source configuration with chart repository service ===")
+
+	clearCache := os.Getenv("CLEAR_CACHE")
+	if clearCache == "true" {
+		log.Println("CLEAR_CACHE is true, clearing settings Redis keys...")
+		// Only clear settings Redis keys for this module
+		if err := ClearSettingsRedis(redisClient); err != nil {
+			log.Printf("Failed to clear settings Redis: %v", err)
+			return fmt.Errorf("failed to clear settings Redis: %w", err)
+		}
+	}
 
 	// 1. Get chart repository service host from environment variable
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")

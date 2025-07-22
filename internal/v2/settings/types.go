@@ -46,6 +46,7 @@ type RedisClient interface {
 	Set(key string, value interface{}, expiration time.Duration) error
 	HSet(key string, fields map[string]interface{}) error
 	HGetAll(key string) (map[string]string, error)
+	Del(key string) error
 }
 
 // Constants for Redis keys

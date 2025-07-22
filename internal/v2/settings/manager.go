@@ -511,3 +511,16 @@ func (sm *SettingsManager) mergeWithDefaultConfig(config *MarketSourcesConfig) *
 	log.Printf("Final configuration has %d sources", len(config.Sources))
 	return config
 }
+
+func ClearSettingsRedis(redisClient RedisClient) error {
+
+	if err := redisClient.Del(RedisKeyMarketSources); err != nil {
+		return fmt.Errorf("failed to delete market sources from Redis: %w", err)
+	}
+
+	if err := redisClient.Del(RedisKeyAPIEndpoints); err != nil {
+		return fmt.Errorf("failed to delete API endpoints from Redis: %w", err)
+	}
+	log.Println("Settings Redis keys cleared successfully")
+	return nil
+}
