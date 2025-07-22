@@ -243,7 +243,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	}
 
 	// Add source field
-	if err := writer.WriteField("source", sourceID); err != nil {
+	if err := writer.WriteField("source", "market-local"); err != nil {
 		return nil, fmt.Errorf("failed to write source field: %w", err)
 	}
 

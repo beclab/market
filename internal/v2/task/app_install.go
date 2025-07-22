@@ -55,6 +55,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	var apiSource string
 	if appSource == "local" {
 		apiSource = "custom"
+		appSource = "market-local"
 	} else {
 		apiSource = "market"
 	}
