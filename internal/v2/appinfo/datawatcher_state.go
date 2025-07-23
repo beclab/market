@@ -530,7 +530,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 				continue
 			}
 			for _, appState := range srcData.AppStateLatest {
-				if appState != nil && appState.Status.Name == msg.Name {
+				if appState != nil && appState.Status.State != "uninstalled" && appState.Status.Name == msg.Name {
 					sourceID = srcID
 					break
 				}
