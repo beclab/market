@@ -9,7 +9,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"market/internal/v2/types"
@@ -326,61 +325,70 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	return latest.RawData, nil
 }
 
-// DeleteAppChart deletes the chart package file for a specific app
-func (lr *LocalRepo) DeleteAppChart(userID, sourceID, appName, appVersion string) error {
-	log.Printf("Deleting chart package for app: %s, version: %s, user: %s, source: %s", appName, appVersion, userID, sourceID)
+func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string) error {
+	log.Printf("Deleting app: %s, version: %s, user: %s", appName, appVersion, userID)
 
-	// Get CHART_ROOT environment variable
-	chartRoot := os.Getenv("CHART_ROOT")
-	if chartRoot == "" {
-		return fmt.Errorf("CHART_ROOT environment variable is not set")
+	// Get chart repo service host from environment variable
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		return fmt.Errorf("CHART_REPO_SERVICE_HOST environment variable is not set")
 	}
 
-	// Build chart package filename: appName-appVersion.tgz
-	chartFileName := fmt.Sprintf("%s-%s.tgz", appName, appVersion)
-	chartPackagePath := filepath.Join(chartRoot, sourceID, chartFileName)
+	// Construct request URL
+	url := fmt.Sprintf("http://%s/chart-repo/api/v2/local-apps/delete", chartRepoHost)
 
-	// Check if chart package exists
-	if _, err := os.Stat(chartPackagePath); os.IsNotExist(err) {
-		log.Printf("Chart package not found: %s", chartPackagePath)
-		return fmt.Errorf("chart package not found: %s", chartPackagePath)
+	// Prepare JSON body
+	bodyMap := map[string]string{
+		"app_name":    appName,
+		"app_version": appVersion,
+		"source_id":   "market-local",
+	}
+	bodyBytes, err := json.Marshal(bodyMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	// Delete the chart package file
-	if err := os.Remove(chartPackagePath); err != nil {
-		log.Printf("Failed to delete chart package: %v", err)
-		return fmt.Errorf("failed to delete chart package: %w", err)
+	// Create HTTP request
+	req, err := http.NewRequest("DELETE", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	log.Printf("Successfully deleted chart package: %s", chartPackagePath)
-	return nil
-}
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Authorization", token)
+	req.Header.Set("X-User-ID", userID)
 
-// DeleteRenderedChart deletes the rendered chart directory for a specific app
-func (lr *LocalRepo) DeleteRenderedChart(userID, sourceID, appName, appVersion string) error {
-	log.Printf("Deleting rendered chart directory for app: %s, version: %s, user: %s, source: %s", appName, appVersion, userID, sourceID)
+	// Send request
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request to chart repo service: %w", err)
+	}
+	defer resp.Body.Close()
 
-	// Get CHART_ROOT environment variable
-	chartRoot := os.Getenv("CHART_ROOT")
-	if chartRoot == "" {
-		return fmt.Errorf("CHART_ROOT environment variable is not set")
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Build rendered chart directory path: {basePath}/{username}/{source name}/{app name}-{version}/
-	chartDir := filepath.Join(chartRoot, userID, sourceID, fmt.Sprintf("%s-%s", appName, appVersion))
-
-	// Check if rendered chart directory exists
-	if _, err := os.Stat(chartDir); os.IsNotExist(err) {
-		log.Printf("Rendered chart directory not found: %s", chartDir)
-		return fmt.Errorf("rendered chart directory not found: %s", chartDir)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("chart repo service returned error status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Delete the rendered chart directory
-	if err := os.RemoveAll(chartDir); err != nil {
-		log.Printf("Failed to delete rendered chart directory: %v", err)
-		return fmt.Errorf("failed to delete rendered chart directory: %w", err)
+	// Parse response JSON
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return fmt.Errorf("failed to parse response JSON: %w", err)
 	}
 
-	log.Printf("Successfully deleted rendered chart directory: %s", chartDir)
+	if !response.Success {
+		return fmt.Errorf("chart repo service returned error: %s", response.Message)
+	}
+
+	log.Printf("Successfully deleted app %s version %s for user %s", appName, appVersion, userID)
 	return nil
 }
