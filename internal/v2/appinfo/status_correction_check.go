@@ -203,6 +203,41 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		glog.Infof("Detected %d status changes, applying corrections", len(changes))
 		scc.applyCorrections(changes, latestStatus)
 
+		// After applying corrections, recalculate and update user data hash for all affected users.
+		// This ensures the hash stays consistent with the latest user data state.
+		// The hash calculation logic is consistent with DataWatcher (see datawatcher_app.go).
+		affectedUsers := make(map[string]struct{})
+		for _, change := range changes {
+			affectedUsers[change.UserID] = struct{}{}
+		}
+		for userID := range affectedUsers {
+			userData := scc.cacheManager.GetUserData(userID)
+			if userData == nil {
+				glog.Warningf("StatusCorrectionChecker: userData not found for user %s, skip hash calculation", userID)
+				continue
+			}
+			// Generate snapshot for hash calculation (reuse logic from DataWatcher)
+			snapshot, err := utils.CreateUserDataSnapshot(userID, userData)
+			if err != nil {
+				glog.Errorf("StatusCorrectionChecker: failed to create snapshot for user %s: %v", userID, err)
+				continue
+			}
+			newHash, err := utils.CalculateUserDataHash(snapshot)
+			if err != nil {
+				glog.Errorf("StatusCorrectionChecker: failed to calculate hash for user %s: %v", userID, err)
+				continue
+			}
+			// Write back hash with lock
+			scc.cacheManager.mutex.Lock()
+			userData.Hash = newHash
+			scc.cacheManager.mutex.Unlock()
+			glog.Infof("StatusCorrectionChecker: user %s hash updated to %s", userID, newHash)
+		}
+		// Force sync after hash update
+		if err := scc.cacheManager.ForceSync(); err != nil {
+			glog.Errorf("StatusCorrectionChecker: ForceSync failed after hash update: %v", err)
+		}
+
 		scc.mutex.Lock()
 		scc.correctionCount += int64(len(changes))
 		scc.mutex.Unlock()
