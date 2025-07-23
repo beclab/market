@@ -203,6 +203,41 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		glog.Infof("Detected %d status changes, applying corrections", len(changes))
 		scc.applyCorrections(changes, latestStatus)
 
+		// After applying corrections, recalculate and update user data hash for all affected users.
+		// This ensures the hash stays consistent with the latest user data state.
+		// The hash calculation logic is consistent with DataWatcher (see datawatcher_app.go).
+		affectedUsers := make(map[string]struct{})
+		for _, change := range changes {
+			affectedUsers[change.UserID] = struct{}{}
+		}
+		for userID := range affectedUsers {
+			userData := scc.cacheManager.GetUserData(userID)
+			if userData == nil {
+				glog.Warningf("StatusCorrectionChecker: userData not found for user %s, skip hash calculation", userID)
+				continue
+			}
+			// Generate snapshot for hash calculation (reuse logic from DataWatcher)
+			snapshot, err := utils.CreateUserDataSnapshot(userID, userData)
+			if err != nil {
+				glog.Errorf("StatusCorrectionChecker: failed to create snapshot for user %s: %v", userID, err)
+				continue
+			}
+			newHash, err := utils.CalculateUserDataHash(snapshot)
+			if err != nil {
+				glog.Errorf("StatusCorrectionChecker: failed to calculate hash for user %s: %v", userID, err)
+				continue
+			}
+			// Write back hash with lock
+			scc.cacheManager.mutex.Lock()
+			userData.Hash = newHash
+			scc.cacheManager.mutex.Unlock()
+			glog.Infof("StatusCorrectionChecker: user %s hash updated to %s", userID, newHash)
+		}
+		// Force sync after hash update
+		if err := scc.cacheManager.ForceSync(); err != nil {
+			glog.Errorf("StatusCorrectionChecker: ForceSync failed after hash update: %v", err)
+		}
+
 		scc.mutex.Lock()
 		scc.correctionCount += int64(len(changes))
 		scc.mutex.Unlock()
@@ -580,17 +615,17 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 			// 2. Check taskModule
-			if sourceID == "" && scc.taskModule != nil {
-				_, src, found := scc.taskModule.GetLatestTaskByAppNameAndUser(change.AppName, change.UserID)
-				if found && src != "" {
-					sourceID = src
-				}
-			}
+			// if sourceID == "" && scc.taskModule != nil {
+			// 	_, src, found := scc.taskModule.GetLatestTaskByAppNameAndUser(change.AppName, change.UserID)
+			// 	if found && src != "" {
+			// 		sourceID = src
+			// 	}
+			// }
 			// 3. Fallback
-			if sourceID == "" {
-				sourceID = "Official-Market-Sources"
-			}
-			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			// if sourceID == "" {
+			// 	sourceID = "Official-Market-Sources"
+			// }
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
 				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
 				continue
@@ -632,18 +667,18 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
 				glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
 			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
 				glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
-					change.AppName, change.UserID, change.SourceID, err)
+					change.AppName, change.UserID, sourceID, err)
 			} else {
 				glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
-					change.AppName, change.UserID, change.SourceID)
+					change.AppName, change.UserID, sourceID)
 			}
 
 		case "state_inconsistency":
@@ -674,19 +709,19 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			appStateData := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
 				glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
 			appStateData.Status.State = "running"
 			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, change.SourceID, AppStateLatest, stateData); err != nil {
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
 				glog.Errorf("Failed to update cache with corrected state for inconsistent app %s (user: %s, source: %s): %v",
-					change.AppName, change.UserID, change.SourceID, err)
+					change.AppName, change.UserID, sourceID, err)
 			} else {
 				glog.Infof("Successfully corrected inconsistent state for app %s (user: %s, source: %s): %s -> running",
-					change.AppName, change.UserID, change.SourceID, change.OldState)
+					change.AppName, change.UserID, sourceID, change.OldState)
 			}
 
 		default:
@@ -696,7 +731,7 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 }
 
 // createAppStateDataFromResponse creates AppStateLatestData from AppServiceResponse
-func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.AppServiceResponse, userID string) *types.AppStateLatestData {
+func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.AppServiceResponse, userID string) (*types.AppStateLatestData, string) {
 	// Create entrance statuses
 	entranceStatuses := make([]struct {
 		ID         string `json:"id"`
@@ -738,9 +773,11 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 
 	// Get version from download record
 	version := ""
+	source := ""
 	if userID != "" && app.Spec.Name != "" {
-		if versionFromRecord, err := utils.GetAppVersionFromDownloadRecord(userID, app.Spec.Name); err == nil && versionFromRecord != "" {
+		if versionFromRecord, sourceFromRecord, err := utils.GetAppInfoFromDownloadRecord(userID, app.Spec.Name); err == nil && versionFromRecord != "" {
 			version = versionFromRecord
+			source = sourceFromRecord
 		}
 	}
 
@@ -772,7 +809,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			Progress:           "",
 			EntranceStatuses:   entranceStatuses,
 		},
-	}
+	}, source
 }
 
 // createStateDataFromAppStateData creates a state data from AppStateLatestData

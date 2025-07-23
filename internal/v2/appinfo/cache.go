@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
@@ -28,6 +29,7 @@ type CacheManager struct {
 	syncChannel       chan SyncRequest
 	stopChannel       chan bool
 	isRunning         bool
+	settingsManager   *settings.SettingsManager
 
 	// Lock monitoring
 	lockStats struct {
@@ -429,7 +431,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			// Check if entrance URLs are missing and fetch them if needed
 			enhancedData := cm.enhanceAppStateDataWithUrls(data)
 
-			appData := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppVersionFromDownloadRecord)
+			appData, sourceIDFromRecord := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppInfoFromDownloadRecord)
 
 			// Validate that the created app state has a name field
 			if appData == nil {
@@ -450,7 +452,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 				if appName != "" {
 					// Check state changes and send notifications
 					if err := cm.stateMonitor.CheckAndNotifyStateChange(
-						userID, sourceID, appName,
+						userID, sourceIDFromRecord, appName,
 						appData,
 						sourceData.AppStateLatest,
 						sourceData.AppInfoLatest,
@@ -461,8 +463,8 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			}
 
 			// Update or add the app state using name matching
-			cm.updateAppStateLatest(userID, sourceID, sourceData, appData)
-			glog.Infof("Updated single app state for user=%s, source=%s", userID, sourceID)
+			cm.updateAppStateLatest(userID, sourceIDFromRecord, sourceData, appData)
+			glog.Infof("Updated single app state for user=%s, source=%s", userID, sourceIDFromRecord)
 		}
 	case AppInfoLatest:
 		appData := NewAppInfoLatestData(data)
@@ -612,6 +614,73 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 	return nil
 }
 
+func (cm *CacheManager) SetLocalAppData(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @SetLocalAppData Start")
+	cm.updateLockStats("lock")
+	cm.mutex.Lock()
+	defer func() {
+		cm.mutex.Unlock()
+		cm.updateLockStats("unlock")
+		glog.Infof("[LOCK] cm.mutex.Unlock() @SetLocalAppData End")
+	}()
+
+	if !cm.isRunning {
+		return fmt.Errorf("cache manager is not running")
+	}
+	if cm.cache == nil {
+		return fmt.Errorf("cache is not initialized")
+	}
+
+	if _, exists := cm.cache.Users[userID]; !exists {
+		cm.cache.Users[userID] = NewUserData()
+	}
+	userData := cm.cache.Users[userID]
+	if _, exists := userData.Sources[sourceID]; !exists {
+		userData.Sources[sourceID] = NewSourceData()
+	}
+
+	pending := &types.AppInfoLatestPendingData{
+		Type:            types.AppInfoLatestPending,
+		Timestamp:       data.Timestamp,
+		Version:         data.Version,
+		RawData:         data.RawData,
+		RawPackage:      data.RawPackage,
+		Values:          data.Values,
+		AppInfo:         data.AppInfo,
+		RenderedPackage: data.RenderedPackage,
+	}
+	sourceData := userData.Sources[sourceID]
+
+	found := false
+	for i, exist := range sourceData.AppInfoLatestPending {
+		if exist != nil && exist.RawData != nil && pending.RawData != nil {
+			nameEqual := exist.RawData.Name == pending.RawData.Name && exist.RawData.Name != ""
+			appIDEqual := exist.RawData.AppID == pending.RawData.AppID && exist.RawData.AppID != ""
+			if nameEqual || appIDEqual {
+				existVer := exist.Version
+				newVer := pending.Version
+				if existVer == newVer || newVer > existVer {
+					sourceData.AppInfoLatestPending[i] = pending
+				}
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, pending)
+	}
+
+	cm.requestSync(SyncRequest{
+		UserID:   userID,
+		SourceID: sourceID,
+		Type:     SyncSource,
+	})
+
+	glog.Infof("SetLocalAppData: added AppInfoLatestPending for user=%s, source=%s", userID, sourceID)
+	return nil
+}
+
 // GetAppData retrieves app data from cache using single global lock
 func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
 	glog.Infof("[LOCK] cm.mutex.RLock() @543 Start")
@@ -654,6 +723,47 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 	})
 
 	glog.Infof("Removed user data for user=%s", userID)
+	return nil
+}
+
+// AddUser adds a new user to the cache
+func (cm *CacheManager) AddUser(userID string) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @AddUser Start")
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if _, exists := cm.cache.Users[userID]; exists {
+		glog.Infof("User %s already exists in cache", userID)
+		return nil
+	}
+
+	userData := NewUserData()
+
+	// Initialize sources from settingsManager
+	if cm.settingsManager != nil {
+		sourcesConfig := cm.settingsManager.GetMarketSources()
+		if sourcesConfig != nil {
+			for _, src := range sourcesConfig.Sources {
+
+				userData.Sources[src.ID] = types.NewSourceDataWithType(types.SourceDataType(src.Type))
+				glog.Infof("Initialized source %s for user %s", src.ID, userID)
+			}
+		} else {
+			glog.Warningf("settingsManager.GetMarketSources() returned nil, no sources initialized for user %s", userID)
+		}
+	} else {
+		glog.Warningf("settingsManager is nil, no sources initialized for user %s", userID)
+	}
+
+	cm.cache.Users[userID] = userData
+	glog.Infof("User %s added to cache with %d sources", userID, len(userData.Sources))
+
+	if cm.isRunning {
+		cm.requestSync(SyncRequest{
+			UserID: userID,
+			Type:   SyncUser,
+		})
+	}
 	return nil
 }
 
@@ -1190,4 +1300,9 @@ func (cm *CacheManager) RemoveAppInfoLatestData(userID, sourceID, appName string
 	}
 
 	return nil
+}
+
+// SetSettingsManager sets the settings manager for the cache manager
+func (cm *CacheManager) SetSettingsManager(sm *settings.SettingsManager) {
+	cm.settingsManager = sm
 }

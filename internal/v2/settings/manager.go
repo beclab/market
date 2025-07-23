@@ -127,6 +127,7 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	defaultSource := &MarketSource{
 		ID:          "default",
 		Name:        "Official-Market-Sources",
+		Type:        "remote",
 		BaseURL:     baseURL,
 		Priority:    100,
 		IsActive:    true,
@@ -138,7 +139,8 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
 	localSource := &MarketSource{
 		ID:          "local",
-		Name:        "local",
+		Name:        "market-local",
+		Type:        "local",
 		BaseURL:     "file://", // 本地文件系统
 		Priority:    50,
 		IsActive:    true,
@@ -193,6 +195,7 @@ func (sm *SettingsManager) GetMarketSources() *MarketSourcesConfig {
 		sources[i] = &MarketSource{
 			ID:          src.ID,
 			Name:        src.Name,
+			Type:        src.Type,
 			BaseURL:     src.BaseURL,
 			Priority:    src.Priority,
 			IsActive:    src.IsActive,
@@ -247,6 +250,7 @@ func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 			return &MarketSource{
 				ID:          source.ID,
 				Name:        source.Name,
+				Type:        source.Type,
 				BaseURL:     source.BaseURL,
 				Priority:    source.Priority,
 				IsActive:    source.IsActive,
@@ -262,6 +266,7 @@ func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 			return &MarketSource{
 				ID:          source.ID,
 				Name:        source.Name,
+				Type:        source.Type,
 				BaseURL:     source.BaseURL,
 				Priority:    source.Priority,
 				IsActive:    source.IsActive,
@@ -308,6 +313,7 @@ func (sm *SettingsManager) SetMarketSource(url string) error {
 		newSource := &MarketSource{
 			ID:          "default",
 			Name:        "Official-Market-Sources",
+			Type:        "remote",
 			BaseURL:     strings.TrimSuffix(url, "/"),
 			Priority:    100,
 			IsActive:    true,
@@ -504,4 +510,17 @@ func (sm *SettingsManager) mergeWithDefaultConfig(config *MarketSourcesConfig) *
 
 	log.Printf("Final configuration has %d sources", len(config.Sources))
 	return config
+}
+
+func ClearSettingsRedis(redisClient RedisClient) error {
+
+	if err := redisClient.Del(RedisKeyMarketSources); err != nil {
+		return fmt.Errorf("failed to delete market sources from Redis: %w", err)
+	}
+
+	if err := redisClient.Del(RedisKeyAPIEndpoints); err != nil {
+		return fmt.Errorf("failed to delete API endpoints from Redis: %w", err)
+	}
+	log.Println("Settings Redis keys cleared successfully")
+	return nil
 }

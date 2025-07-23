@@ -71,11 +71,14 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 	}
 
 	// Add default steps
-	hydrator.AddStep(hydrationfn.NewSourceChartStep())
-	hydrator.AddStep(hydrationfn.NewRenderedChartStep())
-	hydrator.AddStep(hydrationfn.NewCustomParamsUpdateStep())
-	hydrator.AddStep(hydrationfn.NewImageAnalysisStep())
-	hydrator.AddStep(hydrationfn.NewDatabaseUpdateStep())
+
+	hydrator.AddStep(hydrationfn.NewTaskForApiStep())
+
+	// hydrator.AddStep(hydrationfn.NewSourceChartStep())
+	// hydrator.AddStep(hydrationfn.NewRenderedChartStep())
+	// hydrator.AddStep(hydrationfn.NewCustomParamsUpdateStep())
+	// hydrator.AddStep(hydrationfn.NewImageAnalysisStep())
+	// hydrator.AddStep(hydrationfn.NewDatabaseUpdateStep())
 
 	return hydrator
 }
@@ -516,44 +519,50 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 // isAppHydrationComplete checks if an app has completed all hydration steps
 func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendingData) bool {
 	if pendingData == nil {
+		log.Printf("isAppHydrationComplete: pendingData is nil")
 		return false
 	}
 
-	// Quick fail-fast checks for most common missing data
+	appID := ""
+	appName := ""
+	if pendingData.RawData != nil {
+		appID = pendingData.RawData.AppID
+		if appID == "" {
+			appID = pendingData.RawData.ID
+		}
+		appName = pendingData.RawData.Name
+	}
+
 	if pendingData.RawPackage == "" {
-		// Only log detailed messages in debug builds to reduce noise
+		log.Printf("isAppHydrationComplete: RawPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.RenderedPackage == "" {
+		log.Printf("isAppHydrationComplete: RenderedPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
-	// Check if AppInfo exists - this is created during hydration
 	if pendingData.AppInfo == nil {
+		log.Printf("isAppHydrationComplete: AppInfo is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	imageAnalysis := pendingData.AppInfo.ImageAnalysis
 	if imageAnalysis == nil {
+		log.Printf("isAppHydrationComplete: ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
-	// More flexible image analysis validation - consider private images as valid
-	// If image analysis exists and has been performed (regardless of public/private), consider it complete
 	if imageAnalysis.TotalImages > 0 {
-		// Images found and analyzed (including private images)
 		return true
 	}
 
-	// For apps with no images at all, check if analysis was attempted
-	// If TotalImages is 0 but Images map exists, it means analysis was done but no images found
 	if imageAnalysis.TotalImages == 0 && imageAnalysis.Images != nil {
-		// Analysis completed - no images found in this app
 		return true
 	}
 
-	// Analysis not performed or incomplete
+	log.Printf("isAppHydrationComplete: ImageAnalysis incomplete for appID=%s, name=%s, TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
 	return false
 }
 

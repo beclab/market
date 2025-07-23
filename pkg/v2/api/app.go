@@ -440,9 +440,7 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 
 	// Step 9: Process the uploaded package using LocalRepo
 	localRepo := appinfo.NewLocalRepo(s.cacheManager)
-	if s.hydrator != nil {
-		localRepo.SetHydrator(s.hydrator)
-	}
+
 	appInfo, err := localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token)
 	if err != nil {
 		log.Printf("Failed to process uploaded package: %v", err)
@@ -1460,6 +1458,8 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
+	token := utils.GetTokenFromRequest(restfulReq)
+
 	// userID := "saidevgp03"
 	log.Printf("Retrieved user ID for delete request: %s", userID)
 
@@ -1557,20 +1557,13 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 
 	// Step 7: Delete chart files using LocalRepo
 	localRepo := appinfo.NewLocalRepo(s.cacheManager)
-	if s.hydrator != nil {
-		localRepo.SetHydrator(s.hydrator)
-	}
 
 	// Delete chart package file
-	if err := localRepo.DeleteAppChart(userID, "local", request.AppName, request.AppVersion); err != nil {
+	if err := localRepo.DeleteApp(userID, request.AppName, request.AppVersion, token); err != nil {
 		log.Printf("Failed to delete chart package: %v", err)
 		// Continue with deletion even if chart file doesn't exist
-	}
-
-	// Delete rendered chart directory
-	if err := localRepo.DeleteRenderedChart(userID, "local", request.AppName, request.AppVersion); err != nil {
-		log.Printf("Failed to delete rendered chart directory: %v", err)
-		// Continue with deletion even if rendered directory doesn't exist
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to delete chart package", nil)
+		return
 	}
 
 	// Step 8: Remove app from AppStateLatest

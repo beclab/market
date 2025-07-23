@@ -28,6 +28,7 @@ type HydrationTask struct {
 	ID          string                 `json:"id"`           // Unique task ID
 	UserID      string                 `json:"user_id"`      // User ID
 	SourceID    string                 `json:"source_id"`    // Source ID
+	SourceType  string                 `json:"source_type"`  // Source type
 	AppID       string                 `json:"app_id"`       // Application ID
 	AppName     string                 `json:"app_name"`     // Application name
 	AppVersion  string                 `json:"app_version"`  // Application version
@@ -86,10 +87,21 @@ func NewHydrationTask(userID, sourceID, appID string, appData map[string]interfa
 	// Create a safe copy of app data to avoid circular references
 	safeAppData := createSafeAppDataCopy(appData)
 
+	marketSources := settingsManager.GetActiveMarketSources()
+
+	sourceType := ""
+	for _, source := range marketSources {
+		if source.ID == sourceID {
+			sourceType = string(source.Type)
+			break
+		}
+	}
+
 	return &HydrationTask{
 		ID:                 taskID,
 		UserID:             userID,
 		SourceID:           sourceID,
+		SourceType:         sourceType,
 		AppID:              appID,
 		AppName:            appName,
 		AppVersion:         appVersion,

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"log"
 	"reflect"
 	"strings"
@@ -507,7 +508,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 }
 
 // NewAppStateLatestData creates a new app state latest data structure
-func NewAppStateLatestData(data map[string]interface{}, userID string, getVersionFunc func(string, string) (string, error)) *AppStateLatestData {
+func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
 	// Extract status information from data
 	var name, state, updateTime, statusTime, lastTransitionTime, progress string
 	var entranceStatuses []struct {
@@ -535,7 +536,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 	if name == "" {
 		log.Printf("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field")
 		log.Printf("ERROR: Available fields in data: %v", getMapKeys(data))
-		return nil
+		return nil, ""
 	}
 
 	if stateVal, ok := data["state"].(string); ok {
@@ -661,18 +662,20 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 
 	// Version assignment logic
 	version := ""
+	source := ""
 	if versionVal, ok := data["version"].(string); ok && versionVal != "" {
 		version = versionVal
 		log.Printf("DEBUG: NewAppStateLatestData - using version from data: %s", version)
 	}
-	// If version is still empty, and getVersionFunc is available, and userID/name are not empty, try to get from record
-	if version == "" && getVersionFunc != nil && userID != "" && name != "" {
-		versionFromRecord, err := getVersionFunc(userID, name)
+	// If version is still empty, and getInfoFunc is available, and userID/name are not empty, try to get from record
+	if version == "" && getInfoFunc != nil && userID != "" && name != "" {
+		versionFromRecord, sourceFromRecord, err := getInfoFunc(userID, name)
 		if err != nil {
 			log.Printf("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
 		} else if versionFromRecord != "" {
 			version = versionFromRecord
-			log.Printf("DEBUG: NewAppStateLatestData - using version from download record: %s", version)
+			source = sourceFromRecord
+			log.Printf("DEBUG: NewAppStateLatestData - using version from download record: %s, source: %s", version, source)
 		}
 	}
 	// If version is still empty, log error and return nil
@@ -709,15 +712,78 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 			Progress:           progress,
 			EntranceStatuses:   entranceStatuses,
 		},
-	}
+	}, source
 }
 
 // NewAppInfoLatestData creates a new app info latest data structure
 func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
-	// Validate input data - ensure we have meaningful data to work with
 	if data == nil || len(data) == 0 {
 		log.Printf("DEBUG: NewAppInfoLatestData called with nil or empty data, returning nil")
 		return nil
+	}
+
+	// If the input is already a map version of AppInfoLatestData, restore directly
+	if appInfoMap, ok := data["app_info"].(map[string]interface{}); ok {
+		var appInfo AppInfo
+		// Restore AppEntry
+		if appEntryMap, ok := appInfoMap["app_entry"].(map[string]interface{}); ok {
+			appInfo.AppEntry = NewApplicationInfoEntry(appEntryMap)
+		}
+		// Restore ImageAnalysis
+		if imageAnalysisMap, ok := appInfoMap["image_analysis"].(map[string]interface{}); ok {
+			b, err := json.Marshal(imageAnalysisMap)
+			if err == nil {
+				var result ImageAnalysisResult
+				if err := json.Unmarshal(b, &result); err == nil {
+					appInfo.ImageAnalysis = &result
+				}
+			}
+		}
+
+		latest := &AppInfoLatestData{
+			Type:            AppInfoLatest,
+			Timestamp:       getCurrentTimestamp(),
+			Version:         "",
+			RawData:         nil,
+			RawPackage:      "",
+			Values:          make([]*Values, 0),
+			AppInfo:         &appInfo,
+			RenderedPackage: "",
+		}
+		if version, ok := data["version"].(string); ok {
+			latest.Version = version
+		}
+		if rawDataMap, ok := data["raw_data"].(map[string]interface{}); ok {
+			latest.RawData = NewApplicationInfoEntry(rawDataMap)
+		}
+		if rawPackage, ok := data["raw_package"].(string); ok {
+			latest.RawPackage = rawPackage
+		}
+		if renderedPackage, ok := data["rendered_package"].(string); ok {
+			latest.RenderedPackage = renderedPackage
+		}
+		// Restore Values
+		if valuesArr, ok := data["values"].([]interface{}); ok {
+			for _, v := range valuesArr {
+				if vmap, ok := v.(map[string]interface{}); ok {
+					val := &Values{}
+					if fileName, ok := vmap["file_name"].(string); ok {
+						val.FileName = fileName
+					}
+					if modifyType, ok := vmap["modify_type"].(string); ok {
+						val.ModifyType = ModifyType(modifyType)
+					}
+					if modifyKey, ok := vmap["modify_key"].(string); ok {
+						val.ModifyKey = modifyKey
+					}
+					if modifyValue, ok := vmap["modify_value"].(string); ok {
+						val.ModifyValue = modifyValue
+					}
+					latest.Values = append(latest.Values, val)
+				}
+			}
+		}
+		return latest
 	}
 
 	// Check if we have essential app identifiers or meaningful content
@@ -811,9 +877,29 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 	// rawData.Metadata["source_data"] = data
 
 	appInfoLatest.RawData = rawData
+
+	// Try to extract image_analysis from data
+	var imageAnalysis *ImageAnalysisResult
+	if ia, ok := data["image_analysis"]; ok && ia != nil {
+		// Try type assertion
+		switch v := ia.(type) {
+		case *ImageAnalysisResult:
+			imageAnalysis = v
+		case map[string]interface{}:
+			// Try to unmarshal
+			b, err := json.Marshal(v)
+			if err == nil {
+				var result ImageAnalysisResult
+				if err := json.Unmarshal(b, &result); err == nil {
+					imageAnalysis = &result
+				}
+			}
+		}
+	}
+
 	appInfoLatest.AppInfo = &AppInfo{
 		AppEntry:      rawData,
-		ImageAnalysis: nil, // Will be filled later if needed
+		ImageAnalysis: imageAnalysis, // Set ImageAnalysis if present
 	}
 
 	return appInfoLatest

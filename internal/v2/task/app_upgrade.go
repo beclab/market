@@ -46,6 +46,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	var apiSource string
 	if source == "local" {
 		apiSource = "custom"
+		source = "market-local"
 	} else {
 		apiSource = "market"
 	}

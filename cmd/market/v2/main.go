@@ -18,7 +18,6 @@ import (
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 	"market/pkg/v2/api"
-	"market/pkg/v2/helm"
 
 	"github.com/golang/glog"
 )
@@ -45,28 +44,31 @@ func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
 	// Get all user app state data from pre-startup step
 	allUserAppStateData := utils.GetAllUserAppStateData()
 
-	if len(allUserAppStateData) == 0 {
-		log.Println("No app state data found from pre-startup step")
-		return
-	}
+	for userID, sourceData := range allUserAppStateData {
+		if len(sourceData) == 0 {
+			log.Println("No app state data found from pre-startup step")
+			return
+		}
 
-	log.Printf("Loading app state data for %d users", len(allUserAppStateData))
+		log.Printf("Loading app state data for %d users", len(sourceData))
 
-	// For each user, load their app state data into the official source
-	for userID, appStateDataList := range allUserAppStateData {
-		log.Printf("Loading %d app states for user: %s", len(appStateDataList), userID)
+		// For each user, load their app state data into the official source
+		for sourceID, appStateDataList := range sourceData {
+			log.Printf("Loading %d app states for user: %s, source: %s", len(appStateDataList), userID, sourceID)
 
-		// Set app state data for the user's official source
-		err := appInfoModule.SetAppData(userID, "Official-Market-Sources", types.AppStateLatest, map[string]interface{}{
-			"app_states": appStateDataList,
-		})
+			// Set app state data for the user's official source
+			err := appInfoModule.SetAppData(userID, sourceID, types.AppStateLatest, map[string]interface{}{
+				"app_states": appStateDataList,
+			})
 
-		if err != nil {
-			log.Printf("Failed to load app state data for user %s: %v", userID, err)
-		} else {
-			log.Printf("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
+			if err != nil {
+				log.Printf("Failed to load app state data for user %s: %v", userID, err)
+			} else {
+				log.Printf("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
+			}
 		}
 	}
+
 }
 
 func main() {
@@ -96,7 +98,7 @@ func main() {
 		log.Fatalf("Failed to create Redis client: %v", err)
 	}
 
-	utils.SetRedisClient(redisClient.GetRawClient())
+	// utils.SetRedisClient(redisClient.GetRawClient())
 
 	// Pre-startup step: Setup app service data with retry mechanism
 	log.Println("=== Pre-startup: Setting up app service data ===")
@@ -114,8 +116,10 @@ func main() {
 
 		userCount := len(extractedUsers)
 		appCount := 0
-		for _, appList := range allUserAppStateData {
-			appCount += len(appList)
+		for _, sourceData := range allUserAppStateData {
+			for _, appList := range sourceData {
+				appCount += len(appList)
+			}
 		}
 
 		if userCount == 0 || appCount == 0 {
@@ -164,6 +168,16 @@ func main() {
 		log.Println("Warning: StatusCorrectionChecker not available")
 	}
 
+	// 1.5. Sync Market Source Configuration with Chart Repository Service
+	log.Println("=== Step 1.5: Syncing market source configuration with chart repository service ===")
+	if err := settings.SyncMarketSourceConfigWithChartRepo(redisClient); err != nil {
+		log.Printf("Warning: Failed to sync market source configuration: %v", err)
+		// Don't fail the startup, just log the warning
+	} else {
+		log.Println("Market source configuration sync completed successfully")
+	}
+	log.Println("=== End Step 1.5 ===")
+
 	// Load app state data into user's official source
 	log.Println("Loading app state data into user's official source...")
 	loadAppStateDataToUserSource(appInfoModule)
@@ -172,6 +186,7 @@ func main() {
 	// Get cacheManager for HTTP server
 	log.Printf("Getting cache manager for HTTP server...")
 	cacheManager := appInfoModule.GetCacheManager()
+	cacheManager.SetSettingsManager(settingsManager)
 	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
 
 	// Get hydrator for HTTP server
@@ -262,28 +277,6 @@ func main() {
 	log.Println("  POST   /api/v2/apps/upload               - Upload application installation package")
 	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
-
-	// 4. Initialize Helm Repository Service
-	// Start Helm Repository server in a goroutine
-	go func() {
-		log.Println("Starting Helm Repository server on port 82...")
-		// Get Redis client from AppInfo module to set up download history tracking
-		redisClient := appInfoModule.GetRedisClient()
-		if redisClient != nil {
-			// Use Redis configuration for download history tracking
-			redisConfig := appInfoModule.GetRedisConfig()
-			if err := helm.StartHelmRepositoryServerWithRedis(cacheManager, redisConfig); err != nil {
-				log.Printf("Failed to start Helm Repository server: %v", err)
-			}
-		} else {
-			// Fallback to cache manager only if Redis is not available
-			log.Printf("Warning: Redis client not available, starting Helm Repository server without download history tracking")
-			if err := helm.StartHelmRepositoryServerWithCacheManager(cacheManager); err != nil {
-				log.Printf("Failed to start Helm Repository server: %v", err)
-			}
-		}
-	}()
-	log.Println("Helm Repository service initialized successfully")
 
 	// Add history record for successful market setup
 	log.Println("Recording market setup completion in history...")
