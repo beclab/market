@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
@@ -28,6 +29,7 @@ type CacheManager struct {
 	syncChannel       chan SyncRequest
 	stopChannel       chan bool
 	isRunning         bool
+	settingsManager   *settings.SettingsManager
 
 	// Lock monitoring
 	lockStats struct {
@@ -724,6 +726,47 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 	return nil
 }
 
+// AddUser adds a new user to the cache
+func (cm *CacheManager) AddUser(userID string) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @AddUser Start")
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if _, exists := cm.cache.Users[userID]; exists {
+		glog.Infof("User %s already exists in cache", userID)
+		return nil
+	}
+
+	userData := NewUserData()
+
+	// Initialize sources from settingsManager
+	if cm.settingsManager != nil {
+		sourcesConfig := cm.settingsManager.GetMarketSources()
+		if sourcesConfig != nil {
+			for _, src := range sourcesConfig.Sources {
+
+				userData.Sources[src.ID] = types.NewSourceDataWithType(types.SourceDataType(src.Type))
+				glog.Infof("Initialized source %s for user %s", src.ID, userID)
+			}
+		} else {
+			glog.Warningf("settingsManager.GetMarketSources() returned nil, no sources initialized for user %s", userID)
+		}
+	} else {
+		glog.Warningf("settingsManager is nil, no sources initialized for user %s", userID)
+	}
+
+	cm.cache.Users[userID] = userData
+	glog.Infof("User %s added to cache with %d sources", userID, len(userData.Sources))
+
+	if cm.isRunning {
+		cm.requestSync(SyncRequest{
+			UserID: userID,
+			Type:   SyncUser,
+		})
+	}
+	return nil
+}
+
 // GetCacheStats returns cache statistics using single global lock
 func (cm *CacheManager) GetCacheStats() map[string]interface{} {
 	glog.Infof("[LOCK] cm.mutex.RLock() @586 Start")
@@ -1257,4 +1300,9 @@ func (cm *CacheManager) RemoveAppInfoLatestData(userID, sourceID, appName string
 	}
 
 	return nil
+}
+
+// SetSettingsManager sets the settings manager for the cache manager
+func (cm *CacheManager) SetSettingsManager(sm *settings.SettingsManager) {
+	cm.settingsManager = sm
 }
