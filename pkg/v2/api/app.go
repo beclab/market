@@ -1458,6 +1458,8 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
+	token := utils.GetTokenFromRequest(restfulReq)
+
 	// userID := "saidevgp03"
 	log.Printf("Retrieved user ID for delete request: %s", userID)
 
@@ -1557,7 +1559,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	localRepo := appinfo.NewLocalRepo(s.cacheManager)
 
 	// Delete chart package file
-	if err := localRepo.DeleteApp(userID, request.AppName, request.AppVersion); err != nil {
+	if err := localRepo.DeleteApp(userID, request.AppName, request.AppVersion, token); err != nil {
 		log.Printf("Failed to delete chart package: %v", err)
 		// Continue with deletion even if chart file doesn't exist
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to delete chart package", nil)
