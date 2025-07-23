@@ -1,118 +1,62 @@
 package utils
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-
-	"github.com/go-redis/redis/v8"
+	"net/http"
+	"os"
+	"time"
 )
 
-// Global Redis client instance for download tracking
-var globalRedisClient *redis.Client
+// GetAppInfoFromDownloadRecord fetches app version and source from chart-repo service
+func GetAppInfoFromDownloadRecord(userID, appName string) (string, string, error) {
 
-// SetRedisClient sets the global Redis client instance
-func SetRedisClient(redisClient *redis.Client) {
-	globalRedisClient = redisClient
-	log.Printf("Install History: Redis client set successfully")
-}
-
-// DownloadRecord represents a download record stored in Redis
-type DownloadRecord struct {
-	Source  string `json:"source"`
-	Version string `json:"version"`
-}
-
-// saveDownloadRecord saves download record to Redis
-func saveDownloadRecord(userID, appName, source, version string) error {
-	if globalRedisClient == nil {
-		log.Printf("Install History: Redis client not available, skipping download record save")
-		return nil
+	// Get chart repo service host from env, fallback to default
+	host := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if host == "" {
+		return "", "", fmt.Errorf("CHART_REPO_SERVICE_HOST env not set")
 	}
+	url := fmt.Sprintf("http://%s/chart-repo/api/v2/app/version-for-download-history?user=%s&app_name=%s", host, userID, appName)
 
-	// Create download record
-	record := DownloadRecord{
-		Source:  source,
-		Version: version,
-	}
-
-	// Marshal to JSON
-	recordJSON, err := json.Marshal(record)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
-		log.Printf("Install History: Failed to marshal download record: %v", err)
-		return err
+		return "", "", fmt.Errorf("failed to request chart-repo: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("chart-repo returned status: %d", resp.StatusCode)
 	}
 
-	// Create Redis key: user_appname
-	redisKey := fmt.Sprintf("%s_%s", userID, appName)
-
-	// Save to Redis with no expiration (persistent storage)
-	ctx := context.Background()
-	err = globalRedisClient.Set(ctx, redisKey, recordJSON, 0).Err()
-	if err != nil {
-		log.Printf("Install History: Failed to save download record to Redis: %v", err)
-		return err
+	var result struct {
+		Success bool        `json:"success"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	log.Printf("Install History: Saved download record to Redis - Key: %s, Source: %s, Version: %s",
-		redisKey, source, version)
-	return nil
-}
-
-// getDownloadRecord retrieves download record from Redis
-func getDownloadRecord(userID, appName string) (*DownloadRecord, error) {
-	if globalRedisClient == nil {
-		log.Printf("Install History: Redis client not available, cannot retrieve download record")
-		return nil, fmt.Errorf("Redis client not available")
+	if !result.Success {
+		return "", "", fmt.Errorf("chart-repo error: %s", result.Message)
 	}
 
-	// Create Redis key: user_appname
-	redisKey := fmt.Sprintf("%s_%s", userID, appName)
+	// parse data field
+	dataMap, ok := result.Data.(map[string]interface{})
+	if !ok {
 
-	// Get from Redis
-	ctx := context.Background()
-	recordJSON, err := globalRedisClient.Get(ctx, redisKey).Result()
-	if err != nil {
-		if err == redis.Nil {
-			log.Printf("Install History: No download record found for key: %s", redisKey)
-			return nil, nil // Return nil record, not error
+		// if data is map[string]string, return version and source
+		if dataStrMap, ok2 := result.Data.(map[string]string); ok2 {
+			return dataStrMap["version"], dataStrMap["source"], nil
 		}
-		log.Printf("Install History: Failed to get download record from Redis: %v", err)
-		return nil, err
+		return "", "", fmt.Errorf("invalid data format in response")
 	}
 
-	// Unmarshal JSON
-	var record DownloadRecord
-	err = json.Unmarshal([]byte(recordJSON), &record)
-	if err != nil {
-		log.Printf("Install History: Failed to unmarshal download record: %v", err)
-		return nil, err
+	version, _ := dataMap["version"].(string)
+	source, _ := dataMap["source"].(string)
+	if version == "" || source == "" {
+		return "", "", fmt.Errorf("version or source not found in response")
 	}
-
-	log.Printf("Install History: Retrieved download record from Redis - Key: %s, Source: %s, Version: %s",
-		redisKey, record.Source, record.Version)
-	return &record, nil
-}
-
-// GetDownloadRecord retrieves download record from Redis (public function)
-func GetDownloadRecord(userID, appName string) (*DownloadRecord, error) {
-	return getDownloadRecord(userID, appName)
-}
-
-// GetAppVersionFromDownloadRecord retrieves app version from download record
-func GetAppVersionFromDownloadRecord(userID, appName string) (string, error) {
-	record, err := getDownloadRecord(userID, appName)
-	if err != nil {
-		return "", err
-	}
-	if record != nil {
-		return record.Version, nil
-	}
-	return "", nil
-}
-
-// SaveDownloadRecord saves download record to Redis (public function)
-func SaveDownloadRecord(userID, appName, source, version string) error {
-	return saveDownloadRecord(userID, appName, source, version)
+	return version, source, nil
 }

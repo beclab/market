@@ -508,7 +508,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 }
 
 // NewAppStateLatestData creates a new app state latest data structure
-func NewAppStateLatestData(data map[string]interface{}, userID string, getVersionFunc func(string, string) (string, error)) *AppStateLatestData {
+func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
 	// Extract status information from data
 	var name, state, updateTime, statusTime, lastTransitionTime, progress string
 	var entranceStatuses []struct {
@@ -536,7 +536,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 	if name == "" {
 		log.Printf("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field")
 		log.Printf("ERROR: Available fields in data: %v", getMapKeys(data))
-		return nil
+		return nil, ""
 	}
 
 	if stateVal, ok := data["state"].(string); ok {
@@ -662,18 +662,20 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 
 	// Version assignment logic
 	version := ""
+	source := ""
 	if versionVal, ok := data["version"].(string); ok && versionVal != "" {
 		version = versionVal
 		log.Printf("DEBUG: NewAppStateLatestData - using version from data: %s", version)
 	}
-	// If version is still empty, and getVersionFunc is available, and userID/name are not empty, try to get from record
-	if version == "" && getVersionFunc != nil && userID != "" && name != "" {
-		versionFromRecord, err := getVersionFunc(userID, name)
+	// If version is still empty, and getInfoFunc is available, and userID/name are not empty, try to get from record
+	if version == "" && getInfoFunc != nil && userID != "" && name != "" {
+		versionFromRecord, sourceFromRecord, err := getInfoFunc(userID, name)
 		if err != nil {
 			log.Printf("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
 		} else if versionFromRecord != "" {
 			version = versionFromRecord
-			log.Printf("DEBUG: NewAppStateLatestData - using version from download record: %s", version)
+			source = sourceFromRecord
+			log.Printf("DEBUG: NewAppStateLatestData - using version from download record: %s, source: %s", version, source)
 		}
 	}
 	// If version is still empty, log error and return nil
@@ -710,7 +712,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getVersio
 			Progress:           progress,
 			EntranceStatuses:   entranceStatuses,
 		},
-	}
+	}, source
 }
 
 // NewAppInfoLatestData creates a new app info latest data structure

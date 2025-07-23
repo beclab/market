@@ -44,28 +44,31 @@ func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
 	// Get all user app state data from pre-startup step
 	allUserAppStateData := utils.GetAllUserAppStateData()
 
-	if len(allUserAppStateData) == 0 {
-		log.Println("No app state data found from pre-startup step")
-		return
-	}
+	for userID, sourceData := range allUserAppStateData {
+		if len(sourceData) == 0 {
+			log.Println("No app state data found from pre-startup step")
+			return
+		}
 
-	log.Printf("Loading app state data for %d users", len(allUserAppStateData))
+		log.Printf("Loading app state data for %d users", len(sourceData))
 
-	// For each user, load their app state data into the official source
-	for userID, appStateDataList := range allUserAppStateData {
-		log.Printf("Loading %d app states for user: %s", len(appStateDataList), userID)
+		// For each user, load their app state data into the official source
+		for sourceID, appStateDataList := range sourceData {
+			log.Printf("Loading %d app states for user: %s, source: %s", len(appStateDataList), userID, sourceID)
 
-		// Set app state data for the user's official source
-		err := appInfoModule.SetAppData(userID, "Official-Market-Sources", types.AppStateLatest, map[string]interface{}{
-			"app_states": appStateDataList,
-		})
+			// Set app state data for the user's official source
+			err := appInfoModule.SetAppData(userID, sourceID, types.AppStateLatest, map[string]interface{}{
+				"app_states": appStateDataList,
+			})
 
-		if err != nil {
-			log.Printf("Failed to load app state data for user %s: %v", userID, err)
-		} else {
-			log.Printf("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
+			if err != nil {
+				log.Printf("Failed to load app state data for user %s: %v", userID, err)
+			} else {
+				log.Printf("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
+			}
 		}
 	}
+
 }
 
 func main() {
@@ -95,7 +98,7 @@ func main() {
 		log.Fatalf("Failed to create Redis client: %v", err)
 	}
 
-	utils.SetRedisClient(redisClient.GetRawClient())
+	// utils.SetRedisClient(redisClient.GetRawClient())
 
 	// Pre-startup step: Setup app service data with retry mechanism
 	log.Println("=== Pre-startup: Setting up app service data ===")
@@ -113,8 +116,10 @@ func main() {
 
 		userCount := len(extractedUsers)
 		appCount := 0
-		for _, appList := range allUserAppStateData {
-			appCount += len(appList)
+		for _, sourceData := range allUserAppStateData {
+			for _, appList := range sourceData {
+				appCount += len(appList)
+			}
 		}
 
 		if userCount == 0 || appCount == 0 {

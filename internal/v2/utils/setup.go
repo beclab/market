@@ -73,14 +73,14 @@ type AppInfo struct {
 var extractedUsers []string
 
 // Global variable to store app state data for each user
-var userAppStateData map[string][]*types.AppStateLatestData
+var userAppStateData map[string]map[string][]*types.AppStateLatestData
 
 // SetupAppServiceData fetches app data from app-service or reads from local file in development
 func SetupAppServiceData() error {
 	log.Println("Starting app service data setup...")
 
 	// Initialize user app state data map
-	userAppStateData = make(map[string][]*types.AppStateLatestData)
+	userAppStateData = make(map[string]map[string][]*types.AppStateLatestData)
 
 	// Check if we're in development environment
 	if isDevelopmentEnvironment() {
@@ -99,15 +99,15 @@ func GetExtractedUsers() []string {
 }
 
 // GetUserAppStateData returns the app state data for a specific user
-func GetUserAppStateData(userID string) []*types.AppStateLatestData {
+func GetUserAppStateData(userID string) map[string][]*types.AppStateLatestData {
 	if data, exists := userAppStateData[userID]; exists {
 		return data
 	}
-	return []*types.AppStateLatestData{}
+	return make(map[string][]*types.AppStateLatestData)
 }
 
 // GetAllUserAppStateData returns all user app state data
-func GetAllUserAppStateData() map[string][]*types.AppStateLatestData {
+func GetAllUserAppStateData() map[string]map[string][]*types.AppStateLatestData {
 	return userAppStateData
 }
 
@@ -217,14 +217,17 @@ func processAppData(apps []AppServiceResponse) error {
 		}
 
 		// Create AppStateLatestData for this app (startup process)
-		appStateData := createAppStateLatestData(app, true)
+		appStateData, sourceID := createAppStateLatestData(app, true)
 
 		// Add to user's app state data only if creation was successful
 		if appStateData != nil {
 			if userAppStateData[user] == nil {
-				userAppStateData[user] = make([]*types.AppStateLatestData, 0)
+				userAppStateData[user] = make(map[string][]*types.AppStateLatestData)
 			}
-			userAppStateData[user] = append(userAppStateData[user], appStateData)
+			if userAppStateData[user][sourceID] == nil {
+				userAppStateData[user][sourceID] = make([]*types.AppStateLatestData, 0)
+			}
+			userAppStateData[user][sourceID] = append(userAppStateData[user][sourceID], appStateData)
 		}
 	}
 
@@ -263,11 +266,15 @@ func processAppData(apps []AppServiceResponse) error {
 
 	// Print app state data summary
 	log.Println("App state data created:")
-	for user, appStates := range userAppStateData {
-		log.Printf("  User %s: %d app states", user, len(appStates))
-		for _, appState := range appStates {
-			log.Printf("    - App Status: %s", appState.Status.State)
+	for user, sourceData := range userAppStateData {
+
+		for sourceID, appStates := range sourceData {
+			log.Printf("  User %s: Source $s: %d app states", user, sourceID, len(appStates))
+			for _, appState := range appStates {
+				log.Printf("    - App Status: %s", appState.Status.State)
+			}
 		}
+
 	}
 
 	log.Println("=== End App Service Data Summary ===")
@@ -333,7 +340,7 @@ func FetchAppEntranceUrls(appName string) (map[string]string, error) {
 
 // createAppStateLatestData creates AppStateLatestData from AppServiceResponse
 // isStartupProcess indicates whether this is called during startup process
-func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) *types.AppStateLatestData {
+func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*types.AppStateLatestData, string) {
 	data := map[string]interface{}{
 		"name":               app.Spec.Name,
 		"state":              app.Status.State,
@@ -364,7 +371,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) *ty
 		// If any entrance has empty URL, ignore the entire app state data
 		if hasEmptyUrl {
 			log.Printf("Skipping app %s due to empty URL in entrance statuses", app.Spec.Name)
-			return nil
+			return nil, ""
 		}
 	} else {
 		log.Printf("Startup process detected - skipping URL validation for app %s", app.Spec.Name)
@@ -408,5 +415,5 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) *ty
 	}
 	data["entranceStatuses"] = entrances
 
-	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppVersionFromDownloadRecord)
+	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppInfoFromDownloadRecord)
 }

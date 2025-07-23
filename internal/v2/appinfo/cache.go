@@ -431,7 +431,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			// Check if entrance URLs are missing and fetch them if needed
 			enhancedData := cm.enhanceAppStateDataWithUrls(data)
 
-			appData := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppVersionFromDownloadRecord)
+			appData, sourceIDFromRecord := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppInfoFromDownloadRecord)
 
 			// Validate that the created app state has a name field
 			if appData == nil {
@@ -452,7 +452,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 				if appName != "" {
 					// Check state changes and send notifications
 					if err := cm.stateMonitor.CheckAndNotifyStateChange(
-						userID, sourceID, appName,
+						userID, sourceIDFromRecord, appName,
 						appData,
 						sourceData.AppStateLatest,
 						sourceData.AppInfoLatest,
@@ -463,8 +463,8 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 			}
 
 			// Update or add the app state using name matching
-			cm.updateAppStateLatest(userID, sourceID, sourceData, appData)
-			glog.Infof("Updated single app state for user=%s, source=%s", userID, sourceID)
+			cm.updateAppStateLatest(userID, sourceIDFromRecord, sourceData, appData)
+			glog.Infof("Updated single app state for user=%s, source=%s", userID, sourceIDFromRecord)
 		}
 	case AppInfoLatest:
 		appData := NewAppInfoLatestData(data)
