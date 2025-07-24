@@ -114,6 +114,14 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		cfgType = "app" // Default to app type
 	}
 
+	images := []task.Image{}
+	for _, image := range targetApp.AppInfo.ImageAnalysis.Images {
+		images = append(images, task.Image{
+			Name: image.Name,
+			Size: image.TotalSize,
+		})
+	}
+
 	// Step 10: Create installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
@@ -123,6 +131,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"chart_path": chartPath,
 		"token":      utils.GetTokenFromRequest(restfulReq),
 		"cfgType":    cfgType, // Add cfgType to metadata
+		"images":     images,
 	}
 
 	task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata)
@@ -391,6 +400,14 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		cfgType = "app" // Default to app type
 	}
 
+	images := []task.Image{}
+	for _, image := range targetApp.AppInfo.ImageAnalysis.Images {
+		images = append(images, task.Image{
+			Name: image.Name,
+			Size: image.TotalSize,
+		})
+	}
+
 	// Step 10: Create upgrade task
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
@@ -400,6 +417,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"chart_path": chartPath,
 		"token":      utils.GetTokenFromRequest(restfulReq),
 		"cfgType":    cfgType, // Add cfgType to metadata
+		"images":     images,
 	}
 
 	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata)

@@ -11,11 +11,12 @@ import (
 
 // UpgradeOptions represents the options for app upgrade.
 type UpgradeOptions struct {
-	RepoUrl      string `json:"repoUrl,omitempty"`
-	Version      string `json:"version,omitempty"`
-	User         string `json:"x_market_user,omitempty"`
-	Source       string `json:"source,omitempty"`
-	MarketSource string `json:"x_market_source,omitempty"`
+	RepoUrl      string  `json:"repoUrl,omitempty"`
+	Version      string  `json:"version,omitempty"`
+	User         string  `json:"x_market_user,omitempty"`
+	Source       string  `json:"source,omitempty"`
+	MarketSource string  `json:"x_market_source,omitempty"`
+	Images       []Image `json:"images,omitempty"`
 }
 
 // AppUpgrade upgrades an application using the app service.
@@ -43,20 +44,18 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		cfgType = "app" // Default to app type
 	}
 
+	version, ok := task.Metadata["version"].(string)
+	if !ok {
+		log.Printf("Missing version in task metadata for task: %s", task.ID)
+		return "", fmt.Errorf("missing version in task metadata for upgrade")
+	}
+
 	var apiSource string
 	if source == "local" {
 		apiSource = "custom"
 		source = "market-local"
 	} else {
 		apiSource = "market"
-	}
-
-	log.Printf("App source: %s, API source: %s: %s for task: %s", source, apiSource, task.ID)
-
-	version, ok := task.Metadata["version"].(string)
-	if !ok {
-		log.Printf("Missing version in task metadata for task: %s", task.ID)
-		return "", fmt.Errorf("missing version in task metadata for upgrade")
 	}
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
@@ -69,7 +68,10 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	} else {
 		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
 		log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+
 	}
+
+	log.Printf("App source: %s, API source: %s: %s for task: %s", source, apiSource, task.ID)
 
 	upgradeInfo := &UpgradeOptions{
 		RepoUrl:      getRepoUrl(),
@@ -77,6 +79,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		User:         user,
 		Source:       apiSource,
 		MarketSource: source,
+		Images:       task.Metadata["images"].([]Image),
 	}
 	ms, err := json.Marshal(upgradeInfo)
 	if err != nil {
