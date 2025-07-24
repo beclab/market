@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+
 	"net/http"
 	"os"
 	"strings"
@@ -12,14 +13,20 @@ import (
 
 // InstallOptions represents the options for app installation
 type InstallOptions struct {
-	App          string `json:"appName,omitempty"`
-	Dev          bool   `json:"devMode,omitempty"`
-	RepoUrl      string `json:"repoUrl,omitempty"`
-	CfgUrl       string `json:"cfgUrl,omitempty"`
-	Version      string `json:"version,omitempty"`
-	Source       string `json:"source,omitempty"`
-	User         string `json:"x_market_user,omitempty"`
-	MarketSource string `json:"x_market_source,omitempty"`
+	App          string  `json:"appName,omitempty"`
+	Dev          bool    `json:"devMode,omitempty"`
+	RepoUrl      string  `json:"repoUrl,omitempty"`
+	CfgUrl       string  `json:"cfgUrl,omitempty"`
+	Version      string  `json:"version,omitempty"`
+	Source       string  `json:"source,omitempty"`
+	User         string  `json:"x_market_user,omitempty"`
+	MarketSource string  `json:"x_market_source,omitempty"`
+	Images       []Image `json:"images,omitempty"`
+}
+
+type Image struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
 }
 
 // AppInstall installs an application using the app service
@@ -87,6 +94,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		Source:       apiSource, // Use converted API source
 		User:         user,
 		MarketSource: appSource,
+		Images:       task.Metadata["images"].([]Image),
 	}
 	ms, err := json.Marshal(installInfo)
 	if err != nil {
