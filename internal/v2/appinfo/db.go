@@ -670,16 +670,17 @@ func (r *RedisClient) createSafeAppInfoCopy(appInfo *types.AppInfo) map[string]i
 		safeCopy["app_entry"] = r.createSafeApplicationInfoEntryCopy(appInfo.AppEntry)
 	}
 
-	// Only include basic information from ImageAnalysis to avoid cycles
+	// Include all fields from ImageAnalysis, including Images
 	if appInfo.ImageAnalysis != nil {
-		safeCopy["image_analysis"] = map[string]interface{}{
+		imageAnalysisCopy := map[string]interface{}{
 			"app_id":       appInfo.ImageAnalysis.AppID,
 			"user_id":      appInfo.ImageAnalysis.UserID,
 			"source_id":    appInfo.ImageAnalysis.SourceID,
 			"analyzed_at":  appInfo.ImageAnalysis.AnalyzedAt,
 			"total_images": appInfo.ImageAnalysis.TotalImages,
-			// Skip Images map to avoid cycles
+			"images":       appInfo.ImageAnalysis.Images, // Save Images field as well
 		}
+		safeCopy["image_analysis"] = imageAnalysisCopy
 	}
 
 	return safeCopy
