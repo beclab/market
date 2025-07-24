@@ -1137,7 +1137,8 @@ func (s *Server) createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfo
 		"updated_at":         entry.UpdatedAt,
 		// Skip complex interface{} fields that might cause cycles
 		// "supportClient", "permission", "entrances", "middleware", "license", "legal", "i18n", "count", "versionHistory", "metadata"
-		"options": entry.Options,
+		"options":   entry.Options,
+		"entrances": entry.Entrances,
 	}
 }
 
