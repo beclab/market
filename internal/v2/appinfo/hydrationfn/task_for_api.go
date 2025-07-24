@@ -203,6 +203,7 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 
 	log.Printf("Updated AppInfoLatestPendingData in cache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	log.Printf("Type=%s, Version=%s, RawPackage=%s, RenderedPackage=%s", pendingData.Type, pendingData.Version, pendingData.RawPackage, pendingData.RenderedPackage)
+	log.Printf("RawData.Entrances: %+v", pendingData.RawData.Entrances)
 
 	return nil
 }
