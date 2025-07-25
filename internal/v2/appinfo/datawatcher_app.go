@@ -820,7 +820,11 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	latestApp.Version = pendingApp.Version
 
 	// Create AppSimpleInfo from available data
-	latestApp.AppSimpleInfo = dw.createAppSimpleInfo(pendingApp)
+	if pendingApp.AppSimpleInfo != nil {
+		latestApp.AppSimpleInfo = pendingApp.AppSimpleInfo
+	} else {
+		latestApp.AppSimpleInfo = dw.createAppSimpleInfo(pendingApp)
+	}
 
 	return latestApp
 }
