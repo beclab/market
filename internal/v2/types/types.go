@@ -303,6 +303,7 @@ type AppInfoLatestPendingData struct {
 	Values          []*Values             `json:"values"` // Changed to array
 	AppInfo         *AppInfo              `json:"app_info"`
 	RenderedPackage string                `json:"rendered_package"`
+	AppSimpleInfo   *AppSimpleInfo        `json:"app_simple_info,omitempty"`
 }
 
 // AppRenderFailedData contains app data that failed to render with failure reason
@@ -780,6 +781,21 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 						val.ModifyValue = modifyValue
 					}
 					latest.Values = append(latest.Values, val)
+				}
+			}
+		}
+
+		if asi, ok := data["app_simple_info"]; ok && asi != nil {
+			switch v := asi.(type) {
+			case *AppSimpleInfo:
+				latest.AppSimpleInfo = v
+			case map[string]interface{}:
+				b, err := json.Marshal(v)
+				if err == nil {
+					var asiObj AppSimpleInfo
+					if err := json.Unmarshal(b, &asiObj); err == nil {
+						latest.AppSimpleInfo = &asiObj
+					}
 				}
 			}
 		}
