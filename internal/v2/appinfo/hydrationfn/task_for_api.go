@@ -206,6 +206,7 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	log.Printf("Type=%s, Version=%s, RawPackage=%s, RenderedPackage=%s", pendingData.Type, pendingData.Version, pendingData.RawPackage, pendingData.RenderedPackage)
 	log.Printf("RawData.Entrances: %+v", pendingData.RawData.Entrances)
 	log.Printf("AppSimpleInfo: %+v", pendingData.AppSimpleInfo)
+	log.Printf("Dependencies: %+v", pendingData.RawData.Options["dependencies"])
 
 	return nil
 }
