@@ -1259,18 +1259,41 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 		}
 	}
 
-	// String fields
+	// String or map fields for fullDescription
 	if val, ok := sourceData["fullDescription"].(string); ok && val != "" {
 		if entry.FullDescription == nil {
 			entry.FullDescription = make(map[string]string)
 		}
 		entry.FullDescription["en-US"] = val
+	} else if valMap, ok := sourceData["fullDescription"].(map[string]string); ok {
+		entry.FullDescription = valMap
+	} else if valMap, ok := sourceData["fullDescription"].(map[string]interface{}); ok {
+		if entry.FullDescription == nil {
+			entry.FullDescription = make(map[string]string)
+		}
+		for k, v := range valMap {
+			if strVal, ok := v.(string); ok {
+				entry.FullDescription[k] = strVal
+			}
+		}
 	}
+	// String or map fields for upgradeDescription
 	if val, ok := sourceData["upgradeDescription"].(string); ok && val != "" {
 		if entry.UpgradeDescription == nil {
 			entry.UpgradeDescription = make(map[string]string)
 		}
 		entry.UpgradeDescription["en-US"] = val
+	} else if valMap, ok := sourceData["upgradeDescription"].(map[string]string); ok {
+		entry.UpgradeDescription = valMap
+	} else if valMap, ok := sourceData["upgradeDescription"].(map[string]interface{}); ok {
+		if entry.UpgradeDescription == nil {
+			entry.UpgradeDescription = make(map[string]string)
+		}
+		for k, v := range valMap {
+			if strVal, ok := v.(string); ok {
+				entry.UpgradeDescription[k] = strVal
+			}
+		}
 	}
 	if val, ok := sourceData["promoteVideo"].(string); ok && val != "" {
 		entry.PromoteVideo = val
