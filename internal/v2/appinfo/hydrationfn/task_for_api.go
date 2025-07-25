@@ -197,6 +197,7 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	pendingData.Values = appInfoLatest.Values
 	pendingData.AppInfo = appInfoLatest.AppInfo
 	pendingData.RenderedPackage = appInfoLatest.RenderedPackage
+	pendingData.AppSimpleInfo = appInfoLatest.AppSimpleInfo
 
 	// Debug: print address and RawPackage after assignment
 	log.Printf("[DEBUG] After update: pendingData addr=%p, RawPackage=%s", pendingData, pendingData.RawPackage)
