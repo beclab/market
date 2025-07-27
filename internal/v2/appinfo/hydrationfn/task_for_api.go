@@ -188,6 +188,10 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	// Debug: print address and RawPackage before assignment
 	log.Printf("[DEBUG] Before update: pendingData addr=%p, RawPackage=%s", pendingData, pendingData.RawPackage)
 
+	// Fix version history data
+	appInfoLatest.RawData.VersionHistory = pendingData.RawData.VersionHistory
+	appInfoLatest.AppInfo.AppEntry.VersionHistory = pendingData.RawData.VersionHistory
+
 	// Overwrite all fields of pendingData (keep the pointer address, update all contents)
 	pendingData.Type = appInfoLatest.Type
 	pendingData.Timestamp = appInfoLatest.Timestamp
