@@ -36,6 +36,29 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	log.Printf("Starting app installation: app=%s, user=%s, task_id=%s", appName, user, task.ID)
 
+	// Check if there's already a running or pending install task for the same app
+	tm.mu.RLock()
+
+	// Check running tasks
+	for _, runningTask := range tm.runningTasks {
+		if runningTask.Type == InstallApp && runningTask.AppName == appName && runningTask.ID != task.ID {
+			tm.mu.RUnlock()
+			log.Printf("Installation failed: another install task is already running for app: %s, existing task ID: %s", appName, runningTask.ID)
+			errorResult := map[string]interface{}{
+				"operation":        "install",
+				"app_name":         appName,
+				"user":             user,
+				"error":            "Another installation task is already running for this app",
+				"status":           "failed",
+				"existing_task_id": runningTask.ID,
+			}
+			errorJSON, _ := json.Marshal(errorResult)
+			return string(errorJSON), fmt.Errorf("another installation task is already running for app: %s", appName)
+		}
+	}
+
+	tm.mu.RUnlock()
+
 	token, ok := task.Metadata["token"].(string)
 	if !ok {
 		log.Printf("Missing token in task metadata for task: %s", task.ID)
