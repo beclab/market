@@ -137,25 +137,85 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	var responseData map[string]interface{}
 	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
 		log.Printf("Failed to parse response JSON for task %s: %v", task.ID, err)
-	} else {
-		// Check if installation was successful by checking code field
-		if code, ok := responseData["code"].(float64); ok && code == 200 {
-			if data, ok := responseData["data"].(map[string]interface{}); ok {
-				if opID, ok := data["opID"].(string); ok && opID != "" {
-					task.OpID = opID
-					log.Printf("Successfully extracted opID: %s for task: %s", opID, task.ID)
-				} else {
-					log.Printf("opID not found in response data for task: %s", task.ID)
-				}
-			} else {
-				log.Printf("Data field not found or not a map in response for task: %s", task.ID)
-			}
-		} else {
-			log.Printf("Installation code is not 200 for task: %s, code: %v", task.ID, code)
+		// Create error result for JSON parsing failure
+		errorResult := map[string]interface{}{
+			"operation":  "install",
+			"app_name":   appName,
+			"user":       user,
+			"app_source": appSource,
+			"api_source": apiSource,
+			"cfgType":    cfgType,
+			"url":        urlStr,
+			"response":   response,
+			"error":      fmt.Sprintf("Failed to parse response JSON: %v", err),
+			"status":     "failed",
 		}
+		errorJSON, _ := json.Marshal(errorResult)
+		return string(errorJSON), fmt.Errorf("failed to parse response JSON: %v", err)
 	}
 
-	// Create success result
+	// Check if installation was successful by checking code field
+	if code, ok := responseData["code"].(float64); ok && code == 200 {
+		if data, ok := responseData["data"].(map[string]interface{}); ok {
+			if opID, ok := data["opID"].(string); ok && opID != "" {
+				task.OpID = opID
+				log.Printf("Successfully extracted opID: %s for task: %s", opID, task.ID)
+			} else {
+				log.Printf("opID not found in response data for task: %s", task.ID)
+				// Create error result for missing opID
+				errorResult := map[string]interface{}{
+					"operation":  "install",
+					"app_name":   appName,
+					"user":       user,
+					"app_source": appSource,
+					"api_source": apiSource,
+					"cfgType":    cfgType,
+					"url":        urlStr,
+					"response":   response,
+					"error":      "opID not found in response data",
+					"status":     "failed",
+				}
+				errorJSON, _ := json.Marshal(errorResult)
+				return string(errorJSON), fmt.Errorf("opID not found in response data")
+			}
+		} else {
+			log.Printf("Data field not found or not a map in response for task: %s", task.ID)
+			// Create error result for missing data field
+			errorResult := map[string]interface{}{
+				"operation":  "install",
+				"app_name":   appName,
+				"user":       user,
+				"app_source": appSource,
+				"api_source": apiSource,
+				"cfgType":    cfgType,
+				"url":        urlStr,
+				"response":   response,
+				"error":      "Data field not found or not a map in response",
+				"status":     "failed",
+			}
+			errorJSON, _ := json.Marshal(errorResult)
+			return string(errorJSON), fmt.Errorf("data field not found or not a map in response")
+		}
+	} else {
+		log.Printf("Installation code is not 200 for task: %s, code: %v", task.ID, code)
+		// Create error result for non-200 code
+		errorResult := map[string]interface{}{
+			"operation":  "install",
+			"app_name":   appName,
+			"user":       user,
+			"app_source": appSource,
+			"api_source": apiSource,
+			"cfgType":    cfgType,
+			"url":        urlStr,
+			"response":   response,
+			"error":      fmt.Sprintf("Installation failed with code: %v", code),
+			"status":     "failed",
+		}
+		errorJSON, _ := json.Marshal(errorResult)
+		return string(errorJSON), fmt.Errorf("installation failed with code: %v", code)
+	}
+
+	// Create success result only when everything is successful
 	successResult := map[string]interface{}{
 		"operation":  "install",
 		"app_name":   appName,
