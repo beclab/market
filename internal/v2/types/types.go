@@ -25,6 +25,7 @@ const (
 	AppInfoHistory       AppDataType = "app-info-history"
 	AppStateLatest       AppDataType = "app-state-latest"
 	AppInfoLatest        AppDataType = "app-info-latest"
+	AppInfoLatestNoImage AppDataType = "app-info-latest-no-image"
 	AppInfoLatestPending AppDataType = "app-info-latest-pending"
 	AppRenderFailed      AppDataType = "app-render-failed"
 	Other                AppDataType = "other"
@@ -291,6 +292,7 @@ type AppSimpleInfo struct {
 	AppVersion     string            `json:"app_version"`
 	AppTitle       map[string]string `json:"app_title"`
 	Categories     []string          `json:"categories"`
+	Type           AppDataType       `json:"type"`
 }
 
 // AppInfoLatestPendingData contains pending app info data with extended structure

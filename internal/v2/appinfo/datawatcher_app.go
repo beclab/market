@@ -720,7 +720,7 @@ func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, p
 			}
 		}()
 
-		result := dw.hydrator.isAppHydrationComplete(pendingApp)
+		result := dw.hydrator.isAppHydrationCompleteNoImage(pendingApp)
 		resultChan <- result
 	}()
 
@@ -860,6 +860,10 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	// Copy relevant data from pending to latest
 	if pendingApp.AppInfo != nil {
 		latestApp.AppInfo = pendingApp.AppInfo
+
+		if pendingApp.AppInfo.ImageAnalysis == nil || pendingApp.AppInfo.ImageAnalysis.TotalImages == 0 {
+			latestApp.Type = types.AppInfoLatestNoImage
+		}
 	}
 
 	// Copy RawData directly (same type: *ApplicationInfoEntry)
@@ -888,6 +892,8 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	} else {
 		latestApp.AppSimpleInfo = dw.createAppSimpleInfo(pendingApp)
 	}
+
+	latestApp.AppSimpleInfo.Type = latestApp.Type
 
 	return latestApp
 }
