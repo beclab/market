@@ -361,7 +361,7 @@ func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData 
 			glog.Infof("DataWatcher: Hash calculation already in progress for user %s, waiting...", userID)
 
 			// Wait for current calculation to complete
-			for i := 0; i < 50; i++ { // Wait up to 5 seconds
+			for i := 0; i < 10; i++ { // Wait up to 5 seconds
 				time.Sleep(100 * time.Millisecond)
 				dw.hashMutex.Lock()
 				if !dw.activeHashCalculations[userID] {
