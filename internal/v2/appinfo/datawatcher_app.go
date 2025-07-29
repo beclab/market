@@ -349,7 +349,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 // calculateAndSetUserHashWithRetry calculates hash with retry mechanism for data consistency
 func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData *types.UserData) {
 	maxRetries := 3
-	retryDelay := 200 * time.Millisecond
+	retryDelay := 20000 * time.Millisecond
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		glog.Infof("DataWatcher: Hash calculation attempt %d/%d for user %s", attempt, maxRetries, userID)
