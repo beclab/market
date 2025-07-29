@@ -315,15 +315,17 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	var isCalculatingKey = "isCalculating_" + userID
 
 	// Use a map in DataWatcher to track per-user calculation state
+	dw.hashMutex.Lock()
 	if dw.activeHashCalculations[isCalculatingKey] {
+		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation already in progress for user %s (isCalculating), skipping", userID)
 		return
 	}
 
 	dw.activeHashCalculations[isCalculatingKey] = true
-	dw.hashMutex.Lock()
 	// Also keep the original tracking for compatibility
 	if dw.activeHashCalculations[userID] {
+		delete(dw.activeHashCalculations, isCalculatingKey)
 		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
 		return
@@ -375,6 +377,9 @@ func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData 
 				glog.Infof("DataWatcher: Hash calculation completed by another process for user %s", userID)
 				return
 			}
+
+			// Continue to next attempt
+			continue
 		}
 
 		// Mark calculation as in progress
