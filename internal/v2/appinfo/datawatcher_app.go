@@ -275,18 +275,18 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 			glog.Infof("DataWatcher: Hash is empty for user %s, scheduling hash calculation", userID)
 		}
 
-		// Check if hash calculation is already in progress for this user
-		dw.hashMutex.Lock()
-		if dw.activeHashCalculations[userID] {
-			dw.hashMutex.Unlock()
-			glog.Warningf("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
-			return totalProcessed, totalMoved
-		}
-		dw.activeHashCalculations[userID] = true
-		dw.hashMutex.Unlock()
-
-		// Schedule hash calculation with a small delay to ensure all locks are released
+		// Schedule hash calculation in a separate goroutine without setting the flag here
 		go func() {
+			// Check if hash calculation is already in progress for this user
+			dw.hashMutex.Lock()
+			if dw.activeHashCalculations[userID] {
+				dw.hashMutex.Unlock()
+				glog.Warningf("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
+				return
+			}
+			dw.activeHashCalculations[userID] = true
+			dw.hashMutex.Unlock()
+
 			defer func() {
 				// Clean up tracking when done
 				dw.hashMutex.Lock()
@@ -299,8 +299,8 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 			time.Sleep(100 * time.Millisecond)
 			glog.Infof("DataWatcher: Starting hash calculation for user %s", userID)
 
-			// Call the hash calculation function directly without additional tracking
-			dw.calculateAndSetUserHashWithRetry(userID, userData)
+			// Call the hash calculation function directly
+			dw.calculateAndSetUserHashDirect(userID, userData)
 		}()
 	} else {
 		glog.V(2).Infof("DataWatcher: No apps moved and hash exists for user %s, skipping hash calculation", userID)
@@ -354,45 +354,8 @@ func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		glog.Infof("DataWatcher: Hash calculation attempt %d/%d for user %s", attempt, maxRetries, userID)
 
-		// Check if calculation is already in progress
-		dw.hashMutex.Lock()
-		if dw.activeHashCalculations[userID] {
-			dw.hashMutex.Unlock()
-			glog.Infof("DataWatcher: Hash calculation already in progress for user %s, waiting...", userID)
-
-			// Wait for current calculation to complete
-			for i := 0; i < 10; i++ { // Wait up to 5 seconds
-				time.Sleep(100 * time.Millisecond)
-				dw.hashMutex.Lock()
-				if !dw.activeHashCalculations[userID] {
-					dw.hashMutex.Unlock()
-					break
-				}
-				dw.hashMutex.Unlock()
-			}
-
-			// Verify if we need to recalculate after waiting
-			currentUserData := dw.cacheManager.GetUserData(userID)
-			if currentUserData != nil && currentUserData.Hash != "" {
-				glog.Infof("DataWatcher: Hash calculation completed by another process for user %s", userID)
-				return
-			}
-
-			// Continue to next attempt
-			continue
-		}
-
-		// Mark calculation as in progress
-		dw.activeHashCalculations[userID] = true
-		dw.hashMutex.Unlock()
-
-		// Perform hash calculation
+		// Perform hash calculation directly
 		success := dw.calculateAndSetUserHashDirect(userID, userData)
-
-		// Clean up tracking
-		dw.hashMutex.Lock()
-		delete(dw.activeHashCalculations, userID)
-		dw.hashMutex.Unlock()
 
 		if success {
 			glog.Infof("DataWatcher: Hash calculation completed successfully for user %s", userID)
