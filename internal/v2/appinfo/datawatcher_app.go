@@ -325,7 +325,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	dw.activeHashCalculations[isCalculatingKey] = true
 	// Also keep the original tracking for compatibility
 	if dw.activeHashCalculations[userID] {
-		delete(dw.activeHashCalculations, isCalculatingKey)
+		// delete(dw.activeHashCalculations, isCalculatingKey)
 		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
 		return
