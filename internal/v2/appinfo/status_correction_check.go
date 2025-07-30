@@ -471,22 +471,22 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 			continue
 		}
 
-		// Check for state inconsistency
-		if scc.isStateInconsistent(app) {
-			change := StatusChange{
-				UserID:     userID,
-				SourceID:   sourceID,
-				AppName:    appName,
-				ChangeType: "state_inconsistency",
-				OldState:   cachedApp.Status.State,
-				NewState:   "running", // Should be corrected to running
-				Timestamp:  time.Now(),
-			}
-			changes = append(changes, change)
+		// // Check for state inconsistency
+		// if scc.isStateInconsistent(app) {
+		// 	change := StatusChange{
+		// 		UserID:     userID,
+		// 		SourceID:   sourceID,
+		// 		AppName:    appName,
+		// 		ChangeType: "state_inconsistency",
+		// 		OldState:   cachedApp.Status.State,
+		// 		NewState:   "running", // Should be corrected to running
+		// 		Timestamp:  time.Now(),
+		// 	}
+		// 	changes = append(changes, change)
 
-			glog.Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running",
-				appName, userID, sourceID, app.Status.State)
-		}
+		// 	glog.Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running",
+		// 		appName, userID, sourceID, app.Status.State)
+		// }
 	}
 
 	return changes
