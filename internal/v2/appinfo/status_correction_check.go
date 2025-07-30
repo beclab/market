@@ -452,7 +452,7 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 
 		// Find matching cached app by searching through all sources
 		var cachedApp *types.AppStateLatestData
-		var sourceID string
+		// var sourceID string
 
 		for key, cached := range cachedApps {
 			if cached.Status.Name == appName {
@@ -460,7 +460,7 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 				parts := strings.SplitN(key, ":", 3)
 				if len(parts) == 3 && parts[0] == userID {
 					cachedApp = cached
-					sourceID = parts[1]
+					// sourceID = parts[1]
 					break
 				}
 			}
