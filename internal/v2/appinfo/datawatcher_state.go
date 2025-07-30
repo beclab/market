@@ -290,6 +290,38 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		}
 	}
 
+	sourceData := dw.cacheManager.getSourceData(appStateMsg.User, appStateMsg.Name)
+	if sourceData != nil {
+		for _, appState := range sourceData.AppStateLatest {
+			if appState.Status.Name == appStateMsg.Name &&
+				appState.Status.State == appStateMsg.State {
+
+				if (appStateMsg.EntranceStatuses == nil || len(appStateMsg.EntranceStatuses) == 0) && appState.Status.Progress == appStateMsg.Progress {
+					log.Printf("App state message is the same as the cached app state message for app %s, user %s, source %s",
+						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
+					return
+				}
+
+				// Compare timestamps properly by parsing them
+				if appState.Status.StatusTime != "" && appStateMsg.CreateTime != "" {
+					statusTime, err1 := time.Parse("2006-01-02T15:04:05.000000000Z", appState.Status.StatusTime)
+					createTime, err2 := time.Parse("2006-01-02T15:04:05.000000000Z", appStateMsg.CreateTime)
+
+					if err1 == nil && err2 == nil {
+						if statusTime.After(createTime) {
+							log.Printf("Cached app state is newer than incoming message for app %s, user %s, source %s. Skipping update.",
+								appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
+							return
+						}
+					} else {
+						log.Printf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
+							appState.Status.StatusTime, appStateMsg.CreateTime, err1, err2)
+					}
+				}
+			}
+		}
+	}
+
 	// Store as history record
 	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
 
