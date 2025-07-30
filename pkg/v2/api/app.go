@@ -279,7 +279,6 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 				if appID == appQuery.AppID || (appInfoData.RawData != nil && appInfoData.RawData.Name == appQuery.AppID) {
 					log.Printf("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
 
-					// 使用 safe copy，避免循环引用
 					safeCopy := s.createSafeAppInfoLatestCopy(appInfoData)
 					foundApps = append(foundApps, safeCopy)
 					found = true
@@ -1271,6 +1270,7 @@ func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[stri
 		"app_version":     info.AppVersion,
 		"app_title":       info.AppTitle,
 		"categories":      info.Categories,
+		"type":            info.Type,
 	}
 }
 
