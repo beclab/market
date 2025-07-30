@@ -275,18 +275,18 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 			glog.Infof("DataWatcher: Hash is empty for user %s, scheduling hash calculation", userID)
 		}
 
-		// Check if hash calculation is already in progress for this user
-		dw.hashMutex.Lock()
-		if dw.activeHashCalculations[userID] {
-			dw.hashMutex.Unlock()
-			glog.Warningf("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
-			return totalProcessed, totalMoved
-		}
-		dw.activeHashCalculations[userID] = true
-		dw.hashMutex.Unlock()
-
-		// Schedule hash calculation with a small delay to ensure all locks are released
+		// Schedule hash calculation in a separate goroutine without setting the flag here
 		go func() {
+			// Check if hash calculation is already in progress for this user
+			dw.hashMutex.Lock()
+			if dw.activeHashCalculations[userID] {
+				dw.hashMutex.Unlock()
+				glog.Warningf("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
+				return
+			}
+			dw.activeHashCalculations[userID] = true
+			dw.hashMutex.Unlock()
+
 			defer func() {
 				// Clean up tracking when done
 				dw.hashMutex.Lock()
@@ -299,7 +299,7 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 			time.Sleep(100 * time.Millisecond)
 			glog.Infof("DataWatcher: Starting hash calculation for user %s", userID)
 
-			// Call the hash calculation function directly without additional tracking
+			// Call the hash calculation function directly
 			dw.calculateAndSetUserHashDirect(userID, userData)
 		}()
 	} else {
@@ -315,15 +315,17 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	var isCalculatingKey = "isCalculating_" + userID
 
 	// Use a map in DataWatcher to track per-user calculation state
+	dw.hashMutex.Lock()
 	if dw.activeHashCalculations[isCalculatingKey] {
+		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation already in progress for user %s (isCalculating), skipping", userID)
 		return
 	}
 
 	dw.activeHashCalculations[isCalculatingKey] = true
-	dw.hashMutex.Lock()
 	// Also keep the original tracking for compatibility
 	if dw.activeHashCalculations[userID] {
+		// delete(dw.activeHashCalculations, isCalculatingKey)
 		dw.hashMutex.Unlock()
 		glog.Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
 		return
@@ -341,18 +343,44 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	}()
 
 	// Call the direct calculation function
-	dw.calculateAndSetUserHashDirect(userID, userData)
+	_ = dw.calculateAndSetUserHashDirect(userID, userData)
+}
+
+// calculateAndSetUserHashWithRetry calculates hash with retry mechanism for data consistency
+func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData *types.UserData) {
+	maxRetries := 3
+	retryDelay := 20000 * time.Millisecond
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		glog.Infof("DataWatcher: Hash calculation attempt %d/%d for user %s", attempt, maxRetries, userID)
+
+		// Perform hash calculation directly
+		success := dw.calculateAndSetUserHashDirect(userID, userData)
+
+		if success {
+			glog.Infof("DataWatcher: Hash calculation completed successfully for user %s", userID)
+			return
+		}
+
+		if attempt < maxRetries {
+			glog.Warningf("DataWatcher: Hash calculation failed for user %s, retrying in %v", userID, retryDelay)
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+		}
+	}
+
+	glog.Errorf("DataWatcher: Hash calculation failed after %d attempts for user %s", maxRetries, userID)
 }
 
 // calculateAndSetUserHashDirect calculates hash without tracking (used internally by goroutines)
-func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *types.UserData) {
+func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *types.UserData) bool {
 	glog.Infof("DataWatcher: Starting direct hash calculation for user %s", userID)
 
 	// Get the original user data from cache manager to ensure we have the latest reference
 	originalUserData := dw.cacheManager.GetUserData(userID)
 	if originalUserData == nil {
 		glog.Errorf("DataWatcher: Failed to get user data from cache manager for user %s", userID)
-		return
+		return false
 	}
 
 	// Create snapshot for hash calculation without holding any locks
@@ -360,7 +388,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	snapshot, err := utils.CreateUserDataSnapshot(userID, originalUserData)
 	if err != nil {
 		glog.Errorf("DataWatcher: Failed to create user data snapshot for user %s: %v", userID, err)
-		return
+		return false
 	}
 
 	glog.Infof("DataWatcher: Calculating hash for user %s", userID)
@@ -368,7 +396,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	newHash, err := utils.CalculateUserDataHash(snapshot)
 	if err != nil {
 		glog.Errorf("DataWatcher: Failed to calculate hash for user %s: %v", userID, err)
-		return
+		return false
 	}
 
 	// Get current hash for comparison
@@ -377,7 +405,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	if currentHash == newHash {
 		glog.V(2).Infof("DataWatcher: Hash unchanged for user %s: %s", userID, newHash)
-		return
+		return true
 	}
 
 	glog.Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
@@ -418,11 +446,11 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	case err := <-writeLockError:
 		glog.Errorf("DataWatcher: Error acquiring write lock for user %s: %v", userID, err)
-		return
+		return false
 
 	case <-time.After(writeTimeout):
 		glog.Errorf("DataWatcher: Timeout acquiring write lock for hash update, user %s", userID)
-		return
+		return false
 	}
 
 	glog.Infof("DataWatcher: Hash updated for user %s", userID)
@@ -442,9 +470,12 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	glog.Infof("DataWatcher: Starting force sync for user %s", userID)
 	if err := dw.cacheManager.ForceSync(); err != nil {
 		glog.Errorf("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
+		return false
 	} else {
 		glog.Infof("DataWatcher: Force sync completed after hash update for user %s", userID)
 	}
+
+	return true
 }
 
 // calculateAndSetUserHashAsync calculates and sets hash for user data asynchronously
@@ -1034,7 +1065,7 @@ func (dw *DataWatcher) ForceCalculateUserHash(userID string) error {
 	}
 
 	// Call hash calculation directly
-	dw.calculateAndSetUserHash(userID, userData)
+	dw.calculateAndSetUserHashWithRetry(userID, userData)
 	return nil
 }
 
