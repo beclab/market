@@ -290,8 +290,9 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		}
 	}
 
-	sourceData := dw.cacheManager.getSourceData(appStateMsg.User, appStateMsg.Name)
-	if sourceData != nil {
+	userData := dw.cacheManager.getUserData(appStateMsg.User)
+
+	for _, sourceData := range userData.Sources {
 		for _, appState := range sourceData.AppStateLatest {
 			if appState.Status.Name == appStateMsg.Name &&
 				appState.Status.State == appStateMsg.State {
