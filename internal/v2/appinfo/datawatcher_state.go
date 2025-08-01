@@ -291,6 +291,10 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 	}
 
 	userData := dw.cacheManager.getUserData(appStateMsg.User)
+	if userData == nil {
+		log.Printf("User data not found for user %s", appStateMsg.User)
+		return
+	}
 
 	for _, sourceData := range userData.Sources {
 		for _, appState := range sourceData.AppStateLatest {
