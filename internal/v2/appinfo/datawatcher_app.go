@@ -639,8 +639,10 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 			// Create a map of completed app IDs for efficient lookup
 			for _, completedApp := range completedApps {
 				appID := dw.getAppID(completedApp)
-				if appID != "" {
-					completedAppIDs[appID] = true
+				if completedApp.AppInfo.ImageAnalysis != nil && completedApp.AppInfo.ImageAnalysis.TotalImages > 0 {
+					if appID != "" {
+						completedAppIDs[appID] = true
+					}
 				}
 			}
 
