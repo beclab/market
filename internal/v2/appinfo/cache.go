@@ -429,7 +429,7 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 		} else {
 			// Fallback to old logic for backward compatibility
 			// Check if entrance URLs are missing and fetch them if needed
-			enhancedData := cm.enhanceAppStateDataWithUrls(data)
+			enhancedData := cm.enhanceAppStateDataWithUrls(data, userID)
 
 			appData, sourceIDFromRecord := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppInfoFromDownloadRecord)
 
@@ -1029,7 +1029,7 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 }
 
 // enhanceAppStateDataWithUrls enhances app state data with entrance URLs
-func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{}) map[string]interface{} {
+func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{}, user string) map[string]interface{} {
 	// Create a copy of the data to avoid modifying the original
 	enhancedData := make(map[string]interface{})
 	for k, v := range data {
@@ -1088,7 +1088,7 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{})
 				glog.Infof("Running entrances %v have empty URLs for app %s - attempting to fetch URLs from app-service", runningEntrancesWithoutUrl, appName)
 
 				// Fetch entrance URLs from app-service
-				entranceUrls, err := utils.FetchAppEntranceUrls(appName)
+				entranceUrls, err := utils.FetchAppEntranceUrls(appName, user)
 				if err != nil {
 					glog.Warningf("Failed to fetch entrance URLs for app %s: %v - returning empty entrance statuses", appName, err)
 					enhancedData["entranceStatuses"] = []interface{}{}

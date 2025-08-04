@@ -283,7 +283,7 @@ func processAppData(apps []AppServiceResponse) error {
 }
 
 // FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service
-func FetchAppEntranceUrls(appName string) (map[string]string, error) {
+func FetchAppEntranceUrls(appName string, user string) (map[string]string, error) {
 	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
 
@@ -324,7 +324,7 @@ func FetchAppEntranceUrls(appName string) (map[string]string, error) {
 	// Find the specific app and extract entrance URLs
 	entranceUrls := make(map[string]string)
 	for _, app := range apps {
-		if app.Spec.Name == appName {
+		if app.Spec.Name == appName && app.Spec.Owner == user {
 			for _, entrance := range app.Spec.Entrances {
 				if entrance.Url != "" {
 					entranceUrls[entrance.Name] = entrance.Url
