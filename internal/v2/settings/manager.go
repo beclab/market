@@ -290,6 +290,18 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 		return fmt.Errorf("source ID cannot be empty")
 	}
 
+	// First, delete from chart repository service
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
+	} else {
+		if err := deleteMarketSourceFromChartRepo(chartRepoHost, sourceID); err != nil {
+			return fmt.Errorf("failed to delete market source from chart repo: %w", err)
+		}
+		log.Printf("Successfully deleted market source from chart repo: %s", sourceID)
+	}
+
+	// After successful chart repo operation, update local database
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -321,15 +333,7 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 		return fmt.Errorf("failed to save market sources to Redis: %w", err)
 	}
 
-	// Sync with chart repository service
-	go func() {
-		if err := SyncMarketSourceConfigWithChartRepo(sm.redisClient); err != nil {
-			log.Printf("Warning: Failed to sync market source config with chart repo after deleting source: %v", err)
-		} else {
-			log.Printf("Successfully synced market source config with chart repo after deleting source: %s", sourceID)
-		}
-	}()
-
+	log.Printf("Deleted market source: %s", sourceID)
 	return nil
 }
 
@@ -373,6 +377,30 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 		return fmt.Errorf("source base URL cannot be empty")
 	}
 
+	// First, add to chart repository service
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
+	} else {
+		// Convert to ChartRepoMarketSource format
+		chartRepoSource := &ChartRepoMarketSource{
+			ID:          source.ID,
+			Name:        source.Name,
+			Type:        source.Type,
+			BaseURL:     source.BaseURL,
+			Priority:    source.Priority,
+			IsActive:    source.IsActive,
+			UpdatedAt:   source.UpdatedAt,
+			Description: source.Description,
+		}
+
+		if err := addMarketSourceToChartRepo(chartRepoHost, chartRepoSource); err != nil {
+			return fmt.Errorf("failed to add market source to chart repo: %w", err)
+		}
+		log.Printf("Successfully added market source to chart repo: %s (%s)", source.Name, source.ID)
+	}
+
+	// After successful chart repo operation, update local database
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -394,16 +422,6 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	}
 
 	log.Printf("Added new market source: %s (%s)", source.Name, source.ID)
-
-	// Sync with chart repository service
-	go func() {
-		if err := SyncMarketSourceConfigWithChartRepo(sm.redisClient); err != nil {
-			log.Printf("Warning: Failed to sync market source config with chart repo after adding source: %v", err)
-		} else {
-			log.Printf("Successfully synced market source config with chart repo after adding source: %s", source.ID)
-		}
-	}()
-
 	return nil
 }
 
