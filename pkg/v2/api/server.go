@@ -123,32 +123,36 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/settings/market-source", s.getMarketSource).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/market-source")
 
-	// 15. Set market source configuration
-	api.HandleFunc("/settings/market-source", s.setMarketSource).Methods("PUT")
-	log.Printf("Route configured: PUT /app-store/api/v2/settings/market-source")
+	// 15. Add market source configuration
+	api.HandleFunc("/settings/market-source", s.addMarketSource).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/settings/market-source")
 
-	// 16. Get system status aggregation
+	// 16. Delete market source configuration
+	api.HandleFunc("/settings/market-source/{id}", s.deleteMarketSource).Methods("DELETE")
+	log.Printf("Route configured: DELETE /app-store/api/v2/settings/market-source/{id}")
+
+	// 17. Get system status aggregation
 	api.HandleFunc("/settings/system-status", s.getSystemStatus).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/system-status")
 
 	// Diagnostic endpoints
-	// 17. Get cache and Redis diagnostic information
+	// 18. Get cache and Redis diagnostic information
 	api.HandleFunc("/diagnostic", s.getDiagnostic).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/diagnostic")
 
-	// 18. Force reload cache data from Redis
+	// 19. Force reload cache data from Redis
 	api.HandleFunc("/reload", s.forceReloadFromRedis).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/reload")
 
-	// 19. Cleanup invalid pending data
+	// 20. Cleanup invalid pending data
 	api.HandleFunc("/cleanup", s.cleanupInvalidPendingData).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/cleanup")
 
-	// 20. Get application version history
+	// 21. Get application version history
 	api.HandleFunc("/apps/version-history", s.getAppVersionHistory).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/apps/version-history")
 
-	// 21. Delete local source application
+	// 22. Delete local source application
 	api.HandleFunc("/local-apps/delete", s.deleteLocalApp).Methods("DELETE")
 	log.Printf("Route configured: DELETE /app-store/api/v2/local-apps/delete")
 

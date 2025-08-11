@@ -284,45 +284,36 @@ func (sm *SettingsManager) GetMarketSource() *MarketSource {
 	return sm.GetDefaultMarketSource()
 }
 
-// SetMarketSource sets the Official Market Sources URL (for API compatibility)
-func (sm *SettingsManager) SetMarketSource(url string) error {
+// DeleteMarketSource removes a market source from the configuration by ID
+func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
+	if sourceID == "" {
+		return fmt.Errorf("source ID cannot be empty")
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if sm.marketSources == nil {
-		sm.marketSources = &MarketSourcesConfig{
-			Sources:       []*MarketSource{},
-			DefaultSource: "default",
-			UpdatedAt:     time.Now(),
-		}
+		return fmt.Errorf("no market sources configured")
 	}
 
-	// Update the default source or create it if it doesn't exist
-	defaultUpdated := false
+	// Find and remove the source
+	found := false
+	var newSources []*MarketSource
 	for _, source := range sm.marketSources.Sources {
-		if source.ID == "default" {
-			source.BaseURL = strings.TrimSuffix(url, "/")
-			source.UpdatedAt = time.Now()
-			defaultUpdated = true
-			break
+		if source.ID != sourceID {
+			newSources = append(newSources, source)
+		} else {
+			found = true
 		}
 	}
 
-	if !defaultUpdated {
-		// Create new default source
-		newSource := &MarketSource{
-			ID:          "default",
-			Name:        "Official-Market-Sources",
-			Type:        "remote",
-			BaseURL:     strings.TrimSuffix(url, "/"),
-			Priority:    100,
-			IsActive:    true,
-			UpdatedAt:   time.Now(),
-			Description: "Official Market Sources set via API",
-		}
-		sm.marketSources.Sources = append(sm.marketSources.Sources, newSource)
+	if !found {
+		return fmt.Errorf("source with ID %s not found", sourceID)
 	}
 
+	// Update the sources list
+	sm.marketSources.Sources = newSources
 	sm.marketSources.UpdatedAt = time.Now()
 
 	// Save to Redis
