@@ -317,7 +317,20 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 	sm.marketSources.UpdatedAt = time.Now()
 
 	// Save to Redis
-	return sm.saveMarketSourcesToRedis(sm.marketSources)
+	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
+		return fmt.Errorf("failed to save market sources to Redis: %w", err)
+	}
+
+	// Sync with chart repository service
+	go func() {
+		if err := SyncMarketSourceConfigWithChartRepo(sm.redisClient); err != nil {
+			log.Printf("Warning: Failed to sync market source config with chart repo after deleting source: %v", err)
+		} else {
+			log.Printf("Successfully synced market source config with chart repo after deleting source: %s", sourceID)
+		}
+	}()
+
+	return nil
 }
 
 // GetAPIEndpoints gets the API endpoints configuration
@@ -381,6 +394,16 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	}
 
 	log.Printf("Added new market source: %s (%s)", source.Name, source.ID)
+
+	// Sync with chart repository service
+	go func() {
+		if err := SyncMarketSourceConfigWithChartRepo(sm.redisClient); err != nil {
+			log.Printf("Warning: Failed to sync market source config with chart repo after adding source: %v", err)
+		} else {
+			log.Printf("Successfully synced market source config with chart repo after adding source: %s", source.ID)
+		}
+	}()
+
 	return nil
 }
 
