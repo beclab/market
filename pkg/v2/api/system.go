@@ -659,3 +659,51 @@ func stopByType(name, token, ty string) (string, error) {
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/suspend", appServiceHost, appServicePort, name)
 	return doPostWithToken(url, token)
 }
+
+// getMarketSettings handles GET /api/v2/settings/market-settings
+func (s *Server) getMarketSettings(w http.ResponseWriter, r *http.Request) {
+	log.Println("GET /api/v2/settings/market-settings - Getting market settings")
+
+	if settingsManager == nil {
+		log.Println("Settings manager not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Settings manager not initialized", nil)
+		return
+	}
+
+	settings, err := settingsManager.GetMarketSettings()
+	if err != nil {
+		log.Printf("Failed to get market settings: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to get market settings", nil)
+		return
+	}
+
+	log.Printf("Market settings retrieved successfully")
+	s.sendResponse(w, http.StatusOK, true, "Market settings retrieved successfully", settings)
+}
+
+// updateMarketSettings handles PUT /api/v2/settings/market-settings
+func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
+	log.Println("PUT /api/v2/settings/market-settings - Updating market settings")
+
+	if settingsManager == nil {
+		log.Println("Settings manager not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Settings manager not initialized", nil)
+		return
+	}
+
+	var settings settings.MarketSettings
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	if err := settingsManager.UpdateMarketSettings(&settings); err != nil {
+		log.Printf("Failed to update market settings: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to update market settings", nil)
+		return
+	}
+
+	log.Printf("Market settings updated successfully")
+	s.sendResponse(w, http.StatusOK, true, "Market settings updated successfully", settings)
+}

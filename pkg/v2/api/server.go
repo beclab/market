@@ -131,7 +131,15 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/settings/market-source/{id}", s.deleteMarketSource).Methods("DELETE")
 	log.Printf("Route configured: DELETE /app-store/api/v2/settings/market-source/{id}")
 
-	// 17. Get system status aggregation
+	// 17. Get market settings
+	api.HandleFunc("/settings/market-settings", s.getMarketSettings).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/settings/market-settings")
+
+	// 18. Update market settings
+	api.HandleFunc("/settings/market-settings", s.updateMarketSettings).Methods("PUT")
+	log.Printf("Route configured: PUT /app-store/api/v2/settings/market-settings")
+
+	// 19. Get system status aggregation
 	api.HandleFunc("/settings/system-status", s.getSystemStatus).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/settings/system-status")
 

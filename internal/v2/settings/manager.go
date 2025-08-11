@@ -556,3 +556,13 @@ func ClearSettingsRedis(redisClient RedisClient) error {
 	log.Println("Settings Redis keys cleared successfully")
 	return nil
 }
+
+// GetMarketSettings gets market settings from Redis
+func (sm *SettingsManager) GetMarketSettings() (*MarketSettings, error) {
+	return getMarketSettings(sm.redisClient)
+}
+
+// UpdateMarketSettings updates market settings in Redis
+func (sm *SettingsManager) UpdateMarketSettings(settings *MarketSettings) error {
+	return updateMarketSettings(sm.redisClient, settings)
+}
