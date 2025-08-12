@@ -320,9 +320,15 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
 	} else {
 		if err := deleteMarketSourceFromChartRepo(chartRepoHost, sourceID); err != nil {
-			return fmt.Errorf("failed to delete market source from chart repo: %w", err)
+			// Only allow continuation for "source not found" error
+			if strings.Contains(err.Error(), "source with ID") && strings.Contains(err.Error(), "not found") {
+				log.Printf("Warning: market source not found in chart repo: %v, continuing with local deletion", err)
+			} else {
+				return fmt.Errorf("failed to delete market source from chart repo: %w", err)
+			}
+		} else {
+			log.Printf("Successfully deleted market source from chart repo: %s", sourceID)
 		}
-		log.Printf("Successfully deleted market source from chart repo: %s", sourceID)
 	}
 
 	// After successful chart repo operation, update local database
