@@ -149,7 +149,7 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	log.Printf("Base URL after trimming: %s", baseURL)
 
 	defaultSource := &MarketSource{
-		ID:          "default",
+		ID:          "Official-Market-Sources",
 		Name:        "Official-Market-Sources",
 		Type:        "remote",
 		BaseURL:     baseURL,
@@ -174,7 +174,7 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
 	return &MarketSourcesConfig{
 		Sources:       []*MarketSource{defaultSource, localSource},
-		DefaultSource: "default",
+		DefaultSource: "Official-Market-Sources",
 		UpdatedAt:     time.Now(),
 	}
 }
