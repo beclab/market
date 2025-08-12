@@ -1306,3 +1306,63 @@ func (cm *CacheManager) RemoveAppInfoLatestData(userID, sourceID, appName string
 func (cm *CacheManager) SetSettingsManager(sm *settings.SettingsManager) {
 	cm.settingsManager = sm
 }
+
+// SyncMarketSourcesToCache synchronizes market sources to all users in cache
+func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSource) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @SyncMarketSourcesToCache Start")
+	cm.mutex.Lock()
+	defer func() {
+		cm.mutex.Unlock()
+		glog.Infof("[LOCK] cm.mutex.Unlock() @SyncMarketSourcesToCache End")
+	}()
+
+	if !cm.isRunning {
+		return fmt.Errorf("cache manager is not running")
+	}
+
+	glog.Infof("Syncing %d market sources to cache for all users", len(sources))
+
+	// Create a map of source IDs for quick lookup
+	sourceIDMap := make(map[string]*settings.MarketSource)
+	for _, source := range sources {
+		sourceIDMap[source.ID] = source
+	}
+
+	// Update all users in cache
+	for userID, userData := range cm.cache.Users {
+		glog.Infof("Updating market sources for user: %s", userID)
+
+		// Remove sources that no longer exist
+		var sourcesToRemove []string
+		for sourceID := range userData.Sources {
+			if _, exists := sourceIDMap[sourceID]; !exists {
+				sourcesToRemove = append(sourcesToRemove, sourceID)
+			}
+		}
+
+		// Remove non-existent sources
+		for _, sourceID := range sourcesToRemove {
+			delete(userData.Sources, sourceID)
+			glog.Infof("Removed source %s from user %s", sourceID, userID)
+		}
+
+		// Add new sources that don't exist for this user
+		for _, source := range sources {
+			if _, exists := userData.Sources[source.ID]; !exists {
+				userData.Sources[source.ID] = types.NewSourceDataWithType(types.SourceDataType(source.Type))
+				glog.Infof("Added new source %s (%s) for user %s", source.Name, source.ID, userID)
+			}
+		}
+
+		// Trigger sync to Redis for this user
+		if cm.isRunning {
+			cm.requestSync(SyncRequest{
+				UserID: userID,
+				Type:   SyncUser,
+			})
+		}
+	}
+
+	glog.Infof("Successfully synced market sources to cache for all users")
+	return nil
+}

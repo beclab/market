@@ -9,10 +9,34 @@ import (
 	"time"
 )
 
+// CacheManager interface for updating cache when market sources change
+type CacheManager interface {
+	SyncMarketSourcesToCache(sources []*MarketSource) error
+}
+
 // NewSettingsManager creates a new settings manager instance
 func NewSettingsManager(redisClient RedisClient) *SettingsManager {
 	return &SettingsManager{
 		redisClient: redisClient,
+	}
+}
+
+// SetCacheManager sets the cache manager for syncing market source changes
+func (sm *SettingsManager) SetCacheManager(cacheManager CacheManager) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.cacheManager = cacheManager
+	log.Println("Cache manager set for settings manager")
+}
+
+// syncMarketSourcesToCache synchronizes market sources to cache if cache manager is available
+func (sm *SettingsManager) syncMarketSourcesToCache() {
+	if sm.cacheManager != nil {
+		if err := sm.cacheManager.SyncMarketSourcesToCache(sm.marketSources.Sources); err != nil {
+			log.Printf("Failed to sync market sources to cache: %v", err)
+		} else {
+			log.Printf("Successfully synced %d market sources to cache", len(sm.marketSources.Sources))
+		}
 	}
 }
 
@@ -333,6 +357,9 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 		return fmt.Errorf("failed to save market sources to Redis: %w", err)
 	}
 
+	// Sync to cache
+	sm.syncMarketSourcesToCache()
+
 	log.Printf("Deleted market source: %s", sourceID)
 	return nil
 }
@@ -420,6 +447,9 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
 		return fmt.Errorf("failed to save market sources to Redis: %w", err)
 	}
+
+	// Sync to cache
+	sm.syncMarketSourcesToCache()
 
 	log.Printf("Added new market source: %s (%s)", source.Name, source.ID)
 	return nil
