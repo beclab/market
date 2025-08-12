@@ -31,6 +31,7 @@ type CacheManager struct {
 	stopChannel       chan bool
 	isRunning         bool
 	settingsManager   *settings.SettingsManager
+	cleanupTicker     *time.Ticker // Timer for periodic cleanup of AppRenderFailed
 
 	// Lock monitoring
 	lockStats struct {
@@ -140,6 +141,10 @@ func (cm *CacheManager) Start() error {
 
 	// Start sync worker goroutine
 	go cm.syncWorker()
+
+	// Start periodic cleanup of AppRenderFailed data (every 5 minutes)
+	cm.cleanupTicker = time.NewTicker(5 * time.Minute)
+	go cm.cleanupWorker()
 
 	glog.Infof("Cache manager started successfully")
 	return nil
@@ -1396,4 +1401,51 @@ func (cm *CacheManager) ResynceUser() error {
 		}
 	}
 	return nil
+}
+
+// cleanupWorker processes periodic cleanup of AppRenderFailed data
+func (cm *CacheManager) cleanupWorker() {
+	log.Printf("INFO: Starting AppRenderFailed cleanup worker")
+
+	for range cm.cleanupTicker.C {
+		if !cm.isRunning {
+			log.Printf("INFO: CacheManager stopped, cleanup worker exiting")
+			break
+		}
+
+		cm.ClearAppRenderFailedData()
+	}
+
+	log.Printf("INFO: AppRenderFailed cleanup worker stopped")
+}
+
+// ClearAppRenderFailedData clears all AppRenderFailed data for all users and sources
+func (cm *CacheManager) ClearAppRenderFailedData() {
+	log.Printf("INFO: Starting periodic cleanup of AppRenderFailed data")
+
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if cm.cache == nil {
+		log.Printf("WARN: Cache is nil, skipping AppRenderFailed cleanup")
+		return
+	}
+
+	totalCleared := 0
+	for userID, userData := range cm.cache.Users {
+		for sourceID, sourceData := range userData.Sources {
+			originalCount := len(sourceData.AppRenderFailed)
+			if originalCount > 0 {
+				sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
+				totalCleared += originalCount
+				log.Printf("INFO: Cleared %d AppRenderFailed entries for user=%s, source=%s", originalCount, userID, sourceID)
+			}
+		}
+	}
+
+	if totalCleared > 0 {
+		log.Printf("INFO: Periodic cleanup completed, cleared %d total AppRenderFailed entries", totalCleared)
+	} else {
+		log.Printf("DEBUG: No AppRenderFailed entries found during periodic cleanup")
+	}
 }
