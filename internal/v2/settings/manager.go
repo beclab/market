@@ -352,7 +352,13 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 	sm.marketSources.Sources = newSources
 	sm.marketSources.UpdatedAt = time.Now()
 
-	// Save to Redis
+	// Merge with default config to ensure default sources are preserved
+	mergedConfig := sm.mergeWithDefaultConfig(sm.marketSources)
+
+	// Update the in-memory config with merged result
+	sm.marketSources = mergedConfig
+
+	// Save merged config to Redis
 	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
 		return fmt.Errorf("failed to save market sources to Redis: %w", err)
 	}
@@ -443,7 +449,13 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	sm.marketSources.Sources = append(sm.marketSources.Sources, source)
 	sm.marketSources.UpdatedAt = time.Now()
 
-	// Save to Redis
+	// Merge with default config to ensure default sources are preserved
+	mergedConfig := sm.mergeWithDefaultConfig(sm.marketSources)
+
+	// Update the in-memory config with merged result
+	sm.marketSources = mergedConfig
+
+	// Save merged config to Redis
 	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
 		return fmt.Errorf("failed to save market sources to Redis: %w", err)
 	}
