@@ -187,6 +187,7 @@ func main() {
 	log.Printf("Getting cache manager for HTTP server...")
 	cacheManager := appInfoModule.GetCacheManager()
 	cacheManager.SetSettingsManager(settingsManager)
+	settingsManager.SetCacheManager(cacheManager)
 	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
 
 	// Get hydrator for HTTP server
