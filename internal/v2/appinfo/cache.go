@@ -1336,7 +1336,10 @@ func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSourc
 		var sourcesToRemove []string
 		for sourceID := range userData.Sources {
 			if _, exists := sourceIDMap[sourceID]; !exists {
-				sourcesToRemove = append(sourcesToRemove, sourceID)
+				if sourceID != "" {
+					sourcesToRemove = append(sourcesToRemove, sourceID)
+				}
+
 			}
 		}
 
