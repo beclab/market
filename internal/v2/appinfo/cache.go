@@ -2,6 +2,7 @@ package appinfo
 
 import (
 	"fmt"
+	"log"
 	"market/internal/v2/types"
 	"sync"
 	"time"
@@ -1367,5 +1368,32 @@ func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSourc
 	}
 
 	glog.Infof("Successfully synced market sources to cache for all users")
+	return nil
+}
+
+func (cm *CacheManager) ResynceUser() error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if cm.cache == nil {
+		return fmt.Errorf("cache is not initialized")
+	}
+
+	err := utils.SetupAppServiceData()
+	if err == nil {
+		extractedUsers := utils.GetExtractedUsers()
+		for _, userID := range extractedUsers {
+			if _, exists := cm.cache.Users[userID]; !exists {
+				// Add user directly without calling AddUserToCache to avoid deadlock
+				userData := types.NewUserData()
+				activeSources := cm.settingsManager.GetActiveMarketSources()
+				for _, source := range activeSources {
+					userData.Sources[source.ID] = types.NewSourceDataWithType(types.SourceDataType(source.Type))
+				}
+				cm.cache.Users[userID] = userData
+				log.Printf("INFO: User %s has been added to cache and all sources initialized", userID)
+			}
+		}
+	}
 	return nil
 }
