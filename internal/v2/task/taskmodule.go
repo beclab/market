@@ -42,6 +42,9 @@ const (
 	Canceled
 )
 
+// TaskCallback defines the callback function type for task completion
+type TaskCallback func(result string, err error)
+
 // Task represents a task in the system
 type Task struct {
 	ID          string                 `json:"id"`
@@ -55,6 +58,7 @@ type Task struct {
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
 	ErrorMsg    string                 `json:"error_msg,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Callback    TaskCallback           `json:"-"` // Callback function for synchronous requests
 }
 
 // DataSenderInterface defines the interface for sending system updates
@@ -109,7 +113,7 @@ func (tm *TaskModule) SetDataSender(dataSender DataSenderInterface) {
 }
 
 // AddTask adds a new task to the pending queue
-func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, metadata map[string]interface{}) *Task {
+func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, metadata map[string]interface{}, callback TaskCallback) *Task {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -121,11 +125,12 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, me
 		User:      user,
 		CreatedAt: time.Now(),
 		Metadata:  metadata,
+		Callback:  callback,
 	}
 
 	tm.pendingTasks = append(tm.pendingTasks, task)
 
-	log.Printf("[%s] Task added: ID=%s, Type=%d, AppName=%s, User=%s", tm.instanceID, task.ID, task.Type, task.AppName, user)
+	log.Printf("[%s] Task added: ID=%s, Type=%d, AppName=%s, User=%s, HasCallback=%v", tm.instanceID, task.ID, task.Type, task.AppName, user, callback != nil)
 
 	// Record task addition in history
 	tm.recordTaskHistory(task, user)
@@ -293,6 +298,13 @@ func (tm *TaskModule) executeTask(task *Task) {
 			log.Printf("App installation failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Installation failed: %v", err)
+
+			// Call callback if exists (for synchronous requests)
+			if task.Callback != nil {
+				log.Printf("Calling callback for failed task: %s", task.ID)
+				task.Callback(result, err)
+			}
+
 			tm.recordTaskResult(task, result, err)
 			return
 		}
@@ -306,6 +318,13 @@ func (tm *TaskModule) executeTask(task *Task) {
 			log.Printf("App uninstallation failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Uninstallation failed: %v", err)
+
+			// Call callback if exists (for synchronous requests)
+			if task.Callback != nil {
+				log.Printf("Calling callback for failed task: %s", task.ID)
+				task.Callback(result, err)
+			}
+
 			tm.recordTaskResult(task, result, err)
 			return
 		}
@@ -321,6 +340,13 @@ func (tm *TaskModule) executeTask(task *Task) {
 			log.Printf("App cancel failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Cancel failed: %v", err)
+
+			// Call callback if exists (for synchronous requests)
+			if task.Callback != nil {
+				log.Printf("Calling callback for failed task: %s", task.ID)
+				task.Callback(result, err)
+			}
+
 			tm.recordTaskResult(task, result, err)
 			return
 		}
@@ -344,6 +370,13 @@ func (tm *TaskModule) executeTask(task *Task) {
 			log.Printf("App upgrade failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Upgrade failed: %v", err)
+
+			// Call callback if exists (for synchronous requests)
+			if task.Callback != nil {
+				log.Printf("Calling callback for failed task: %s", task.ID)
+				task.Callback(result, err)
+			}
+
 			tm.recordTaskResult(task, result, err)
 			return
 		}
@@ -360,8 +393,13 @@ func (tm *TaskModule) executeTask(task *Task) {
 	// Log the result summary
 	log.Printf("Task result summary: ID=%s, Result length=%d bytes", task.ID, len(result))
 
-	tm.recordTaskResult(task, result, nil)
+	// Call callback if exists (for synchronous requests)
+	if task.Callback != nil {
+		log.Printf("Calling callback for successful task: %s", task.ID)
+		task.Callback(result, nil)
+	}
 
+	tm.recordTaskResult(task, result, nil)
 }
 
 // sendTaskExecutionUpdate sends system update when task execution starts
