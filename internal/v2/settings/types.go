@@ -38,6 +38,7 @@ type SettingsManager struct {
 	marketSources *MarketSourcesConfig
 	apiEndpoints  *APIEndpointsConfig
 	redisClient   RedisClient
+	cacheManager  CacheManager // Cache manager for syncing market source changes
 }
 
 // RedisClient interface for Redis operations

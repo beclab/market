@@ -254,3 +254,48 @@ func addMarketSourceToChartRepo(host string, source *ChartRepoMarketSource) erro
 
 	return nil
 }
+
+// deleteMarketSourceFromChartRepo deletes a market source from chart repository service
+func deleteMarketSourceFromChartRepo(host string, sourceID string) error {
+	url := fmt.Sprintf("http://%s/chart-repo/api/v2/settings/market-source/%s", host, sourceID)
+
+	log.Printf("Making DELETE request to: %s", url)
+	log.Printf("Deleting market source with ID: %s", sourceID)
+
+	// Create HTTP request
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Make the request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to make HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	log.Printf("Response status: %d", resp.StatusCode)
+	log.Printf("Response body: %s", string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var response ChartRepoResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !response.Success {
+		return fmt.Errorf("API request failed: %s", response.Message)
+	}
+
+	return nil
+}

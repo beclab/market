@@ -587,9 +587,24 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 		// Get user data from cache
 		userData := s.cacheManager.GetUserData(userID)
 		if userData == nil {
-			log.Printf("User data not found for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("user data not found")}
-			return
+			log.Printf("User data not found for user: %s, attempting to resync user data", userID)
+
+			// Try to resync user data to fix missing user information
+			if err := s.cacheManager.ResynceUser(); err != nil {
+				log.Printf("Failed to resync user data for user %s: %v", userID, err)
+				resultChan <- result{err: fmt.Errorf("failed to resync user data: %v", err)}
+				return
+			}
+
+			// Try to get user data again after resync
+			userData = s.cacheManager.GetUserData(userID)
+			if userData == nil {
+				log.Printf("User data still not found for user: %s after resync", userID)
+				resultChan <- result{err: fmt.Errorf("user data not found even after resync")}
+				return
+			}
+
+			log.Printf("Successfully retrieved user data for user: %s after resync", userID)
 		}
 
 		// Get hash from user data
@@ -610,6 +625,10 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Error retrieving market hash: %v", res.err)
 			if res.err.Error() == "user data not found" {
 				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+			} else if strings.Contains(res.err.Error(), "failed to resync user data") {
+				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to resync user data", nil)
+			} else if strings.Contains(res.err.Error(), "user data not found even after resync") {
+				s.sendResponse(w, http.StatusNotFound, false, "User data not found even after resync attempt", nil)
 			} else {
 				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market hash", nil)
 			}

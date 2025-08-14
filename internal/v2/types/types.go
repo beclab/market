@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+type MarketSettings struct {
+	SelectedSource string `json:"selected_source"`
+}
+
 // ModifyType represents different types of value modifications
 type ModifyType string
 

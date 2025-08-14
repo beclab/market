@@ -219,7 +219,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 	}
 
 	// Check if this is an install operation with installCanceled state
-	if appStateMsg.OpType == "install" && appStateMsg.State == "installCanceled" {
+	if appStateMsg.OpType == "install" && (appStateMsg.State == "installCanceled" || appStateMsg.State == "installingCanceled") {
 		log.Printf("Detected install operation with installCanceled state for opID: %s, app: %s, user: %s",
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 

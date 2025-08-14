@@ -2,6 +2,7 @@ package appinfo
 
 import (
 	"fmt"
+	"log"
 	"market/internal/v2/types"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ type CacheManager struct {
 	stopChannel       chan bool
 	isRunning         bool
 	settingsManager   *settings.SettingsManager
+	cleanupTicker     *time.Ticker // Timer for periodic cleanup of AppRenderFailed
 
 	// Lock monitoring
 	lockStats struct {
@@ -139,6 +141,10 @@ func (cm *CacheManager) Start() error {
 
 	// Start sync worker goroutine
 	go cm.syncWorker()
+
+	// Start periodic cleanup of AppRenderFailed data (every 5 minutes)
+	cm.cleanupTicker = time.NewTicker(5 * time.Minute)
+	go cm.cleanupWorker()
 
 	glog.Infof("Cache manager started successfully")
 	return nil
@@ -1305,4 +1311,141 @@ func (cm *CacheManager) RemoveAppInfoLatestData(userID, sourceID, appName string
 // SetSettingsManager sets the settings manager for the cache manager
 func (cm *CacheManager) SetSettingsManager(sm *settings.SettingsManager) {
 	cm.settingsManager = sm
+}
+
+// SyncMarketSourcesToCache synchronizes market sources to all users in cache
+func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSource) error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @SyncMarketSourcesToCache Start")
+	cm.mutex.Lock()
+	defer func() {
+		cm.mutex.Unlock()
+		glog.Infof("[LOCK] cm.mutex.Unlock() @SyncMarketSourcesToCache End")
+	}()
+
+	if !cm.isRunning {
+		return fmt.Errorf("cache manager is not running")
+	}
+
+	glog.Infof("Syncing %d market sources to cache for all users", len(sources))
+
+	// Create a map of source IDs for quick lookup
+	sourceIDMap := make(map[string]*settings.MarketSource)
+	for _, source := range sources {
+		sourceIDMap[source.ID] = source
+	}
+
+	// Update all users in cache
+	for userID, userData := range cm.cache.Users {
+		glog.Infof("Updating market sources for user: %s", userID)
+
+		// Remove sources that no longer exist
+		var sourcesToRemove []string
+		for sourceID := range userData.Sources {
+			if _, exists := sourceIDMap[sourceID]; !exists {
+				if sourceID != "" {
+					sourcesToRemove = append(sourcesToRemove, sourceID)
+				}
+
+			}
+		}
+
+		// Remove non-existent sources
+		for _, sourceID := range sourcesToRemove {
+			delete(userData.Sources, sourceID)
+			glog.Infof("Removed source %s from user %s", sourceID, userID)
+		}
+
+		// Add new sources that don't exist for this user
+		for _, source := range sources {
+			if _, exists := userData.Sources[source.ID]; !exists {
+				userData.Sources[source.ID] = types.NewSourceDataWithType(types.SourceDataType(source.Type))
+				glog.Infof("Added new source %s (%s) for user %s", source.Name, source.ID, userID)
+			}
+		}
+
+		// Trigger sync to Redis for this user
+		if cm.isRunning {
+			cm.requestSync(SyncRequest{
+				UserID: userID,
+				Type:   SyncUser,
+			})
+		}
+	}
+
+	glog.Infof("Successfully synced market sources to cache for all users")
+	return nil
+}
+
+func (cm *CacheManager) ResynceUser() error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if cm.cache == nil {
+		return fmt.Errorf("cache is not initialized")
+	}
+
+	err := utils.SetupAppServiceData()
+	if err == nil {
+		extractedUsers := utils.GetExtractedUsers()
+		for _, userID := range extractedUsers {
+			if _, exists := cm.cache.Users[userID]; !exists {
+				// Add user directly without calling AddUserToCache to avoid deadlock
+				userData := types.NewUserData()
+				activeSources := cm.settingsManager.GetActiveMarketSources()
+				for _, source := range activeSources {
+					userData.Sources[source.ID] = types.NewSourceDataWithType(types.SourceDataType(source.Type))
+				}
+				cm.cache.Users[userID] = userData
+				log.Printf("INFO: User %s has been added to cache and all sources initialized", userID)
+			}
+		}
+	}
+	return nil
+}
+
+// cleanupWorker processes periodic cleanup of AppRenderFailed data
+func (cm *CacheManager) cleanupWorker() {
+	log.Printf("INFO: Starting AppRenderFailed cleanup worker")
+
+	for range cm.cleanupTicker.C {
+		if !cm.isRunning {
+			log.Printf("INFO: CacheManager stopped, cleanup worker exiting")
+			break
+		}
+
+		cm.ClearAppRenderFailedData()
+	}
+
+	log.Printf("INFO: AppRenderFailed cleanup worker stopped")
+}
+
+// ClearAppRenderFailedData clears all AppRenderFailed data for all users and sources
+func (cm *CacheManager) ClearAppRenderFailedData() {
+	log.Printf("INFO: Starting periodic cleanup of AppRenderFailed data")
+
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if cm.cache == nil {
+		log.Printf("WARN: Cache is nil, skipping AppRenderFailed cleanup")
+		return
+	}
+
+	totalCleared := 0
+	for userID, userData := range cm.cache.Users {
+		for sourceID, sourceData := range userData.Sources {
+			originalCount := len(sourceData.AppRenderFailed)
+			if originalCount > 0 {
+				sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
+				totalCleared += originalCount
+				log.Printf("INFO: Cleared %d AppRenderFailed entries for user=%s, source=%s", originalCount, userID, sourceID)
+			}
+		}
+	}
+
+	if totalCleared > 0 {
+		log.Printf("INFO: Periodic cleanup completed, cleared %d total AppRenderFailed entries", totalCleared)
+	} else {
+		log.Printf("DEBUG: No AppRenderFailed entries found during periodic cleanup")
+	}
 }

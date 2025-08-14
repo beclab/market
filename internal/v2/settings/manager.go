@@ -9,10 +9,34 @@ import (
 	"time"
 )
 
+// CacheManager interface for updating cache when market sources change
+type CacheManager interface {
+	SyncMarketSourcesToCache(sources []*MarketSource) error
+}
+
 // NewSettingsManager creates a new settings manager instance
 func NewSettingsManager(redisClient RedisClient) *SettingsManager {
 	return &SettingsManager{
 		redisClient: redisClient,
+	}
+}
+
+// SetCacheManager sets the cache manager for syncing market source changes
+func (sm *SettingsManager) SetCacheManager(cacheManager CacheManager) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.cacheManager = cacheManager
+	log.Println("Cache manager set for settings manager")
+}
+
+// syncMarketSourcesToCache synchronizes market sources to cache if cache manager is available
+func (sm *SettingsManager) syncMarketSourcesToCache() {
+	if sm.cacheManager != nil {
+		if err := sm.cacheManager.SyncMarketSourcesToCache(sm.marketSources.Sources); err != nil {
+			log.Printf("Failed to sync market sources to cache: %v", err)
+		} else {
+			log.Printf("Successfully synced %d market sources to cache", len(sm.marketSources.Sources))
+		}
 	}
 }
 
@@ -125,7 +149,7 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	log.Printf("Base URL after trimming: %s", baseURL)
 
 	defaultSource := &MarketSource{
-		ID:          "default",
+		ID:          "Official-Market-Sources",
 		Name:        "Official-Market-Sources",
 		Type:        "remote",
 		BaseURL:     baseURL,
@@ -150,7 +174,7 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
 	return &MarketSourcesConfig{
 		Sources:       []*MarketSource{defaultSource, localSource},
-		DefaultSource: "default",
+		DefaultSource: "Official-Market-Sources",
 		UpdatedAt:     time.Now(),
 	}
 }
@@ -284,49 +308,72 @@ func (sm *SettingsManager) GetMarketSource() *MarketSource {
 	return sm.GetDefaultMarketSource()
 }
 
-// SetMarketSource sets the Official Market Sources URL (for API compatibility)
-func (sm *SettingsManager) SetMarketSource(url string) error {
+// DeleteMarketSource removes a market source from the configuration by ID
+func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
+	if sourceID == "" {
+		return fmt.Errorf("source ID cannot be empty")
+	}
+
+	// First, delete from chart repository service
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
+	} else {
+		if err := deleteMarketSourceFromChartRepo(chartRepoHost, sourceID); err != nil {
+			// Only allow continuation for "source not found" error
+			if strings.Contains(err.Error(), "source with ID") && strings.Contains(err.Error(), "not found") {
+				log.Printf("Warning: market source not found in chart repo: %v, continuing with local deletion", err)
+			} else {
+				return fmt.Errorf("failed to delete market source from chart repo: %w", err)
+			}
+		} else {
+			log.Printf("Successfully deleted market source from chart repo: %s", sourceID)
+		}
+	}
+
+	// After successful chart repo operation, update local database
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if sm.marketSources == nil {
-		sm.marketSources = &MarketSourcesConfig{
-			Sources:       []*MarketSource{},
-			DefaultSource: "default",
-			UpdatedAt:     time.Now(),
-		}
+		return fmt.Errorf("no market sources configured")
 	}
 
-	// Update the default source or create it if it doesn't exist
-	defaultUpdated := false
+	// Find and remove the source
+	found := false
+	var newSources []*MarketSource
 	for _, source := range sm.marketSources.Sources {
-		if source.ID == "default" {
-			source.BaseURL = strings.TrimSuffix(url, "/")
-			source.UpdatedAt = time.Now()
-			defaultUpdated = true
-			break
+		if source.ID != sourceID {
+			newSources = append(newSources, source)
+		} else {
+			found = true
 		}
 	}
 
-	if !defaultUpdated {
-		// Create new default source
-		newSource := &MarketSource{
-			ID:          "default",
-			Name:        "Official-Market-Sources",
-			Type:        "remote",
-			BaseURL:     strings.TrimSuffix(url, "/"),
-			Priority:    100,
-			IsActive:    true,
-			UpdatedAt:   time.Now(),
-			Description: "Official Market Sources set via API",
-		}
-		sm.marketSources.Sources = append(sm.marketSources.Sources, newSource)
+	if !found {
+		return fmt.Errorf("source with ID %s not found", sourceID)
 	}
 
+	// Update the sources list
+	sm.marketSources.Sources = newSources
 	sm.marketSources.UpdatedAt = time.Now()
 
-	// Save to Redis
-	return sm.saveMarketSourcesToRedis(sm.marketSources)
+	// Merge with default config to ensure default sources are preserved
+	mergedConfig := sm.mergeWithDefaultConfig(sm.marketSources)
+
+	// Update the in-memory config with merged result
+	sm.marketSources = mergedConfig
+
+	// Save merged config to Redis
+	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
+		return fmt.Errorf("failed to save market sources to Redis: %w", err)
+	}
+
+	// Sync to cache
+	sm.syncMarketSourcesToCache()
+
+	log.Printf("Deleted market source: %s", sourceID)
+	return nil
 }
 
 // GetAPIEndpoints gets the API endpoints configuration
@@ -369,6 +416,30 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 		return fmt.Errorf("source base URL cannot be empty")
 	}
 
+	// First, add to chart repository service
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
+	} else {
+		// Convert to ChartRepoMarketSource format
+		chartRepoSource := &ChartRepoMarketSource{
+			ID:          source.ID,
+			Name:        source.Name,
+			Type:        source.Type,
+			BaseURL:     source.BaseURL,
+			Priority:    source.Priority,
+			IsActive:    source.IsActive,
+			UpdatedAt:   source.UpdatedAt,
+			Description: source.Description,
+		}
+
+		if err := addMarketSourceToChartRepo(chartRepoHost, chartRepoSource); err != nil {
+			return fmt.Errorf("failed to add market source to chart repo: %w", err)
+		}
+		log.Printf("Successfully added market source to chart repo: %s (%s)", source.Name, source.ID)
+	}
+
+	// After successful chart repo operation, update local database
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -384,10 +455,19 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	sm.marketSources.Sources = append(sm.marketSources.Sources, source)
 	sm.marketSources.UpdatedAt = time.Now()
 
-	// Save to Redis
+	// Merge with default config to ensure default sources are preserved
+	mergedConfig := sm.mergeWithDefaultConfig(sm.marketSources)
+
+	// Update the in-memory config with merged result
+	sm.marketSources = mergedConfig
+
+	// Save merged config to Redis
 	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
 		return fmt.Errorf("failed to save market sources to Redis: %w", err)
 	}
+
+	// Sync to cache
+	sm.syncMarketSourcesToCache()
 
 	log.Printf("Added new market source: %s (%s)", source.Name, source.ID)
 	return nil
@@ -523,4 +603,14 @@ func ClearSettingsRedis(redisClient RedisClient) error {
 	}
 	log.Println("Settings Redis keys cleared successfully")
 	return nil
+}
+
+// GetMarketSettings gets market settings from Redis
+func (sm *SettingsManager) GetMarketSettings() (*MarketSettings, error) {
+	return getMarketSettings(sm.redisClient)
+}
+
+// UpdateMarketSettings updates market settings in Redis
+func (sm *SettingsManager) UpdateMarketSettings(settings *MarketSettings) error {
+	return updateMarketSettings(sm.redisClient, settings)
 }

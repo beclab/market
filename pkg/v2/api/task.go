@@ -18,6 +18,12 @@ type InstallAppRequest struct {
 	Source  string `json:"source"`
 	AppName string `json:"app_name"`
 	Version string `json:"version"`
+	Sync    bool   `json:"sync"` // Whether this is a synchronous request
+}
+
+// CancelInstallRequest represents the request body for cancel installation
+type CancelInstallRequest struct {
+	Sync bool `json:"sync"` // Whether this is a synchronous request
 }
 
 // 6. Install application (single)
@@ -134,18 +140,37 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"images":     images,
 	}
 
-	task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata)
+	// Create callback function for synchronous requests
+	var callback task.TaskCallback
+	if request.Sync {
+		callback = func(result string, err error) {
+			if err != nil {
+				log.Printf("Synchronous installation failed for app: %s, error: %v", request.AppName, err)
+				s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Installation failed: %v", err), nil)
+			} else {
+				log.Printf("Synchronous installation completed successfully for app: %s", request.AppName)
+				s.sendResponse(w, http.StatusOK, true, "App installation completed successfully", map[string]interface{}{
+					"result": result,
+				})
+			}
+		}
+	}
+
+	task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
 	if task == nil {
 		log.Printf("Failed to create installation task for app: %s", request.AppName)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create installation task", nil)
 		return
 	}
 
-	log.Printf("Created installation task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
+	log.Printf("Created installation task: ID=%s for app: %s version: %s, sync=%v", task.ID, request.AppName, request.Version, request.Sync)
 
-	s.sendResponse(w, http.StatusOK, true, "App installation started successfully", map[string]interface{}{
-		"task_id": task.ID,
-	})
+	// For asynchronous requests, return immediately
+	if !request.Sync {
+		s.sendResponse(w, http.StatusOK, true, "App installation started successfully", map[string]interface{}{
+			"task_id": task.ID,
+		})
+	}
 }
 
 // 7. Cancel installation (single)
@@ -164,14 +189,23 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Retrieved user ID for cancel request: %s", userID)
 
-	// Step 2: Check if cache manager is available
+	// Step 2: Parse request body for sync parameter
+	var request CancelInstallRequest
+	var sync bool
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&request); err == nil {
+			sync = request.Sync
+		}
+	}
+
+	// Step 3: Check if cache manager is available
 	if s.cacheManager == nil {
 		log.Printf("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
 
-	// Step 3: Get user data from cache
+	// Step 4: Get user data from cache
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
 		log.Printf("User data not found for user: %s", userID)
@@ -179,7 +213,7 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Get app cfgType from cache
+	// Step 5: Get app cfgType from cache
 	var cfgType string
 	// Try to find the app in user data to get cfgType
 	if userData != nil {
@@ -205,7 +239,7 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		cfgType = "app" // Default to app type
 	}
 
-	// Step 5: Create cancel installation task
+	// Step 6: Create cancel installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":  userID,
 		"app_name": appName,
@@ -213,18 +247,37 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		"cfgType":  cfgType, // Use retrieved cfgType
 	}
 
-	task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata)
+	// Create callback function for synchronous requests
+	var callback task.TaskCallback
+	if sync {
+		callback = func(result string, err error) {
+			if err != nil {
+				log.Printf("Synchronous cancel installation failed for app: %s, error: %v", appName, err)
+				s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Cancel installation failed: %v", err), nil)
+			} else {
+				log.Printf("Synchronous cancel installation completed successfully for app: %s", appName)
+				s.sendResponse(w, http.StatusOK, true, "App installation cancellation completed successfully", map[string]interface{}{
+					"result": result,
+				})
+			}
+		}
+	}
+
+	task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
 	if task == nil {
 		log.Printf("Failed to create cancel installation task for app: %s", appName)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create cancel installation task", nil)
 		return
 	}
 
-	log.Printf("Created cancel installation task: ID=%s for app: %s", task.ID, appName)
+	log.Printf("Created cancel installation task: ID=%s for app: %s, sync=%v", task.ID, appName, sync)
 
-	s.sendResponse(w, http.StatusOK, true, "App installation cancellation started successfully", map[string]interface{}{
-		"task_id": task.ID,
-	})
+	// For asynchronous requests, return immediately
+	if !sync {
+		s.sendResponse(w, http.StatusOK, true, "App installation cancellation started successfully", map[string]interface{}{
+			"task_id": task.ID,
+		})
+	}
 }
 
 // 8. Uninstall application (single)
@@ -243,14 +296,25 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Retrieved user ID for uninstall request: %s", userID)
 
-	// Step 2: Check if cache manager is available
+	// Step 2: Parse request body for sync parameter
+	var requestBody map[string]interface{}
+	var sync bool
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err == nil {
+			if syncVal, ok := requestBody["sync"].(bool); ok {
+				sync = syncVal
+			}
+		}
+	}
+
+	// Step 3: Check if cache manager is available
 	if s.cacheManager == nil {
 		log.Printf("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
 
-	// Step 3: Get user data from cache
+	// Step 4: Get user data from cache
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
 		log.Printf("User data not found for user: %s", userID)
@@ -258,7 +322,7 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Get app cfgType from cache
+	// Step 5: Get app cfgType from cache
 	var cfgType string
 	// Try to find the app in user data to get cfgType
 	if userData != nil {
@@ -284,7 +348,7 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		cfgType = "app" // Default to app type
 	}
 
-	// Step 5: Create uninstallation task
+	// Step 6: Create uninstallation task
 	taskMetadata := map[string]interface{}{
 		"user_id":  userID,
 		"app_name": appName,
@@ -292,18 +356,37 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":  cfgType, // Use retrieved cfgType
 	}
 
-	task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata)
+	// Create callback function for synchronous requests
+	var callback task.TaskCallback
+	if sync {
+		callback = func(result string, err error) {
+			if err != nil {
+				log.Printf("Synchronous uninstallation failed for app: %s, error: %v", appName, err)
+				s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Uninstallation failed: %v", err), nil)
+			} else {
+				log.Printf("Synchronous uninstallation completed successfully for app: %s", appName)
+				s.sendResponse(w, http.StatusOK, true, "App uninstallation completed successfully", map[string]interface{}{
+					"result": result,
+				})
+			}
+		}
+	}
+
+	task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
 	if task == nil {
 		log.Printf("Failed to create uninstallation task for app: %s", appName)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create uninstallation task", nil)
 		return
 	}
 
-	log.Printf("Created uninstallation task: ID=%s for app: %s", task.ID, appName)
+	log.Printf("Created uninstallation task: ID=%s for app: %s, sync=%v", task.ID, appName, sync)
 
-	s.sendResponse(w, http.StatusOK, true, "App uninstallation started successfully", map[string]interface{}{
-		"task_id": task.ID,
-	})
+	// For asynchronous requests, return immediately
+	if !sync {
+		s.sendResponse(w, http.StatusOK, true, "App uninstallation started successfully", map[string]interface{}{
+			"task_id": task.ID,
+		})
+	}
 }
 
 // 9. Upgrade application (single)
@@ -420,16 +503,35 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"images":     images,
 	}
 
-	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata)
+	// Create callback function for synchronous requests
+	var callback task.TaskCallback
+	if request.Sync {
+		callback = func(result string, err error) {
+			if err != nil {
+				log.Printf("Synchronous upgrade failed for app: %s, error: %v", request.AppName, err)
+				s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Upgrade failed: %v", err), nil)
+			} else {
+				log.Printf("Synchronous upgrade completed successfully for app: %s", request.AppName)
+				s.sendResponse(w, http.StatusOK, true, "App upgrade completed successfully", map[string]interface{}{
+					"result": result,
+				})
+			}
+		}
+	}
+
+	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
 	if task == nil {
 		log.Printf("Failed to create upgrade task for app: %s", request.AppName)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create upgrade task", nil)
 		return
 	}
 
-	log.Printf("Created upgrade task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
+	log.Printf("Created upgrade task: ID=%s for app: %s version: %s, sync=%v", task.ID, request.AppName, request.Version, request.Sync)
 
-	s.sendResponse(w, http.StatusOK, true, "App upgrade started successfully", map[string]interface{}{
-		"task_id": task.ID,
-	})
+	// For asynchronous requests, return immediately
+	if !request.Sync {
+		s.sendResponse(w, http.StatusOK, true, "App upgrade started successfully", map[string]interface{}{
+			"task_id": task.ID,
+		})
+	}
 }

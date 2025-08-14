@@ -14,6 +14,7 @@ import (
 	"market/internal/v2/utils"
 
 	"github.com/emicklei/go-restful/v3"
+	"github.com/gorilla/mux"
 )
 
 // settingsManager holds the global settings manager instance
@@ -24,9 +25,13 @@ func SetSettingsManager(sm *settings.SettingsManager) {
 	settingsManager = sm
 }
 
-// MarketSourceRequest represents the request body for setting market source
+// MarketSourceRequest represents the request body for adding market source
 type MarketSourceRequest struct {
-	URL string `json:"url"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	BaseURL     string `json:"base_url"`
+	Description string `json:"description,omitempty"`
 }
 
 // ResumeAppRequest represents the request body for resuming an application
@@ -94,9 +99,9 @@ func (s *Server) getMarketSource(w http.ResponseWriter, r *http.Request) {
 	s.sendResponse(w, http.StatusOK, true, "Market source configuration retrieved successfully", config)
 }
 
-// setMarketSource handles PUT /api/v2/settings/market-source
-func (s *Server) setMarketSource(w http.ResponseWriter, r *http.Request) {
-	log.Println("PUT /api/v2/settings/market-source - Setting market source configuration")
+// addMarketSource handles POST /api/v2/settings/market-source
+func (s *Server) addMarketSource(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/settings/market-source - Adding market source")
 
 	if settingsManager == nil {
 		log.Println("Settings manager not initialized")
@@ -111,23 +116,72 @@ func (s *Server) setMarketSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.URL == "" {
-		log.Println("Market source URL is empty")
-		s.sendResponse(w, http.StatusBadRequest, false, "Market source URL cannot be empty", nil)
+	if req.ID == "" {
+		log.Println("Market source ID is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "Market source ID cannot be empty", nil)
 		return
 	}
 
-	if err := settingsManager.SetMarketSource(req.URL); err != nil {
-		log.Printf("Failed to set market source: %v", err)
-		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to set market source configuration", nil)
+	if req.Type == "" {
+		log.Println("Market source Type is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "Market source Type cannot be empty", nil)
 		return
 	}
 
-	// Get the updated configuration to return
-	config := settingsManager.GetMarketSource()
+	if req.Type != "local" && req.Type != "remote" {
+		log.Printf("Invalid market source Type: %s", req.Type)
+		s.sendResponse(w, http.StatusBadRequest, false, "Market source Type must be 'local' or 'remote'", nil)
+		return
+	}
 
-	log.Printf("Market source configuration updated to: %s", req.URL)
-	s.sendResponse(w, http.StatusOK, true, "Market source configuration updated successfully", config)
+	// Create MarketSource struct
+	source := &settings.MarketSource{
+		ID:          req.ID,
+		Name:        req.Name,
+		Type:        req.Type,
+		BaseURL:     req.BaseURL,
+		Description: req.Description,
+	}
+
+	if err := settingsManager.AddMarketSource(source); err != nil {
+		log.Printf("Failed to add market source: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, err.Error(), nil)
+		return
+	}
+
+	config := settingsManager.GetMarketSources()
+	log.Printf("Market source added: %s", req.ID)
+	s.sendResponse(w, http.StatusOK, true, "Market source added successfully", config)
+}
+
+// deleteMarketSource handles DELETE /api/v2/settings/market-source/{id}
+func (s *Server) deleteMarketSource(w http.ResponseWriter, r *http.Request) {
+	log.Println("DELETE /api/v2/settings/market-source/{id} - Deleting market source")
+
+	if settingsManager == nil {
+		log.Println("Settings manager not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Settings manager not initialized", nil)
+		return
+	}
+
+	// Extract ID from URL path
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if id == "" {
+		log.Println("Market source ID is empty in path")
+		s.sendResponse(w, http.StatusBadRequest, false, "Market source ID cannot be empty", nil)
+		return
+	}
+
+	if err := settingsManager.DeleteMarketSource(id); err != nil {
+		log.Printf("Failed to delete market source: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, err.Error(), nil)
+		return
+	}
+
+	config := settingsManager.GetMarketSources()
+	log.Printf("Market source deleted: %s", id)
+	s.sendResponse(w, http.StatusOK, true, "Market source deleted successfully", config)
 }
 
 // getSystemStatus handles GET /api/v2/settings/system-status
@@ -604,4 +658,52 @@ func stopByType(name, token, ty string) (string, error) {
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/suspend", appServiceHost, appServicePort, name)
 	return doPostWithToken(url, token)
+}
+
+// getMarketSettings handles GET /api/v2/settings/market-settings
+func (s *Server) getMarketSettings(w http.ResponseWriter, r *http.Request) {
+	log.Println("GET /api/v2/settings/market-settings - Getting market settings")
+
+	if settingsManager == nil {
+		log.Println("Settings manager not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Settings manager not initialized", nil)
+		return
+	}
+
+	settings, err := settingsManager.GetMarketSettings()
+	if err != nil {
+		log.Printf("Failed to get market settings: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to get market settings", nil)
+		return
+	}
+
+	log.Printf("Market settings retrieved successfully")
+	s.sendResponse(w, http.StatusOK, true, "Market settings retrieved successfully", settings)
+}
+
+// updateMarketSettings handles PUT /api/v2/settings/market-settings
+func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
+	log.Println("PUT /api/v2/settings/market-settings - Updating market settings")
+
+	if settingsManager == nil {
+		log.Println("Settings manager not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Settings manager not initialized", nil)
+		return
+	}
+
+	var settings settings.MarketSettings
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	if err := settingsManager.UpdateMarketSettings(&settings); err != nil {
+		log.Printf("Failed to update market settings: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to update market settings", nil)
+		return
+	}
+
+	log.Printf("Market settings updated successfully")
+	s.sendResponse(w, http.StatusOK, true, "Market settings updated successfully", settings)
 }
