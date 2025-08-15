@@ -93,9 +93,12 @@ func main() {
 		log.Fatalf("Invalid REDIS_DB value: %v", err)
 	}
 
-	redisClient, err := settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
-	if err != nil {
-		log.Fatalf("Failed to create Redis client: %v", err)
+	var redisClient settings.RedisClient
+	if !utils.IsPublicEnvironment() {
+		redisClient, err = settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
+		if err != nil {
+			log.Fatalf("Failed to create Redis client: %v", err)
+		}
 	}
 
 	// utils.SetRedisClient(redisClient.GetRawClient())
@@ -353,8 +356,13 @@ func main() {
 		}
 
 		log.Println("Stopping Settings module...")
-		if err := redisClient.Close(); err != nil {
-			log.Printf("Error stopping Redis client: %v", err)
+		if redisClient != nil {
+			// Type assert to access Close method
+			if closer, ok := redisClient.(interface{ Close() error }); ok {
+				if err := closer.Close(); err != nil {
+					log.Printf("Error stopping Redis client: %v", err)
+				}
+			}
 		}
 
 		log.Println("Note: Helm Repository server will stop automatically when main process exits")
