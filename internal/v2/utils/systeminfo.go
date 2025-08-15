@@ -32,7 +32,7 @@ func GetTerminusVersion() (string, error) {
 // GetTerminusVersionValue returns the parsed version string
 func GetTerminusVersionValue() (string, error) {
 	// Check public environment first
-	if isPublicEnvironment() {
+	if IsPublicEnvironment() {
 		version := os.Getenv("PUBLIC_VERSION")
 		if version != "" {
 			return version, nil
@@ -71,7 +71,7 @@ func IsDevelopmentEnvironment() bool {
 }
 
 // isPublicEnvironment checks if the application is running in public mode
-func isPublicEnvironment() bool {
+func IsPublicEnvironment() bool {
 	isPublic := os.Getenv("isPublic")
 	return isPublic == "true"
 }

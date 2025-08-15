@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"market/internal/v2/types"
+	"market/internal/v2/utils"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -34,6 +35,11 @@ func (s *TaskForApiStep) GetStepName() string {
 }
 
 func (s *TaskForApiStep) CanSkip(ctx context.Context, task *HydrationTask) bool {
+
+	if utils.IsPublicEnvironment() {
+		return true
+	}
+
 	return false
 }
 
