@@ -149,8 +149,10 @@ func (m *AppInfoModule) Start() error {
 
 	// Initialize Redis client if enabled
 	if m.config.EnableCache {
-		if err := m.initRedisClient(); err != nil {
-			return fmt.Errorf("failed to initialize Redis client: %w", err)
+		if !utils.IsPublicEnvironment() {
+			if err := m.initRedisClient(); err != nil {
+				return fmt.Errorf("failed to initialize Redis client: %w", err)
+			}
 		}
 	}
 
@@ -451,8 +453,10 @@ func (m *AppInfoModule) initRedisClient() error {
 func (m *AppInfoModule) initCacheManager() error {
 	glog.Infof("Initializing cache manager...")
 
-	if m.redisClient == nil {
-		return fmt.Errorf("Redis client is required for cache manager")
+	if !utils.IsPublicEnvironment() {
+		if m.redisClient == nil {
+			return fmt.Errorf("Redis client is required for cache manager")
+		}
 	}
 
 	m.cacheManager = NewCacheManager(m.redisClient, m.config.User)

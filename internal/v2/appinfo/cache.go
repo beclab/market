@@ -105,10 +105,12 @@ func (cm *CacheManager) Start() error {
 	} else {
 		glog.Infof("ClearCache is enabled, clearing Redis data and starting with empty cache")
 
-		// Clear all Redis data
-		if err := cm.redisClient.ClearAllData(); err != nil {
-			glog.Errorf("Failed to clear Redis data: %v", err)
-			return err
+		if !utils.IsPublicEnvironment() {
+			// Clear all Redis data
+			if err := cm.redisClient.ClearAllData(); err != nil {
+				glog.Errorf("Failed to clear Redis data: %v", err)
+				return err
+			}
 		}
 
 		glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
@@ -188,6 +190,11 @@ func (cm *CacheManager) syncWorker() {
 
 // processSyncRequest handles individual sync requests
 func (cm *CacheManager) processSyncRequest(req SyncRequest) {
+
+	if utils.IsPublicEnvironment() {
+		return
+	}
+
 	switch req.Type {
 	case SyncUser:
 		if userData := cm.getUserData(req.UserID); userData != nil {
