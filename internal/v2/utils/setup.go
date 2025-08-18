@@ -118,7 +118,9 @@ func GetUserAppStateData(userID string) map[string][]*types.AppStateLatestData {
 func GetAllUserAppStateData() map[string]map[string][]*types.AppStateLatestData {
 	if IsPublicEnvironment() {
 		return map[string]map[string][]*types.AppStateLatestData{
-			"admin": {},
+			"admin": {
+				"app": {},
+			},
 		}
 	}
 	return userAppStateData
