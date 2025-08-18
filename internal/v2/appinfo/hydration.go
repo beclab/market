@@ -14,7 +14,6 @@ import (
 	"market/internal/v2/appinfo/hydrationfn"
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
-	"market/internal/v2/utils"
 )
 
 // Hydrator manages the hydration process with task queue and workers
@@ -520,9 +519,9 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 // isAppHydrationComplete checks if an app has completed all hydration steps
 func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendingData) bool {
 
-	if utils.IsPublicEnvironment() {
-		return true
-	}
+	// if utils.IsPublicEnvironment() {
+	// 	return true
+	// }
 
 	if pendingData == nil {
 		log.Printf("isAppHydrationComplete: pendingData is nil")
