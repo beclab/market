@@ -517,6 +517,11 @@ func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, e
 
 // saveMarketSourcesToRedis saves market sources to Redis
 func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig) error {
+
+	if utils.IsPublicEnvironment() {
+		return nil
+	}
+
 	data, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal market sources config: %w", err)
