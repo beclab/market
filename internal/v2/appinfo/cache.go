@@ -93,15 +93,18 @@ func (cm *CacheManager) Start() error {
 
 	// Load cache data from Redis if ClearCache is false
 	if !cm.userConfig.ClearCache {
-		cache, err := cm.redisClient.LoadCacheFromRedis()
-		if err != nil {
-			glog.Errorf("Failed to load cache from Redis: %v", err)
-			return err
+		if !utils.IsPublicEnvironment() {
+			cache, err := cm.redisClient.LoadCacheFromRedis()
+			if err != nil {
+				glog.Errorf("Failed to load cache from Redis: %v", err)
+				return err
+			}
+			glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
+			cm.mutex.Lock()
+			cm.cache = cache
+			cm.mutex.Unlock()
 		}
-		glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
-		cm.mutex.Lock()
-		cm.cache = cache
-		cm.mutex.Unlock()
+
 	} else {
 		glog.Infof("ClearCache is enabled, clearing Redis data and starting with empty cache")
 
