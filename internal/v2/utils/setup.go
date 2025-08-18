@@ -77,6 +77,11 @@ var userAppStateData map[string]map[string][]*types.AppStateLatestData
 
 // SetupAppServiceData fetches app data from app-service or reads from local file in development
 func SetupAppServiceData() error {
+
+	if IsPublicEnvironment() {
+		return nil
+	}
+
 	log.Println("Starting app service data setup...")
 
 	// Initialize user app state data map
@@ -95,6 +100,9 @@ func SetupAppServiceData() error {
 
 // GetExtractedUsers returns the list of users extracted from app service data
 func GetExtractedUsers() []string {
+	if IsPublicEnvironment() {
+		return []string{"admin"}
+	}
 	return extractedUsers
 }
 
@@ -108,6 +116,11 @@ func GetUserAppStateData(userID string) map[string][]*types.AppStateLatestData {
 
 // GetAllUserAppStateData returns all user app state data
 func GetAllUserAppStateData() map[string]map[string][]*types.AppStateLatestData {
+	if IsPublicEnvironment() {
+		return map[string]map[string][]*types.AppStateLatestData{
+			"admin": {},
+		}
+	}
 	return userAppStateData
 }
 
