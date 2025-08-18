@@ -495,7 +495,7 @@ func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) err
 func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, error) {
 
 	if utils.IsPublicEnvironment() {
-		return nil, nil
+		return nil, fmt.Errorf("in public environment, no need to load market sources from Redis")
 	}
 
 	data, err := sm.redisClient.Get(RedisKeyMarketSources)
