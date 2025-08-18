@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"market/internal/v2/types"
+	"market/internal/v2/utils"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/golang/glog"
@@ -309,6 +310,11 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 
 // SaveUserDataToRedis saves user data to Redis with optimized performance
 func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserData) error {
+
+	if utils.IsPublicEnvironment() {
+		return nil
+	}
+
 	glog.Infof("Saving user data to Redis for user: %s", userID)
 
 	// Step 1: Create a snapshot of data (no locks needed as this is called from CacheManager)
