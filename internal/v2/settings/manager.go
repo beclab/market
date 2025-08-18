@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"market/internal/v2/utils"
 	"os"
 	"strings"
 	"time"
@@ -492,6 +493,11 @@ func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) err
 
 // loadMarketSourcesFromRedis loads market sources from Redis
 func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, error) {
+
+	if utils.IsPublicEnvironment() {
+		return nil, nil
+	}
+
 	data, err := sm.redisClient.Get(RedisKeyMarketSources)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get market sources from Redis: %w", err)
