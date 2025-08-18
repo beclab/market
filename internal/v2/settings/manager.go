@@ -532,6 +532,11 @@ func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig)
 
 // loadAPIEndpointsFromRedis loads API endpoints from Redis
 func (sm *SettingsManager) loadAPIEndpointsFromRedis() (*APIEndpointsConfig, error) {
+
+	if utils.IsPublicEnvironment() {
+		return nil, fmt.Errorf("in public environment, no need to load API endpoints from Redis")
+	}
+
 	data, err := sm.redisClient.Get(RedisKeyAPIEndpoints)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get API endpoints from Redis: %w", err)
@@ -551,6 +556,11 @@ func (sm *SettingsManager) loadAPIEndpointsFromRedis() (*APIEndpointsConfig, err
 
 // saveAPIEndpointsToRedis saves API endpoints to Redis
 func (sm *SettingsManager) saveAPIEndpointsToRedis(config *APIEndpointsConfig) error {
+
+	if utils.IsPublicEnvironment() {
+		return nil
+	}
+
 	data, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal API endpoints config: %w", err)
