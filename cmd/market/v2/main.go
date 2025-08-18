@@ -201,36 +201,41 @@ func main() {
 	hydrator := appInfoModule.GetHydrator()
 	log.Printf("Hydrator obtained successfully: %v", hydrator != nil)
 
-	// 2. Initialize History Module
-	historyModule, err := history.NewHistoryModule()
-	if err != nil {
-		log.Fatalf("Failed to create History module: %v", err)
+	var taskModule *task.TaskModule
+	var historyModule *history.HistoryModule
+	if !utils.IsPublicEnvironment() {
+		// 2. Initialize History Module
+		historyModule, err := history.NewHistoryModule()
+		if err != nil {
+			log.Fatalf("Failed to create History module: %v", err)
+		}
+		log.Println("History module started successfully")
+
+		// 3. Initialize Task Module
+		taskModule := task.NewTaskModule()
+		// Set history module reference for task recording
+		taskModule.SetHistoryModule(historyModule)
+
+		// Set data sender from AppInfo module for system notifications
+		dataSender := appInfoModule.GetDataSender()
+		if dataSender != nil {
+			taskModule.SetDataSender(dataSender)
+			log.Println("Data sender set in Task module successfully")
+		} else {
+			log.Println("Warning: Data sender not available from AppInfo module, Task module will run without system notifications")
+		}
+
+		log.Println("Task module started successfully")
+
+		// Set task module reference in AppInfo module
+		appInfoModule.SetTaskModule(taskModule)
+		log.Println("Task module reference set in AppInfo module")
+
+		// Set history module reference in AppInfo module
+		appInfoModule.SetHistoryModule(historyModule)
+		log.Println("History module reference set in AppInfo module")
+
 	}
-	log.Println("History module started successfully")
-
-	// 3. Initialize Task Module
-	taskModule := task.NewTaskModule()
-	// Set history module reference for task recording
-	taskModule.SetHistoryModule(historyModule)
-
-	// Set data sender from AppInfo module for system notifications
-	dataSender := appInfoModule.GetDataSender()
-	if dataSender != nil {
-		taskModule.SetDataSender(dataSender)
-		log.Println("Data sender set in Task module successfully")
-	} else {
-		log.Println("Warning: Data sender not available from AppInfo module, Task module will run without system notifications")
-	}
-
-	log.Println("Task module started successfully")
-
-	// Set task module reference in AppInfo module
-	appInfoModule.SetTaskModule(taskModule)
-	log.Println("Task module reference set in AppInfo module")
-
-	// Set history module reference in AppInfo module
-	appInfoModule.SetHistoryModule(historyModule)
-	log.Println("History module reference set in AppInfo module")
 
 	// Create and start the HTTP server
 	log.Printf("Preparing to create HTTP server...")
@@ -285,21 +290,23 @@ func main() {
 	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
 
-	// Add history record for successful market setup
-	log.Println("Recording market setup completion in history...")
-	historyRecord := &history.HistoryRecord{
-		Type:     history.TypeSystem,
-		Message:  "market setup finished",
-		Time:     time.Now().Unix(),
-		App:      "market",
-		Account:  "system",
-		Extended: "",
-	}
+	if !utils.IsPublicEnvironment() {
+		// Add history record for successful market setup
+		log.Println("Recording market setup completion in history...")
+		historyRecord := &history.HistoryRecord{
+			Type:     history.TypeSystem,
+			Message:  "market setup finished",
+			Time:     time.Now().Unix(),
+			App:      "market",
+			Account:  "system",
+			Extended: "",
+		}
 
-	if err := historyModule.StoreRecord(historyRecord); err != nil {
-		log.Printf("Warning: Failed to record market setup completion: %v", err)
-	} else {
-		log.Printf("Successfully recorded market setup completion with ID: %d", historyRecord.ID)
+		if err := historyModule.StoreRecord(historyRecord); err != nil {
+			log.Printf("Warning: Failed to record market setup completion: %v", err)
+		} else {
+			log.Printf("Successfully recorded market setup completion with ID: %d", historyRecord.ID)
+		}
 	}
 
 	log.Println("")
