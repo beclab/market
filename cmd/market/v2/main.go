@@ -249,7 +249,7 @@ func main() {
 
 	server := api.NewServer("8080", cacheManager, hydrator, taskModule, historyModule)
 	log.Printf("HTTP server instance created successfully")
-	log.Printf("Task module instance ID: %s", taskModule.GetInstanceID())
+	// log.Printf("Task module instance ID: %s", taskModule.GetInstanceID())
 
 	// Lock to system thread
 	runtime.LockOSThread()
