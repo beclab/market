@@ -117,19 +117,22 @@ func main() {
 		extractedUsers := utils.GetExtractedUsers()
 		allUserAppStateData := utils.GetAllUserAppStateData()
 
-		userCount := len(extractedUsers)
-		appCount := 0
-		for _, sourceData := range allUserAppStateData {
-			for _, appList := range sourceData {
-				appCount += len(appList)
-			}
-		}
+		if !utils.IsPublicEnvironment() {
 
-		if userCount == 0 || appCount == 0 {
-			log.Printf("App service data not ready: user count = %d, app count = %d", userCount, appCount)
-			log.Println("Retrying in 10 seconds...")
-			time.Sleep(10 * time.Second)
-			continue
+			userCount := len(extractedUsers)
+			appCount := 0
+			for _, sourceData := range allUserAppStateData {
+				for _, appList := range sourceData {
+					appCount += len(appList)
+				}
+			}
+
+			if userCount == 0 || appCount == 0 {
+				log.Printf("App service data not ready: user count = %d, app count = %d", userCount, appCount)
+				log.Println("Retrying in 10 seconds...")
+				time.Sleep(10 * time.Second)
+				continue
+			}
 		}
 
 		log.Println("App service data setup completed successfully")
