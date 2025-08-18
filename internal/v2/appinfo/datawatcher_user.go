@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"market/internal/v2/history"
+	"market/internal/v2/utils"
 
 	"github.com/nats-io/nats.go"
 )
@@ -50,6 +51,11 @@ func (dw *DataWatcherUser) SetHistoryModule(historyModule *history.HistoryModule
 
 // Start initializes and starts the data watcher
 func (dw *DataWatcherUser) Start(ctx context.Context) error {
+	if utils.IsPublicEnvironment() {
+		log.Printf("Public environment detected, DataWatcherUser disabled")
+		return nil
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	dw.cancelFunc = cancel
 

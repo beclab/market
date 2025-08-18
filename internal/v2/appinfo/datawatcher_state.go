@@ -12,6 +12,7 @@ import (
 
 	"market/internal/v2/history" // Import history module with correct path
 	"market/internal/v2/task"
+	"market/internal/v2/utils"
 
 	"github.com/nats-io/nats.go"
 )
@@ -85,6 +86,11 @@ func (dw *DataWatcherState) Start() error {
 	if dw.isDev {
 		log.Println("Starting data watcher in development mode")
 		go dw.startDevMockData()
+		return nil
+	}
+
+	if utils.IsPublicEnvironment() {
+		log.Println("Public environment detected, DataWatcherState disabled")
 		return nil
 	}
 
