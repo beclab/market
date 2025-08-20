@@ -161,6 +161,9 @@ func main() {
 		log.Fatalf("Failed to create AppInfo module: %v", err)
 	}
 
+	// Set the settings manager for AppInfo module to use
+	appInfoModule.SetSettingsManager(settingsManager)
+
 	if err := appInfoModule.Start(); err != nil {
 		log.Fatalf("Failed to start AppInfo module: %v", err)
 	}

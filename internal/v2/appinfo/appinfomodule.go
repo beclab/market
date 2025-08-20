@@ -31,6 +31,7 @@ type AppInfoModule struct {
 	dataWatcherUser         *DataWatcherUser
 	dataSender              *DataSender
 	statusCorrectionChecker *StatusCorrectionChecker
+	settingsManager         *settings.SettingsManager
 	ctx                     context.Context
 	cancel                  context.CancelFunc
 	mutex                   sync.RWMutex
@@ -478,17 +479,14 @@ func (m *AppInfoModule) initSyncer() error {
 		return fmt.Errorf("cache manager is required for syncer")
 	}
 
+	if m.settingsManager == nil {
+		return fmt.Errorf("settings manager is required for syncer")
+	}
+
 	// Get the actual cache data from cache manager instead of creating a new one
 	cacheData := m.cacheManager.cache
 
-	// Create settings manager for syncer
-	redisAdapter := &RedisClientAdapter{client: m.redisClient}
-	settingsManager := settings.NewSettingsManager(redisAdapter)
-	if err := settingsManager.Initialize(); err != nil {
-		return fmt.Errorf("failed to initialize settings manager: %w", err)
-	}
-
-	m.syncer = CreateDefaultSyncer(cacheData, *m.config.Syncer, settingsManager)
+	m.syncer = CreateDefaultSyncer(cacheData, *m.config.Syncer, m.settingsManager)
 
 	// Set cache manager reference for hydration notifications
 	if m.cacheManager != nil {
@@ -513,15 +511,12 @@ func (m *AppInfoModule) initHydrator() error {
 		return fmt.Errorf("cache manager is required for hydrator")
 	}
 
+	if m.settingsManager == nil {
+		return fmt.Errorf("settings manager is required for hydrator")
+	}
+
 	// Get the actual cache data from cache manager
 	cacheData := m.cacheManager.cache
-
-	// Create settings manager for hydrator
-	redisAdapter := &RedisClientAdapter{client: m.redisClient}
-	settingsManager := settings.NewSettingsManager(redisAdapter)
-	if err := settingsManager.Initialize(); err != nil {
-		return fmt.Errorf("failed to initialize settings manager: %w", err)
-	}
 
 	// Use hydrator config from module config, or default if not specified
 	hydratorConfig := DefaultHydratorConfig()
@@ -529,7 +524,7 @@ func (m *AppInfoModule) initHydrator() error {
 		hydratorConfig = *m.config.Hydrator
 	}
 
-	m.hydrator = NewHydrator(cacheData, settingsManager, hydratorConfig)
+	m.hydrator = NewHydrator(cacheData, m.settingsManager, hydratorConfig)
 
 	// Start hydrator with context
 	if err := m.hydrator.Start(m.ctx); err != nil {
@@ -1503,4 +1498,19 @@ func (m *AppInfoModule) GetTaskModule() *task.TaskModule {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.taskModule
+}
+
+// SetSettingsManager sets the settings manager for the module
+func (m *AppInfoModule) SetSettingsManager(settingsManager *settings.SettingsManager) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.settingsManager = settingsManager
+	glog.Infof("Settings manager set in AppInfo module")
+}
+
+// GetSettingsManager returns the settings manager instance
+func (m *AppInfoModule) GetSettingsManager() *settings.SettingsManager {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.settingsManager
 }
