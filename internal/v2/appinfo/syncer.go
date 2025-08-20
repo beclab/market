@@ -180,9 +180,9 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		// Success with this source
 		duration := time.Since(startTime)
 		log.Printf("Sync cycle completed successfully with source %s in %v", source.Name, duration)
-		log.Println("==================== SYNC CYCLE COMPLETED ====================")
-		return nil
+
 	}
+	log.Println("==================== SYNC CYCLE COMPLETED ====================")
 
 	// All sources failed
 	log.Println("==================== SYNC CYCLE FAILED ====================")
