@@ -78,17 +78,17 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 	studioSourceExists := false
 	cliSourceExists := false
 	for _, source := range currentConfig.Sources {
-		if source.Type == "local" && source.Name == "upload" {
+		if source.Type == "local" && source.ID == "upload" {
 			localSourceExists = true
 			log.Printf("Local source found: %s (ID: %s)", source.Name, source.ID)
 			break
 		}
-		if source.Type == "local" && source.Name == "studio" {
+		if source.Type == "local" && source.ID == "studio" {
 			studioSourceExists = true
 			log.Printf("Studio source found: %s (ID: %s)", source.Name, source.ID)
 			break
 		}
-		if source.Type == "local" && source.Name == "cli" {
+		if source.Type == "local" && source.ID == "cli" {
 			cliSourceExists = true
 			log.Printf("CLI source found: %s (ID: %s)", source.Name, source.ID)
 			break
@@ -164,7 +164,7 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 	log.Println("Step 4: Checking for remote source (type=remote, name=market.olares)")
 	remoteSourceExists := false
 	for _, source := range currentConfig.Sources {
-		if source.Type == "remote" && source.Name == "market.olares" {
+		if source.Type == "remote" && source.ID == "market.olares" {
 			remoteSourceExists = true
 			log.Printf("Remote source found: %s (ID: %s)", source.Name, source.ID)
 			break

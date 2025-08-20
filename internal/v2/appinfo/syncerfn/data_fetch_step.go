@@ -618,7 +618,7 @@ func (d *DataFetchStep) mapToTag(m map[string]interface{}) *types.Tag {
 // updateOthersInCache updates Others data in the cache for the current source
 func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Others) {
 	// Get source ID from market source - use Name to match syncer.go behavior
-	sourceID := data.MarketSource.Name
+	sourceID := data.MarketSource.ID
 
 	// Get all existing user IDs with minimal locking
 	data.Cache.Mutex.RLock()

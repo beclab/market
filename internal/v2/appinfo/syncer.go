@@ -169,17 +169,17 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	// Try each source in priority order until one succeeds
 	var lastError error
 	for _, source := range activeSources {
-		log.Printf("Trying market source: %s (%s)", source.Name, source.BaseURL)
+		log.Printf("Trying market source: %s (%s)", source.ID, source.BaseURL)
 
 		if err := s.executeSyncCycleWithSource(ctx, source); err != nil {
-			log.Printf("Failed to sync with source %s: %v", source.Name, err)
+			log.Printf("Failed to sync with source %s: %v", source.ID, err)
 			lastError = err
 			continue
 		}
 
 		// Success with this source
 		duration := time.Since(startTime)
-		log.Printf("Sync cycle completed successfully with source %s in %v", source.Name, duration)
+		log.Printf("Sync cycle completed successfully with source %s in %v", source.ID, duration)
 
 	}
 	log.Println("==================== SYNC CYCLE COMPLETED ====================")
@@ -198,7 +198,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		}
 	}()
 
-	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.Name)
+	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.ID)
 
 	syncContext := syncerfn.NewSyncContext(s.cache)
 
@@ -242,18 +242,18 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			if err != nil {
 				log.Printf("Step %d (%s) failed: %v", i+1, step.GetStepName(), err)
 				log.Printf("======== SYNC STEP %d/%d FAILED: %s ========", i+1, len(steps), step.GetStepName())
-				log.Printf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.Name)
+				log.Printf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.ID)
 				return fmt.Errorf("step %d failed: %w", i+1, err)
 			}
 		case <-stepTimer.C:
 			log.Printf("Step %d (%s) timed out after %v", i+1, step.GetStepName(), stepTimeout)
 			log.Printf("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())
-			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.Name)
+			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.ID)
 			return fmt.Errorf("step %d timed out after %v", i+1, stepTimeout)
 		case <-syncCtx.Done():
 			log.Printf("Step %d (%s) timed out or context cancelled", i+1, step.GetStepName())
 			log.Printf("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())
-			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.Name)
+			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.ID)
 			return fmt.Errorf("step %d timed out: %w", i+1, syncCtx.Err())
 		}
 
@@ -290,7 +290,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			},
 		}
 
-		sourceID := source.Name // Use market source name as source ID
+		sourceID := source.ID // Use market source name as source ID
 		log.Printf("Using source ID: %s for data storage", sourceID)
 
 		// Get all existing user IDs with minimal locking
@@ -335,7 +335,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			syncContext.HashMatches, syncContext.RemoteHash, syncContext.LocalHash)
 	}
 
-	log.Printf("-------------------- SOURCE SYNC COMPLETED: %s --------------------", source.Name)
+	log.Printf("-------------------- SOURCE SYNC COMPLETED: %s --------------------", source.ID)
 	return nil
 }
 
