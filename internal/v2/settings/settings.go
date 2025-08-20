@@ -19,7 +19,7 @@ func getMarketSettings(redisClient RedisClient) (*MarketSettings, error) {
 		// If key not found, return default settings
 		if err.Error() == "key not found" {
 			return &MarketSettings{
-				SelectedSource: "", // Default empty selected source
+				SelectedSource: "market.olares", // Default empty selected source
 			}, nil
 		}
 		return nil, err
