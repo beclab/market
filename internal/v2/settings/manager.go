@@ -326,9 +326,50 @@ func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 	return nil
 }
 
-// GetMarketSource gets a single market source (for API compatibility)
-func (sm *SettingsManager) GetMarketSource() *MarketSource {
-	return sm.GetDefaultMarketSource()
+// GetMarketSource gets market sources from chart repository service (for API compatibility)
+func (sm *SettingsManager) GetMarketSource() []*MarketSource {
+	// Get chart repository service host from environment variable
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, falling back to default market sources")
+		// Return default market sources as fallback
+		defaultSource := sm.GetDefaultMarketSource()
+		if defaultSource != nil {
+			return []*MarketSource{defaultSource}
+		}
+		return nil
+	}
+
+	// Get market sources from chart repository service
+	chartRepoConfig, err := getMarketSourceFromChartRepo(chartRepoHost)
+	if err != nil {
+		log.Printf("Failed to get market sources from chart repo: %v, falling back to default market sources", err)
+		// Return default market sources as fallback
+		defaultSource := sm.GetDefaultMarketSource()
+		if defaultSource != nil {
+			return []*MarketSource{defaultSource}
+		}
+		return nil
+	}
+
+	// Convert all ChartRepoMarketSource to MarketSource
+	var marketSources []*MarketSource
+	for _, chartRepoSource := range chartRepoConfig.Sources {
+		marketSource := &MarketSource{
+			ID:          chartRepoSource.ID,
+			Name:        chartRepoSource.Name,
+			Type:        chartRepoSource.Type,
+			BaseURL:     chartRepoSource.BaseURL,
+			Priority:    chartRepoSource.Priority,
+			IsActive:    chartRepoSource.IsActive,
+			UpdatedAt:   chartRepoSource.UpdatedAt,
+			Description: chartRepoSource.Description,
+		}
+		marketSources = append(marketSources, marketSource)
+	}
+
+	log.Printf("Retrieved %d market sources from chart repository service", len(marketSources))
+	return marketSources
 }
 
 // DeleteMarketSource removes a market source from the configuration by ID
