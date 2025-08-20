@@ -141,6 +141,7 @@ func (s *Server) addMarketSource(w http.ResponseWriter, r *http.Request) {
 		Type:        req.Type,
 		BaseURL:     req.BaseURL,
 		Description: req.Description,
+		IsActive:    true,
 	}
 
 	if err := settingsManager.AddMarketSource(source); err != nil {
