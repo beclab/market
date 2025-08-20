@@ -72,23 +72,35 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 
 	log.Printf("Retrieved %d market sources from chart repository service", len(currentConfig.Sources))
 
-	// 3. Check if local source (type=local, name=market-local) exists
-	log.Println("Step 2: Checking for local source (type=local, name=market-local)")
+	// 3. Check if local source (type=local, name=upload) exists
+	log.Println("Step 2: Checking for local source (type=local, name=upload)")
 	localSourceExists := false
+	studioSourceExists := false
+	cliSourceExists := false
 	for _, source := range currentConfig.Sources {
-		if source.Type == "local" && source.Name == "market-local" {
+		if source.Type == "local" && source.ID == "upload" {
 			localSourceExists = true
 			log.Printf("Local source found: %s (ID: %s)", source.Name, source.ID)
+			break
+		}
+		if source.Type == "local" && source.ID == "studio" {
+			studioSourceExists = true
+			log.Printf("Studio source found: %s (ID: %s)", source.Name, source.ID)
+			break
+		}
+		if source.Type == "local" && source.ID == "cli" {
+			cliSourceExists = true
+			log.Printf("CLI source found: %s (ID: %s)", source.Name, source.ID)
 			break
 		}
 	}
 
 	// 4. Add local source if it doesn't exist
 	if !localSourceExists {
-		log.Println("Step 3: Adding local source (type=local, name=market-local)")
+		log.Println("Step 3: Adding upload source (type=local, name=upload)")
 		localSource := &ChartRepoMarketSource{
-			ID:          "market-local",
-			Name:        "market-local",
+			ID:          "upload",
+			Name:        "upload",
 			Type:        "local",
 			BaseURL:     "file://",
 			Priority:    50,
@@ -98,19 +110,61 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 		}
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, localSource); err != nil {
-			log.Printf("Failed to add local source: %v", err)
-			return fmt.Errorf("failed to add local source: %w", err)
+			log.Printf("Failed to add upload source: %v", err)
+			return fmt.Errorf("failed to add upload source: %w", err)
 		}
-		log.Println("Local source added successfully")
+		log.Println("upload source added successfully")
 	} else {
-		log.Println("Local source already exists, skipping")
+		log.Println("upload source already exists, skipping")
+	}
+	if !studioSourceExists {
+		log.Println("Step 3: Adding studio source (type=local, name=studio)")
+		studioSource := &ChartRepoMarketSource{
+			ID:          "studio",
+			Name:        "studio",
+			Type:        "local",
+			BaseURL:     "file://",
+			Priority:    50,
+			IsActive:    true,
+			UpdatedAt:   time.Now(),
+			Description: "Local market source for studio",
+		}
+
+		if err := addMarketSourceToChartRepo(chartRepoHost, studioSource); err != nil {
+			log.Printf("Failed to add studio source: %v", err)
+			return fmt.Errorf("failed to add studio source: %w", err)
+		}
+		log.Println("studio source added successfully")
+	} else {
+		log.Println("studio source already exists, skipping")
+	}
+	if !cliSourceExists {
+		log.Println("Step 3: Adding cli source (type=local, name=cli)")
+		cliSource := &ChartRepoMarketSource{
+			ID:          "cli",
+			Name:        "cli",
+			Type:        "local",
+			BaseURL:     "file://",
+			Priority:    50,
+			IsActive:    true,
+			UpdatedAt:   time.Now(),
+			Description: "Local market source for cli",
+		}
+
+		if err := addMarketSourceToChartRepo(chartRepoHost, cliSource); err != nil {
+			log.Printf("Failed to add cli source: %v", err)
+			return fmt.Errorf("failed to add cli source: %w", err)
+		}
+		log.Println("cli source added successfully")
+	} else {
+		log.Println("cli source already exists, skipping")
 	}
 
-	// 5. Check if remote source (type=remote, name=Official-Market-Sources) exists
-	log.Println("Step 4: Checking for remote source (type=remote, name=Official-Market-Sources)")
+	// 5. Check if remote source (type=remote, name=market.olares) exists
+	log.Println("Step 4: Checking for remote source (type=remote, name=market.olares)")
 	remoteSourceExists := false
 	for _, source := range currentConfig.Sources {
-		if source.Type == "remote" && source.Name == "Official-Market-Sources" {
+		if source.Type == "remote" && source.ID == "market.olares" {
 			remoteSourceExists = true
 			log.Printf("Remote source found: %s (ID: %s)", source.Name, source.ID)
 			break
@@ -119,7 +173,7 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 
 	// 6. Add remote source if it doesn't exist
 	if !remoteSourceExists {
-		log.Println("Step 5: Adding remote source (type=remote, name=Official-Market-Sources)")
+		log.Println("Step 5: Adding remote source (type=remote, name=market.olares)")
 		// Get base URL from environment variables
 		baseURL := os.Getenv("MARKET_PROVIDER")
 		if baseURL == "" {
@@ -130,8 +184,8 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 		}
 
 		remoteSource := &ChartRepoMarketSource{
-			ID:          "Official-Market-Sources",
-			Name:        "Official-Market-Sources",
+			ID:          "market.olares",
+			Name:        "market.olares",
 			Type:        "remote",
 			BaseURL:     baseURL,
 			Priority:    100,

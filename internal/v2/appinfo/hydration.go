@@ -518,6 +518,11 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 
 // isAppHydrationComplete checks if an app has completed all hydration steps
 func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendingData) bool {
+
+	// if utils.IsPublicEnvironment() {
+	// 	return true
+	// }
+
 	if pendingData == nil {
 		log.Printf("isAppHydrationComplete: pendingData is nil")
 		return false
@@ -657,6 +662,9 @@ func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfo
 		"screenshots": entry.Screenshots,
 		"tags":        entry.Tags,
 		"updated_at":  entry.UpdatedAt,
+
+		"versionHistory": entry.VersionHistory,
+		"subCharts":      entry.SubCharts,
 	}
 
 	// Safely copy metadata without potential circular references

@@ -296,13 +296,17 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Retrieved user ID for uninstall request: %s", userID)
 
-	// Step 2: Parse request body for sync parameter
+	// Step 2: Parse request body for sync parameter and all parameter
 	var requestBody map[string]interface{}
 	var sync bool
+	var all bool
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err == nil {
 			if syncVal, ok := requestBody["sync"].(bool); ok {
 				sync = syncVal
+			}
+			if allVal, ok := requestBody["all"].(bool); ok {
+				all = allVal
 			}
 		}
 	}
@@ -354,6 +358,7 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		"app_name": appName,
 		"token":    utils.GetTokenFromRequest(restfulReq),
 		"cfgType":  cfgType, // Use retrieved cfgType
+		"all":      all,     // Add all parameter to metadata
 	}
 
 	// Create callback function for synchronous requests

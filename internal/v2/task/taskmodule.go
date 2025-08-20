@@ -298,12 +298,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			log.Printf("App installation failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Installation failed: %v", err)
+			now := time.Now()
+			task.CompletedAt = &now
 
 			// Call callback if exists (for synchronous requests)
 			if task.Callback != nil {
 				log.Printf("Calling callback for failed task: %s", task.ID)
 				task.Callback(result, err)
 			}
+
+			// Remove failed task from running tasks
+			tm.mu.Lock()
+			delete(tm.runningTasks, task.ID)
+			tm.mu.Unlock()
+			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+
+			// Send task finished system update
+			tm.sendTaskFinishedUpdate(task, "failed")
 
 			tm.recordTaskResult(task, result, err)
 			return
@@ -318,12 +329,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			log.Printf("App uninstallation failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Uninstallation failed: %v", err)
+			now := time.Now()
+			task.CompletedAt = &now
 
 			// Call callback if exists (for synchronous requests)
 			if task.Callback != nil {
 				log.Printf("Calling callback for failed task: %s", task.ID)
 				task.Callback(result, err)
 			}
+
+			// Remove failed task from running tasks
+			tm.mu.Lock()
+			delete(tm.runningTasks, task.ID)
+			tm.mu.Unlock()
+			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+
+			// Send task finished system update
+			tm.sendTaskFinishedUpdate(task, "failed")
 
 			tm.recordTaskResult(task, result, err)
 			return
@@ -340,12 +362,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			log.Printf("App cancel failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Cancel failed: %v", err)
+			now := time.Now()
+			task.CompletedAt = &now
 
 			// Call callback if exists (for synchronous requests)
 			if task.Callback != nil {
 				log.Printf("Calling callback for failed task: %s", task.ID)
 				task.Callback(result, err)
 			}
+
+			// Remove failed task from running tasks
+			tm.mu.Lock()
+			delete(tm.runningTasks, task.ID)
+			tm.mu.Unlock()
+			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+
+			// Send task finished system update
+			tm.sendTaskFinishedUpdate(task, "failed")
 
 			tm.recordTaskResult(task, result, err)
 			return
@@ -370,12 +403,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			log.Printf("App upgrade failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
 			task.ErrorMsg = fmt.Sprintf("Upgrade failed: %v", err)
+			now := time.Now()
+			task.CompletedAt = &now
 
 			// Call callback if exists (for synchronous requests)
 			if task.Callback != nil {
 				log.Printf("Calling callback for failed task: %s", task.ID)
 				task.Callback(result, err)
 			}
+
+			// Remove failed task from running tasks
+			tm.mu.Lock()
+			delete(tm.runningTasks, task.ID)
+			tm.mu.Unlock()
+			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+
+			// Send task finished system update
+			tm.sendTaskFinishedUpdate(task, "failed")
 
 			tm.recordTaskResult(task, result, err)
 			return
@@ -658,12 +702,12 @@ func (tm *TaskModule) GetInstanceID() string {
 	return tm.instanceID
 }
 
-// InstallTaskSucceed marks an install task as completed successfully by opID
-func (tm *TaskModule) InstallTaskSucceed(opID string) error {
+// InstallTaskSucceed marks an install task as completed successfully by opID or appName+user
+func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Find the install task with matching opID in running tasks
+	// First try to find the install task with matching opID in running tasks
 	var targetTask *Task
 	for _, task := range tm.runningTasks {
 		if task.OpID == opID && task.Type == InstallApp {
@@ -672,9 +716,20 @@ func (tm *TaskModule) InstallTaskSucceed(opID string) error {
 		}
 	}
 
+	// If opID match failed, try to find by appName and user
+	if targetTask == nil && appName != "" && user != "" {
+		for _, task := range tm.runningTasks {
+			if task.Type == InstallApp && task.AppName == appName && task.User == user {
+				targetTask = task
+				break
+			}
+		}
+	}
+
 	if targetTask == nil {
-		log.Printf("[%s] InstallTaskSucceed - No running install task found with opID: %s", tm.instanceID, opID)
-		return fmt.Errorf("no running install task found with opID: %s", opID)
+		log.Printf("[%s] InstallTaskSucceed - No running install task found with opID: %s or appName: %s, user: %s",
+			tm.instanceID, opID, appName, user)
+		return fmt.Errorf("no running install task found with opID: %s or appName: %s, user: %s", opID, appName, user)
 	}
 
 	// Mark task as completed
@@ -683,7 +738,7 @@ func (tm *TaskModule) InstallTaskSucceed(opID string) error {
 	targetTask.CompletedAt = &now
 
 	log.Printf("[%s] InstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
-		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
@@ -698,12 +753,12 @@ func (tm *TaskModule) InstallTaskSucceed(opID string) error {
 	return nil
 }
 
-// InstallTaskFailed marks an install task as failed by opID
-func (tm *TaskModule) InstallTaskFailed(opID string, errorMsg string) error {
+// InstallTaskFailed marks an install task as failed by opID or appName+user
+func (tm *TaskModule) InstallTaskFailed(opID, appName, user, errorMsg string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Find the install task with matching opID in running tasks
+	// First try to find the install task with matching opID in running tasks
 	var targetTask *Task
 	for _, task := range tm.runningTasks {
 		if task.OpID == opID && task.Type == InstallApp {
@@ -712,9 +767,20 @@ func (tm *TaskModule) InstallTaskFailed(opID string, errorMsg string) error {
 		}
 	}
 
+	// If opID match failed, try to find by appName and user
+	if targetTask == nil && appName != "" && user != "" {
+		for _, task := range tm.runningTasks {
+			if task.Type == InstallApp && task.AppName == appName && task.User == user {
+				targetTask = task
+				break
+			}
+		}
+	}
+
 	if targetTask == nil {
-		log.Printf("[%s] InstallTaskFailed - No running install task found with opID: %s", tm.instanceID, opID)
-		return fmt.Errorf("no running install task found with opID: %s", opID)
+		log.Printf("[%s] InstallTaskFailed - No running install task found with opID: %s or appName: %s, user: %s",
+			tm.instanceID, opID, appName, user)
+		return fmt.Errorf("no running install task found with opID: %s or appName: %s, user: %s", opID, appName, user)
 	}
 
 	// Mark task as failed
@@ -724,7 +790,7 @@ func (tm *TaskModule) InstallTaskFailed(opID string, errorMsg string) error {
 	targetTask.ErrorMsg = errorMsg
 
 	log.Printf("[%s] InstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
-		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
@@ -781,12 +847,12 @@ func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user stri
 	return nil
 }
 
-// CancelInstallTaskSucceed marks a cancel install task as completed successfully by opID
-func (tm *TaskModule) CancelInstallTaskSucceed(opID string) error {
+// CancelInstallTaskSucceed marks a cancel install task as completed successfully by opID or appName+user
+func (tm *TaskModule) CancelInstallTaskSucceed(opID, appName, user string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Find the cancel install task with matching opID in running tasks
+	// First try to find the cancel install task with matching opID in running tasks
 	var targetTask *Task
 	for _, task := range tm.runningTasks {
 		if task.OpID == opID && task.Type == CancelAppInstall {
@@ -795,9 +861,20 @@ func (tm *TaskModule) CancelInstallTaskSucceed(opID string) error {
 		}
 	}
 
+	// If opID match failed, try to find by appName and user
+	if targetTask == nil && appName != "" && user != "" {
+		for _, task := range tm.runningTasks {
+			if task.Type == CancelAppInstall && task.AppName == appName && task.User == user {
+				targetTask = task
+				break
+			}
+		}
+	}
+
 	if targetTask == nil {
-		log.Printf("[%s] CancelInstallTaskSucceed - No running cancel install task found with opID: %s", tm.instanceID, opID)
-		return fmt.Errorf("no running cancel install task found with opID: %s", opID)
+		log.Printf("[%s] CancelInstallTaskSucceed - No running cancel install task found with opID: %s or appName: %s, user: %s",
+			tm.instanceID, opID, appName, user)
+		return fmt.Errorf("no running cancel install task found with opID: %s or appName: %s, user: %s", opID, appName, user)
 	}
 
 	// Mark task as completed
@@ -806,7 +883,7 @@ func (tm *TaskModule) CancelInstallTaskSucceed(opID string) error {
 	targetTask.CompletedAt = &now
 
 	log.Printf("[%s] CancelInstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
-		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
@@ -821,12 +898,12 @@ func (tm *TaskModule) CancelInstallTaskSucceed(opID string) error {
 	return nil
 }
 
-// CancelInstallTaskFailed marks a cancel install task as failed by opID
-func (tm *TaskModule) CancelInstallTaskFailed(opID string, errorMsg string) error {
+// CancelInstallTaskFailed marks a cancel install task as failed by opID or appName+user
+func (tm *TaskModule) CancelInstallTaskFailed(opID, appName, user, errorMsg string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Find the cancel install task with matching opID in running tasks
+	// First try to find the cancel install task with matching opID in running tasks
 	var targetTask *Task
 	for _, task := range tm.runningTasks {
 		if task.OpID == opID && task.Type == CancelAppInstall {
@@ -835,9 +912,20 @@ func (tm *TaskModule) CancelInstallTaskFailed(opID string, errorMsg string) erro
 		}
 	}
 
+	// If opID match failed, try to find by appName and user
+	if targetTask == nil && appName != "" && user != "" {
+		for _, task := range tm.runningTasks {
+			if task.Type == CancelAppInstall && task.AppName == appName && task.User == user {
+				targetTask = task
+				break
+			}
+		}
+	}
+
 	if targetTask == nil {
-		log.Printf("[%s] CancelInstallTaskFailed - No running cancel install task found with opID: %s", tm.instanceID, opID)
-		return fmt.Errorf("no running cancel install task found with opID: %s", opID)
+		log.Printf("[%s] CancelInstallTaskFailed - No running cancel install task found with opID: %s or appName: %s, user: %s",
+			tm.instanceID, opID, appName, user)
+		return fmt.Errorf("no running cancel install task found with opID: %s or appName: %s, user: %s", opID, appName, user)
 	}
 
 	// Mark task as failed
@@ -847,7 +935,7 @@ func (tm *TaskModule) CancelInstallTaskFailed(opID string, errorMsg string) erro
 	targetTask.ErrorMsg = errorMsg
 
 	log.Printf("[%s] CancelInstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
-		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
@@ -862,12 +950,12 @@ func (tm *TaskModule) CancelInstallTaskFailed(opID string, errorMsg string) erro
 	return nil
 }
 
-// UninstallTaskSucceed marks an uninstall task as completed successfully by opID
-func (tm *TaskModule) UninstallTaskSucceed(opID string) error {
+// UninstallTaskSucceed marks an uninstall task as completed successfully by opID or appName+user
+func (tm *TaskModule) UninstallTaskSucceed(opID, appName, user string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Find the uninstall task with matching opID in running tasks
+	// First try to find the uninstall task with matching opID in running tasks
 	var targetTask *Task
 	for _, task := range tm.runningTasks {
 		if task.OpID == opID && task.Type == UninstallApp {
@@ -876,9 +964,20 @@ func (tm *TaskModule) UninstallTaskSucceed(opID string) error {
 		}
 	}
 
+	// If opID match failed, try to find by appName and user
+	if targetTask == nil && appName != "" && user != "" {
+		for _, task := range tm.runningTasks {
+			if task.Type == UninstallApp && task.AppName == appName && task.User == user {
+				targetTask = task
+				break
+			}
+		}
+	}
+
 	if targetTask == nil {
-		log.Printf("[%s] UninstallTaskSucceed - No running uninstall task found with opID: %s", tm.instanceID, opID)
-		return fmt.Errorf("no running uninstall task found with opID: %s", opID)
+		log.Printf("[%s] UninstallTaskSucceed - No running uninstall task found with opID: %s or appName: %s, user: %s",
+			tm.instanceID, opID, appName, user)
+		return fmt.Errorf("no running uninstall task found with opID: %s or appName: %s, user: %s", opID, appName, user)
 	}
 
 	// Mark task as completed
@@ -887,7 +986,7 @@ func (tm *TaskModule) UninstallTaskSucceed(opID string) error {
 	targetTask.CompletedAt = &now
 
 	log.Printf("[%s] UninstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
-		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
@@ -902,12 +1001,12 @@ func (tm *TaskModule) UninstallTaskSucceed(opID string) error {
 	return nil
 }
 
-// UninstallTaskFailed marks an uninstall task as failed by opID
-func (tm *TaskModule) UninstallTaskFailed(opID string, errorMsg string) error {
+// UninstallTaskFailed marks an uninstall task as failed by opID or appName+user
+func (tm *TaskModule) UninstallTaskFailed(opID, appName, user, errorMsg string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Find the uninstall task with matching opID in running tasks
+	// First try to find the uninstall task with matching opID in running tasks
 	var targetTask *Task
 	for _, task := range tm.runningTasks {
 		if task.OpID == opID && task.Type == UninstallApp {
@@ -916,9 +1015,20 @@ func (tm *TaskModule) UninstallTaskFailed(opID string, errorMsg string) error {
 		}
 	}
 
+	// If opID match failed, try to find by appName and user
+	if targetTask == nil && appName != "" && user != "" {
+		for _, task := range tm.runningTasks {
+			if task.Type == UninstallApp && task.AppName == appName && task.User == user {
+				targetTask = task
+				break
+			}
+		}
+	}
+
 	if targetTask == nil {
-		log.Printf("[%s] UninstallTaskFailed - No running uninstall task found with opID: %s", tm.instanceID, opID)
-		return fmt.Errorf("no running uninstall task found with opID: %s", opID)
+		log.Printf("[%s] UninstallTaskFailed - No running uninstall task found with opID: %s or appName: %s, user: %s",
+			tm.instanceID, opID, appName, user)
+		return fmt.Errorf("no running uninstall task found with opID: %s or appName: %s, user: %s", opID, appName, user)
 	}
 
 	// Mark task as failed
@@ -928,7 +1038,7 @@ func (tm *TaskModule) UninstallTaskFailed(opID string, errorMsg string) error {
 	targetTask.ErrorMsg = errorMsg
 
 	log.Printf("[%s] UninstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
-		tm.instanceID, targetTask.ID, opID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
+		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)

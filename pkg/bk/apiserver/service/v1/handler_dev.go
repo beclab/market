@@ -331,19 +331,16 @@ func deleteLocalCharts(name string) error {
 	chartPath := path.Join(constants.ChartsLocalDir, info.ChartName)
 	if !utils.PathExists(chartPath) {
 		glog.Warningf("chart %s not found", chartPath)
-		//return errors.New("local chart not found")
 	}
 
 	err = os.Remove(chartPath)
 	if err != nil {
 		glog.Warningf("os.Remove %s err:%s", chartPath, err.Error())
-		//return err
 	}
 
 	err = redisdb.DelLocalAppInfo(name)
 	if err != nil {
 		glog.Warningf("redisdb.DelLocalAppInfo %s err:%s", name, err.Error())
-		//return err
 	}
 
 	return nil

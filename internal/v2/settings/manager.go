@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"market/internal/v2/utils"
 	"os"
 	"strings"
 	"time"
@@ -149,8 +150,8 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	log.Printf("Base URL after trimming: %s", baseURL)
 
 	defaultSource := &MarketSource{
-		ID:          "Official-Market-Sources",
-		Name:        "Official-Market-Sources",
+		ID:          "market.olares",
+		Name:        "market.olares",
 		Type:        "remote",
 		BaseURL:     baseURL,
 		Priority:    100,
@@ -162,10 +163,32 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	log.Printf("Created default market source with BaseURL: %s", defaultSource.BaseURL)
 
 	localSource := &MarketSource{
-		ID:          "local",
-		Name:        "market-local",
+		ID:          "upload",
+		Name:        "upload",
 		Type:        "local",
-		BaseURL:     "file://", // 本地文件系统
+		BaseURL:     "file://",
+		Priority:    50,
+		IsActive:    true,
+		UpdatedAt:   time.Now(),
+		Description: "Local market source for uploaded apps",
+	}
+
+	studioSource := &MarketSource{
+		ID:          "studio",
+		Name:        "studio",
+		Type:        "local",
+		BaseURL:     "file://",
+		Priority:    50,
+		IsActive:    true,
+		UpdatedAt:   time.Now(),
+		Description: "Local market source for uploaded apps",
+	}
+
+	cliSource := &MarketSource{
+		ID:          "cli",
+		Name:        "cli",
+		Type:        "local",
+		BaseURL:     "file://",
 		Priority:    50,
 		IsActive:    true,
 		UpdatedAt:   time.Now(),
@@ -173,8 +196,8 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	}
 
 	return &MarketSourcesConfig{
-		Sources:       []*MarketSource{defaultSource, localSource},
-		DefaultSource: "Official-Market-Sources",
+		Sources:       []*MarketSource{defaultSource, localSource, studioSource, cliSource},
+		DefaultSource: "market.olares",
 		UpdatedAt:     time.Now(),
 	}
 }
@@ -303,9 +326,50 @@ func (sm *SettingsManager) GetDefaultMarketSource() *MarketSource {
 	return nil
 }
 
-// GetMarketSource gets a single market source (for API compatibility)
-func (sm *SettingsManager) GetMarketSource() *MarketSource {
-	return sm.GetDefaultMarketSource()
+// GetMarketSource gets market sources from chart repository service (for API compatibility)
+func (sm *SettingsManager) GetMarketSource() []*MarketSource {
+	// Get chart repository service host from environment variable
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, falling back to default market sources")
+		// Return default market sources as fallback
+		defaultSource := sm.GetDefaultMarketSource()
+		if defaultSource != nil {
+			return []*MarketSource{defaultSource}
+		}
+		return nil
+	}
+
+	// Get market sources from chart repository service
+	chartRepoConfig, err := getMarketSourceFromChartRepo(chartRepoHost)
+	if err != nil {
+		log.Printf("Failed to get market sources from chart repo: %v, falling back to default market sources", err)
+		// Return default market sources as fallback
+		defaultSource := sm.GetDefaultMarketSource()
+		if defaultSource != nil {
+			return []*MarketSource{defaultSource}
+		}
+		return nil
+	}
+
+	// Convert all ChartRepoMarketSource to MarketSource
+	var marketSources []*MarketSource
+	for _, chartRepoSource := range chartRepoConfig.Sources {
+		marketSource := &MarketSource{
+			ID:          chartRepoSource.ID,
+			Name:        chartRepoSource.Name,
+			Type:        chartRepoSource.Type,
+			BaseURL:     chartRepoSource.BaseURL,
+			Priority:    chartRepoSource.Priority,
+			IsActive:    chartRepoSource.IsActive,
+			UpdatedAt:   chartRepoSource.UpdatedAt,
+			Description: chartRepoSource.Description,
+		}
+		marketSources = append(marketSources, marketSource)
+	}
+
+	log.Printf("Retrieved %d market sources from chart repository service", len(marketSources))
+	return marketSources
 }
 
 // DeleteMarketSource removes a market source from the configuration by ID
@@ -492,6 +556,11 @@ func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) err
 
 // loadMarketSourcesFromRedis loads market sources from Redis
 func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, error) {
+
+	if utils.IsPublicEnvironment() {
+		return nil, fmt.Errorf("in public environment, no need to load market sources from Redis")
+	}
+
 	data, err := sm.redisClient.Get(RedisKeyMarketSources)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get market sources from Redis: %w", err)
@@ -511,6 +580,11 @@ func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, e
 
 // saveMarketSourcesToRedis saves market sources to Redis
 func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig) error {
+
+	if utils.IsPublicEnvironment() {
+		return nil
+	}
+
 	data, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal market sources config: %w", err)
@@ -521,6 +595,11 @@ func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig)
 
 // loadAPIEndpointsFromRedis loads API endpoints from Redis
 func (sm *SettingsManager) loadAPIEndpointsFromRedis() (*APIEndpointsConfig, error) {
+
+	if utils.IsPublicEnvironment() {
+		return nil, fmt.Errorf("in public environment, no need to load API endpoints from Redis")
+	}
+
 	data, err := sm.redisClient.Get(RedisKeyAPIEndpoints)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get API endpoints from Redis: %w", err)
@@ -540,6 +619,11 @@ func (sm *SettingsManager) loadAPIEndpointsFromRedis() (*APIEndpointsConfig, err
 
 // saveAPIEndpointsToRedis saves API endpoints to Redis
 func (sm *SettingsManager) saveAPIEndpointsToRedis(config *APIEndpointsConfig) error {
+
+	if utils.IsPublicEnvironment() {
+		return nil
+	}
+
 	data, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal API endpoints config: %w", err)

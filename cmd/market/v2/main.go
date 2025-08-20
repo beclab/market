@@ -93,9 +93,12 @@ func main() {
 		log.Fatalf("Invalid REDIS_DB value: %v", err)
 	}
 
-	redisClient, err := settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
-	if err != nil {
-		log.Fatalf("Failed to create Redis client: %v", err)
+	var redisClient settings.RedisClient
+	if !utils.IsPublicEnvironment() {
+		redisClient, err = settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
+		if err != nil {
+			log.Fatalf("Failed to create Redis client: %v", err)
+		}
 	}
 
 	// utils.SetRedisClient(redisClient.GetRawClient())
@@ -114,19 +117,22 @@ func main() {
 		extractedUsers := utils.GetExtractedUsers()
 		allUserAppStateData := utils.GetAllUserAppStateData()
 
-		userCount := len(extractedUsers)
-		appCount := 0
-		for _, sourceData := range allUserAppStateData {
-			for _, appList := range sourceData {
-				appCount += len(appList)
-			}
-		}
+		if !utils.IsPublicEnvironment() {
 
-		if userCount == 0 || appCount == 0 {
-			log.Printf("App service data not ready: user count = %d, app count = %d", userCount, appCount)
-			log.Println("Retrying in 10 seconds...")
-			time.Sleep(10 * time.Second)
-			continue
+			userCount := len(extractedUsers)
+			appCount := 0
+			for _, sourceData := range allUserAppStateData {
+				for _, appList := range sourceData {
+					appCount += len(appList)
+				}
+			}
+
+			if userCount == 0 || appCount == 0 {
+				log.Printf("App service data not ready: user count = %d, app count = %d", userCount, appCount)
+				log.Println("Retrying in 10 seconds...")
+				time.Sleep(10 * time.Second)
+				continue
+			}
 		}
 
 		log.Println("App service data setup completed successfully")
@@ -154,6 +160,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create AppInfo module: %v", err)
 	}
+
+	// Set the settings manager for AppInfo module to use
+	appInfoModule.SetSettingsManager(settingsManager)
 
 	if err := appInfoModule.Start(); err != nil {
 		log.Fatalf("Failed to start AppInfo module: %v", err)
@@ -195,36 +204,41 @@ func main() {
 	hydrator := appInfoModule.GetHydrator()
 	log.Printf("Hydrator obtained successfully: %v", hydrator != nil)
 
-	// 2. Initialize History Module
-	historyModule, err := history.NewHistoryModule()
-	if err != nil {
-		log.Fatalf("Failed to create History module: %v", err)
+	var taskModule *task.TaskModule
+	var historyModule *history.HistoryModule
+	if !utils.IsPublicEnvironment() {
+		// 2. Initialize History Module
+		historyModule, err = history.NewHistoryModule()
+		if err != nil {
+			log.Fatalf("Failed to create History module: %v", err)
+		}
+		log.Println("History module started successfully")
+
+		// 3. Initialize Task Module
+		taskModule = task.NewTaskModule()
+		// Set history module reference for task recording
+		taskModule.SetHistoryModule(historyModule)
+
+		// Set data sender from AppInfo module for system notifications
+		dataSender := appInfoModule.GetDataSender()
+		if dataSender != nil {
+			taskModule.SetDataSender(dataSender)
+			log.Println("Data sender set in Task module successfully")
+		} else {
+			log.Println("Warning: Data sender not available from AppInfo module, Task module will run without system notifications")
+		}
+
+		log.Println("Task module started successfully")
+
+		// Set task module reference in AppInfo module
+		appInfoModule.SetTaskModule(taskModule)
+		log.Println("Task module reference set in AppInfo module")
+
+		// Set history module reference in AppInfo module
+		appInfoModule.SetHistoryModule(historyModule)
+		log.Println("History module reference set in AppInfo module")
+
 	}
-	log.Println("History module started successfully")
-
-	// 3. Initialize Task Module
-	taskModule := task.NewTaskModule()
-	// Set history module reference for task recording
-	taskModule.SetHistoryModule(historyModule)
-
-	// Set data sender from AppInfo module for system notifications
-	dataSender := appInfoModule.GetDataSender()
-	if dataSender != nil {
-		taskModule.SetDataSender(dataSender)
-		log.Println("Data sender set in Task module successfully")
-	} else {
-		log.Println("Warning: Data sender not available from AppInfo module, Task module will run without system notifications")
-	}
-
-	log.Println("Task module started successfully")
-
-	// Set task module reference in AppInfo module
-	appInfoModule.SetTaskModule(taskModule)
-	log.Println("Task module reference set in AppInfo module")
-
-	// Set history module reference in AppInfo module
-	appInfoModule.SetHistoryModule(historyModule)
-	log.Println("History module reference set in AppInfo module")
 
 	// Create and start the HTTP server
 	log.Printf("Preparing to create HTTP server...")
@@ -238,7 +252,7 @@ func main() {
 
 	server := api.NewServer("8080", cacheManager, hydrator, taskModule, historyModule)
 	log.Printf("HTTP server instance created successfully")
-	log.Printf("Task module instance ID: %s", taskModule.GetInstanceID())
+	// log.Printf("Task module instance ID: %s", taskModule.GetInstanceID())
 
 	// Lock to system thread
 	runtime.LockOSThread()
@@ -279,21 +293,23 @@ func main() {
 	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
 
-	// Add history record for successful market setup
-	log.Println("Recording market setup completion in history...")
-	historyRecord := &history.HistoryRecord{
-		Type:     history.TypeSystem,
-		Message:  "market setup finished",
-		Time:     time.Now().Unix(),
-		App:      "market",
-		Account:  "system",
-		Extended: "",
-	}
+	if !utils.IsPublicEnvironment() {
+		// Add history record for successful market setup
+		log.Println("Recording market setup completion in history...")
+		historyRecord := &history.HistoryRecord{
+			Type:     history.TypeSystem,
+			Message:  "market setup finished",
+			Time:     time.Now().Unix(),
+			App:      "market",
+			Account:  "system",
+			Extended: "",
+		}
 
-	if err := historyModule.StoreRecord(historyRecord); err != nil {
-		log.Printf("Warning: Failed to record market setup completion: %v", err)
-	} else {
-		log.Printf("Successfully recorded market setup completion with ID: %d", historyRecord.ID)
+		if err := historyModule.StoreRecord(historyRecord); err != nil {
+			log.Printf("Warning: Failed to record market setup completion: %v", err)
+		} else {
+			log.Printf("Successfully recorded market setup completion with ID: %d", historyRecord.ID)
+		}
 	}
 
 	log.Println("")
@@ -353,8 +369,13 @@ func main() {
 		}
 
 		log.Println("Stopping Settings module...")
-		if err := redisClient.Close(); err != nil {
-			log.Printf("Error stopping Redis client: %v", err)
+		if redisClient != nil {
+			// Type assert to access Close method
+			if closer, ok := redisClient.(interface{ Close() error }); ok {
+				if err := closer.Close(); err != nil {
+					log.Printf("Error stopping Redis client: %v", err)
+				}
+			}
 		}
 
 		log.Println("Note: Helm Repository server will stop automatically when main process exits")

@@ -34,6 +34,11 @@ func (s *TaskForApiStep) GetStepName() string {
 }
 
 func (s *TaskForApiStep) CanSkip(ctx context.Context, task *HydrationTask) bool {
+
+	// if utils.IsPublicEnvironment() {
+	// 	return true
+	// }
+
 	return false
 }
 

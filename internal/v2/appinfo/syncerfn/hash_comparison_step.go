@@ -117,7 +117,7 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSo
 	}
 
 	// Use market source name as source ID to match syncer.go behavior
-	sourceID := marketSource.Name
+	sourceID := marketSource.ID
 
 	cache.Mutex.RLock()
 	defer cache.Mutex.RUnlock()

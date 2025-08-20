@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"market/internal/v2/utils"
 	"os"
 	"strconv"
 	"time"
@@ -64,6 +65,11 @@ type HistoryModule struct {
 
 // NewHistoryModule creates a new history module instance
 func NewHistoryModule() (*HistoryModule, error) {
+
+	if utils.IsPublicEnvironment() {
+		return nil, fmt.Errorf("in public environment, no need to load history module")
+	}
+
 	// Get database configuration from environment variables
 	dbHost := os.Getenv("POSTGRES_HOST")
 	if dbHost == "" {

@@ -35,6 +35,10 @@ func isPublicEnv() bool {
 
 // GetUserInfoFromRequest extracts username from request
 func GetUserInfoFromRequest(req *restful.Request) (string, error) {
+	if IsPublicEnvironment() {
+		return "admin", nil
+	}
+
 	// Check if it's development environment, return admin user directly
 	if IsDevelopmentEnvironment() {
 		glog.Infof("Development environment detected, returning admin username")

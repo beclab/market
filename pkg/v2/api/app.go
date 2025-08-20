@@ -432,7 +432,7 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 	// Step 7: Get source ID from form or use default
 	sourceID := r.FormValue("source")
 	if sourceID == "" {
-		sourceID = "local" // Default source for uploaded packages
+		sourceID = "upload" // Default source for uploaded packages
 	}
 
 	// Step 8: Get token for validation
@@ -1159,6 +1159,7 @@ func (s *Server) createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfo
 		"options":        entry.Options,
 		"entrances":      entry.Entrances,
 		"versionHistory": entry.VersionHistory,
+		"subCharts":      entry.SubCharts,
 	}
 }
 
@@ -1469,7 +1470,7 @@ type DeleteLocalAppRequest struct {
 
 // deleteLocalApp handles DELETE /api/v2/apps/delete
 func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
-	log.Println("DELETE /api/v2/apps/delete - Deleting local source application")
+	log.Println("DELETE /api/v2/apps/delete - Deleting upload source application")
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
@@ -1522,7 +1523,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Received delete request for app: %s, version: %s from user: %s", request.AppName, request.AppVersion, userID)
 
-	// Step 5: Check if app exists in local source
+	// Step 5: Check if app exists in upload source
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
 		log.Printf("User data not found for user: %s", userID)
@@ -1530,10 +1531,10 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sourceData, exists := userData.Sources["local"]
+	sourceData, exists := userData.Sources["upload"]
 	if !exists {
-		log.Printf("Local source not found for user: %s", userID)
-		s.sendResponse(w, http.StatusNotFound, false, "Local source not found", nil)
+		log.Printf("upload source not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "upload source not found", nil)
 		return
 	}
 
@@ -1571,8 +1572,8 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !appExists {
-		log.Printf("App %s version %s not found in local source for user: %s", request.AppName, request.AppVersion, userID)
-		s.sendResponse(w, http.StatusNotFound, false, "App not found in local source", nil)
+		log.Printf("App %s version %s not found in upload source for user: %s", request.AppName, request.AppVersion, userID)
+		s.sendResponse(w, http.StatusNotFound, false, "App not found in upload source", nil)
 		return
 	}
 
@@ -1588,13 +1589,13 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 8: Remove app from AppStateLatest
-	if err := s.cacheManager.RemoveAppStateData(userID, "local", request.AppName); err != nil {
+	if err := s.cacheManager.RemoveAppStateData(userID, "upload", request.AppName); err != nil {
 		log.Printf("Failed to remove app from AppStateLatest: %v", err)
 		// Continue with deletion even if app state doesn't exist
 	}
 
 	// Step 9: Remove app from AppInfoLatest
-	if err := s.cacheManager.RemoveAppInfoLatestData(userID, "local", request.AppName); err != nil {
+	if err := s.cacheManager.RemoveAppInfoLatestData(userID, "upload", request.AppName); err != nil {
 		log.Printf("Failed to remove app from AppInfoLatest: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to remove app from cache", nil)
 		return
@@ -1614,7 +1615,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 			Extensions: map[string]string{
 				"app_name":    request.AppName,
 				"app_version": request.AppVersion,
-				"source":      "local",
+				"source":      "upload",
 			},
 		}
 
@@ -1627,16 +1628,16 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		dataSender.Close()
 	}
 
-	log.Printf("Successfully deleted app: %s version: %s from local source for user: %s", request.AppName, request.AppVersion, userID)
+	log.Printf("Successfully deleted app: %s version: %s from upload source for user: %s", request.AppName, request.AppVersion, userID)
 
 	// Step 11: Prepare response
 	responseData := map[string]interface{}{
 		"app_name":    request.AppName,
 		"app_version": request.AppVersion,
 		"user_id":     userID,
-		"source":      "local",
+		"source":      "upload",
 		"deleted_at":  time.Now().Unix(),
 	}
 
-	s.sendResponse(w, http.StatusOK, true, "App deleted successfully from local source", responseData)
+	s.sendResponse(w, http.StatusOK, true, "App deleted successfully from upload source", responseData)
 }

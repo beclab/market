@@ -564,6 +564,11 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				glog.Infof("Successfully removed disappeared app %s from cache (user: %s, source: %s)",
 					change.AppName, change.UserID, change.SourceID)
 			}
+			if scc.taskModule != nil {
+				if err := scc.taskModule.UninstallTaskSucceed("", change.AppName, change.UserID); err != nil {
+					glog.Warningf("Failed to mark uninstall task as succeeded for app %s (user: %s): %v", change.AppName, change.UserID, err)
+				}
+			}
 
 		case "app_appeared":
 			var appToUpdate *utils.AppServiceResponse
@@ -614,17 +619,13 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					}
 				}
 			}
-			// 2. Check taskModule
-			// if sourceID == "" && scc.taskModule != nil {
-			// 	_, src, found := scc.taskModule.GetLatestTaskByAppNameAndUser(change.AppName, change.UserID)
-			// 	if found && src != "" {
-			// 		sourceID = src
-			// 	}
-			// }
-			// 3. Fallback
-			// if sourceID == "" {
-			// 	sourceID = "Official-Market-Sources"
-			// }
+
+			if scc.taskModule != nil {
+				if err := scc.taskModule.InstallTaskSucceed("", change.AppName, change.UserID); err != nil {
+					glog.Warningf("Failed to mark install task as succeeded for app %s (user: %s): %v", change.AppName, change.UserID, err)
+				}
+			}
+
 			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
 				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)

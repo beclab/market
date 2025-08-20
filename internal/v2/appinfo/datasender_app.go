@@ -38,6 +38,11 @@ func NewDataSender() (*DataSender, error) {
 		return &DataSender{enabled: false}, nil
 	}
 
+	if utils.IsPublicEnvironment() {
+		log.Println("Public environment detected, NATS data sender disabled")
+		return &DataSender{enabled: false}, nil
+	}
+
 	config := loadConfig()
 
 	// Build NATS connection URL

@@ -83,9 +83,8 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	// If app source is "local", use "custom" for API
 	// Otherwise, use "market" for API
 	var apiSource string
-	if appSource == "local" {
+	if appSource == "upload" {
 		apiSource = "custom"
-		appSource = "market-local"
 	} else {
 		apiSource = "market"
 	}

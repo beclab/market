@@ -95,7 +95,7 @@ func (s *Server) getMarketSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Market source configuration retrieved: %s", config.BaseURL)
+	log.Printf("Market source configuration retrieved: %s", config)
 	s.sendResponse(w, http.StatusOK, true, "Market source configuration retrieved successfully", config)
 }
 
@@ -141,6 +141,7 @@ func (s *Server) addMarketSource(w http.ResponseWriter, r *http.Request) {
 		Type:        req.Type,
 		BaseURL:     req.BaseURL,
 		Description: req.Description,
+		IsActive:    true,
 	}
 
 	if err := settingsManager.AddMarketSource(source); err != nil {
