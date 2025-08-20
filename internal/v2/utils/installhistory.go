@@ -59,9 +59,5 @@ func GetAppInfoFromDownloadRecord(userID, appName string) (string, string, error
 		return "", "", fmt.Errorf("version or source not found in response")
 	}
 
-	if source == "market-local" {
-		source = "local"
-	}
-
 	return version, source, nil
 }

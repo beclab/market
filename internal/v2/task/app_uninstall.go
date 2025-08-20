@@ -1,6 +1,7 @@
 package task
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,6 +26,13 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 	if !ok {
 		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
 		cfgType = "app" // Default to app type
+	}
+
+	// Get all parameter from metadata
+	all, ok := task.Metadata["all"].(bool)
+	if !ok {
+		log.Printf("Missing all parameter in task metadata for task: %s, using default false", task.ID)
+		all = false // Default to false
 	}
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
@@ -55,8 +63,15 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	log.Printf("Sending HTTP request for app uninstallation: task=%s", task.ID)
-	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, nil)
+	log.Printf("Sending HTTP request for app uninstallation: task=%s, all=%v", task.ID, all)
+
+	// Create request body with all parameter
+	requestBody := map[string]interface{}{
+		"all": all,
+	}
+	requestBodyBytes, _ := json.Marshal(requestBody)
+
+	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, bytes.NewReader(requestBodyBytes))
 	if err != nil {
 		log.Printf("HTTP request failed for app uninstallation: task=%s, error=%v", task.ID, err)
 		// Create detailed error result
@@ -65,6 +80,7 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 			"app_name":  appName,
 			"user":      task.User,
 			"cfgType":   cfgType,
+			"all":       all,
 			"url":       urlStr,
 			"error":     err.Error(),
 			"status":    "failed",
@@ -103,6 +119,7 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		"app_name":  appName,
 		"user":      task.User,
 		"cfgType":   cfgType,
+		"all":       all,
 		"url":       urlStr,
 		"response":  response,
 		"opID":      task.OpID, // Include opID in result

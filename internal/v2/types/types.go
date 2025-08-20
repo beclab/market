@@ -465,7 +465,7 @@ func NewUserData() *UserData {
 	}
 
 	// Create a default local source for the user
-	userData.Sources["local"] = NewSourceDataWithType(SourceDataTypeLocal)
+	userData.Sources["upload"] = NewSourceDataWithType(SourceDataTypeLocal)
 
 	return userData
 }

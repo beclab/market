@@ -150,8 +150,8 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	log.Printf("Base URL after trimming: %s", baseURL)
 
 	defaultSource := &MarketSource{
-		ID:          "Official-Market-Sources",
-		Name:        "Official-Market-Sources",
+		ID:          "market.olares",
+		Name:        "market.olares",
 		Type:        "remote",
 		BaseURL:     baseURL,
 		Priority:    100,
@@ -163,10 +163,32 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	log.Printf("Created default market source with BaseURL: %s", defaultSource.BaseURL)
 
 	localSource := &MarketSource{
-		ID:          "local",
-		Name:        "market-local",
+		ID:          "upload",
+		Name:        "upload",
 		Type:        "local",
-		BaseURL:     "file://", // 本地文件系统
+		BaseURL:     "file://",
+		Priority:    50,
+		IsActive:    true,
+		UpdatedAt:   time.Now(),
+		Description: "Local market source for uploaded apps",
+	}
+
+	studioSource := &MarketSource{
+		ID:          "studio",
+		Name:        "studio",
+		Type:        "local",
+		BaseURL:     "file://",
+		Priority:    50,
+		IsActive:    true,
+		UpdatedAt:   time.Now(),
+		Description: "Local market source for uploaded apps",
+	}
+
+	cliSource := &MarketSource{
+		ID:          "cli",
+		Name:        "cli",
+		Type:        "local",
+		BaseURL:     "file://",
 		Priority:    50,
 		IsActive:    true,
 		UpdatedAt:   time.Now(),
@@ -174,8 +196,8 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	}
 
 	return &MarketSourcesConfig{
-		Sources:       []*MarketSource{defaultSource, localSource},
-		DefaultSource: "Official-Market-Sources",
+		Sources:       []*MarketSource{defaultSource, localSource, studioSource, cliSource},
+		DefaultSource: "market.olares",
 		UpdatedAt:     time.Now(),
 	}
 }

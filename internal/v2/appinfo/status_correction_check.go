@@ -626,10 +626,6 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			// 3. Fallback
-			// if sourceID == "" {
-			// 	sourceID = "Official-Market-Sources"
-			// }
 			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
 				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)

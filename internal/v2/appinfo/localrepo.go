@@ -241,7 +241,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	}
 
 	// Add source field
-	if err := writer.WriteField("source", "market-local"); err != nil {
+	if err := writer.WriteField("source", "upload"); err != nil {
 		return nil, fmt.Errorf("failed to write source field: %w", err)
 	}
 
@@ -317,7 +317,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	}
 
 	// if appDataMap != nil {
-	if err := lr.cacheManager.SetLocalAppData(userID, "local", types.AppInfoLatestPending, latest); err != nil {
+	if err := lr.cacheManager.SetLocalAppData(userID, "upload", types.AppInfoLatestPending, latest); err != nil {
 		log.Printf("Warning: Failed to add app data to cache: %v", err)
 	}
 	// }
@@ -341,7 +341,7 @@ func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string)
 	bodyMap := map[string]string{
 		"app_name":    appName,
 		"app_version": appVersion,
-		"source_id":   "market-local",
+		"source_id":   "upload",
 	}
 	bodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
