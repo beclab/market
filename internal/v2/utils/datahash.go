@@ -438,6 +438,7 @@ func createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfoEntry) map[s
 		"license":        entry.License,
 		"legal":          entry.Legal,
 		"versionHistory": entry.VersionHistory,
+		"subCharts":      entry.SubCharts,
 	}
 }
 

@@ -606,6 +606,7 @@ func (r *RedisClient) createSafeApplicationInfoEntryCopy(entry *types.Applicatio
 		"license":            entry.License,
 		"legal":              entry.Legal,
 		"versionHistory":     entry.VersionHistory,
+		"subCharts":          entry.SubCharts,
 	}
 }
 

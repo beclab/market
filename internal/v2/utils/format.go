@@ -5,6 +5,7 @@ import (
 	"log"
 	"market/internal/v2/types"
 	"reflect"
+	"time"
 )
 
 // convertApplicationInfoEntryToMap converts ApplicationInfoEntry to map for task creation
@@ -193,6 +194,49 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		result["count"] = safeCopyCount(entry.Count)
 		if _, err := json.Marshal(result); err != nil {
 			log.Printf("DEBUG: marshal count: %v", err)
+		}
+	}
+
+	if entry.VersionHistory != nil {
+		safeVersionHistory := make([]map[string]interface{}, 0, len(entry.VersionHistory))
+		for _, versionInfo := range entry.VersionHistory {
+			if versionInfo != nil {
+				versionInfoMap := map[string]interface{}{
+					"appName":            versionInfo.AppName,
+					"version":            versionInfo.Version,
+					"versionName":        versionInfo.VersionName,
+					"upgradeDescription": versionInfo.UpgradeDescription,
+				}
+				if versionInfo.MergedAt != nil {
+					versionInfoMap["mergedAt"] = versionInfo.MergedAt.Format(time.RFC3339)
+				}
+				safeVersionHistory = append(safeVersionHistory, versionInfoMap)
+			}
+		}
+		if len(safeVersionHistory) > 0 {
+			result["versionHistory"] = safeVersionHistory
+			if _, err := json.Marshal(result); err != nil {
+				log.Printf("DEBUG: marshal versionHistory: %v", err)
+			}
+		}
+	}
+
+	if entry.SubCharts != nil {
+		safeSubCharts := make([]map[string]interface{}, 0, len(entry.SubCharts))
+		for _, subChart := range entry.SubCharts {
+			if subChart != nil {
+				subChartMap := map[string]interface{}{
+					"name":   subChart.Name,
+					"shared": subChart.Shared,
+				}
+				safeSubCharts = append(safeSubCharts, subChartMap)
+			}
+		}
+		if len(safeSubCharts) > 0 {
+			result["subCharts"] = safeSubCharts
+			if _, err := json.Marshal(result); err != nil {
+				log.Printf("DEBUG: marshal subCharts: %v", err)
+			}
 		}
 	}
 

@@ -192,6 +192,12 @@ type Values struct {
 	ModifyValue string     `json:"modify_value"` // Modified value
 }
 
+// SubChart represents a sub-chart configuration
+type SubChart struct {
+	Name   string `yaml:"name" json:"name"`
+	Shared bool   `yaml:"shared,omitempty" json:"shared,omitempty"`
+}
+
 // ApplicationInfoEntry represents the structure returned by the applications/info API
 type ApplicationInfoEntry struct {
 	ID string `json:"id"`
@@ -249,6 +255,9 @@ type ApplicationInfoEntry struct {
 
 	// Version history information
 	VersionHistory []*VersionInfo `json:"versionHistory,omitempty"`
+
+	// Sub-charts information
+	SubCharts []*SubChart `json:"subCharts,omitempty"`
 
 	// Legacy fields for backward compatibility
 	Screenshots []string               `json:"screenshots"`
@@ -1107,6 +1116,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 		CreateTime: getCurrentTimestamp(),
 		UpdateTime: getCurrentTimestamp(),
 		Metadata:   make(map[string]interface{}),
+		SubCharts:  make([]*SubChart, 0),
 	}
 
 	// Use the complete field mapping function to ensure no data is lost
@@ -1459,6 +1469,25 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 		}
 	}
 
+	// Sub-charts information
+	if val, ok := sourceData["subCharts"].([]interface{}); ok {
+		entry.SubCharts = make([]*SubChart, len(val))
+		for i, subChart := range val {
+			if subChartMap, ok := subChart.(map[string]interface{}); ok {
+				subChart := &SubChart{}
+
+				if name, ok := subChartMap["name"].(string); ok {
+					subChart.Name = name
+				}
+				if shared, ok := subChartMap["shared"].(bool); ok {
+					subChart.Shared = shared
+				}
+
+				entry.SubCharts[i] = subChart
+			}
+		}
+	}
+
 	// Handle legacy field names for backward compatibility
 	if val, ok := sourceData["app_id"].(string); ok && val != "" && entry.AppID == "" {
 		entry.AppID = val
@@ -1525,6 +1554,7 @@ func NewApplicationInfoEntry(sourceData map[string]interface{}) *ApplicationInfo
 		CreateTime:         getCurrentTimestamp(),
 		UpdateTime:         getCurrentTimestamp(),
 		Metadata:           make(map[string]interface{}),
+		SubCharts:          make([]*SubChart, 0),
 	}
 
 	// Map all fields from source data
@@ -1710,6 +1740,9 @@ func ValidateApplicationInfoEntryFields(entry *ApplicationInfoEntry) map[string]
 
 	// Check version history
 	validation["versionHistory"] = entry.VersionHistory
+
+	// Check sub-charts
+	validation["subCharts"] = entry.SubCharts
 
 	return validation
 }

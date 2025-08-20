@@ -1159,6 +1159,7 @@ func (s *Server) createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfo
 		"options":        entry.Options,
 		"entrances":      entry.Entrances,
 		"versionHistory": entry.VersionHistory,
+		"subCharts":      entry.SubCharts,
 	}
 }
 
