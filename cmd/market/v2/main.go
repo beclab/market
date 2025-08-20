@@ -205,14 +205,14 @@ func main() {
 	var historyModule *history.HistoryModule
 	if !utils.IsPublicEnvironment() {
 		// 2. Initialize History Module
-		historyModule, err := history.NewHistoryModule()
+		historyModule, err = history.NewHistoryModule()
 		if err != nil {
 			log.Fatalf("Failed to create History module: %v", err)
 		}
 		log.Println("History module started successfully")
 
 		// 3. Initialize Task Module
-		taskModule := task.NewTaskModule()
+		taskModule = task.NewTaskModule()
 		// Set history module reference for task recording
 		taskModule.SetHistoryModule(historyModule)
 
