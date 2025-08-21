@@ -64,6 +64,12 @@ type FilteredSourceData struct {
 	Others         *types.Others                `json:"others,omitempty"`
 }
 
+// FilteredSourceDataForState represents filtered source data for state endpoint (only AppStateLatest)
+type FilteredSourceDataForState struct {
+	Type           types.SourceDataType        `json:"type"`
+	AppStateLatest []*types.AppStateLatestData `json:"app_state_latest"`
+}
+
 // FilteredAppInfoLatestData contains only AppSimpleInfo from AppInfoLatestData
 type FilteredAppInfoLatestData struct {
 	Type          types.AppDataType    `json:"type"`
@@ -78,11 +84,24 @@ type FilteredUserData struct {
 	Hash    string                         `json:"hash"`
 }
 
+// FilteredUserDataForState represents filtered user data for state endpoint (only AppStateLatest)
+type FilteredUserDataForState struct {
+	Sources map[string]*FilteredSourceDataForState `json:"sources"`
+	Hash    string                                 `json:"hash"`
+}
+
 // MarketDataResponse represents the response structure for market data
 type MarketDataResponse struct {
 	UserData  *FilteredUserData `json:"user_data"`
 	UserID    string            `json:"user_id"`
 	Timestamp int64             `json:"timestamp"`
+}
+
+// MarketStateResponse represents the response structure for market state (only AppStateLatest)
+type MarketStateResponse struct {
+	UserData  *FilteredUserDataForState `json:"user_data"`
+	UserID    string                    `json:"user_id"`
+	Timestamp int64                     `json:"timestamp"`
 }
 
 // 1. Get market information
@@ -645,6 +664,112 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Get market state information (only AppStateLatest data)
+func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
+	requestStart := time.Now()
+	log.Printf("GET /api/v2/market/state - Getting market state, request start: %v", requestStart)
+
+	// Add timeout context
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	// Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Println("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Convert http.Request to restful.Request to reuse utils functions
+	restfulReq := s.httpToRestfulRequest(r)
+
+	// Get user information from request using utils module
+	authStart := time.Now()
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
+
+	// Create a channel to receive the result
+	type result struct {
+		data MarketStateResponse
+		err  error
+	}
+	resultChan := make(chan result, 1)
+
+	// Run the data retrieval in a goroutine
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in getMarketState: %v", r)
+				resultChan <- result{err: fmt.Errorf("internal error occurred")}
+			}
+		}()
+
+		// Get user data from cache with timeout check
+		start := time.Now()
+		userData := s.cacheManager.GetUserData(userID)
+		if userData == nil {
+			log.Printf("User data not found for user: %s", userID)
+			resultChan <- result{err: fmt.Errorf("user data not found")}
+			return
+		}
+		log.Printf("GetUserData took %v for user: %s", time.Since(start), userID)
+
+		// Check if we're still within timeout before filtering
+		select {
+		case <-ctx.Done():
+			log.Printf("Context cancelled during user data retrieval for user: %s", userID)
+			resultChan <- result{err: fmt.Errorf("request cancelled")}
+			return
+		default:
+		}
+
+		// Filter the user data to include only AppStateLatest fields with timeout
+		filterStart := time.Now()
+		filteredUserData := s.filterUserDataForStateWithTimeout(ctx, userData)
+		if filteredUserData == nil {
+			log.Printf("Data filtering timed out or failed for user: %s", userID)
+			resultChan <- result{err: fmt.Errorf("data filtering timeout")}
+			return
+		}
+		log.Printf("Data filtering took %v for user: %s", time.Since(filterStart), userID)
+
+		// Prepare response data
+		responseData := MarketStateResponse{
+			UserData:  filteredUserData,
+			UserID:    userID,
+			Timestamp: time.Now().Unix(),
+		}
+
+		resultChan <- result{data: responseData}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case <-ctx.Done():
+		log.Printf("Request timeout or cancelled for /api/v2/market/state")
+		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
+		return
+	case res := <-resultChan:
+		if res.err != nil {
+			log.Printf("Error retrieving market state: %v", res.err)
+			if res.err.Error() == "user data not found" {
+				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+			} else {
+				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market state", nil)
+			}
+			return
+		}
+
+		log.Printf("Market state retrieved successfully for user: %s", userID)
+		s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", res.data)
+	}
+}
+
 // Get market data information
 func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 	requestStart := time.Now()
@@ -853,6 +978,63 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 				filteredSourceData.AppInfoLatest = append(filteredSourceData.AppInfoLatest, filteredAppInfo)
 			}
 		}
+	}
+
+	return filteredSourceData
+}
+
+// filterUserDataForStateWithTimeout filters user data to include only AppStateLatest fields with timeout
+func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData *types.UserData) *FilteredUserDataForState {
+	if userData == nil {
+		return nil
+	}
+
+	log.Printf("DEBUG: Starting filterUserDataForStateWithTimeout with single global lock approach")
+
+	// Use single lock for all data access to avoid deadlocks
+	filteredUserData := &FilteredUserDataForState{
+		Sources: make(map[string]*FilteredSourceDataForState),
+		Hash:    userData.Hash,
+	}
+
+	// Check timeout
+	select {
+	case <-ctx.Done():
+		log.Printf("Context cancelled before data processing")
+		return nil
+	default:
+	}
+
+	// Process each source in the user data
+	for sourceID, sourceData := range userData.Sources {
+		// Check timeout
+		select {
+		case <-ctx.Done():
+			log.Printf("Context cancelled during source processing: %s", sourceID)
+			return nil
+		default:
+		}
+
+		// Convert data directly without additional locks
+		filteredSourceData := s.convertSourceDataToFilteredForState(sourceData)
+		if filteredSourceData != nil {
+			filteredUserData.Sources[sourceID] = filteredSourceData
+		}
+	}
+
+	log.Printf("DEBUG: Completed filterUserDataForStateWithTimeout with %d sources processed", len(filteredUserData.Sources))
+	return filteredUserData
+}
+
+// convertSourceDataToFilteredForState converts source data to filtered format for state endpoint (only AppStateLatest)
+func (s *Server) convertSourceDataToFilteredForState(sourceData *types.SourceData) *FilteredSourceDataForState {
+	if sourceData == nil {
+		return nil
+	}
+
+	filteredSourceData := &FilteredSourceDataForState{
+		Type:           sourceData.Type,
+		AppStateLatest: sourceData.AppStateLatest,
 	}
 
 	return filteredSourceData
