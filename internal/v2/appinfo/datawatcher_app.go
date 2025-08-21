@@ -615,19 +615,27 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 				}
 
 				if existingIndex >= 0 {
+
+					if latestData.AppInfo.AppEntry.Version != sourceData.AppInfoLatest[existingIndex].AppInfo.AppEntry.Version {
+						// Send system notification for new app ready
+						dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
+						glog.Infof("DataWatcher: Sent system notification for new app ready: %s", appName)
+					}
+
 					// Replace existing app with same name
 					sourceData.AppInfoLatest[existingIndex] = latestData
 					glog.Infof("DataWatcher: Replaced existing app with same name: %s (index: %d)", appName, existingIndex)
+
 				} else {
 					// Add new app if no existing app with same name
 					sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
 					glog.Infof("DataWatcher: Added new app to latest: %s", appName)
+					// Send system notification for new app ready
+					dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
 				}
 
 				movedCount++
 
-				// Send system notification for new app ready
-				dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
 			}
 		}
 
