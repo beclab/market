@@ -1337,12 +1337,138 @@ func (s *Server) createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfo
 		"screenshots":        entry.Screenshots,
 		"tags":               entry.Tags,
 		"updated_at":         entry.UpdatedAt,
-		// Skip complex interface{} fields that might cause cycles
-		// "supportClient", "permission", "middleware", "license", "legal", "i18n", "count", "metadata"
+		// Add back previously excluded fields with safe conversion
+		"supportClient":  s.createSafeSupportClientCopy(entry.SupportClient),
+		"permission":     s.createSafePermissionCopy(entry.Permission),
+		"middleware":     s.createSafeMiddlewareCopy(entry.Middleware),
+		"license":        entry.License,
+		"legal":          entry.Legal,
+		"i18n":           s.createSafeI18nCopy(entry.I18n),
+		"count":          entry.Count,
+		"metadata":       s.createSafeMetadataCopy(entry.Metadata),
 		"options":        entry.Options,
 		"entrances":      entry.Entrances,
 		"versionHistory": entry.VersionHistory,
 		"subCharts":      entry.SubCharts,
+	}
+}
+
+// createSafeSupportClientCopy creates a safe copy of SupportClient to avoid circular references
+func (s *Server) createSafeSupportClientCopy(sc interface{}) interface{} {
+	if sc == nil {
+		return nil
+	}
+
+	switch v := sc.(type) {
+	case map[string]interface{}:
+		// Create safe copy
+		safeCopy := make(map[string]interface{})
+		for k, v2 := range v {
+			if v2 != nil {
+				safeCopy[k] = v2
+			}
+		}
+		return safeCopy
+	case map[string]string:
+		// If it's map[string]string, return directly
+		return v
+	default:
+		log.Printf("WARNING: SupportClient has unexpected type: %T", sc)
+		return nil
+	}
+}
+
+// createSafePermissionCopy creates a safe copy of Permission to avoid circular references
+func (s *Server) createSafePermissionCopy(perm interface{}) interface{} {
+	if perm == nil {
+		return nil
+	}
+
+	switch v := perm.(type) {
+	case map[string]interface{}:
+		// Create safe copy
+		safeCopy := make(map[string]interface{})
+		for k, v2 := range v {
+			if v2 != nil {
+				safeCopy[k] = v2
+			}
+		}
+		return safeCopy
+	default:
+		log.Printf("WARNING: Permission has unexpected type: %T", perm)
+		return nil
+	}
+}
+
+// createSafeMiddlewareCopy creates a safe copy of Middleware to avoid circular references
+func (s *Server) createSafeMiddlewareCopy(mw interface{}) interface{} {
+	if mw == nil {
+		return nil
+	}
+
+	switch v := mw.(type) {
+	case map[string]interface{}:
+		// Create safe copy
+		safeCopy := make(map[string]interface{})
+		for k, v2 := range v {
+			if v2 != nil {
+				safeCopy[k] = v2
+			}
+		}
+		return safeCopy
+	default:
+		log.Printf("WARNING: Middleware has unexpected type: %T", mw)
+		return nil
+	}
+}
+
+// createSafeI18nCopy creates a safe copy of I18n to avoid circular references
+func (s *Server) createSafeI18nCopy(i18n interface{}) interface{} {
+	if i18n == nil {
+		return nil
+	}
+
+	switch v := i18n.(type) {
+	case map[string]interface{}:
+		// Create safe copy
+		safeCopy := make(map[string]interface{})
+		for k, v2 := range v {
+			if v2 != nil {
+				safeCopy[k] = v2
+			}
+		}
+		return safeCopy
+	default:
+		log.Printf("WARNING: I18n has unexpected type: %T", i18n)
+		return nil
+	}
+}
+
+// createSafeMetadataCopy creates a safe copy of Metadata to avoid circular references
+func (s *Server) createSafeMetadataCopy(metadata interface{}) interface{} {
+	if metadata == nil {
+		return nil
+	}
+
+	switch v := metadata.(type) {
+	case map[string]interface{}:
+		// Create safe copy, excluding potential circular reference keys
+		safeCopy := make(map[string]interface{})
+		for k, v2 := range v {
+			// Skip potential circular reference keys
+			if k == "source_data" || k == "raw_data" || k == "app_info" ||
+				k == "parent" || k == "self" || k == "circular_ref" ||
+				k == "back_ref" || k == "loop" {
+				continue
+			}
+			if v2 != nil {
+				safeCopy[k] = v2
+			}
+		}
+		return safeCopy
+	default:
+		log.Printf("WARNING: Metadata has unexpected type: %T", metadata)
+		return nil
 	}
 }
 

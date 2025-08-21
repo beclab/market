@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -612,7 +613,37 @@ func (r *RedisClient) createSafeApplicationInfoEntryCopy(entry *types.Applicatio
 }
 
 func convertToStringMapDB(val interface{}) map[string]interface{} {
-	return convertToStringMapDBWithVisited(val, make(map[uintptr]bool))
+	if val == nil {
+		return nil
+	}
+
+	result := convertToStringMapDBWithVisited(val, make(map[uintptr]bool))
+
+	// If conversion failed, try simple type conversion
+	if result == nil {
+		log.Printf("WARNING: convertToStringMapDB returned nil, attempting simple conversion")
+		switch v := val.(type) {
+		case map[string]interface{}:
+			// Create shallow copy
+			simpleCopy := make(map[string]interface{})
+			for k, v2 := range v {
+				simpleCopy[k] = v2
+			}
+			return simpleCopy
+		case map[string]string:
+			// Convert to map[string]interface{}
+			converted := make(map[string]interface{})
+			for k, v2 := range v {
+				converted[k] = v2
+			}
+			return converted
+		default:
+			log.Printf("ERROR: Cannot convert supportClient type: %T", val)
+			return nil
+		}
+	}
+
+	return result
 }
 
 func convertToStringMapDBWithVisited(val interface{}, visited map[uintptr]bool) map[string]interface{} {

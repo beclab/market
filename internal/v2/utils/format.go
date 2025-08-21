@@ -112,7 +112,16 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 	}
 
 	if entry.SupportClient != nil {
-		result["supportClient"] = deepSafeCopy(entry.SupportClient)
+		copied := deepSafeCopy(entry.SupportClient)
+		if copied == nil {
+			log.Printf("WARNING: supportClient deep copy failed, using shallow copy")
+			// Use shallow copy as fallback
+			copied = make(map[string]interface{})
+			for k, v := range entry.SupportClient {
+				copied[k] = v
+			}
+		}
+		result["supportClient"] = copied
 		if _, err := json.Marshal(result); err != nil {
 			log.Printf("DEBUG: marshal supportClient: %v", err)
 		}

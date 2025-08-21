@@ -1384,8 +1384,38 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 	}
 
 	// Interface{} fields (complex objects)
-	if val, ok := sourceData["supportClient"].(map[string]interface{}); ok {
-		entry.SupportClient = val
+	if val, ok := sourceData["supportClient"]; ok {
+		switch v := val.(type) {
+		case map[string]interface{}:
+			entry.SupportClient = v
+			log.Printf("DEBUG: Successfully mapped supportClient from map[string]interface{}")
+		case map[interface{}]interface{}:
+			// Convert map[interface{}]interface{} to map[string]interface{}
+			converted := make(map[string]interface{})
+			for k, v2 := range v {
+				if ks, ok := k.(string); ok {
+					converted[ks] = v2
+				} else {
+					log.Printf("WARNING: supportClient key is not string: %T", k)
+				}
+			}
+			entry.SupportClient = converted
+			log.Printf("DEBUG: Converted supportClient from map[interface{}]interface{}")
+		case map[string]string:
+			// If it's map[string]string, convert to map[string]interface{}
+			converted := make(map[string]interface{})
+			for k, v2 := range v {
+				converted[k] = v2
+			}
+			entry.SupportClient = converted
+			log.Printf("DEBUG: Converted supportClient from map[string]string")
+		default:
+			log.Printf("ERROR: supportClient has unexpected type: %T, value: %v", val, val)
+			// Try to create empty structure
+			entry.SupportClient = make(map[string]interface{})
+		}
+	} else {
+		log.Printf("DEBUG: supportClient field not found in source data")
 	}
 	if val, ok := sourceData["permission"].(map[string]interface{}); ok {
 		entry.Permission = val
@@ -1473,7 +1503,7 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 		}
 	}
 
-	// Sub-charts information
+	// Check sub-charts information
 	if val, ok := sourceData["subCharts"].([]interface{}); ok {
 		entry.SubCharts = make([]*SubChart, len(val))
 		for i, subChart := range val {
@@ -1492,16 +1522,8 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 		}
 	}
 
-	// Handle legacy field names for backward compatibility
-	if val, ok := sourceData["app_id"].(string); ok && val != "" && entry.AppID == "" {
-		entry.AppID = val
-	}
-	if val, ok := sourceData["app_name"].(string); ok && val != "" && entry.Name == "" {
-		entry.Name = val
-	}
-	if val, ok := sourceData["app_version"].(string); ok && val != "" && entry.Version == "" {
-		entry.Version = val
-	}
+	// Validate and fix SupportClient data after mapping
+	ValidateAndFixSupportClient(sourceData, entry)
 }
 
 // NewApplicationInfoEntry creates a complete ApplicationInfoEntry from source data
@@ -1865,4 +1887,90 @@ type CacheConfig struct {
 	Host     string `json:"host,omitempty" yaml:"host,omitempty"`
 	Port     int    `json:"port,omitempty" yaml:"port,omitempty"`
 	Database int    `json:"database,omitempty" yaml:"database,omitempty"`
+}
+
+// ValidateSupportClientData validates SupportClient data integrity
+func ValidateSupportClientData(entry *ApplicationInfoEntry) {
+	if entry == nil {
+		log.Printf("WARNING: Cannot validate SupportClient for nil entry")
+		return
+	}
+
+	if entry.SupportClient == nil {
+		log.Printf("WARNING: SupportClient is nil in entry %s", entry.Name)
+		return
+	}
+
+	// Validate each client type data
+	expectedClients := []string{"android", "ios", "windows", "mac", "linux", "chrome", "edge"}
+	validCount := 0
+
+	for _, clientType := range expectedClients {
+		if url, exists := entry.SupportClient[clientType]; exists {
+			if url == nil {
+				log.Printf("WARNING: SupportClient.%s is nil", clientType)
+			} else if urlStr, ok := url.(string); ok {
+				if urlStr == "" {
+					log.Printf("WARNING: SupportClient.%s is empty string", clientType)
+				} else {
+					validCount++
+					log.Printf("DEBUG: SupportClient.%s: %s", clientType, urlStr)
+				}
+			} else {
+				log.Printf("WARNING: SupportClient.%s has wrong type: %T", clientType, url)
+			}
+		}
+	}
+
+	log.Printf("DEBUG: SupportClient validation completed for entry %s - %d valid clients found", entry.Name, validCount)
+}
+
+// ValidateAndFixSupportClient ensures SupportClient data is properly set and not lost
+func ValidateAndFixSupportClient(sourceData map[string]interface{}, entry *ApplicationInfoEntry) {
+	if entry == nil {
+		return
+	}
+
+	// Initialize SupportClient if nil
+	if entry.SupportClient == nil {
+		entry.SupportClient = make(map[string]interface{})
+	}
+
+	// Check if SupportClient is missing but should be present in source data
+	if len(entry.SupportClient) == 0 {
+		if sourceData != nil {
+			if supportClient, ok := sourceData["supportClient"]; ok && supportClient != nil {
+				log.Printf("DEBUG: Attempting to fix missing SupportClient from source data")
+
+				switch v := supportClient.(type) {
+				case map[string]interface{}:
+					entry.SupportClient = v
+					log.Printf("DEBUG: Fixed missing SupportClient from source data: %v", entry.SupportClient)
+				case map[interface{}]interface{}:
+					// Convert map[interface{}]interface{} to map[string]interface{}
+					converted := make(map[string]interface{})
+					for k, v2 := range v {
+						if ks, ok := k.(string); ok {
+							converted[ks] = v2
+						}
+					}
+					entry.SupportClient = converted
+					log.Printf("DEBUG: Fixed missing SupportClient from source data (converted): %v", entry.SupportClient)
+				case map[string]string:
+					// Convert map[string]string to map[string]interface{}
+					converted := make(map[string]interface{})
+					for k, v2 := range v {
+						converted[k] = v2
+					}
+					entry.SupportClient = converted
+					log.Printf("DEBUG: Fixed missing SupportClient from source data (converted): %v", entry.SupportClient)
+				default:
+					log.Printf("WARNING: SupportClient in source data has unexpected type: %T", supportClient)
+				}
+			}
+		}
+	}
+
+	// Validate the data after fixing
+	ValidateSupportClientData(entry)
 }
