@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"market/internal/v2/types"
 
 	"sort"
@@ -395,6 +396,7 @@ func createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfoEntry) map[s
 		"appID":              entry.AppID,
 		"title":              entry.Title,
 		"version":            entry.Version,
+		"apiVersion":         entry.ApiVersion,
 		"categories":         entry.Categories,
 		"versionName":        entry.VersionName,
 		"fullDescription":    entry.FullDescription,
@@ -443,6 +445,10 @@ func createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfoEntry) map[s
 }
 
 func convertToStringMapDW(val interface{}) map[string]interface{} {
+	if val == nil {
+		return nil
+	}
+
 	switch v := val.(type) {
 	case map[string]interface{}:
 		return v
@@ -451,12 +457,20 @@ func convertToStringMapDW(val interface{}) map[string]interface{} {
 		for k, v2 := range v {
 			if ks, ok := k.(string); ok {
 				converted[ks] = v2
+			} else {
+				log.Printf("WARNING: SupportClient key is not string: %T", k)
 			}
 		}
 		return converted
-	case nil:
-		return nil
+	case map[string]string:
+		// Convert map[string]string to map[string]interface{}
+		converted := make(map[string]interface{})
+		for k, v2 := range v {
+			converted[k] = v2
+		}
+		return converted
 	default:
+		log.Printf("WARNING: SupportClient has unexpected type in datahash: %T", val)
 		return nil
 	}
 }

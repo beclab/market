@@ -157,6 +157,21 @@ func readLocalAppState() error {
 
 // fetchFromAppService fetches app data from the app-service
 func fetchFromAppService() error {
+	// Fetch apps data
+	if err := fetchAppsFromAppService(); err != nil {
+		return fmt.Errorf("failed to fetch apps from app-service: %v", err)
+	}
+
+	// Fetch middlewares data
+	if err := fetchMiddlewaresFromAppService(); err != nil {
+		return fmt.Errorf("failed to fetch middlewares from app-service: %v", err)
+	}
+
+	return nil
+}
+
+// fetchAppsFromAppService fetches app data from the app-service
+func fetchAppsFromAppService() error {
 	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
 
@@ -282,19 +297,212 @@ func processAppData(apps []AppServiceResponse) error {
 	// Print app state data summary
 	log.Println("App state data created:")
 	for user, sourceData := range userAppStateData {
-
 		for sourceID, appStates := range sourceData {
-			log.Printf("  User %s: Source $s: %d app states", user, sourceID, len(appStates))
+			log.Printf("  User %s: Source %s: %d app states", user, sourceID, len(appStates))
 			for _, appState := range appStates {
 				log.Printf("    - App Status: %s", appState.Status.State)
 			}
 		}
-
 	}
 
 	log.Println("=== End App Service Data Summary ===")
 
 	return nil
+}
+
+// MiddlewareResponse represents the response structure from middleware status endpoint
+type MiddlewareResponse struct {
+	Code int `json:"code"`
+	Data []struct {
+		UUID           string `json:"uuid"`
+		Namespace      string `json:"namespace"`
+		User           string `json:"user"`
+		ResourceStatus string `json:"resourceStatus"`
+		ResourceType   string `json:"resourceType"`
+		CreateTime     string `json:"createTime"`
+		UpdateTime     string `json:"updateTime"`
+		Metadata       struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Version string `json:"version"`
+		Title   string `json:"title"`
+	} `json:"data"`
+}
+
+// fetchMiddlewaresFromAppService fetches middleware data from the app-service
+func fetchMiddlewaresFromAppService() error {
+	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
+
+	if host == "" {
+		host = "localhost" // Default fallback
+	}
+	if port == "" {
+		port = "80" // Default fallback
+	}
+
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/status", host, port)
+	log.Printf("Fetching middleware data from: %s", url)
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to fetch middlewares from app-service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("app-service middleware endpoint returned status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read middleware response body: %v", err)
+	}
+
+	var middlewareResp MiddlewareResponse
+	if err := json.Unmarshal(data, &middlewareResp); err != nil {
+		return fmt.Errorf("failed to parse middleware response: %v", err)
+	}
+
+	return processMiddlewareData(middlewareResp.Data)
+}
+
+// processMiddlewareData processes the middleware data and creates AppStateLatestData
+func processMiddlewareData(middlewares []struct {
+	UUID           string `json:"uuid"`
+	Namespace      string `json:"namespace"`
+	User           string `json:"user"`
+	ResourceStatus string `json:"resourceStatus"`
+	ResourceType   string `json:"resourceType"`
+	CreateTime     string `json:"createTime"`
+	UpdateTime     string `json:"updateTime"`
+	Metadata       struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Version string `json:"version"`
+	Title   string `json:"title"`
+}) error {
+	log.Println("Processing middleware data...")
+	log.Printf("Found %d middlewares", len(middlewares))
+
+	userSet := make(map[string]bool) // Use map to avoid duplicates
+
+	for i, middleware := range middlewares {
+		// Extract user and middleware name
+		user := middleware.User
+		middlewareName := middleware.Metadata.Name
+
+		// Add user to set to avoid duplicates
+		userSet[user] = true
+
+		// Print individual middleware info
+		log.Printf("Middleware %d: User=%s, Name=%s, Status=%s, Version=%s",
+			i+1, user, middlewareName, middleware.ResourceStatus, middleware.Version)
+
+		// Create AppStateLatestData for this middleware (startup process)
+		middlewareStateData, sourceID := createMiddlewareStateLatestData(middleware, true)
+
+		// Add to user's app state data only if creation was successful
+		if middlewareStateData != nil {
+			if userAppStateData[user] == nil {
+				userAppStateData[user] = make(map[string][]*types.AppStateLatestData)
+			}
+			if userAppStateData[user][sourceID] == nil {
+				userAppStateData[user][sourceID] = make([]*types.AppStateLatestData, 0)
+			}
+			userAppStateData[user][sourceID] = append(userAppStateData[user][sourceID], middlewareStateData)
+		}
+	}
+
+	// Update extracted users with middleware users
+	for user := range userSet {
+		// Check if user already exists in extractedUsers
+		exists := false
+		for _, existingUser := range extractedUsers {
+			if existingUser == user {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			extractedUsers = append(extractedUsers, user)
+		}
+	}
+
+	// Print summary
+	log.Println("=== Middleware Data Summary ===")
+	log.Printf("Total middlewares: %d", len(middlewares))
+
+	// Group by user
+	userStats := make(map[string]int)
+	for _, middleware := range middlewares {
+		userStats[middleware.User]++
+	}
+
+	log.Println("Middlewares per user:")
+	for user, count := range userStats {
+		log.Printf("  %s: %d middlewares", user, count)
+	}
+
+	// Group by status
+	statusStats := make(map[string]int)
+	for _, middleware := range middlewares {
+		statusStats[middleware.ResourceStatus]++
+	}
+
+	log.Println("Middlewares by status:")
+	for status, count := range statusStats {
+		log.Printf("  %s: %d middlewares", status, count)
+	}
+
+	log.Println("=== End Middleware Data Summary ===")
+
+	return nil
+}
+
+// createMiddlewareStateLatestData creates AppStateLatestData from middleware data
+// isStartupProcess indicates whether this is called during startup process
+func createMiddlewareStateLatestData(middleware struct {
+	UUID           string `json:"uuid"`
+	Namespace      string `json:"namespace"`
+	User           string `json:"user"`
+	ResourceStatus string `json:"resourceStatus"`
+	ResourceType   string `json:"resourceType"`
+	CreateTime     string `json:"createTime"`
+	UpdateTime     string `json:"updateTime"`
+	Metadata       struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Version string `json:"version"`
+	Title   string `json:"title"`
+}, isStartupProcess bool) (*types.AppStateLatestData, string) {
+	data := map[string]interface{}{
+		"name":               middleware.Metadata.Name,
+		"state":              middleware.ResourceStatus,
+		"updateTime":         middleware.UpdateTime,
+		"statusTime":         middleware.UpdateTime, // Use UpdateTime as StatusTime for middlewares
+		"lastTransitionTime": middleware.UpdateTime, // Use UpdateTime as LastTransitionTime for middlewares
+		"version":            middleware.Version,
+	}
+
+	// // Create entrance statuses for middleware (simplified structure)
+	// entrances := make([]interface{}, 0, 1)
+	// entrances = append(entrances, map[string]interface{}{
+	// 	"id":         middleware.UUID, // Use UUID as ID
+	// 	"name":       middleware.Metadata.Name,
+	// 	"state":      middleware.ResourceStatus,
+	// 	"statusTime": middleware.UpdateTime,
+	// 	"reason":     "",
+	// 	"url":        "", // Middlewares don't have URLs like apps
+	// 	"invisible":  false,
+	// })
+	// data["entranceStatuses"] = entrances
+
+	return types.NewAppStateLatestData(data, middleware.User, GetAppInfoFromDownloadRecord)
 }
 
 // FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service

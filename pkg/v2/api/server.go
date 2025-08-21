@@ -70,6 +70,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/market/data", s.getMarketData).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/market/data")
 
+	// Market state endpoint
+	api.HandleFunc("/market/state", s.getMarketState).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/market/state")
+
 	// 2. Get specific application information (supports multiple queries)
 	api.HandleFunc("/apps", s.getAppsInfo).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/apps")

@@ -98,6 +98,7 @@ func (scc *StatusCorrectionChecker) Start() error {
 
 	glog.Infof("Starting status correction checker with interval: %v", scc.checkInterval)
 	glog.Infof("App service endpoint: http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort)
+	glog.Infof("Middleware service endpoint: http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort)
 
 	// Start the periodic checking goroutine
 	go scc.runPeriodicCheck()
@@ -137,12 +138,13 @@ func (scc *StatusCorrectionChecker) GetStats() map[string]interface{} {
 	defer scc.mutex.RUnlock()
 
 	return map[string]interface{}{
-		"is_running":       scc.isRunning,
-		"check_interval":   scc.checkInterval,
-		"last_check_time":  scc.lastCheckTime,
-		"check_count":      scc.checkCount,
-		"correction_count": scc.correctionCount,
-		"app_service_url":  fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort),
+		"is_running":             scc.isRunning,
+		"check_interval":         scc.checkInterval,
+		"last_check_time":        scc.lastCheckTime,
+		"check_count":            scc.checkCount,
+		"correction_count":       scc.correctionCount,
+		"app_service_url":        fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort),
+		"middleware_service_url": fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort),
 	}
 }
 
@@ -185,7 +187,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		return
 	}
 
-	glog.Infof("Fetched status for %d applications from app-service", len(latestStatus))
+	glog.Infof("Fetched status for %d applications and middlewares from app-service", len(latestStatus))
 
 	// Get current status from cache
 	cachedStatus := scc.getCachedStatus()
@@ -194,7 +196,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		return
 	}
 
-	glog.Infof("Found cached status for %d applications", len(cachedStatus))
+	glog.Infof("Found cached status for %d applications and middlewares", len(cachedStatus))
 
 	// Compare and detect changes
 	changes := scc.compareStatus(latestStatus, cachedStatus)
@@ -250,6 +252,39 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 
 // fetchLatestStatus fetches the latest status from app-service
 func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceResponse, error) {
+	// Fetch apps status
+	appsStatus, err := scc.fetchLatestAppsStatus()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch apps status: %v", err)
+	}
+
+	// Fetch middlewares status
+	middlewaresStatus, err := scc.fetchLatestMiddlewaresStatus()
+	if err != nil {
+		// Log warning but don't fail the entire operation
+		glog.Warningf("Failed to fetch middlewares status: %v", err)
+		// Return only apps status if middlewares fetch fails
+		return appsStatus, nil
+	}
+
+	// Combine apps and middlewares status
+	// Convert middlewares to AppServiceResponse format and merge with apps
+	allStatus := make([]utils.AppServiceResponse, 0, len(appsStatus)+len(middlewaresStatus))
+
+	// Add apps status
+	allStatus = append(allStatus, appsStatus...)
+
+	// Add middlewares status (already converted to AppServiceResponse format)
+	allStatus = append(allStatus, middlewaresStatus...)
+
+	glog.Infof("Combined status: %d apps + %d middlewares = %d total",
+		len(appsStatus), len(middlewaresStatus), len(allStatus))
+
+	return allStatus, nil
+}
+
+// fetchLatestAppsStatus fetches the latest apps status from app-service
+func (scc *StatusCorrectionChecker) fetchLatestAppsStatus() ([]utils.AppServiceResponse, error) {
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort)
 
 	client := &http.Client{
@@ -277,6 +312,129 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceRespo
 	}
 
 	return apps, nil
+}
+
+// MiddlewareStatusResponse represents the response structure from middleware status endpoint
+type MiddlewareStatusResponse struct {
+	Code int `json:"code"`
+	Data []struct {
+		UUID           string `json:"uuid"`
+		Namespace      string `json:"namespace"`
+		User           string `json:"user"`
+		ResourceStatus string `json:"resourceStatus"`
+		ResourceType   string `json:"resourceType"`
+		CreateTime     string `json:"createTime"`
+		UpdateTime     string `json:"updateTime"`
+		Metadata       struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Version string `json:"version"`
+		Title   string `json:"title"`
+	} `json:"data"`
+}
+
+// fetchLatestMiddlewaresStatus fetches the latest middlewares status from app-service
+func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppServiceResponse, error) {
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort)
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch middlewares from app-service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("app-service middleware endpoint returned status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read middleware response body: %v", err)
+	}
+
+	var middlewareResp MiddlewareStatusResponse
+	if err := json.Unmarshal(data, &middlewareResp); err != nil {
+		return nil, fmt.Errorf("failed to parse middleware response: %v", err)
+	}
+
+	// Convert middleware response to AppServiceResponse format for compatibility
+	// This allows us to reuse existing comparison logic
+	var convertedResponses []utils.AppServiceResponse
+
+	for _, middleware := range middlewareResp.Data {
+		// Convert middleware to AppServiceResponse format
+		converted := utils.AppServiceResponse{
+			Metadata: struct {
+				Name      string `json:"name"`
+				UID       string `json:"uid"`
+				Namespace string `json:"namespace"`
+			}{
+				Name:      middleware.Metadata.Name,
+				UID:       middleware.UUID,
+				Namespace: middleware.Namespace,
+			},
+			Spec: struct {
+				Name      string `json:"name"`
+				AppID     string `json:"appid"`
+				Owner     string `json:"owner"`
+				Icon      string `json:"icon"`
+				Title     string `json:"title"`
+				Source    string `json:"source"`
+				Entrances []struct {
+					Name      string `json:"name"`
+					Url       string `json:"url"`
+					Invisible bool   `json:"invisible"`
+				} `json:"entrances"`
+			}{
+				Name:   middleware.Metadata.Name,
+				AppID:  middleware.Metadata.Name,
+				Owner:  middleware.User,
+				Icon:   "",
+				Title:  middleware.Title,
+				Source: "middleware",
+				Entrances: []struct {
+					Name      string `json:"name"`
+					Url       string `json:"url"`
+					Invisible bool   `json:"invisible"`
+				}{},
+			},
+			Status: struct {
+				State              string `json:"state"`
+				UpdateTime         string `json:"updateTime"`
+				StatusTime         string `json:"statusTime"`
+				LastTransitionTime string `json:"lastTransitionTime"`
+				EntranceStatuses   []struct {
+					ID         string `json:"id"`
+					Name       string `json:"name"`
+					State      string `json:"state"`
+					StatusTime string `json:"statusTime"`
+					Reason     string `json:"reason"`
+					Url        string `json:"url"`
+				} `json:"entranceStatuses"`
+			}{
+				State:              middleware.ResourceStatus,
+				UpdateTime:         middleware.UpdateTime,
+				StatusTime:         middleware.UpdateTime, // Use UpdateTime as StatusTime for middlewares
+				LastTransitionTime: middleware.UpdateTime, // Use UpdateTime as LastTransitionTime for middlewares
+				EntranceStatuses: []struct {
+					ID         string `json:"id"`
+					Name       string `json:"name"`
+					State      string `json:"state"`
+					StatusTime string `json:"statusTime"`
+					Reason     string `json:"reason"`
+					Url        string `json:"url"`
+				}{},
+			},
+		}
+
+		convertedResponses = append(convertedResponses, converted)
+	}
+
+	return convertedResponses, nil
 }
 
 // getCachedStatus retrieves current status from cache
