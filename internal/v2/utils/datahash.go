@@ -395,6 +395,7 @@ func createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfoEntry) map[s
 		"appID":              entry.AppID,
 		"title":              entry.Title,
 		"version":            entry.Version,
+		"apiVersion":         entry.ApiVersion,
 		"categories":         entry.Categories,
 		"versionName":        entry.VersionName,
 		"fullDescription":    entry.FullDescription,

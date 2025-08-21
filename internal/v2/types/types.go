@@ -210,6 +210,7 @@ type ApplicationInfoEntry struct {
 	AppID       string            `json:"appID"`
 	Title       map[string]string `json:"title"` // Changed to support multi-language
 	Version     string            `json:"version"`
+	ApiVersion  string            `json:"apiVersion,omitempty"`
 	Categories  []string          `json:"categories"`
 	VersionName string            `json:"versionName"`
 
@@ -1186,6 +1187,9 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 	if val, ok := sourceData["versionName"].(string); ok && val != "" {
 		entry.VersionName = val
 	}
+	if val, ok := sourceData["apiVersion"].(string); ok && val != "" {
+		entry.ApiVersion = val
+	}
 
 	// Multi-language fields
 	if val, ok := sourceData["description"].(string); ok && val != "" {
@@ -1680,6 +1684,7 @@ func ValidateApplicationInfoEntryFields(entry *ApplicationInfoEntry) map[string]
 	validation["icon"] = entry.Icon
 	validation["appID"] = entry.AppID
 	validation["version"] = entry.Version
+	validation["apiVersion"] = entry.ApiVersion
 	validation["versionName"] = entry.VersionName
 
 	// Check multi-language fields

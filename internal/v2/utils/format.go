@@ -26,6 +26,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		"icon":        entry.Icon,
 		"appID":       entry.AppID,
 		"version":     entry.Version,
+		"apiVersion":  entry.ApiVersion,
 		"categories":  entry.Categories,
 		"versionName": entry.VersionName,
 

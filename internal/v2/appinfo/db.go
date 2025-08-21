@@ -564,6 +564,7 @@ func (r *RedisClient) createSafeApplicationInfoEntryCopy(entry *types.Applicatio
 		"appID":              entry.AppID,
 		"title":              entry.Title,
 		"version":            entry.Version,
+		"apiVersion":         entry.ApiVersion,
 		"categories":         entry.Categories,
 		"versionName":        entry.VersionName,
 		"fullDescription":    entry.FullDescription,
