@@ -461,6 +461,13 @@ type MarketSystemUpdate struct {
 	ExtensionsObj map[string]interface{} `json:"extensions_obj,omitempty"` // Additional extension information
 }
 
+type ImageInfoUpdate struct {
+	ImageInfo  *ImageInfo `json:"image_info"`
+	Timestamp  int64      `json:"timestamp"`
+	User       string     `json:"user"`
+	NotifyType string     `json:"notify_type"`
+}
+
 // NewCacheData creates a new cache data structure
 func NewCacheData() *CacheData {
 	return &CacheData{

@@ -62,6 +62,7 @@ type DataWatcherRepo struct {
 	apiBaseURL      string
 	cacheManager    *CacheManager // Add cache manager reference
 	dataWatcher     *DataWatcher  // Add DataWatcher reference for hash calculation
+	dataSender      *DataSender   // Add DataSender reference for NATS communication
 	mu              sync.RWMutex
 	ticker          *time.Ticker
 	stopChannel     chan bool
@@ -69,7 +70,7 @@ type DataWatcherRepo struct {
 }
 
 // NewDataWatcherRepo creates a new data watcher repository instance
-func NewDataWatcherRepo(redisClient *RedisClient, cacheManager *CacheManager, dataWatcher *DataWatcher) *DataWatcherRepo {
+func NewDataWatcherRepo(redisClient *RedisClient, cacheManager *CacheManager, dataWatcher *DataWatcher, dataSender *DataSender) *DataWatcherRepo {
 	// Get API base URL from environment variable
 	apiBaseURL := os.Getenv("CHART_REPO_SERVICE_HOST")
 	if apiBaseURL == "" {
@@ -82,6 +83,7 @@ func NewDataWatcherRepo(redisClient *RedisClient, cacheManager *CacheManager, da
 		apiBaseURL:   apiBaseURL,
 		cacheManager: cacheManager,
 		dataWatcher:  dataWatcher,
+		dataSender:   dataSender,
 		stopChannel:  make(chan bool),
 	}
 
@@ -541,6 +543,16 @@ func (dwr *DataWatcherRepo) GetDataWatcher() *DataWatcher {
 	return dwr.dataWatcher
 }
 
+// SetDataSender sets the DataSender reference for NATS communication
+func (dwr *DataWatcherRepo) SetDataSender(dataSender *DataSender) {
+	dwr.dataSender = dataSender
+}
+
+// GetDataSender returns the DataSender reference
+func (dwr *DataWatcherRepo) GetDataSender() *DataSender {
+	return dwr.dataSender
+}
+
 // GetLastProcessedID returns the last processed ID
 func (dwr *DataWatcherRepo) GetLastProcessedID() int64 {
 	dwr.mu.RLock()
@@ -712,10 +724,10 @@ func (dwr *DataWatcherRepo) shouldUpdateVersion(existingVersion, newVersion stri
 	return false
 }
 
-// fetchImageInfoFromAPI fetches image information from the /images/{imageName} API endpoint
+// fetchImageInfoFromAPI fetches image information from the /images API endpoint with query parameter
 func (dwr *DataWatcherRepo) fetchImageInfoFromAPI(imageName string) (map[string]interface{}, error) {
-	// Make HTTP request to /images/{imageName} endpoint
-	url := fmt.Sprintf("http://%s/chart-repo/api/v2/images/%s", dwr.apiBaseURL, imageName)
+	// Make HTTP request to /images endpoint with imageName query parameter
+	url := fmt.Sprintf("http://%s/chart-repo/api/v2/images?imageName=%s", dwr.apiBaseURL, imageName)
 	log.Printf("Fetching image info from API: %s for image: %s", url, imageName)
 
 	// Create HTTP request with context
@@ -791,6 +803,11 @@ func (dwr *DataWatcherRepo) updateImageInfoInCache(imageName string, updatedImag
 			// Update image info in AppInfoLatestPending
 			updatedCount += dwr.updateImageInfoInAppInfoLatestPending(userID, sourceID, sourceData, imageName, updatedImageInfo)
 		}
+
+		// Send ImageInfoUpdate message to this user if DataSender is available
+		if dwr.dataSender != nil {
+			dwr.sendImageStateChangeToUser(userID, imageName, updatedImageInfo)
+		}
 	}
 
 	return updatedCount
@@ -814,9 +831,13 @@ func (dwr *DataWatcherRepo) updateImageInfoInAppInfoLatest(userID, sourceID stri
 						appInfo.RawData.Name, err)
 					continue
 				}
+
+				// Update app timestamp to current time when image info is updated
+				appInfo.Timestamp = time.Now().Unix()
+
 				updatedCount++
-				log.Printf("Updated image info for %s in AppInfoLatest for app %s (user: %s, source: %s)",
-					imageName, appInfo.RawData.Name, userID, sourceID)
+				log.Printf("Updated image info for %s in AppInfoLatest for app %s (user: %s, source: %s), app timestamp updated to: %d",
+					imageName, appInfo.RawData.Name, userID, sourceID, appInfo.Timestamp)
 			}
 		}
 	}
@@ -842,9 +863,13 @@ func (dwr *DataWatcherRepo) updateImageInfoInAppInfoLatestPending(userID, source
 						pendingApp.RawData.Name, err)
 					continue
 				}
+
+				// Update app timestamp to current time when image info is updated
+				pendingApp.Timestamp = time.Now().Unix()
+
 				updatedCount++
-				log.Printf("Updated image info for %s in AppInfoLatestPending for app %s (user: %s, source: %s)",
-					imageName, pendingApp.RawData.Name, userID, sourceID)
+				log.Printf("Updated image info for %s in AppInfoLatestPending for app %s (user: %s, source: %s), app timestamp updated to: %d",
+					imageName, pendingApp.RawData.Name, userID, sourceID, pendingApp.Timestamp)
 			}
 		}
 	}
@@ -974,4 +999,80 @@ func (dwr *DataWatcherRepo) convertLayersData(layersData []interface{}) []*types
 	}
 
 	return layers
+}
+
+// sendImageStateChangeToUser sends image state change message to a specific user
+func (dwr *DataWatcherRepo) sendImageStateChangeToUser(userID, imageName string, updatedImageInfo map[string]interface{}) {
+	// Convert map[string]interface{} to *types.ImageInfo
+	imageInfo := dwr.convertMapToImageInfo(imageName, updatedImageInfo)
+	if imageInfo == nil {
+		log.Printf("Failed to convert updated image info to ImageInfo struct for user %s", userID)
+		return
+	}
+
+	// Create ImageInfoUpdate message for this user
+	update := types.ImageInfoUpdate{
+		ImageInfo:  imageInfo,
+		Timestamp:  time.Now().Unix(),
+		User:       userID,
+		NotifyType: "image_state_change",
+	}
+
+	// Send the update via DataSender
+	if err := dwr.dataSender.SendImageInfoUpdate(update); err != nil {
+		log.Printf("Failed to send image state change message to user %s: %v", userID, err)
+	} else {
+		log.Printf("Successfully sent image state change message to user: %s for image: %s", userID, imageName)
+	}
+}
+
+// convertMapToImageInfo converts map[string]interface{} to *types.ImageInfo
+func (dwr *DataWatcherRepo) convertMapToImageInfo(imageName string, imageData map[string]interface{}) *types.ImageInfo {
+	if imageData == nil {
+		return nil
+	}
+
+	imageInfo := &types.ImageInfo{
+		Name: imageName,
+	}
+
+	// Extract basic fields
+	if tag, ok := imageData["tag"].(string); ok {
+		imageInfo.Tag = tag
+	}
+	if architecture, ok := imageData["architecture"].(string); ok {
+		imageInfo.Architecture = architecture
+	}
+	if totalSize, ok := imageData["total_size"].(float64); ok {
+		imageInfo.TotalSize = int64(totalSize)
+	}
+	if downloadedSize, ok := imageData["downloaded_size"].(float64); ok {
+		imageInfo.DownloadedSize = int64(downloadedSize)
+	}
+	if downloadProgress, ok := imageData["download_progress"].(float64); ok {
+		imageInfo.DownloadProgress = downloadProgress
+	}
+	if layerCount, ok := imageData["layer_count"].(float64); ok {
+		imageInfo.LayerCount = int(layerCount)
+	}
+	if downloadedLayers, ok := imageData["downloaded_layers"].(float64); ok {
+		imageInfo.DownloadedLayers = int(downloadedLayers)
+	}
+	if status, ok := imageData["status"].(string); ok {
+		imageInfo.Status = status
+	}
+	if errorMessage, ok := imageData["error_message"].(string); ok {
+		imageInfo.ErrorMessage = errorMessage
+	}
+
+	// Set timestamps
+	imageInfo.CreatedAt = time.Now()
+	imageInfo.AnalyzedAt = time.Now()
+
+	// Convert nodes if present
+	if nodesData, ok := imageData["nodes"].([]interface{}); ok {
+		imageInfo.Nodes = dwr.convertNodesData(nodesData)
+	}
+
+	return imageInfo
 }
