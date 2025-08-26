@@ -640,7 +640,7 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 	}
 
 	// Create DataWatcherRepo instance
-	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.cacheManager, m.dataWatcher)
+	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.cacheManager, m.dataWatcher, m.dataSender)
 
 	// Start DataWatcherRepo
 	if err := m.dataWatcherRepo.Start(); err != nil {
