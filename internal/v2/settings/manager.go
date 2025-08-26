@@ -13,6 +13,8 @@ import (
 // CacheManager interface for updating cache when market sources change
 type CacheManager interface {
 	SyncMarketSourcesToCache(sources []*MarketSource) error
+	// Check if any user has non-empty state data for a specific source
+	HasUserStateDataForSource(sourceID string) bool
 }
 
 // NewSettingsManager creates a new settings manager instance
@@ -378,6 +380,16 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 		return fmt.Errorf("source ID cannot be empty")
 	}
 
+	// Check if any user has non-empty state data for this source
+	if sm.cacheManager != nil {
+		if sm.cacheManager.HasUserStateDataForSource(sourceID) {
+			return fmt.Errorf("cannot delete market source '%s': some users have non-empty state data for this source", sourceID)
+		}
+		log.Printf("No user state data found for source: %s, proceeding with deletion", sourceID)
+	} else {
+		log.Println("Cache manager not available, skipping user state check")
+	}
+
 	// First, delete from chart repository service
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
 	if chartRepoHost == "" {
@@ -689,12 +701,12 @@ func ClearSettingsRedis(redisClient RedisClient) error {
 	return nil
 }
 
-// GetMarketSettings gets market settings from Redis
-func (sm *SettingsManager) GetMarketSettings() (*MarketSettings, error) {
-	return getMarketSettings(sm.redisClient)
+// GetMarketSettings gets market settings from Redis for a specific user
+func (sm *SettingsManager) GetMarketSettings(userID string) (*MarketSettings, error) {
+	return getMarketSettings(sm.redisClient, userID)
 }
 
-// UpdateMarketSettings updates market settings in Redis
-func (sm *SettingsManager) UpdateMarketSettings(settings *MarketSettings) error {
-	return updateMarketSettings(sm.redisClient, settings)
+// UpdateMarketSettings updates market settings in Redis for a specific user
+func (sm *SettingsManager) UpdateMarketSettings(userID string, settings *MarketSettings) error {
+	return updateMarketSettings(sm.redisClient, userID, settings)
 }
