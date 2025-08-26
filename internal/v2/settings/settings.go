@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"market/internal/v2/types"
+	"market/internal/v2/utils"
 )
 
 type MarketSettings = types.MarketSettings
@@ -16,6 +17,12 @@ const RedisKeyMarketSettings = "market:settings"
 func getMarketSettings(redisClient RedisClient, userID string) (*MarketSettings, error) {
 	// Create user-specific Redis key
 	userRedisKey := fmt.Sprintf("%s:%s", RedisKeyMarketSettings, userID)
+
+	if utils.IsPublicEnvironment() {
+		return &MarketSettings{
+			SelectedSource: "market.olares", // Default selected source
+		}, nil
+	}
 
 	// Get settings from Redis
 	data, err := redisClient.Get(userRedisKey)
