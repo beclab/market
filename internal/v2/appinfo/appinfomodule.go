@@ -29,6 +29,7 @@ type AppInfoModule struct {
 	dataWatcher             *DataWatcher
 	dataWatcherState        *DataWatcherState
 	dataWatcherUser         *DataWatcherUser
+	dataWatcherRepo         *DataWatcherRepo // Add DataWatcherRepo for image info updates
 	dataSender              *DataSender
 	statusCorrectionChecker *StatusCorrectionChecker
 	settingsManager         *settings.SettingsManager
@@ -53,6 +54,7 @@ type ModuleConfig struct {
 	EnableDataWatcher             bool            `json:"enable_data_watcher"`
 	EnableDataWatcherState        bool            `json:"enable_data_watcher_state"`
 	EnableDataWatcherUser         bool            `json:"enable_data_watcher_user"`
+	EnableDataWatcherRepo         bool            `json:"enable_data_watcher_repo"` // Add DataWatcherRepo enable flag
 	EnableStatusCorrectionChecker bool            `json:"enable_status_correction_checker"`
 	StartTimeout                  time.Duration   `json:"start_timeout"`
 }
@@ -184,8 +186,8 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
-	// Initialize DataWatcher if enabled and dependencies are available
-	if m.config.EnableDataWatcher && m.config.EnableCache && m.config.EnableHydrator {
+	// Initialize DataWatcher if enabled
+	if m.config.EnableDataWatcher {
 		if err := m.initDataWatcher(); err != nil {
 			return fmt.Errorf("failed to initialize DataWatcher: %w", err)
 		}
@@ -202,6 +204,13 @@ func (m *AppInfoModule) Start() error {
 	if m.config.EnableDataWatcherUser {
 		if err := m.initDataWatcherUser(); err != nil {
 			return fmt.Errorf("failed to initialize DataWatcherUser: %w", err)
+		}
+	}
+
+	// Initialize DataWatcherRepo if enabled (after DataWatcher is initialized)
+	if m.config.EnableDataWatcherRepo {
+		if err := m.initDataWatcherRepo(); err != nil {
+			return fmt.Errorf("failed to initialize DataWatcherRepo: %w", err)
 		}
 	}
 
@@ -255,6 +264,15 @@ func (m *AppInfoModule) Stop() error {
 	if m.dataWatcherUser != nil {
 		m.dataWatcherUser.Stop()
 		glog.Infof("DataWatcherUser stopped")
+	}
+
+	// Stop DataWatcherRepo
+	if m.dataWatcherRepo != nil {
+		if err := m.dataWatcherRepo.Stop(); err != nil {
+			glog.Errorf("Failed to stop DataWatcherRepo: %v", err)
+		} else {
+			glog.Infof("DataWatcherRepo stopped")
+		}
 	}
 
 	// Stop StatusCorrectionChecker
@@ -609,6 +627,30 @@ func (m *AppInfoModule) initDataWatcherUser() error {
 	return nil
 }
 
+// initDataWatcherRepo initializes the DataWatcherRepo
+func (m *AppInfoModule) initDataWatcherRepo() error {
+	glog.Infof("Initializing DataWatcherRepo...")
+
+	if m.redisClient == nil {
+		return fmt.Errorf("redis client is required for DataWatcherRepo")
+	}
+
+	if m.cacheManager == nil {
+		return fmt.Errorf("cache manager is required for DataWatcherRepo")
+	}
+
+	// Create DataWatcherRepo instance
+	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.cacheManager, m.dataWatcher)
+
+	// Start DataWatcherRepo
+	if err := m.dataWatcherRepo.Start(); err != nil {
+		return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
+	}
+
+	glog.Infof("DataWatcherRepo initialized successfully")
+	return nil
+}
+
 // initStatusCorrectionChecker initializes the StatusCorrectionChecker
 func (m *AppInfoModule) initStatusCorrectionChecker() error {
 	glog.Infof("Initializing StatusCorrectionChecker...")
@@ -885,6 +927,11 @@ func DefaultModuleConfig() *ModuleConfig {
 		enableDataWatcherUser = true
 	}
 
+	enableDataWatcherRepo, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_DATA_WATCHER_REPO"))
+	if err != nil {
+		enableDataWatcherRepo = true
+	}
+
 	enableStatusCorrectionChecker, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_STATUS_CORRECTION_CHECKER"))
 	if err != nil {
 		enableStatusCorrectionChecker = true
@@ -1030,6 +1077,7 @@ func DefaultModuleConfig() *ModuleConfig {
 		EnableDataWatcher:             enableDataWatcher,
 		EnableDataWatcherState:        enableDataWatcherState,
 		EnableDataWatcherUser:         enableDataWatcherUser,
+		EnableDataWatcherRepo:         enableDataWatcherRepo,
 		EnableStatusCorrectionChecker: enableStatusCorrectionChecker,
 		StartTimeout:                  startTimeout,
 	}

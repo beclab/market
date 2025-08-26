@@ -334,6 +334,37 @@ func main() {
 	log.Println("  helm repo add myrepo http://localhost:82 --header 'X-Market-User=user1' --header 'X-Market-Source=web-console'")
 	log.Println("")
 
+	// // Create and start DataWatcherRepo for monitoring state changes
+	// log.Println("=== Creating DataWatcherRepo for state change monitoring ===")
+
+	// // Get Redis client from AppInfo module
+	// var redisClientForRepo *appinfo.RedisClient
+	// if !utils.IsPublicEnvironment() && appInfoModule != nil {
+	// 	redisClientForRepo = appInfoModule.GetRedisClient()
+	// } else {
+	// 	log.Println("Public environment detected or AppInfo module not available, skipping DataWatcherRepo creation")
+	// }
+
+	// if redisClientForRepo != nil {
+	// 	// Create DataWatcherRepo instance
+	// 	dataWatcherRepo := appinfo.NewDataWatcherRepo(redisClientForRepo, cacheManager, appInfoModule.GetDataWatcher())
+
+	// 	// Start DataWatcherRepo
+	// 	if err := dataWatcherRepo.Start(); err != nil {
+	// 		log.Printf("Warning: Failed to start DataWatcherRepo: %v", err)
+	// 	} else {
+	// 		log.Println("DataWatcherRepo started successfully for monitoring state changes")
+
+	// 		// Set DataWatcherRepo reference in AppInfo module if available
+	// 		if appInfoModule != nil {
+	// 			// Note: We need to add a method to set DataWatcherRepo in AppInfoModule
+	// 			// For now, we'll just log that it's created
+	// 			log.Println("DataWatcherRepo is ready to monitor image info updates and other state changes")
+	// 		}
+	// 	}
+	// }
+	// log.Println("=== End DataWatcherRepo creation ===")
+
 	// Setup graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
