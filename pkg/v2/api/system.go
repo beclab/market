@@ -671,14 +671,24 @@ func (s *Server) getMarketSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settings, err := settingsManager.GetMarketSettings()
+	// Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get market settings: %v", err)
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for market settings request: %s", userID)
+
+	settings, err := settingsManager.GetMarketSettings(userID)
+	if err != nil {
+		log.Printf("Failed to get market settings for user %s: %v", userID, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to get market settings", nil)
 		return
 	}
 
-	log.Printf("Market settings retrieved successfully")
+	log.Printf("Market settings retrieved successfully for user: %s", userID)
 	s.sendResponse(w, http.StatusOK, true, "Market settings retrieved successfully", settings)
 }
 
@@ -692,6 +702,16 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for market settings update request: %s", userID)
+
 	var settings settings.MarketSettings
 	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
 		log.Printf("Failed to decode request body: %v", err)
@@ -699,12 +719,12 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := settingsManager.UpdateMarketSettings(&settings); err != nil {
-		log.Printf("Failed to update market settings: %v", err)
+	if err := settingsManager.UpdateMarketSettings(userID, &settings); err != nil {
+		log.Printf("Failed to update market settings for user %s: %v", userID, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to update market settings", nil)
 		return
 	}
 
-	log.Printf("Market settings updated successfully")
+	log.Printf("Market settings updated successfully for user: %s", userID)
 	s.sendResponse(w, http.StatusOK, true, "Market settings updated successfully", settings)
 }

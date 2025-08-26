@@ -229,7 +229,7 @@ func (dwr *DataWatcherRepo) processStateChanges() error {
 
 	// Update the last processed ID in Redis
 	ctx := context.Background()
-	err := dwr.redisClient.client.Set(ctx, "datawatcher:last_processed_id", strconv.FormatInt(lastProcessedID, 10), 0).Err()
+	err = dwr.redisClient.client.Set(ctx, "datawatcher:last_processed_id", strconv.FormatInt(lastProcessedID, 10), 0).Err()
 	if err != nil {
 		log.Printf("Failed to update last processed ID in Redis: %v", err)
 	}

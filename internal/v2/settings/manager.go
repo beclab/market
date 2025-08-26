@@ -701,12 +701,12 @@ func ClearSettingsRedis(redisClient RedisClient) error {
 	return nil
 }
 
-// GetMarketSettings gets market settings from Redis
-func (sm *SettingsManager) GetMarketSettings() (*MarketSettings, error) {
-	return getMarketSettings(sm.redisClient)
+// GetMarketSettings gets market settings from Redis for a specific user
+func (sm *SettingsManager) GetMarketSettings(userID string) (*MarketSettings, error) {
+	return getMarketSettings(sm.redisClient, userID)
 }
 
-// UpdateMarketSettings updates market settings in Redis
-func (sm *SettingsManager) UpdateMarketSettings(settings *MarketSettings) error {
-	return updateMarketSettings(sm.redisClient, settings)
+// UpdateMarketSettings updates market settings in Redis for a specific user
+func (sm *SettingsManager) UpdateMarketSettings(userID string, settings *MarketSettings) error {
+	return updateMarketSettings(sm.redisClient, userID, settings)
 }
