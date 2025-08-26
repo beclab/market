@@ -239,7 +239,7 @@ func (dwr *DataWatcherRepo) processStateChanges() error {
 
 // fetchStateChanges calls the /state-changes API to get new state changes
 func (dwr *DataWatcherRepo) fetchStateChanges(afterID int64) ([]*StateChange, error) {
-	url := fmt.Sprintf("http://s%s/chart-repo/api/v2/state-changes?after_id=%d&limit=1000", dwr.apiBaseURL, afterID)
+	url := fmt.Sprintf("http://%s/chart-repo/api/v2/state-changes?after_id=%d&limit=1000", dwr.apiBaseURL, afterID)
 
 	log.Printf("Fetching state changes from: %s", url)
 
