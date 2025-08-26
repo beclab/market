@@ -207,10 +207,12 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
-	// Initialize DataWatcherRepo if enabled (after DataWatcher is initialized)
-	if m.config.EnableDataWatcherRepo {
-		if err := m.initDataWatcherRepo(); err != nil {
-			return fmt.Errorf("failed to initialize DataWatcherRepo: %w", err)
+	if !utils.IsPublicEnvironment() {
+		// Initialize DataWatcherRepo if enabled (after DataWatcher is initialized)
+		if m.config.EnableDataWatcherRepo {
+			if err := m.initDataWatcherRepo(); err != nil {
+				return fmt.Errorf("failed to initialize DataWatcherRepo: %w", err)
+			}
 		}
 	}
 
