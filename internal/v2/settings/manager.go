@@ -13,6 +13,8 @@ import (
 // CacheManager interface for updating cache when market sources change
 type CacheManager interface {
 	SyncMarketSourcesToCache(sources []*MarketSource) error
+	// Check if any user has non-empty state data for a specific source
+	HasUserStateDataForSource(sourceID string) bool
 }
 
 // NewSettingsManager creates a new settings manager instance
@@ -376,6 +378,16 @@ func (sm *SettingsManager) GetMarketSource() []*MarketSource {
 func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 	if sourceID == "" {
 		return fmt.Errorf("source ID cannot be empty")
+	}
+
+	// Check if any user has non-empty state data for this source
+	if sm.cacheManager != nil {
+		if sm.cacheManager.HasUserStateDataForSource(sourceID) {
+			return fmt.Errorf("cannot delete market source '%s': some users have non-empty state data for this source", sourceID)
+		}
+		log.Printf("No user state data found for source: %s, proceeding with deletion", sourceID)
+	} else {
+		log.Println("Cache manager not available, skipping user state check")
 	}
 
 	// First, delete from chart repository service

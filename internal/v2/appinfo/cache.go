@@ -879,6 +879,34 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 	}
 }
 
+// HasUserStateDataForSource checks if any user has non-empty state data for a specific source
+func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
+	glog.Infof("[LOCK] cm.mutex.RLock() @HasUserStateDataForSource Start")
+	cm.mutex.RLock()
+	defer func() {
+		cm.mutex.RUnlock()
+		glog.Infof("[LOCK] cm.mutex.RUnlock() @HasUserStateDataForSource End")
+	}()
+
+	if cm.cache == nil {
+		return false
+	}
+
+	// Check all users for non-empty state data in the specified source
+	for userID, userData := range cm.cache.Users {
+		if sourceData, exists := userData.Sources[sourceID]; exists {
+			// Check if any of the state-related data is non-empty
+			if len(sourceData.AppStateLatest) > 0 {
+				glog.Infof("Found non-empty state data for user %s in source %s", userID, sourceID)
+				return true
+			}
+		}
+	}
+
+	glog.Infof("No user state data found for source: %s", sourceID)
+	return false
+}
+
 // UpdateUserConfig updates the user configuration and ensures all users have data structures
 func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @660 Start")
