@@ -432,9 +432,9 @@ func (dwr *DataWatcherRepo) fetchAppInfoFromAPI(userID, sourceID, appName string
 			{
 				"appid":          appName,
 				"sourceDataName": sourceID,
-				"userid":         userID,
 			},
 		},
+		"userid": userID,
 	}
 
 	// Convert to JSON
