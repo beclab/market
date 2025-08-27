@@ -207,39 +207,79 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 
 	restfulReq := &restful.Request{Request: r}
 	token := utils.GetTokenFromRequest(restfulReq)
+	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
 
 	userInfoURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/user-info"
 	curUserResourceURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/user/resource"
 	clusterResourceURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/cluster/resource"
 	terminusVersionURL := "http://" + appServiceHost + ":" + appServicePort + "/app-service/v1/terminus/version"
 
-	log.Printf("Requesting userInfo from %s", userInfoURL)
-	userInfo, err1 := doGetWithToken(userInfoURL, token)
-	if err1 != nil {
-		log.Printf("Failed to get userInfo: %v", err1)
-	}
-	log.Printf("userInfo: %v", userInfo)
+	// Declare variables for storing responses
+	var userInfo, curUserResource, clusterResource, terminusVersion interface{}
+	var err1, err2, err3, err4 error
 
-	log.Printf("Requesting curUserResource from %s", curUserResourceURL)
-	curUserResource, err2 := doGetWithToken(curUserResourceURL, token)
-	if err2 != nil {
-		log.Printf("Failed to get curUserResource: %v", err2)
-	}
-	log.Printf("curUserResource: %v", curUserResource)
+	// Check if account is from header
+	if utils.IsAccountFromHeader() {
+		log.Printf("Account from header detected, using bflUser: %s", bflUser)
 
-	log.Printf("Requesting clusterResource from %s", clusterResourceURL)
-	clusterResource, err3 := doGetWithToken(clusterResourceURL, token)
-	if err3 != nil {
-		log.Printf("Failed to get clusterResource: %v", err3)
-	}
-	log.Printf("clusterResource: %v", clusterResource)
+		log.Printf("Requesting userInfo from %s", userInfoURL)
+		userInfo, err1 = doGetWithBflUser(userInfoURL, bflUser)
+		if err1 != nil {
+			log.Printf("Failed to get userInfo: %v", err1)
+		}
+		log.Printf("userInfo: %v", userInfo)
 
-	log.Printf("Requesting terminusVersion from %s", terminusVersionURL)
-	terminusVersion, err4 := doGetWithToken(terminusVersionURL, token)
-	if err4 != nil {
-		log.Printf("Failed to get terminusVersion: %v", err4)
+		log.Printf("Requesting curUserResource from %s", curUserResourceURL)
+		curUserResource, err2 = doGetWithBflUser(curUserResourceURL, bflUser)
+		if err2 != nil {
+			log.Printf("Failed to get curUserResource: %v", err2)
+		}
+		log.Printf("curUserResource: %v", curUserResource)
+
+		log.Printf("Requesting clusterResource from %s", clusterResourceURL)
+		clusterResource, err3 = doGetWithBflUser(clusterResourceURL, bflUser)
+		if err3 != nil {
+			log.Printf("Failed to get clusterResource: %v", err3)
+		}
+		log.Printf("clusterResource: %v", clusterResource)
+
+		log.Printf("Requesting terminusVersion from %s", terminusVersionURL)
+		terminusVersion, err4 = doGetWithBflUser(terminusVersionURL, bflUser)
+		if err4 != nil {
+			log.Printf("Failed to get terminusVersion: %v", err4)
+		}
+		log.Printf("terminusVersion: %v", terminusVersion)
+	} else {
+		log.Printf("Account from token, using token: %s", token)
+
+		log.Printf("Requesting userInfo from %s", userInfoURL)
+		userInfo, err1 = doGetWithToken(userInfoURL, token)
+		if err1 != nil {
+			log.Printf("Failed to get userInfo: %v", err1)
+		}
+		log.Printf("userInfo: %v", userInfo)
+
+		log.Printf("Requesting curUserResource from %s", curUserResourceURL)
+		curUserResource, err2 = doGetWithToken(curUserResourceURL, token)
+		if err2 != nil {
+			log.Printf("Failed to get curUserResource: %v", err2)
+		}
+		log.Printf("curUserResource: %v", curUserResource)
+
+		log.Printf("Requesting clusterResource from %s", clusterResourceURL)
+		clusterResource, err3 = doGetWithToken(clusterResourceURL, token)
+		if err3 != nil {
+			log.Printf("Failed to get clusterResource: %v", err3)
+		}
+		log.Printf("clusterResource: %v", clusterResource)
+
+		log.Printf("Requesting terminusVersion from %s", terminusVersionURL)
+		terminusVersion, err4 = doGetWithToken(terminusVersionURL, token)
+		if err4 != nil {
+			log.Printf("Failed to get terminusVersion: %v", err4)
+		}
+		log.Printf("terminusVersion: %v", terminusVersion)
 	}
-	log.Printf("terminusVersion: %v", terminusVersion)
 
 	// null 兜底
 	if userInfo == nil {
@@ -291,6 +331,36 @@ func doGetWithToken(url, token string) (interface{}, error) {
 	}
 	if result == nil {
 		log.Printf("doGetWithToken: result is nil, return empty map")
+		return map[string]interface{}{}, nil
+	}
+	return result, nil
+}
+
+// Simple GET with token, returns parsed JSON or raw string
+func doGetWithBflUser(url, bflUser string) (interface{}, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	log.Printf("doGetWithBflUser: url=%s, bflUser=%s", url, bflUser)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Printf("doGetWithBflUser: failed to create request: %v", err)
+		return map[string]interface{}{}, err
+	}
+	if bflUser != "" {
+		req.Header.Set("X-Bfl-User", bflUser)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("doGetWithBflUser: request failed: %v", err)
+		return map[string]interface{}{}, err
+	}
+	defer resp.Body.Close()
+	var result interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("doGetWithBflUser: decode failed: %v", err)
+		return map[string]interface{}{}, err
+	}
+	if result == nil {
+		log.Printf("doGetWithBflUser: result is nil, return empty map")
 		return map[string]interface{}{}, nil
 	}
 	return result, nil
