@@ -76,6 +76,11 @@ func IsPublicEnvironment() bool {
 	return isPublic == "true"
 }
 
+func IsAccountFromHeader() bool {
+	accountFromHeader := os.Getenv("IS_ACCOUNT_FROM_HEADER")
+	return accountFromHeader == "true"
+}
+
 // getTerminusVersionFromService retrieves version from the app service
 func getTerminusVersionFromService() (string, error) {
 	// Get app service host and port from environment

@@ -432,9 +432,9 @@ func (dwr *DataWatcherRepo) fetchAppInfoFromAPI(userID, sourceID, appName string
 			{
 				"appid":          appName,
 				"sourceDataName": sourceID,
-				"userid":         userID,
 			},
 		},
+		"userid": userID,
 	}
 
 	// Convert to JSON
@@ -507,10 +507,23 @@ func (dwr *DataWatcherRepo) updateCacheWithAppInfo(userID, sourceID string, appI
 
 	log.Printf("Updating cache with app info for user: %s, source: %s", userID, sourceID)
 
-	// Convert the app info to the appropriate data type and update cache
-	// We'll use AppInfoLatestPending as the data type for newly uploaded apps
-	err := dwr.cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, appInfo)
-	if err != nil {
+	// Convert the app info to AppInfoLatestData directly, similar to localrepo.go
+	var latest types.AppInfoLatestData
+
+	if appInfo != nil {
+		b, _ := json.Marshal(appInfo)
+
+		if err := json.Unmarshal(b, &latest); err == nil && latest.RawData != nil {
+			log.Printf("Successfully converted app info to AppInfoLatestData for app: %s", latest.RawData.Name)
+		} else {
+			log.Printf("Failed to convert app info to AppInfoLatestData: %v", err)
+			// Fallback: create a basic AppInfoLatestData structure
+			return nil
+		}
+	}
+
+	// Use SetLocalAppData to directly set the AppInfoLatestData structure
+	if err := dwr.cacheManager.SetLocalAppData(userID, sourceID, types.AppInfoLatestPending, latest); err != nil {
 		log.Printf("Failed to set app data in cache: %v", err)
 		return fmt.Errorf("failed to set app data in cache: %w", err)
 	}
@@ -616,13 +629,13 @@ func (dwr *DataWatcherRepo) shouldUpdateAppInCache(userID, sourceID, appName str
 	}
 
 	// Check in AppStateLatest
-	for _, appState := range sourceData.AppStateLatest {
-		if appState != nil && appState.Status.Name == appName {
-			existingVersion := dwr.extractVersionFromAppState(appState)
-			log.Printf("Found app in AppStateLatest with version: %s", existingVersion)
-			return dwr.shouldUpdateVersion(existingVersion, newVersion)
-		}
-	}
+	// for _, appState := range sourceData.AppStateLatest {
+	// 	if appState != nil && appState.Status.Name == appName {
+	// 		existingVersion := dwr.extractVersionFromAppState(appState)
+	// 		log.Printf("Found app in AppStateLatest with version: %s", existingVersion)
+	// 		return dwr.shouldUpdateVersion(existingVersion, newVersion)
+	// 	}
+	// }
 
 	// Check in AppInfoLatestPending
 	for _, appPending := range sourceData.AppInfoLatestPending {

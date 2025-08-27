@@ -45,6 +45,11 @@ func GetUserInfoFromRequest(req *restful.Request) (string, error) {
 		return "admin", nil
 	}
 
+	if IsAccountFromHeader() {
+		account := req.HeaderParameter("X-Bfl-User")
+		return account, nil
+	}
+
 	// Get token from request
 	token := GetTokenFromRequest(req)
 	if token == "" {
