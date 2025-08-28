@@ -107,6 +107,21 @@ func sendHttpRequestWithToken(method, url, token string, reader io.Reader) (stri
 	return sendHttpRequest(httpReq)
 }
 
+// sendHttpRequestWithBflUser sends HTTP request with bfl user (copied from utils.SendHttpRequestWithToken)
+func sendHttpRequestWithBflUser(method, url, bflUser string, reader io.Reader) (string, error) {
+	httpReq, err := http.NewRequest(method, url, reader)
+	if err != nil {
+		glog.Warningf("url:%s, err:%s", url, err.Error())
+		return "", err
+	}
+
+	httpReq.Header.Set("X-Bfl-User", bflUser)
+	httpReq.Header.Set("Accept", "*/*")
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	return sendHttpRequest(httpReq)
+}
+
 // sendHttpRequest sends HTTP request (copied from utils.SendHttpRequest)
 func sendHttpRequest(req *http.Request) (string, error) {
 	client := &http.Client{

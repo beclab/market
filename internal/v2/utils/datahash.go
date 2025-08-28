@@ -377,6 +377,7 @@ func createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[string]interface
 		"app_version":     info.AppVersion,
 		"app_title":       info.AppTitle,
 		"categories":      info.Categories,
+		"support_arch":    info.SupportArch,
 	}
 }
 

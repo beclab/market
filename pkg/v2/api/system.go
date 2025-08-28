@@ -573,14 +573,16 @@ func (s *Server) resumeApp(w http.ResponseWriter, r *http.Request) {
 	// Get token from request
 	restfulReq := &restful.Request{Request: r}
 	token := utils.GetTokenFromRequest(restfulReq)
-	if token == "" {
-		log.Println("Access token not found")
-		s.sendResponse(w, http.StatusUnauthorized, false, "Access token not found", nil)
-		return
-	}
+	// if token == "" {
+	// 	log.Println("Access token not found")
+	// 	s.sendResponse(w, http.StatusUnauthorized, false, "Access token not found", nil)
+	// 	return
+	// }
+
+	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
 
 	// Resume application by type
-	resBody, err := resumeByType(req.AppName, token, req.Type)
+	resBody, err := resumeByType(req.AppName, token, req.Type, bflUser)
 	if err != nil {
 		log.Printf("Failed to resume %s type:%s resp:%s, err:%s", req.AppName, req.Type, resBody, err.Error())
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to resume application", nil)
@@ -596,7 +598,7 @@ func (s *Server) resumeApp(w http.ResponseWriter, r *http.Request) {
 }
 
 // resumeByType resumes application by type (copied from handler_suspend.go)
-func resumeByType(name, token, ty string) (string, error) {
+func resumeByType(name, token, ty, bflUser string) (string, error) {
 	// Get app service host and port
 	appServiceHost := "127.0.0.1"
 	appServicePort := "8080"
@@ -613,7 +615,12 @@ func resumeByType(name, token, ty string) (string, error) {
 	}
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/resume", appServiceHost, appServicePort, name)
-	return doPostWithToken(url, token)
+
+	if utils.IsAccountFromHeader() {
+		return doPostWithBflUser(url, bflUser)
+	} else {
+		return doPostWithToken(url, token)
+	}
 }
 
 // doPostWithToken performs POST request with token
@@ -629,6 +636,44 @@ func doPostWithToken(url, token string) (string, error) {
 
 	if token != "" {
 		req.Header.Set("X-Authorization", token)
+	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("doPostWithToken: request failed: %v", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("doPostWithToken: failed to read response body: %v", err)
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("doPostWithToken: response status: %d, body: %s", resp.StatusCode, string(body))
+		return string(body), fmt.Errorf("HTTP status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return string(body), nil
+}
+
+// doPostWithToken performs POST request with token
+func doPostWithBflUser(url, bflUser string) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	log.Printf("doPostWithBflUser: url=%s, bflUser=%s", url, bflUser)
+
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		log.Printf("doPostWithToken: failed to create request: %v", err)
+		return "", err
+	}
+
+	if bflUser != "" {
+		req.Header.Set("X-Bfl-User", bflUser)
 	}
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Content-Type", "application/json")
@@ -688,14 +733,15 @@ func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
 	// Get token from request
 	restfulReq := &restful.Request{Request: r}
 	token := utils.GetTokenFromRequest(restfulReq)
-	if token == "" {
-		log.Println("Access token not found")
-		s.sendResponse(w, http.StatusUnauthorized, false, "Access token not found", nil)
-		return
-	}
+	// if token == "" {
+	// 	log.Println("Access token not found")
+	// 	s.sendResponse(w, http.StatusUnauthorized, false, "Access token not found", nil)
+	// 	return
+	// }
+	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
 
 	// Stop application by type
-	resBody, err := stopByType(req.AppName, token, req.Type)
+	resBody, err := stopByType(req.AppName, token, req.Type, bflUser)
 	if err != nil {
 		log.Printf("Failed to stop %s type:%s resp:%s, err:%s", req.AppName, req.Type, resBody, err.Error())
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to stop application", nil)
@@ -711,7 +757,7 @@ func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
 }
 
 // stopByType stops application by type (copied from handler_suspend.go suspendByType)
-func stopByType(name, token, ty string) (string, error) {
+func stopByType(name, token, ty, bflUser string) (string, error) {
 	// Get app service host and port
 	appServiceHost := "127.0.0.1"
 	appServicePort := "8080"
@@ -728,7 +774,12 @@ func stopByType(name, token, ty string) (string, error) {
 	}
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/suspend", appServiceHost, appServicePort, name)
-	return doPostWithToken(url, token)
+
+	if utils.IsAccountFromHeader() {
+		return doPostWithBflUser(url, bflUser)
+	} else {
+		return doPostWithToken(url, token)
+	}
 }
 
 // getMarketSettings handles GET /api/v2/settings/market-settings

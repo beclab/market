@@ -685,7 +685,8 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 
 	// Only use /repo/data GET, and expect a structure like { user_data: { sources: { sourceID: { app_info_latest: [...] } } } }
 	type AppSimpleInfo struct {
-		AppID string `json:"app_id"`
+		AppID       string   `json:"app_id"`
+		SupportArch []string `json:"support_arch,omitempty"`
 		// ... other fields omitted
 	}
 	type FilteredAppInfoLatestData struct {

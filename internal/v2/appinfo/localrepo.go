@@ -261,6 +261,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("X-Authorization", token)
 	req.Header.Set("X-User-ID", userID)
+	req.Header.Set("X-Bfl-User", userID)
 
 	// Send request
 	client := &http.Client{Timeout: 300 * time.Second} // 5 minutes timeout
@@ -358,6 +359,7 @@ func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Authorization", token)
 	req.Header.Set("X-User-ID", userID)
+	req.Header.Set("X-Bfl-User", userID)
 
 	// Send request
 	client := &http.Client{Timeout: 60 * time.Second}

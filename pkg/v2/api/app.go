@@ -72,10 +72,10 @@ type FilteredSourceDataForState struct {
 
 // FilteredAppInfoLatestData contains only AppSimpleInfo from AppInfoLatestData
 type FilteredAppInfoLatestData struct {
-	Type          types.AppDataType    `json:"type"`
-	Timestamp     int64                `json:"timestamp"`
-	Version       string               `json:"version,omitempty"`
-	AppSimpleInfo *types.AppSimpleInfo `json:"app_simple_info"`
+	Type          types.AppDataType      `json:"type"`
+	Timestamp     int64                  `json:"timestamp"`
+	Version       string                 `json:"version,omitempty"`
+	AppSimpleInfo map[string]interface{} `json:"app_simple_info"`
 }
 
 // FilteredUserData represents filtered user data
@@ -969,11 +969,33 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 	if sourceData.AppInfoLatest != nil {
 		for _, appInfoData := range sourceData.AppInfoLatest {
 			if appInfoData != nil {
+				// Use createSafeAppSimpleInfoCopy to ensure all fields including support_arch are included
+				var safeAppSimpleInfo map[string]interface{}
+				if appInfoData.AppSimpleInfo != nil {
+					// Debug: Log the original AppSimpleInfo data
+					log.Printf("DEBUG: Original AppSimpleInfo - SupportArch: %+v (length: %d)",
+						appInfoData.AppSimpleInfo.SupportArch, len(appInfoData.AppSimpleInfo.SupportArch))
+
+					// Check if SupportArch is empty, try to get it from RawData or AppInfo
+					if len(appInfoData.AppSimpleInfo.SupportArch) == 0 {
+						if appInfoData.RawData != nil && len(appInfoData.RawData.SupportArch) > 0 {
+							log.Printf("DEBUG: Found SupportArch in RawData: %+v", appInfoData.RawData.SupportArch)
+							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.RawData.SupportArch...)
+						} else if appInfoData.AppInfo != nil && appInfoData.AppInfo.AppEntry != nil && len(appInfoData.AppInfo.AppEntry.SupportArch) > 0 {
+							log.Printf("DEBUG: Found SupportArch in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.SupportArch)
+							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.AppInfo.AppEntry.SupportArch...)
+						}
+					}
+
+					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo)
+					log.Printf("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
+				}
+
 				filteredAppInfo := &FilteredAppInfoLatestData{
 					Type:          appInfoData.Type,
 					Timestamp:     appInfoData.Timestamp,
 					Version:       appInfoData.Version,
-					AppSimpleInfo: appInfoData.AppSimpleInfo,
+					AppSimpleInfo: safeAppSimpleInfo, // Use safe copy instead of direct reference
 				}
 				filteredSourceData.AppInfoLatest = append(filteredSourceData.AppInfoLatest, filteredAppInfo)
 			}
@@ -1600,6 +1622,7 @@ func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[stri
 		"app_version":     info.AppVersion,
 		"app_title":       info.AppTitle,
 		"categories":      info.Categories,
+		"support_arch":    info.SupportArch,
 	}
 }
 

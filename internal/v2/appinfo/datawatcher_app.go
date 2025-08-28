@@ -917,6 +917,7 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 	appSimpleInfo := &types.AppSimpleInfo{
 		AppDescription: make(map[string]string),
 		AppTitle:       make(map[string]string),
+		SupportArch:    make([]string, 0),
 	}
 
 	// Extract information from RawData if available
@@ -955,6 +956,11 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 		// Use Categories for App Categories
 		if len(pendingApp.RawData.Categories) > 0 {
 			appSimpleInfo.Categories = pendingApp.RawData.Categories
+		}
+
+		// Use SupportArch for App SupportArch
+		if len(pendingApp.RawData.SupportArch) > 0 {
+			appSimpleInfo.SupportArch = append([]string{}, pendingApp.RawData.SupportArch...)
 		}
 	}
 
@@ -1003,6 +1009,11 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 		// Fill missing Categories
 		if len(appSimpleInfo.Categories) == 0 && len(entry.Categories) > 0 {
 			appSimpleInfo.Categories = entry.Categories
+		}
+
+		// Fill missing SupportArch
+		if len(appSimpleInfo.SupportArch) == 0 && len(entry.SupportArch) > 0 {
+			appSimpleInfo.SupportArch = append([]string{}, entry.SupportArch...)
 		}
 	}
 

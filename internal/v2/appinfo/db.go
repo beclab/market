@@ -776,5 +776,6 @@ func (r *RedisClient) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map
 		"app_version":     info.AppVersion,
 		"app_title":       info.AppTitle,
 		"categories":      info.Categories,
+		"support_arch":    info.SupportArch,
 	}
 }
