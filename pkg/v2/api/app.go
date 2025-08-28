@@ -72,10 +72,10 @@ type FilteredSourceDataForState struct {
 
 // FilteredAppInfoLatestData contains only AppSimpleInfo from AppInfoLatestData
 type FilteredAppInfoLatestData struct {
-	Type          types.AppDataType    `json:"type"`
-	Timestamp     int64                `json:"timestamp"`
-	Version       string               `json:"version,omitempty"`
-	AppSimpleInfo *types.AppSimpleInfo `json:"app_simple_info"`
+	Type          types.AppDataType      `json:"type"`
+	Timestamp     int64                  `json:"timestamp"`
+	Version       string                 `json:"version,omitempty"`
+	AppSimpleInfo map[string]interface{} `json:"app_simple_info"`
 }
 
 // FilteredUserData represents filtered user data
@@ -969,11 +969,17 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 	if sourceData.AppInfoLatest != nil {
 		for _, appInfoData := range sourceData.AppInfoLatest {
 			if appInfoData != nil {
+				// Use createSafeAppSimpleInfoCopy to ensure all fields including support_arch are included
+				var safeAppSimpleInfo map[string]interface{}
+				if appInfoData.AppSimpleInfo != nil {
+					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo)
+				}
+
 				filteredAppInfo := &FilteredAppInfoLatestData{
 					Type:          appInfoData.Type,
 					Timestamp:     appInfoData.Timestamp,
 					Version:       appInfoData.Version,
-					AppSimpleInfo: appInfoData.AppSimpleInfo,
+					AppSimpleInfo: safeAppSimpleInfo, // Use safe copy instead of direct reference
 				}
 				filteredSourceData.AppInfoLatest = append(filteredSourceData.AppInfoLatest, filteredAppInfo)
 			}
