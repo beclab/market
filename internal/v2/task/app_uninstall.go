@@ -57,6 +57,7 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 
 	headers := map[string]string{
 		"X-Authorization": token,
+		"X-Bfl-User":      task.User,
 		// Content-Type is not strictly necessary for a request with no body,
 		// but we include it for consistency.
 		"Content-Type": "application/json",

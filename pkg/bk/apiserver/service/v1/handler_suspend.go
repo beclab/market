@@ -3,11 +3,12 @@ package v1
 import (
 	"errors"
 	"fmt"
-	"github.com/golang/glog"
 	"market/internal/appservice"
 	"market/internal/constants"
 	"market/internal/watchdog"
 	"market/pkg/api"
+
+	"github.com/golang/glog"
 
 	"github.com/emicklei/go-restful/v3"
 )
@@ -70,10 +71,16 @@ func suspendByType(name, token, ty string) (string, error) {
 
 func (h *Handler) resume(req *restful.Request, resp *restful.Response) {
 	token := getToken(req)
-	if token == "" {
-		api.HandleUnauthorized(resp, errors.New("access token not found"))
-		return
-	}
+	// if token == "" {
+	// 	api.HandleUnauthorized(resp, errors.New("access token not found"))
+	// 	return
+	// }
+
+	bflUser := req.HeaderParameter("X-Bfl-User")
+	// if bflUser == "" {
+	// 	api.HandleUnauthorized(resp, errors.New("bfl user not found"))
+	// 	return
+	// }
 
 	appName := req.PathParameter(ParamAppName)
 	if appName == "" {
@@ -87,7 +94,7 @@ func (h *Handler) resume(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	resBody, err := resumeByType(appName, token, ty)
+	resBody, err := resumeByType(appName, token, ty, bflUser)
 	if err != nil {
 		glog.Warningf("suspend %s type:%s resp:%s, err:%s", appName, ty, resBody, err.Error())
 		api.HandleError(resp, err)
@@ -115,12 +122,12 @@ func (h *Handler) resume(req *restful.Request, resp *restful.Response) {
 	respJsonWithOriginBody(resp, resBody)
 }
 
-func resumeByType(name, token, ty string) (string, error) {
+func resumeByType(name, token, ty, bflUser string) (string, error) {
 	switch ty {
 	case constants.AppType:
-		return appservice.Resume(name, token)
+		return appservice.Resume(name, token, bflUser)
 	case constants.ModelType:
-		resBody, _, err := appservice.LlmResume(name, token)
+		resBody, _, err := appservice.LlmResume(name, token, bflUser)
 		return resBody, err
 	//case constants.AgentType:
 	//	//todo

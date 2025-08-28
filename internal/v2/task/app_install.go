@@ -127,6 +127,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	headers := map[string]string{
 		"X-Authorization": token,
+		"X-Bfl-User":      task.User,
 		"Content-Type":    "application/json",
 		"X-Market-User":   user,
 		"X-Market-Source": appSource,

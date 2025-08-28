@@ -90,6 +90,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	headers := map[string]string{
 		"Accept":          "*/*",
 		"X-Authorization": token,
+		"X-Bfl-User":      task.User,
 		"Content-Type":    "application/json",
 		"X-Market-User":   user,
 		"X-Market-Source": source,
