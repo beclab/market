@@ -1600,6 +1600,7 @@ func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[stri
 		"app_version":     info.AppVersion,
 		"app_title":       info.AppTitle,
 		"categories":      info.Categories,
+		"support_arch":    info.SupportArch,
 	}
 }
 
