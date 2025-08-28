@@ -972,7 +972,23 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 				// Use createSafeAppSimpleInfoCopy to ensure all fields including support_arch are included
 				var safeAppSimpleInfo map[string]interface{}
 				if appInfoData.AppSimpleInfo != nil {
+					// Debug: Log the original AppSimpleInfo data
+					log.Printf("DEBUG: Original AppSimpleInfo - SupportArch: %+v (length: %d)",
+						appInfoData.AppSimpleInfo.SupportArch, len(appInfoData.AppSimpleInfo.SupportArch))
+
+					// Check if SupportArch is empty, try to get it from RawData or AppInfo
+					if len(appInfoData.AppSimpleInfo.SupportArch) == 0 {
+						if appInfoData.RawData != nil && len(appInfoData.RawData.SupportArch) > 0 {
+							log.Printf("DEBUG: Found SupportArch in RawData: %+v", appInfoData.RawData.SupportArch)
+							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.RawData.SupportArch...)
+						} else if appInfoData.AppInfo != nil && appInfoData.AppInfo.AppEntry != nil && len(appInfoData.AppInfo.AppEntry.SupportArch) > 0 {
+							log.Printf("DEBUG: Found SupportArch in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.SupportArch)
+							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.AppInfo.AppEntry.SupportArch...)
+						}
+					}
+
 					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo)
+					log.Printf("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
 				}
 
 				filteredAppInfo := &FilteredAppInfoLatestData{
