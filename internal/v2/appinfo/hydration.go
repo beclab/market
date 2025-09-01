@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"market/internal/v2/appinfo/hydrationfn"
@@ -25,8 +26,7 @@ type Hydrator struct {
 	taskQueue       chan *hydrationfn.HydrationTask
 	workerCount     int
 	stopChan        chan struct{}
-	isRunning       bool
-	mutex           sync.RWMutex
+	isRunning       atomic.Bool // Changed to atomic.Bool for better performance
 
 	// Task tracking
 	activeTasks    map[string]*hydrationfn.HydrationTask
@@ -60,7 +60,7 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 		taskQueue:            make(chan *hydrationfn.HydrationTask, config.QueueSize),
 		workerCount:          config.WorkerCount,
 		stopChan:             make(chan struct{}),
-		isRunning:            false,
+		isRunning:            atomic.Bool{}, // Initialize atomic.Bool
 		activeTasks:          make(map[string]*hydrationfn.HydrationTask),
 		completedTasks:       make(map[string]*hydrationfn.HydrationTask),
 		failedTasks:          make(map[string]*hydrationfn.HydrationTask),
@@ -99,20 +99,15 @@ func DefaultHydratorConfig() HydratorConfig {
 
 // AddStep adds a hydration step to the hydrator
 func (h *Hydrator) AddStep(step hydrationfn.HydrationStep) {
-	h.mutex.Lock()
-	defer h.mutex.Unlock()
 	h.steps = append(h.steps, step)
 }
 
 // Start begins the hydration process with workers
 func (h *Hydrator) Start(ctx context.Context) error {
-	h.mutex.Lock()
-	if h.isRunning {
-		h.mutex.Unlock()
+	if h.isRunning.Load() {
 		return fmt.Errorf("hydrator is already running")
 	}
-	h.isRunning = true
-	h.mutex.Unlock()
+	h.isRunning.Store(true)
 
 	log.Printf("Starting hydrator with %d workers and %d steps", h.workerCount, len(h.steps))
 
@@ -137,23 +132,18 @@ func (h *Hydrator) Start(ctx context.Context) error {
 
 // Stop stops the hydration process
 func (h *Hydrator) Stop() {
-	h.mutex.Lock()
-	defer h.mutex.Unlock()
-
-	if !h.isRunning {
+	if !h.isRunning.Load() {
 		return
 	}
 
 	log.Println("Stopping hydrator...")
 	close(h.stopChan)
-	h.isRunning = false
+	h.isRunning.Store(false)
 }
 
 // IsRunning returns whether the hydrator is currently running
 func (h *Hydrator) IsRunning() bool {
-	h.mutex.RLock()
-	defer h.mutex.RUnlock()
-	return h.isRunning
+	return h.isRunning.Load()
 }
 
 // EnqueueTask adds a task to the hydration queue
@@ -1182,8 +1172,6 @@ func (h *Hydrator) looksLikeAppsMap(data map[string]interface{}) bool {
 
 // SetCacheManager sets the cache manager for database synchronization
 func (h *Hydrator) SetCacheManager(cacheManager *CacheManager) {
-	h.mutex.Lock()
-	defer h.mutex.Unlock()
 	h.cacheManager = cacheManager
 	h.lastSyncTime = time.Now()
 	log.Printf("Cache manager set for hydrator with sync interval: %v", h.syncInterval)

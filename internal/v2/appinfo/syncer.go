@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"market/internal/v2/appinfo/syncerfn"
@@ -17,11 +18,11 @@ import (
 type Syncer struct {
 	steps           []syncerfn.SyncStep
 	cache           *CacheData
-	cacheManager    *CacheManager // Reference to CacheManager for notifications
+	cacheManager    atomic.Pointer[CacheManager] // Use atomic.Pointer for thread-safe pointer assignment
 	syncInterval    time.Duration
 	stopChan        chan struct{}
-	isRunning       bool
-	mutex           sync.RWMutex
+	isRunning       atomic.Bool               // Use atomic.Bool for thread-safe boolean operations
+	mutex           sync.RWMutex              // Keep mutex for steps slice operations
 	settingsManager *settings.SettingsManager // Settings manager for data source information
 }
 
@@ -30,10 +31,10 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 	return &Syncer{
 		steps:           make([]syncerfn.SyncStep, 0),
 		cache:           cache,
-		cacheManager:    nil,
+		cacheManager:    atomic.Pointer[CacheManager]{}, // Initialize with nil
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
-		isRunning:       false,
+		isRunning:       atomic.Bool{}, // Initialize with false
 		settingsManager: settingsManager,
 	}
 }
@@ -71,11 +72,11 @@ func (s *Syncer) GetSteps() []syncerfn.SyncStep {
 // Start begins the synchronization process
 func (s *Syncer) Start(ctx context.Context) error {
 	s.mutex.Lock()
-	if s.isRunning {
+	if s.isRunning.Load() {
 		s.mutex.Unlock()
 		return fmt.Errorf("syncer is already running")
 	}
-	s.isRunning = true
+	s.isRunning.Store(true)
 	s.mutex.Unlock()
 
 	log.Printf("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
@@ -89,27 +90,25 @@ func (s *Syncer) Stop() {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if !s.isRunning {
+	if !s.isRunning.Load() {
 		return
 	}
 
 	log.Println("Stopping syncer...")
 	close(s.stopChan)
-	s.isRunning = false
+	s.isRunning.Store(false)
 }
 
 // IsRunning returns whether the syncer is currently running
 func (s *Syncer) IsRunning() bool {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-	return s.isRunning
+	return s.isRunning.Load()
 }
 
 // syncLoop runs the main synchronization loop
 func (s *Syncer) syncLoop(ctx context.Context) {
 	defer func() {
 		s.mutex.Lock()
-		s.isRunning = false
+		s.isRunning.Store(false)
 		s.mutex.Unlock()
 		log.Println("Syncer stopped")
 	}()
@@ -322,7 +321,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		log.Printf("Storing data for %d users: %v", len(userIDs), userIDs)
 
 		// Determine storage method based on CacheManager availability
-		if s.cacheManager != nil {
+		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			log.Printf("Using CacheManager for data storage with hydration notifications")
 			s.storeDataViaCacheManager(userIDs, sourceID, completeData)
 		} else {
@@ -617,9 +616,9 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 		s.cache.Mutex.RUnlock()
 
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
-		if s.cacheManager != nil {
+		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			log.Printf("Using CacheManager to store data for user: %s, source: %s", userID, sourceID)
-			err := s.cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData)
+			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData)
 			if err != nil {
 				log.Printf("Failed to store data via CacheManager for user: %s, source: %s, error: %v", userID, sourceID, err)
 				// Fall back to direct cache access
@@ -680,5 +679,5 @@ func DefaultSyncerConfig() SyncerConfig {
 func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.cacheManager = cacheManager
+	s.cacheManager.Store(cacheManager) // Use atomic.Store to set the pointer
 }
