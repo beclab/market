@@ -5,7 +5,6 @@ import (
 	"log"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -367,8 +366,7 @@ type UserData struct {
 // CacheData represents the entire cache with a single global lock
 type CacheData struct {
 	Users map[string]*UserData `json:"users"`
-	// Single global lock to manage all data access
-	Mutex sync.RWMutex `json:"-"`
+	// Remove Mutex - unified lock strategy using CacheManager.mutex only
 }
 
 // NodeInfo represents information about a specific node and its layers

@@ -81,8 +81,12 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 
 	data.RemoteHash = hashResponse.Hash
 
-	// Calculate local hash
-	data.LocalHash = h.calculateLocalHash(data.Cache, data.GetMarketSource())
+	// Calculate local hash with proper locking
+	if data.CacheManager != nil {
+		data.CacheManager.RLock()
+		data.LocalHash = h.calculateLocalHash(data.Cache, data.GetMarketSource())
+		data.CacheManager.RUnlock()
+	}
 
 	// Compare hashes and set result
 	data.HashMatches = data.RemoteHash == data.LocalHash
@@ -119,8 +123,7 @@ func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSo
 	// Use market source name as source ID to match syncer.go behavior
 	sourceID := marketSource.ID
 
-	cache.Mutex.RLock()
-	defer cache.Mutex.RUnlock()
+	// Note: This function is called from SyncContext with proper locking
 
 	// If no users exist, return empty hash
 	if len(cache.Users) == 0 {

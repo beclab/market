@@ -49,8 +49,9 @@ type HydrationTask struct {
 	DatabaseUpdateData map[string]interface{} `json:"database_update_data"` // Database update data
 
 	// Context data
-	Cache           *types.CacheData          `json:"-"` // Cache data reference
-	SettingsManager *settings.SettingsManager `json:"-"` // Settings manager
+	Cache           *types.CacheData            `json:"-"` // Cache data reference
+	CacheManager    types.CacheManagerInterface `json:"-"` // CacheManager for unified lock strategy
+	SettingsManager *settings.SettingsManager   `json:"-"` // Settings manager
 
 	mutex sync.RWMutex `json:"-"` // Task mutex for thread safety
 
@@ -114,6 +115,57 @@ func NewHydrationTask(userID, sourceID, appID string, appData map[string]interfa
 		RetryCount:         0,
 		MaxRetries:         3,
 		Cache:              cache,
+		SettingsManager:    settingsManager,
+		ChartData:          make(map[string]interface{}),
+		DatabaseUpdateData: make(map[string]interface{}),
+	}
+}
+
+// NewHydrationTaskWithManager creates a new hydration task with CacheManager
+func NewHydrationTaskWithManager(userID, sourceID, appID string, appData map[string]interface{}, cache *types.CacheData, cacheManager types.CacheManagerInterface, settingsManager *settings.SettingsManager) *HydrationTask {
+	taskID := generateTaskID(userID, sourceID, appID)
+
+	// Extract app info
+	appName := ""
+	appVersion := ""
+	if name, ok := appData["name"].(string); ok {
+		appName = name
+	}
+	if version, ok := appData["version"].(string); ok {
+		appVersion = version
+	}
+
+	// Create a safe copy of app data to avoid circular references
+	safeAppData := createSafeAppDataCopy(appData)
+
+	marketSources := settingsManager.GetActiveMarketSources()
+
+	sourceType := ""
+	for _, source := range marketSources {
+		if source.ID == sourceID {
+			sourceType = string(source.Type)
+			break
+		}
+	}
+
+	return &HydrationTask{
+		ID:                 taskID,
+		UserID:             userID,
+		SourceID:           sourceID,
+		SourceType:         sourceType,
+		AppID:              appID,
+		AppName:            appName,
+		AppVersion:         appVersion,
+		AppData:            safeAppData,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+		Status:             TaskStatusPending,
+		CurrentStep:        0,
+		TotalSteps:         3, // Default 3 steps: source chart, rendered chart, database update
+		RetryCount:         0,
+		MaxRetries:         3,
+		Cache:              cache,
+		CacheManager:       cacheManager,
 		SettingsManager:    settingsManager,
 		ChartData:          make(map[string]interface{}),
 		DatabaseUpdateData: make(map[string]interface{}),

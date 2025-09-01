@@ -140,19 +140,53 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"images":     images,
 	}
 
-	// Create callback function for synchronous requests
-	var callback task.TaskCallback
+	// Handle synchronous requests with proper blocking
 	if request.Sync {
-		callback = func(result string, err error) {
-			if err != nil {
-				log.Printf("Synchronous installation failed for app: %s, error: %v", request.AppName, err)
-				s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Installation failed: %v", err), nil)
-			} else {
-				log.Printf("Synchronous installation completed successfully for app: %s", request.AppName)
-				s.sendResponse(w, http.StatusOK, true, "App installation completed successfully", map[string]interface{}{
-					"result": result,
-				})
-			}
+		// Create channel to wait for task completion
+		done := make(chan struct{})
+		var taskResult string
+		var taskError error
+
+		// Create callback function that will be called when task completes
+		callback := func(result string, err error) {
+			taskResult = result
+			taskError = err
+			close(done)
+		}
+
+		// Start the task
+		task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
+		if task == nil {
+			log.Printf("Failed to create installation task for app: %s", request.AppName)
+			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create installation task", nil)
+			return
+		}
+
+		log.Printf("Created synchronous installation task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
+
+		// Wait for task completion
+		<-done
+
+		// Send response based on task result
+		if taskError != nil {
+			log.Printf("Synchronous installation failed for app: %s, error: %v", request.AppName, taskError)
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Installation failed: %v", taskError), nil)
+		} else {
+			log.Printf("Synchronous installation completed successfully for app: %s", request.AppName)
+			s.sendResponse(w, http.StatusOK, true, "App installation completed successfully", map[string]interface{}{
+				"result": taskResult,
+			})
+		}
+		return
+	}
+
+	// Handle asynchronous requests
+	callback := func(result string, err error) {
+		// For async requests, callback is just for logging
+		if err != nil {
+			log.Printf("Asynchronous installation failed for app: %s, error: %v", request.AppName, err)
+		} else {
+			log.Printf("Asynchronous installation completed successfully for app: %s", request.AppName)
 		}
 	}
 
@@ -163,14 +197,12 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created installation task: ID=%s for app: %s version: %s, sync=%v", task.ID, request.AppName, request.Version, request.Sync)
+	log.Printf("Created asynchronous installation task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
 
-	// For asynchronous requests, return immediately
-	if !request.Sync {
-		s.sendResponse(w, http.StatusOK, true, "App installation started successfully", map[string]interface{}{
-			"task_id": task.ID,
-		})
-	}
+	// Return immediately for asynchronous requests
+	s.sendResponse(w, http.StatusOK, true, "App installation started successfully", map[string]interface{}{
+		"task_id": task.ID,
+	})
 }
 
 // 7. Cancel installation (single)
@@ -247,19 +279,53 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		"cfgType":  cfgType, // Use retrieved cfgType
 	}
 
-	// Create callback function for synchronous requests
-	var callback task.TaskCallback
+	// Handle synchronous requests with proper blocking
 	if sync {
-		callback = func(result string, err error) {
-			if err != nil {
-				log.Printf("Synchronous cancel installation failed for app: %s, error: %v", appName, err)
-				s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Cancel installation failed: %v", err), nil)
-			} else {
-				log.Printf("Synchronous cancel installation completed successfully for app: %s", appName)
-				s.sendResponse(w, http.StatusOK, true, "App installation cancellation completed successfully", map[string]interface{}{
-					"result": result,
-				})
-			}
+		// Create channel to wait for task completion
+		done := make(chan struct{})
+		var taskResult string
+		var taskError error
+
+		// Create callback function that will be called when task completes
+		callback := func(result string, err error) {
+			taskResult = result
+			taskError = err
+			close(done)
+		}
+
+		// Start the task
+		task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
+		if task == nil {
+			log.Printf("Failed to create cancel installation task for app: %s", appName)
+			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create cancel installation task", nil)
+			return
+		}
+
+		log.Printf("Created synchronous cancel installation task: ID=%s for app: %s", task.ID, appName)
+
+		// Wait for task completion
+		<-done
+
+		// Send response based on task result
+		if taskError != nil {
+			log.Printf("Synchronous cancel installation failed for app: %s, error: %v", appName, taskError)
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Cancel installation failed: %v", taskError), nil)
+		} else {
+			log.Printf("Synchronous cancel installation completed successfully for app: %s", appName)
+			s.sendResponse(w, http.StatusOK, true, "App installation cancellation completed successfully", map[string]interface{}{
+				"result": taskResult,
+			})
+		}
+		return
+	}
+
+	// Handle asynchronous requests
+	callback := func(result string, err error) {
+		// For async requests, callback is just for logging
+		if err != nil {
+			log.Printf("Asynchronous cancel installation failed for app: %s, error: %v", appName, err)
+		} else {
+			log.Printf("Asynchronous cancel installation completed successfully for app: %s", appName)
 		}
 	}
 
@@ -270,14 +336,12 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created cancel installation task: ID=%s for app: %s, sync=%v", task.ID, appName, sync)
+	log.Printf("Created asynchronous cancel installation task: ID=%s for app: %s", task.ID, appName)
 
-	// For asynchronous requests, return immediately
-	if !sync {
-		s.sendResponse(w, http.StatusOK, true, "App installation cancellation started successfully", map[string]interface{}{
-			"task_id": task.ID,
-		})
-	}
+	// Return immediately for asynchronous requests
+	s.sendResponse(w, http.StatusOK, true, "App installation cancellation started successfully", map[string]interface{}{
+		"task_id": task.ID,
+	})
 }
 
 // 8. Uninstall application (single)
@@ -361,19 +425,53 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		"all":      all,     // Add all parameter to metadata
 	}
 
-	// Create callback function for synchronous requests
-	var callback task.TaskCallback
+	// Handle synchronous requests with proper blocking
 	if sync {
-		callback = func(result string, err error) {
-			if err != nil {
-				log.Printf("Synchronous uninstallation failed for app: %s, error: %v", appName, err)
-				s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Uninstallation failed: %v", err), nil)
-			} else {
-				log.Printf("Synchronous uninstallation completed successfully for app: %s", appName)
-				s.sendResponse(w, http.StatusOK, true, "App uninstallation completed successfully", map[string]interface{}{
-					"result": result,
-				})
-			}
+		// Create channel to wait for task completion
+		done := make(chan struct{})
+		var taskResult string
+		var taskError error
+
+		// Create callback function that will be called when task completes
+		callback := func(result string, err error) {
+			taskResult = result
+			taskError = err
+			close(done)
+		}
+
+		// Start the task
+		task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
+		if task == nil {
+			log.Printf("Failed to create uninstallation task for app: %s", appName)
+			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create uninstallation task", nil)
+			return
+		}
+
+		log.Printf("Created synchronous uninstallation task: ID=%s for app: %s", task.ID, appName)
+
+		// Wait for task completion
+		<-done
+
+		// Send response based on task result
+		if taskError != nil {
+			log.Printf("Synchronous uninstallation failed for app: %s, error: %v", appName, taskError)
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Uninstallation failed: %v", taskError), nil)
+		} else {
+			log.Printf("Synchronous uninstallation completed successfully for app: %s", appName)
+			s.sendResponse(w, http.StatusOK, true, "App uninstallation completed successfully", map[string]interface{}{
+				"result": taskResult,
+			})
+		}
+		return
+	}
+
+	// Handle asynchronous requests
+	callback := func(result string, err error) {
+		// For async requests, callback is just for logging
+		if err != nil {
+			log.Printf("Asynchronous uninstallation failed for app: %s, error: %v", appName, err)
+		} else {
+			log.Printf("Asynchronous uninstallation completed successfully for app: %s", appName)
 		}
 	}
 
@@ -384,14 +482,12 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created uninstallation task: ID=%s for app: %s, sync=%v", task.ID, appName, sync)
+	log.Printf("Created asynchronous uninstallation task: ID=%s for app: %s", task.ID, appName)
 
-	// For asynchronous requests, return immediately
-	if !sync {
-		s.sendResponse(w, http.StatusOK, true, "App uninstallation started successfully", map[string]interface{}{
-			"task_id": task.ID,
-		})
-	}
+	// Return immediately for asynchronous requests
+	s.sendResponse(w, http.StatusOK, true, "App uninstallation started successfully", map[string]interface{}{
+		"task_id": task.ID,
+	})
 }
 
 // 9. Upgrade application (single)
@@ -508,19 +604,53 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"images":     images,
 	}
 
-	// Create callback function for synchronous requests
-	var callback task.TaskCallback
+	// Handle synchronous requests with proper blocking
 	if request.Sync {
-		callback = func(result string, err error) {
-			if err != nil {
-				log.Printf("Synchronous upgrade failed for app: %s, error: %v", request.AppName, err)
-				s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Upgrade failed: %v", err), nil)
-			} else {
-				log.Printf("Synchronous upgrade completed successfully for app: %s", request.AppName)
-				s.sendResponse(w, http.StatusOK, true, "App upgrade completed successfully", map[string]interface{}{
-					"result": result,
-				})
-			}
+		// Create channel to wait for task completion
+		done := make(chan struct{})
+		var taskResult string
+		var taskError error
+
+		// Create callback function that will be called when task completes
+		callback := func(result string, err error) {
+			taskResult = result
+			taskError = err
+			close(done)
+		}
+
+		// Start the task
+		task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
+		if task == nil {
+			log.Printf("Failed to create upgrade task for app: %s", request.AppName)
+			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create upgrade task", nil)
+			return
+		}
+
+		log.Printf("Created synchronous upgrade task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
+
+		// Wait for task completion
+		<-done
+
+		// Send response based on task result
+		if taskError != nil {
+			log.Printf("Synchronous upgrade failed for app: %s, error: %v", request.AppName, taskError)
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Upgrade failed: %v", taskError), nil)
+		} else {
+			log.Printf("Synchronous upgrade completed successfully for app: %s", request.AppName)
+			s.sendResponse(w, http.StatusOK, true, "App upgrade completed successfully", map[string]interface{}{
+				"result": taskResult,
+			})
+		}
+		return
+	}
+
+	// Handle asynchronous requests
+	callback := func(result string, err error) {
+		// For async requests, callback is just for logging
+		if err != nil {
+			log.Printf("Asynchronous upgrade failed for app: %s, error: %v", request.AppName, err)
+		} else {
+			log.Printf("Asynchronous upgrade completed successfully for app: %s", request.AppName)
 		}
 	}
 
@@ -531,12 +661,10 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created upgrade task: ID=%s for app: %s version: %s, sync=%v", task.ID, request.AppName, request.Version, request.Sync)
+	log.Printf("Created asynchronous upgrade task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
 
-	// For asynchronous requests, return immediately
-	if !request.Sync {
-		s.sendResponse(w, http.StatusOK, true, "App upgrade started successfully", map[string]interface{}{
-			"task_id": task.ID,
-		})
-	}
+	// Return immediately for asynchronous requests
+	s.sendResponse(w, http.StatusOK, true, "App upgrade started successfully", map[string]interface{}{
+		"task_id": task.ID,
+	})
 }

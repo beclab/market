@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"market/internal/v2/appinfo/syncerfn"
@@ -17,11 +18,11 @@ import (
 type Syncer struct {
 	steps           []syncerfn.SyncStep
 	cache           *CacheData
-	cacheManager    *CacheManager // Reference to CacheManager for notifications
+	cacheManager    atomic.Pointer[CacheManager] // Use atomic.Pointer for thread-safe pointer assignment
 	syncInterval    time.Duration
 	stopChan        chan struct{}
-	isRunning       bool
-	mutex           sync.RWMutex
+	isRunning       atomic.Bool               // Use atomic.Bool for thread-safe boolean operations
+	mutex           sync.RWMutex              // Keep mutex for steps slice operations
 	settingsManager *settings.SettingsManager // Settings manager for data source information
 }
 
@@ -30,10 +31,10 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 	return &Syncer{
 		steps:           make([]syncerfn.SyncStep, 0),
 		cache:           cache,
-		cacheManager:    nil,
+		cacheManager:    atomic.Pointer[CacheManager]{}, // Initialize with nil
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
-		isRunning:       false,
+		isRunning:       atomic.Bool{}, // Initialize with false
 		settingsManager: settingsManager,
 	}
 }
@@ -71,11 +72,11 @@ func (s *Syncer) GetSteps() []syncerfn.SyncStep {
 // Start begins the synchronization process
 func (s *Syncer) Start(ctx context.Context) error {
 	s.mutex.Lock()
-	if s.isRunning {
+	if s.isRunning.Load() {
 		s.mutex.Unlock()
 		return fmt.Errorf("syncer is already running")
 	}
-	s.isRunning = true
+	s.isRunning.Store(true)
 	s.mutex.Unlock()
 
 	log.Printf("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
@@ -89,27 +90,25 @@ func (s *Syncer) Stop() {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if !s.isRunning {
+	if !s.isRunning.Load() {
 		return
 	}
 
 	log.Println("Stopping syncer...")
 	close(s.stopChan)
-	s.isRunning = false
+	s.isRunning.Store(false)
 }
 
 // IsRunning returns whether the syncer is currently running
 func (s *Syncer) IsRunning() bool {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-	return s.isRunning
+	return s.isRunning.Load()
 }
 
 // syncLoop runs the main synchronization loop
 func (s *Syncer) syncLoop(ctx context.Context) {
 	defer func() {
 		s.mutex.Lock()
-		s.isRunning = false
+		s.isRunning.Store(false)
 		s.mutex.Unlock()
 		log.Println("Syncer stopped")
 	}()
@@ -200,7 +199,12 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.ID)
 
-	syncContext := syncerfn.NewSyncContext(s.cache)
+	// Create sync context with CacheManager for unified lock strategy
+	var cacheManager types.CacheManagerInterface
+	if cm := s.cacheManager.Load(); cm != nil {
+		cacheManager = cm
+	}
+	syncContext := syncerfn.NewSyncContextWithManager(s.cache, cacheManager)
 
 	// Set version for API requests using utils function
 	version := getVersionForSync()
@@ -294,35 +298,45 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		log.Printf("Using source ID: %s for data storage", sourceID)
 
 		// Get all existing user IDs with minimal locking
-		s.cache.Mutex.RLock()
 		var userIDs []string
-		for userID := range s.cache.Users {
-			userIDs = append(userIDs, userID)
-		}
-		s.cache.Mutex.RUnlock()
-
-		// If no users exist, create a system user as fallback
-		if len(userIDs) == 0 {
-			s.cache.Mutex.Lock()
-			// Double-check after acquiring write lock
-			if len(s.cache.Users) == 0 {
-				systemUserID := "system"
-				s.cache.Users[systemUserID] = NewUserData()
-				userIDs = append(userIDs, systemUserID)
-				log.Printf("No existing users found, created system user as fallback")
-			} else {
-				// Users were added by another goroutine
-				for userID := range s.cache.Users {
-					userIDs = append(userIDs, userID)
-				}
+		// Use CacheManager if available, otherwise use direct cache access
+		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
+			// Use CacheManager's lock
+			cacheManager.mutex.RLock()
+			for userID := range s.cache.Users {
+				userIDs = append(userIDs, userID)
 			}
-			s.cache.Mutex.Unlock()
+			cacheManager.mutex.RUnlock()
+
+			// If no users exist, create a system user as fallback
+			if len(userIDs) == 0 {
+				cacheManager.mutex.Lock()
+				// Double-check after acquiring write lock
+				if len(s.cache.Users) == 0 {
+					systemUserID := "system"
+					s.cache.Users[systemUserID] = NewUserData()
+					userIDs = append(userIDs, systemUserID)
+					log.Printf("No existing users found, created system user as fallback")
+				} else {
+					// Users were added by another goroutine
+					for userID := range s.cache.Users {
+						userIDs = append(userIDs, userID)
+					}
+				}
+				cacheManager.mutex.Unlock()
+			}
+		} else {
+			// Fallback to direct cache access without lock (not recommended)
+			log.Printf("Warning: CacheManager not available, using direct cache access")
+			for userID := range s.cache.Users {
+				userIDs = append(userIDs, userID)
+			}
 		}
 
 		log.Printf("Storing data for %d users: %v", len(userIDs), userIDs)
 
 		// Determine storage method based on CacheManager availability
-		if s.cacheManager != nil {
+		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			log.Printf("Using CacheManager for data storage with hydration notifications")
 			s.storeDataViaCacheManager(userIDs, sourceID, completeData)
 		} else {
@@ -341,9 +355,14 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 // storeDataDirectly stores data directly to cache without going through CacheManager
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
-	// Use global lock instead of nested locks
-	s.cache.Mutex.Lock()
-	defer s.cache.Mutex.Unlock()
+	// Use CacheManager's lock if available
+	if cacheManager := s.cacheManager.Load(); cacheManager != nil {
+		cacheManager.mutex.Lock()
+		defer cacheManager.mutex.Unlock()
+	} else {
+		// Fallback: no lock protection (not recommended)
+		log.Printf("Warning: CacheManager not available for storeDataDirectly")
+	}
 
 	userData := s.cache.Users[userID]
 
@@ -601,25 +620,27 @@ func (s *Syncer) storeDataDirectlyBatch(userIDs []string, sourceID string, compl
 func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, completeData map[string]interface{}) {
 	for _, userID := range userIDs {
 		// Check if the source is local type - skip syncer operations for local sources
-		s.cache.Mutex.RLock()
-		userData, userExists := s.cache.Users[userID]
-		if userExists {
-			sourceData, sourceExists := userData.Sources[sourceID]
-			if sourceExists {
-				sourceType := sourceData.Type
-				if sourceType == types.SourceDataTypeLocal {
-					log.Printf("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
-					s.cache.Mutex.RUnlock()
-					continue
+		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
+			cacheManager.mutex.RLock()
+			userData, userExists := s.cache.Users[userID]
+			if userExists {
+				sourceData, sourceExists := userData.Sources[sourceID]
+				if sourceExists {
+					sourceType := sourceData.Type
+					if sourceType == types.SourceDataTypeLocal {
+						log.Printf("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
+						cacheManager.mutex.RUnlock()
+						continue
+					}
 				}
 			}
+			cacheManager.mutex.RUnlock()
 		}
-		s.cache.Mutex.RUnlock()
 
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
-		if s.cacheManager != nil {
+		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			log.Printf("Using CacheManager to store data for user: %s, source: %s", userID, sourceID)
-			err := s.cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData)
+			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData)
 			if err != nil {
 				log.Printf("Failed to store data via CacheManager for user: %s, source: %s, error: %v", userID, sourceID, err)
 				// Fall back to direct cache access
@@ -680,5 +701,5 @@ func DefaultSyncerConfig() SyncerConfig {
 func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.cacheManager = cacheManager
+	s.cacheManager.Store(cacheManager) // Use atomic.Store to set the pointer
 }

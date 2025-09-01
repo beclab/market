@@ -473,13 +473,11 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 	sourceID := data.GetMarketSource().Name
 	log.Printf("Removing app %s (name: %s) from cache for source: %s", appID, appName, sourceID)
 
-	// Remove app from cache for all users
-	log.Printf("Acquiring cache mutex lock for app removal")
-	data.Cache.Mutex.Lock()
-	defer func() {
-		log.Printf("Releasing cache mutex lock for app removal")
-		data.Cache.Mutex.Unlock()
-	}()
+	// Use CacheManager's lock for unified lock strategy
+	if data.CacheManager != nil {
+		data.CacheManager.Lock()
+		defer data.CacheManager.Unlock()
+	}
 
 	log.Printf("Processing %d users for app removal", len(data.Cache.Users))
 

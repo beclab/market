@@ -318,76 +318,67 @@ func (m *AppInfoModule) Stop() error {
 
 // GetCacheManager returns the cache manager instance
 func (m *AppInfoModule) GetCacheManager() *CacheManager {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.cacheManager
 }
 
 // GetSyncer returns the syncer instance
 func (m *AppInfoModule) GetSyncer() *Syncer {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.syncer
 }
 
 // GetHydrator returns the hydrator instance (can nil)
 func (m *AppInfoModule) GetHydrator() *Hydrator {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.hydrator
 }
 
 // GetDataWatcher returns the DataWatcher instance (can nil)
 func (m *AppInfoModule) GetDataWatcher() *DataWatcher {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.dataWatcher
 }
 
 // GetDataWatcherState returns the DataWatcherState instance (can nil)
 func (m *AppInfoModule) GetDataWatcherState() *DataWatcherState {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.dataWatcherState
 }
 
 // GetDataWatcherUser returns the DataWatcherUser instance (can nil)
 func (m *AppInfoModule) GetDataWatcherUser() *DataWatcherUser {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.dataWatcherUser
 }
 
 // GetDataSender returns the DataSender instance (can nil)
 func (m *AppInfoModule) GetDataSender() *DataSender {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.dataSender
 }
 
 // GetStatusCorrectionChecker returns the StatusCorrectionChecker instance (can be nil)
 func (m *AppInfoModule) GetStatusCorrectionChecker() *StatusCorrectionChecker {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.statusCorrectionChecker
 }
 
 // GetRedisClient returns the Redis client instance
 func (m *AppInfoModule) GetRedisClient() *RedisClient {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.redisClient
 }
 
 // GetRedisConfig returns the Redis configuration
 func (m *AppInfoModule) GetRedisConfig() *RedisConfig {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Config is read-only after initialization, no need for read lock
 	return m.config.Redis
 }
 
 // IsStarted returns whether the module is currently running
 func (m *AppInfoModule) IsStarted() bool {
+	// Boolean read is atomic, but we need to ensure consistency with Start/Stop operations
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.isStarted
@@ -395,6 +386,7 @@ func (m *AppInfoModule) IsStarted() bool {
 
 // GetModuleStatus returns the current status of the module and all components
 func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
+	// Need read lock to ensure consistent snapshot of all component states
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -1114,8 +1106,7 @@ func (m *AppInfoModule) GetAppData(userID, sourceID string, dataType AppDataType
 
 // GetUserConfig returns the user configuration
 func (m *AppInfoModule) GetUserConfig() *UserConfig {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Config is read-only after initialization, no need for read lock
 	return m.config.User
 }
 
@@ -1250,13 +1241,12 @@ func (m *AppInfoModule) UpdateUserConfig(newUserConfig *UserConfig) error {
 
 // SyncUserListToCache synchronizes the current user list to cache
 func (m *AppInfoModule) SyncUserListToCache() error {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
+	// Check isStarted without lock since it's only read
 	if !m.isStarted {
 		return fmt.Errorf("module is not started")
 	}
 
+	// Cache manager pointer access is atomic
 	if m.cacheManager == nil {
 		return fmt.Errorf("cache manager is not available")
 	}
@@ -1266,6 +1256,7 @@ func (m *AppInfoModule) SyncUserListToCache() error {
 
 // RefreshUserDataStructures ensures all configured users have proper data structures
 func (m *AppInfoModule) RefreshUserDataStructures() error {
+	// Check isStarted without lock since it's only read
 	if !m.isStarted {
 		return fmt.Errorf("module is not started")
 	}
@@ -1278,6 +1269,7 @@ func (m *AppInfoModule) RefreshUserDataStructures() error {
 	}
 
 	// Force sync to Redis to ensure persistence
+	// Cache manager pointer access is atomic
 	if m.cacheManager != nil {
 		if err := m.cacheManager.ForceSync(); err != nil {
 			glog.Warningf("Failed to force sync after refreshing user data structures: %v", err)
@@ -1290,9 +1282,7 @@ func (m *AppInfoModule) RefreshUserDataStructures() error {
 
 // GetConfiguredUsers returns the list of configured users
 func (m *AppInfoModule) GetConfiguredUsers() []string {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
+	// Config is read-only after initialization, no need for read lock
 	if m.config.User == nil {
 		return []string{}
 	}
@@ -1305,9 +1295,7 @@ func (m *AppInfoModule) GetConfiguredUsers() []string {
 
 // GetCachedUsers returns the list of users currently in cache
 func (m *AppInfoModule) GetCachedUsers() []string {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
+	// Check isStarted and cache manager without lock since they're only read
 	if !m.isStarted || m.cacheManager == nil {
 		return []string{}
 	}
@@ -1546,8 +1534,7 @@ func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
 
 // GetTaskModule returns the task module instance
 func (m *AppInfoModule) GetTaskModule() *task.TaskModule {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.taskModule
 }
 
@@ -1561,7 +1548,6 @@ func (m *AppInfoModule) SetSettingsManager(settingsManager *settings.SettingsMan
 
 // GetSettingsManager returns the settings manager instance
 func (m *AppInfoModule) GetSettingsManager() *settings.SettingsManager {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	// Pointer assignment is atomic, no need for read lock
 	return m.settingsManager
 }
