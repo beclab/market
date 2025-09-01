@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"market/internal/v2/types"
@@ -18,9 +19,8 @@ type DataWatcher struct {
 	hydrator     *Hydrator
 	dataSender   *DataSender
 	interval     time.Duration
-	isRunning    bool
+	isRunning    int32 // 0 = false, 1 = true, using atomic operations
 	stopChan     chan struct{}
-	mutex        sync.RWMutex
 
 	// Processing mutex to ensure only one cycle runs at a time
 	processingMutex sync.Mutex
@@ -29,11 +29,10 @@ type DataWatcher struct {
 	activeHashCalculations map[string]bool
 	hashMutex              sync.Mutex
 
-	// Metrics
+	// Metrics - using atomic operations for thread safety
 	totalAppsProcessed int64
 	totalAppsMoved     int64
-	lastRunTime        time.Time
-	metricsMutex       sync.RWMutex
+	lastRunTime        int64 // Unix timestamp for atomic operations
 }
 
 // NewDataWatcher creates a new DataWatcher instance
@@ -44,17 +43,14 @@ func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator, dataSender *
 		dataSender:             dataSender,
 		interval:               30 * time.Second, // Run every 30 seconds
 		stopChan:               make(chan struct{}),
-		isRunning:              false,
+		isRunning:              0, // Initialize as false
 		activeHashCalculations: make(map[string]bool),
 	}
 }
 
 // Start begins the data watching process
 func (dw *DataWatcher) Start(ctx context.Context) error {
-	dw.mutex.Lock()
-	defer dw.mutex.Unlock()
-
-	if dw.isRunning {
+	if atomic.LoadInt32(&dw.isRunning) == 1 {
 		return fmt.Errorf("DataWatcher is already running")
 	}
 
@@ -66,8 +62,8 @@ func (dw *DataWatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("Hydrator is required for DataWatcher")
 	}
 
-	dw.isRunning = true
-	glog.Infof("Starting DataWatcher with interval: %v", dw.interval)
+	atomic.StoreInt32(&dw.isRunning, 1)
+	glog.Infof("Starting DataWatcher with interval: %v", time.Duration(atomic.LoadInt64((*int64)(&dw.interval))))
 
 	// Start the monitoring goroutine
 	go dw.watchLoop(ctx)
@@ -77,23 +73,18 @@ func (dw *DataWatcher) Start(ctx context.Context) error {
 
 // Stop stops the data watching process
 func (dw *DataWatcher) Stop() {
-	dw.mutex.Lock()
-	defer dw.mutex.Unlock()
-
-	if !dw.isRunning {
+	if atomic.LoadInt32(&dw.isRunning) == 0 {
 		return
 	}
 
 	glog.Infof("Stopping DataWatcher...")
 	close(dw.stopChan)
-	dw.isRunning = false
+	atomic.StoreInt32(&dw.isRunning, 0)
 }
 
 // IsRunning returns whether the DataWatcher is currently running
 func (dw *DataWatcher) IsRunning() bool {
-	dw.mutex.RLock()
-	defer dw.mutex.RUnlock()
-	return dw.isRunning
+	return atomic.LoadInt32(&dw.isRunning) == 1
 }
 
 // watchLoop is the main monitoring loop
@@ -101,7 +92,7 @@ func (dw *DataWatcher) watchLoop(ctx context.Context) {
 	glog.Infof("DataWatcher monitoring loop started")
 	defer glog.Infof("DataWatcher monitoring loop stopped")
 
-	ticker := time.NewTicker(dw.interval)
+	ticker := time.NewTicker(time.Duration(atomic.LoadInt64((*int64)(&dw.interval))))
 	defer ticker.Stop()
 
 	// Run once immediately
@@ -131,9 +122,7 @@ func (dw *DataWatcher) processCompletedApps() {
 	defer dw.processingMutex.Unlock()
 
 	processingStart := time.Now()
-	dw.metricsMutex.Lock()
-	dw.lastRunTime = time.Now()
-	dw.metricsMutex.Unlock()
+	atomic.StoreInt64(&dw.lastRunTime, processingStart.Unix())
 
 	glog.Infof("DataWatcher: Starting to process completed apps")
 
@@ -159,7 +148,7 @@ func (dw *DataWatcher) processCompletedApps() {
 	}
 
 	if len(allUsersData) == 0 {
-		glog.Infof("DataWatcher: No users data found, processing cycle completed in %v", time.Since(processingStart))
+		glog.Infof("DataWatcher: No users data found, processing cycle completed")
 		return
 	}
 
@@ -199,10 +188,8 @@ func (dw *DataWatcher) processCompletedApps() {
 	}
 
 	// Update metrics
-	dw.metricsMutex.Lock()
-	dw.totalAppsProcessed += totalProcessed
-	dw.totalAppsMoved += totalMoved
-	dw.metricsMutex.Unlock()
+	atomic.AddInt64(&dw.totalAppsProcessed, totalProcessed)
+	atomic.AddInt64(&dw.totalAppsMoved, totalMoved)
 
 	processingDuration := time.Since(processingStart)
 	if totalMoved > 0 {
@@ -870,19 +857,14 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 
 // GetMetrics returns DataWatcher metrics
 func (dw *DataWatcher) GetMetrics() DataWatcherMetrics {
-	dw.metricsMutex.RLock()
-	defer dw.metricsMutex.RUnlock()
-
-	dw.mutex.RLock()
-	isRunning := dw.isRunning
-	dw.mutex.RUnlock()
+	isRunning := atomic.LoadInt32(&dw.isRunning) == 1
 
 	return DataWatcherMetrics{
 		IsRunning:          isRunning,
-		TotalAppsProcessed: dw.totalAppsProcessed,
-		TotalAppsMoved:     dw.totalAppsMoved,
-		LastRunTime:        dw.lastRunTime,
-		Interval:           dw.interval,
+		TotalAppsProcessed: atomic.LoadInt64(&dw.totalAppsProcessed),
+		TotalAppsMoved:     atomic.LoadInt64(&dw.totalAppsMoved),
+		LastRunTime:        time.Unix(atomic.LoadInt64(&dw.lastRunTime), 0),
+		Interval:           time.Duration(atomic.LoadInt64((*int64)(&dw.interval))),
 	}
 }
 
@@ -897,14 +879,12 @@ type DataWatcherMetrics struct {
 
 // SetInterval sets the monitoring interval
 func (dw *DataWatcher) SetInterval(interval time.Duration) {
-	dw.mutex.Lock()
-	defer dw.mutex.Unlock()
-
 	if interval < time.Second {
 		interval = time.Second // Minimum 1 second
 	}
 
-	dw.interval = interval
+	// Use atomic operation for thread safety since interval can be modified at runtime
+	atomic.StoreInt64((*int64)(&dw.interval), int64(interval))
 	glog.Infof("DataWatcher interval set to: %v", interval)
 }
 

@@ -253,12 +253,19 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 }
 
 // SetHydrationNotifier sets the hydration notifier for real-time updates
-func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
+func (cm *CacheManager) setHydrationNotifierInternal(notifier HydrationNotifier) {
 	glog.Infof("[LOCK] cm.mutex.Lock() @216 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 	cm.hydrationNotifier = notifier
 	glog.Infof("Hydration notifier set successfully")
+}
+
+// SetHydrationNotifier sets the hydration notifier for real-time updates
+func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
+	go func() {
+		cm.setHydrationNotifierInternal(notifier)
+	}()
 }
 
 // updateAppStateLatest updates or adds a single app state based on name matching
@@ -341,8 +348,7 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 	}
 }
 
-// SetAppData sets app data in cache using single global lock
-func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
+func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @269 Start")
 	cm.updateLockStats("lock")
 	cm.mutex.Lock()
@@ -630,7 +636,18 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 	return nil
 }
 
-func (cm *CacheManager) SetLocalAppData(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
+func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
+
+	go func() {
+		if err := cm.setAppDataInternal(userID, sourceID, dataType, data); err != nil {
+			glog.Errorf("Failed to set app data in goroutine: %v", err)
+		}
+	}()
+
+	return nil
+}
+
+func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @SetLocalAppData Start")
 	cm.updateLockStats("lock")
 	cm.mutex.Lock()
@@ -697,6 +714,15 @@ func (cm *CacheManager) SetLocalAppData(userID, sourceID string, dataType AppDat
 	return nil
 }
 
+func (cm *CacheManager) SetLocalAppData(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
+	go func() {
+		if err := cm.setLocalAppDataInternal(userID, sourceID, dataType, data); err != nil {
+			glog.Errorf("Failed to set local app data in goroutine: %v", err)
+		}
+	}()
+	return nil
+}
+
 // GetAppData retrieves app data from cache using single global lock
 func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
 	glog.Infof("[LOCK] cm.mutex.RLock() @543 Start")
@@ -724,7 +750,7 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 }
 
 // RemoveUserData removes user data from cache and Redis
-func (cm *CacheManager) RemoveUserData(userID string) error {
+func (cm *CacheManager) removeUserDataInternal(userID string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @568 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -742,8 +768,18 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 	return nil
 }
 
+// RemoveUserData removes user data from cache and Redis
+func (cm *CacheManager) RemoveUserData(userID string) error {
+	go func() {
+		if err := cm.removeUserDataInternal(userID); err != nil {
+			glog.Errorf("Failed to remove user data in goroutine: %v", err)
+		}
+	}()
+	return nil
+}
+
 // AddUser adds a new user to the cache
-func (cm *CacheManager) AddUser(userID string) error {
+func (cm *CacheManager) addUserInternal(userID string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @AddUser Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -780,6 +816,16 @@ func (cm *CacheManager) AddUser(userID string) error {
 			Type:   SyncUser,
 		})
 	}
+	return nil
+}
+
+// AddUser adds a new user to the cache
+func (cm *CacheManager) AddUser(userID string) error {
+	go func() {
+		if err := cm.addUserInternal(userID); err != nil {
+			glog.Errorf("Failed to add user in goroutine: %v", err)
+		}
+	}()
 	return nil
 }
 
@@ -908,7 +954,7 @@ func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
 }
 
 // UpdateUserConfig updates the user configuration and ensures all users have data structures
-func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
+func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @660 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -966,8 +1012,18 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 	return nil
 }
 
+// UpdateUserConfig updates the user configuration and ensures all users have data structures
+func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
+	go func() {
+		if err := cm.updateUserConfigInternal(newUserConfig); err != nil {
+			glog.Errorf("Failed to update user config in goroutine: %v", err)
+		}
+	}()
+	return nil
+}
+
 // SyncUserListToCache ensures all users from current userConfig have initialized data structures
-func (cm *CacheManager) SyncUserListToCache() error {
+func (cm *CacheManager) syncUserListToCacheInternal() error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @718 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -1000,8 +1056,18 @@ func (cm *CacheManager) SyncUserListToCache() error {
 	return nil
 }
 
+// SyncUserListToCache ensures all users from current userConfig have initialized data structures
+func (cm *CacheManager) SyncUserListToCache() error {
+	go func() {
+		if err := cm.syncUserListToCacheInternal(); err != nil {
+			glog.Errorf("Failed to sync user list to cache in goroutine: %v", err)
+		}
+	}()
+	return nil
+}
+
 // CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
-func (cm *CacheManager) CleanupInvalidPendingData() int {
+func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
 	glog.Infof("[LOCK] cm.mutex.Lock() @751 Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -1070,6 +1136,22 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 	}
 
 	return totalCleaned
+}
+
+// CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
+func (cm *CacheManager) CleanupInvalidPendingData() int {
+	result := make(chan int, 1)
+	go func() {
+		result <- cm.cleanupInvalidPendingDataInternal()
+	}()
+
+	select {
+	case cleaned := <-result:
+		return cleaned
+	case <-time.After(5 * time.Second):
+		glog.Warningf("CleanupInvalidPendingData timeout, returning 0")
+		return 0
+	}
 }
 
 // enhanceAppStateDataWithUrls enhances app state data with entrance URLs
@@ -1238,7 +1320,7 @@ func (cm *CacheManager) updateLockStats(lockType string) {
 }
 
 // RemoveAppStateData removes a specific app from AppStateLatest for a user and source
-func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) error {
+func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppStateData Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -1280,8 +1362,18 @@ func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) err
 	return nil
 }
 
+// RemoveAppStateData removes a specific app from AppStateLatest for a user and source
+func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) error {
+	go func() {
+		if err := cm.removeAppStateDataInternal(userID, sourceID, appName); err != nil {
+			glog.Errorf("Failed to remove app state data in goroutine: %v", err)
+		}
+	}()
+	return nil
+}
+
 // RemoveAppInfoLatestData removes a specific app from AppInfoLatest for a user and source
-func (cm *CacheManager) RemoveAppInfoLatestData(userID, sourceID, appName string) error {
+func (cm *CacheManager) removeAppInfoLatestDataInternal(userID, sourceID, appName string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppInfoLatestData Start")
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -1346,13 +1438,23 @@ func (cm *CacheManager) RemoveAppInfoLatestData(userID, sourceID, appName string
 	return nil
 }
 
+// RemoveAppInfoLatestData removes a specific app from AppInfoLatest for a user and source
+func (cm *CacheManager) RemoveAppInfoLatestData(userID, sourceID, appName string) error {
+	go func() {
+		if err := cm.removeAppInfoLatestDataInternal(userID, sourceID, appName); err != nil {
+			glog.Errorf("Failed to remove app info latest data in goroutine: %v", err)
+		}
+	}()
+	return nil
+}
+
 // SetSettingsManager sets the settings manager for the cache manager
 func (cm *CacheManager) SetSettingsManager(sm *settings.SettingsManager) {
 	cm.settingsManager = sm
 }
 
 // SyncMarketSourcesToCache synchronizes market sources to all users in cache
-func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSource) error {
+func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.MarketSource) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @SyncMarketSourcesToCache Start")
 	cm.mutex.Lock()
 	defer func() {
@@ -1414,7 +1516,17 @@ func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSourc
 	return nil
 }
 
-func (cm *CacheManager) ResynceUser() error {
+// SyncMarketSourcesToCache synchronizes market sources to all users in cache
+func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSource) error {
+	go func() {
+		if err := cm.syncMarketSourcesToCacheInternal(sources); err != nil {
+			glog.Errorf("Failed to sync market sources to cache in goroutine: %v", err)
+		}
+	}()
+	return nil
+}
+
+func (cm *CacheManager) resynceUserInternal() error {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
@@ -1438,6 +1550,15 @@ func (cm *CacheManager) ResynceUser() error {
 			}
 		}
 	}
+	return nil
+}
+
+func (cm *CacheManager) ResynceUser() error {
+	go func() {
+		if err := cm.resynceUserInternal(); err != nil {
+			glog.Errorf("Failed to resync user in goroutine: %v", err)
+		}
+	}()
 	return nil
 }
 
