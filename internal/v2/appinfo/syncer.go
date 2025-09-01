@@ -293,29 +293,39 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		log.Printf("Using source ID: %s for data storage", sourceID)
 
 		// Get all existing user IDs with minimal locking
-		s.cache.Mutex.RLock()
 		var userIDs []string
-		for userID := range s.cache.Users {
-			userIDs = append(userIDs, userID)
-		}
-		s.cache.Mutex.RUnlock()
-
-		// If no users exist, create a system user as fallback
-		if len(userIDs) == 0 {
-			s.cache.Mutex.Lock()
-			// Double-check after acquiring write lock
-			if len(s.cache.Users) == 0 {
-				systemUserID := "system"
-				s.cache.Users[systemUserID] = NewUserData()
-				userIDs = append(userIDs, systemUserID)
-				log.Printf("No existing users found, created system user as fallback")
-			} else {
-				// Users were added by another goroutine
-				for userID := range s.cache.Users {
-					userIDs = append(userIDs, userID)
-				}
+		// Use CacheManager if available, otherwise use direct cache access
+		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
+			// Use CacheManager's lock
+			cacheManager.mutex.RLock()
+			for userID := range s.cache.Users {
+				userIDs = append(userIDs, userID)
 			}
-			s.cache.Mutex.Unlock()
+			cacheManager.mutex.RUnlock()
+
+			// If no users exist, create a system user as fallback
+			if len(userIDs) == 0 {
+				cacheManager.mutex.Lock()
+				// Double-check after acquiring write lock
+				if len(s.cache.Users) == 0 {
+					systemUserID := "system"
+					s.cache.Users[systemUserID] = NewUserData()
+					userIDs = append(userIDs, systemUserID)
+					log.Printf("No existing users found, created system user as fallback")
+				} else {
+					// Users were added by another goroutine
+					for userID := range s.cache.Users {
+						userIDs = append(userIDs, userID)
+					}
+				}
+				cacheManager.mutex.Unlock()
+			}
+		} else {
+			// Fallback to direct cache access without lock (not recommended)
+			log.Printf("Warning: CacheManager not available, using direct cache access")
+			for userID := range s.cache.Users {
+				userIDs = append(userIDs, userID)
+			}
 		}
 
 		log.Printf("Storing data for %d users: %v", len(userIDs), userIDs)
@@ -340,9 +350,14 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 // storeDataDirectly stores data directly to cache without going through CacheManager
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
-	// Use global lock instead of nested locks
-	s.cache.Mutex.Lock()
-	defer s.cache.Mutex.Unlock()
+	// Use CacheManager's lock if available
+	if cacheManager := s.cacheManager.Load(); cacheManager != nil {
+		cacheManager.mutex.Lock()
+		defer cacheManager.mutex.Unlock()
+	} else {
+		// Fallback: no lock protection (not recommended)
+		log.Printf("Warning: CacheManager not available for storeDataDirectly")
+	}
 
 	userData := s.cache.Users[userID]
 
@@ -600,20 +615,22 @@ func (s *Syncer) storeDataDirectlyBatch(userIDs []string, sourceID string, compl
 func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, completeData map[string]interface{}) {
 	for _, userID := range userIDs {
 		// Check if the source is local type - skip syncer operations for local sources
-		s.cache.Mutex.RLock()
-		userData, userExists := s.cache.Users[userID]
-		if userExists {
-			sourceData, sourceExists := userData.Sources[sourceID]
-			if sourceExists {
-				sourceType := sourceData.Type
-				if sourceType == types.SourceDataTypeLocal {
-					log.Printf("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
-					s.cache.Mutex.RUnlock()
-					continue
+		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
+			cacheManager.mutex.RLock()
+			userData, userExists := s.cache.Users[userID]
+			if userExists {
+				sourceData, sourceExists := userData.Sources[sourceID]
+				if sourceExists {
+					sourceType := sourceData.Type
+					if sourceType == types.SourceDataTypeLocal {
+						log.Printf("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
+						cacheManager.mutex.RUnlock()
+						continue
+					}
 				}
 			}
+			cacheManager.mutex.RUnlock()
 		}
-		s.cache.Mutex.RUnlock()
 
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {

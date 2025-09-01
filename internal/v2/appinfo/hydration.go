@@ -34,6 +34,8 @@ type Hydrator struct {
 	failedTasks    map[string]*hydrationfn.HydrationTask
 	taskMutex      sync.RWMutex
 
+	// Cache access mutex for unified lock strategy - removed, use CacheManager.mutex instead
+
 	// Batch completion tracking
 	batchCompletionQueue chan string   // Queue for completed tasks
 	completedTaskCount   int64         // Total completed tasks counter
@@ -414,26 +416,31 @@ func (h *Hydrator) pendingDataMonitor(ctx context.Context) {
 
 // checkForPendingData scans cache for pending data and creates hydration tasks
 func (h *Hydrator) checkForPendingData() {
-	h.cache.Mutex.RLock()
-	defer h.cache.Mutex.RUnlock()
+	// Use CacheManager's lock if available
+	if h.cacheManager != nil {
+		h.cacheManager.mutex.RLock()
+		defer h.cacheManager.mutex.RUnlock()
 
-	for userID, userData := range h.cache.Users {
-		// No nested locks needed since we already hold the global lock
-		for sourceID, sourceData := range userData.Sources {
+		for userID, userData := range h.cache.Users {
 			// No nested locks needed since we already hold the global lock
+			for sourceID, sourceData := range userData.Sources {
+				// No nested locks needed since we already hold the global lock
 
-			// Log source type for debugging - both local and remote should be processed
-			log.Printf("Checking pending data for user: %s, source: %s, type: %s", userID, sourceID, sourceData.Type)
+				// Log source type for debugging - both local and remote should be processed
+				log.Printf("Checking pending data for user: %s, source: %s, type: %s", userID, sourceID, sourceData.Type)
 
-			// Check if there's pending data - process both local and remote sources
-			if len(sourceData.AppInfoLatestPending) > 0 {
-				log.Printf("Found %d pending apps for user: %s, source: %s, type: %s",
-					len(sourceData.AppInfoLatestPending), userID, sourceID, sourceData.Type)
-				for _, pendingData := range sourceData.AppInfoLatestPending {
-					h.createTasksFromPendingData(userID, sourceID, pendingData)
+				// Check if there's pending data - process both local and remote sources
+				if len(sourceData.AppInfoLatestPending) > 0 {
+					log.Printf("Found %d pending apps for user: %s, source: %s, type: %s",
+						len(sourceData.AppInfoLatestPending), userID, sourceID, sourceData.Type)
+					for _, pendingData := range sourceData.AppInfoLatestPending {
+						h.createTasksFromPendingData(userID, sourceID, pendingData)
+					}
 				}
 			}
 		}
+	} else {
+		log.Printf("Warning: CacheManager not available for checkForPendingData")
 	}
 }
 
@@ -563,27 +570,31 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 
 // isAppDataHydrationComplete checks if an app's hydration is complete by looking up pending data in cache
 func (h *Hydrator) isAppDataHydrationComplete(userID, sourceID, appID string) bool {
-	// Get the source data from cache using global lock
-	h.cache.Mutex.RLock()
-	defer h.cache.Mutex.RUnlock()
+	// Use CacheManager's lock if available
+	if h.cacheManager != nil {
+		h.cacheManager.mutex.RLock()
+		defer h.cacheManager.mutex.RUnlock()
 
-	userData, userExists := h.cache.Users[userID]
-	if !userExists {
-		return false
-	}
-
-	sourceData, sourceExists := userData.Sources[sourceID]
-	if !sourceExists {
-		return false
-	}
-
-	// Find the pending data for the specific app
-	for _, pendingData := range sourceData.AppInfoLatestPending {
-		if pendingData.RawData != nil &&
-			(pendingData.RawData.ID == appID || pendingData.RawData.AppID == appID || pendingData.RawData.Name == appID) {
-			// Found the pending data for this app, check if hydration is complete
-			return h.isAppHydrationComplete(pendingData)
+		userData, userExists := h.cache.Users[userID]
+		if !userExists {
+			return false
 		}
+
+		sourceData, sourceExists := userData.Sources[sourceID]
+		if !sourceExists {
+			return false
+		}
+
+		// Find the pending data for the specific app
+		for _, pendingData := range sourceData.AppInfoLatestPending {
+			if pendingData.RawData != nil &&
+				(pendingData.RawData.ID == appID || pendingData.RawData.AppID == appID || pendingData.RawData.Name == appID) {
+				// Found the pending data for this app, check if hydration is complete
+				return h.isAppHydrationComplete(pendingData)
+			}
+		}
+	} else {
+		log.Printf("Warning: CacheManager not available for isAppDataHydrationComplete")
 	}
 
 	// If no pending data found for this app, consider it not hydrated
@@ -865,31 +876,36 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 	}
 
 	// Find the pending data for this task
-	h.cache.Mutex.RLock()
-	userData, userExists := h.cache.Users[task.UserID]
-	if !userExists {
-		h.cache.Mutex.RUnlock()
-		log.Printf("Warning: User data not found for task: %s, user: %s", task.ID, task.UserID)
-		return
-	}
-
-	sourceData, sourceExists := userData.Sources[task.SourceID]
-	if !sourceExists {
-		h.cache.Mutex.RUnlock()
-		log.Printf("Warning: Source data not found for task: %s, user: %s, source: %s", task.ID, task.UserID, task.SourceID)
-		return
-	}
-
-	// Find the pending data for this app
 	var pendingData *types.AppInfoLatestPendingData
-	for _, pending := range sourceData.AppInfoLatestPending {
-		if pending.RawData != nil &&
-			(pending.RawData.ID == task.AppID || pending.RawData.AppID == task.AppID || pending.RawData.Name == task.AppID) {
-			pendingData = pending
-			break
+	if h.cacheManager != nil {
+		h.cacheManager.mutex.RLock()
+		userData, userExists := h.cache.Users[task.UserID]
+		if !userExists {
+			h.cacheManager.mutex.RUnlock()
+			log.Printf("Warning: User data not found for task: %s, user: %s", task.ID, task.UserID)
+			return
 		}
+
+		sourceData, sourceExists := userData.Sources[task.SourceID]
+		if !sourceExists {
+			h.cacheManager.mutex.RUnlock()
+			log.Printf("Warning: Source data not found for task: %s, user: %s, source: %s", task.ID, task.UserID, task.SourceID)
+			return
+		}
+
+		// Find the pending data for this app
+		for _, pending := range sourceData.AppInfoLatestPending {
+			if pending.RawData != nil &&
+				(pending.RawData.ID == task.AppID || pending.RawData.AppID == task.AppID || pending.RawData.Name == task.AppID) {
+				pendingData = pending
+				break
+			}
+		}
+		h.cacheManager.mutex.RUnlock()
+	} else {
+		log.Printf("Warning: CacheManager not available for moveTaskToRenderFailed")
+		return
 	}
-	h.cache.Mutex.RUnlock()
 
 	if pendingData == nil {
 		log.Printf("Warning: Pending data not found for task: %s, app: %s", task.ID, task.AppID)
@@ -916,28 +932,32 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 
 // removeFromPendingList removes an app from the pending list
 func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
-	h.cache.Mutex.Lock()
-	defer h.cache.Mutex.Unlock()
+	if h.cacheManager != nil {
+		h.cacheManager.mutex.Lock()
+		defer h.cacheManager.mutex.Unlock()
 
-	userData, userExists := h.cache.Users[userID]
-	if !userExists {
-		return
-	}
-
-	sourceData, sourceExists := userData.Sources[sourceID]
-	if !sourceExists {
-		return
-	}
-
-	// Find and remove the app from pending list
-	for i, pending := range sourceData.AppInfoLatestPending {
-		if pending.RawData != nil &&
-			(pending.RawData.ID == appID || pending.RawData.AppID == appID || pending.RawData.Name == appID) {
-			// Remove from slice
-			sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending[:i], sourceData.AppInfoLatestPending[i+1:]...)
-			log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
-			break
+		userData, userExists := h.cache.Users[userID]
+		if !userExists {
+			return
 		}
+
+		sourceData, sourceExists := userData.Sources[sourceID]
+		if !sourceExists {
+			return
+		}
+
+		// Find and remove the app from pending list
+		for i, pending := range sourceData.AppInfoLatestPending {
+			if pending.RawData != nil &&
+				(pending.RawData.ID == appID || pending.RawData.AppID == appID || pending.RawData.Name == appID) {
+				// Remove from slice
+				sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending[:i], sourceData.AppInfoLatestPending[i+1:]...)
+				log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
+				break
+			}
+		}
+	} else {
+		log.Printf("Warning: CacheManager not available for removeFromPendingList")
 	}
 }
 
@@ -1428,72 +1448,76 @@ func (h *Hydrator) cleanupOldTasks() {
 
 // isAppInLatestQueue checks if an app already exists in the AppInfoLatest queue with version comparison
 func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) bool {
-	// Get the source data from cache using global lock
-	h.cache.Mutex.RLock()
-	defer h.cache.Mutex.RUnlock()
+	// Use CacheManager's lock if available
+	if h.cacheManager != nil {
+		h.cacheManager.mutex.RLock()
+		defer h.cacheManager.mutex.RUnlock()
 
-	userData, userExists := h.cache.Users[userID]
-	if !userExists {
-		return false
-	}
-
-	sourceData, sourceExists := userData.Sources[sourceID]
-	if !sourceExists {
-		return false
-	}
-
-	// Check if app exists in AppInfoLatest queue
-	for _, latestData := range sourceData.AppInfoLatest {
-		if latestData == nil {
-			continue
+		userData, userExists := h.cache.Users[userID]
+		if !userExists {
+			return false
 		}
 
-		// Check RawData first
-		if latestData.RawData != nil {
-			if latestData.RawData.ID == appID ||
-				latestData.RawData.AppID == appID ||
-				latestData.RawData.Name == appID {
-				// Add version comparison - only return true if versions match
-				if version != "" && latestData.RawData.Version != version {
-					log.Printf("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
-						appID, version, latestData.RawData.Version)
-					continue
-				}
-				log.Printf("App %s found in latest queue with matching version: %s", appID, version)
-				return true
-			}
+		sourceData, sourceExists := userData.Sources[sourceID]
+		if !sourceExists {
+			return false
 		}
 
-		// Check AppInfo.AppEntry
-		if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
-			if latestData.AppInfo.AppEntry.ID == appID ||
-				latestData.AppInfo.AppEntry.AppID == appID ||
-				latestData.AppInfo.AppEntry.Name == appID {
-				// Add version comparison - only return true if versions match
-				if version != "" && latestData.AppInfo.AppEntry.Version != version {
-					log.Printf("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
-						appID, version, latestData.AppInfo.AppEntry.Version)
-					continue
-				}
-				log.Printf("App %s found in latest queue with matching version: %s", appID, version)
-				return true
-			}
-		}
-
-		// Check AppSimpleInfo
-		if latestData.AppSimpleInfo != nil {
-			if latestData.AppSimpleInfo.AppID == appID ||
-				latestData.AppSimpleInfo.AppName == appID {
-				// For AppSimpleInfo, we may not have version info, so only check if version is empty
-				if version == "" {
-					log.Printf("App %s found in latest queue (AppSimpleInfo)", appID)
-					return true
-				}
-				// If version is provided but AppSimpleInfo doesn't have version, skip
-				log.Printf("App %s found in latest queue but AppSimpleInfo has no version info, skipping", appID)
+		// Check if app exists in AppInfoLatest queue
+		for _, latestData := range sourceData.AppInfoLatest {
+			if latestData == nil {
 				continue
 			}
+
+			// Check RawData first
+			if latestData.RawData != nil {
+				if latestData.RawData.ID == appID ||
+					latestData.RawData.AppID == appID ||
+					latestData.RawData.Name == appID {
+					// Add version comparison - only return true if versions match
+					if version != "" && latestData.RawData.Version != version {
+						log.Printf("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
+							appID, version, latestData.RawData.Version)
+						continue
+					}
+					log.Printf("App %s found in latest queue with matching version: %s", appID, version)
+					return true
+				}
+			}
+
+			// Check AppInfo.AppEntry
+			if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+				if latestData.AppInfo.AppEntry.ID == appID ||
+					latestData.AppInfo.AppEntry.AppID == appID ||
+					latestData.AppInfo.AppEntry.Name == appID {
+					// Add version comparison - only return true if versions match
+					if version != "" && latestData.AppInfo.AppEntry.Version != version {
+						log.Printf("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
+							appID, version, latestData.AppInfo.AppEntry.Version)
+						continue
+					}
+					log.Printf("App %s found in latest queue with matching version: %s", appID, version)
+					return true
+				}
+			}
+
+			// Check AppSimpleInfo
+			if latestData.AppSimpleInfo != nil {
+				if latestData.AppSimpleInfo.AppID == appID ||
+					latestData.AppSimpleInfo.AppName == appID {
+					// For AppSimpleInfo, we may not have version info, so only check if version is empty
+					if version == "" {
+						log.Printf("App %s found in latest queue (AppSimpleInfo)", appID)
+						return true
+					}
+					// If version is provided but AppSimpleInfo doesn't have version, skip
+					log.Printf("App %s found in latest queue but AppSimpleInfo has no version info, skipping", appID)
+					continue
+				}
+			}
 		}
+	} else {
+		log.Printf("Warning: CacheManager not available for isAppInLatestQueue")
 	}
 
 	return false
@@ -1640,26 +1664,30 @@ func (h *Hydrator) convertLatestDataToMap(latestData *types.AppInfoLatestData) m
 
 // isAppInRenderFailedList checks if an app already exists in the render failed list
 func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool {
-	// Get the source data from cache using global lock
-	h.cache.Mutex.RLock()
-	defer h.cache.Mutex.RUnlock()
+	// Use CacheManager's lock if available
+	if h.cacheManager != nil {
+		h.cacheManager.mutex.RLock()
+		defer h.cacheManager.mutex.RUnlock()
 
-	userData, userExists := h.cache.Users[userID]
-	if !userExists {
-		return false
-	}
-
-	sourceData, sourceExists := userData.Sources[sourceID]
-	if !sourceExists {
-		return false
-	}
-
-	// Check if app exists in render failed list
-	for _, failedData := range sourceData.AppRenderFailed {
-		if failedData.RawData != nil &&
-			(failedData.RawData.ID == appID || failedData.RawData.AppID == appID || failedData.RawData.Name == appID) {
-			return true
+		userData, userExists := h.cache.Users[userID]
+		if !userExists {
+			return false
 		}
+
+		sourceData, sourceExists := userData.Sources[sourceID]
+		if !sourceExists {
+			return false
+		}
+
+		// Check if app exists in render failed list
+		for _, failedData := range sourceData.AppRenderFailed {
+			if failedData.RawData != nil &&
+				(failedData.RawData.ID == appID || failedData.RawData.AppID == appID || failedData.RawData.Name == appID) {
+				return true
+			}
+		}
+	} else {
+		log.Printf("Warning: CacheManager not available for isAppInRenderFailedList")
 	}
 
 	return false
