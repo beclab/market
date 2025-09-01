@@ -93,23 +93,41 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 	// Check if we have any existing data in cache
 	hasExistingData := false
 	if data.Cache != nil {
-		data.Cache.Mutex.RLock()
-		for _, userData := range data.Cache.Users {
-			// No nested locks needed since we already hold the global lock
-			for _, sourceData := range userData.Sources {
-				// No nested locks needed since we already hold the global lock
-				if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
-					hasExistingData = true
+		// Use CacheManager's lock for unified lock strategy
+		if data.CacheManager != nil {
+			data.CacheManager.RLock()
+			for _, userData := range data.Cache.Users {
+				for _, sourceData := range userData.Sources {
+					if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
+						hasExistingData = true
+					}
+					if hasExistingData {
+						break
+					}
 				}
 				if hasExistingData {
 					break
 				}
 			}
-			if hasExistingData {
-				break
+			data.CacheManager.RUnlock()
+		} else {
+			// Fallback to SyncContext's mutex if CacheManager is not available
+			data.mutex.RLock()
+			for _, userData := range data.Cache.Users {
+				for _, sourceData := range userData.Sources {
+					if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
+						hasExistingData = true
+					}
+					if hasExistingData {
+						break
+					}
+				}
+				if hasExistingData {
+					break
+				}
 			}
+			data.mutex.RUnlock()
 		}
-		data.Cache.Mutex.RUnlock()
 	}
 
 	// Skip only if hashes match AND we have existing data
@@ -620,41 +638,31 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 	// Get source ID from market source - use Name to match syncer.go behavior
 	sourceID := data.MarketSource.ID
 
-	// Get all existing user IDs with minimal locking
-	data.Cache.Mutex.RLock()
+	// Use CacheManager's lock for unified lock strategy
+	if data.CacheManager != nil {
+		data.CacheManager.Lock()
+		defer data.CacheManager.Unlock()
+	}
+
+	// Get all existing user IDs
 	var userIDs []string
 	for userID := range data.Cache.Users {
 		userIDs = append(userIDs, userID)
 	}
-	data.Cache.Mutex.RUnlock()
 
 	// If no users exist, create a system user as fallback
 	if len(userIDs) == 0 {
-		data.Cache.Mutex.Lock()
-		// Double-check after acquiring write lock
-		if len(data.Cache.Users) == 0 {
-			systemUserID := "system"
-			data.Cache.Users[systemUserID] = types.NewUserData()
-			userIDs = append(userIDs, systemUserID)
-			log.Printf("No existing users found, created system user as fallback")
-		} else {
-			// Users were added by another goroutine
-			for userID := range data.Cache.Users {
-				userIDs = append(userIDs, userID)
-			}
-		}
-		data.Cache.Mutex.Unlock()
+		systemUserID := "system"
+		data.Cache.Users[systemUserID] = types.NewUserData()
+		userIDs = append(userIDs, systemUserID)
+		log.Printf("No existing users found, created system user as fallback")
 	}
 
 	log.Printf("Updating Others data for %d users: %v, sourceID: %s", len(userIDs), userIDs, sourceID)
 
-	// Update Others for each user using global lock
-	data.Cache.Mutex.Lock()
-	defer data.Cache.Mutex.Unlock()
-
+	// Update Others for each user
 	for _, userID := range userIDs {
 		userData := data.Cache.Users[userID]
-		// No nested locks needed since we already hold the global lock
 
 		// Ensure source data exists for this user
 		if userData.Sources == nil {
@@ -666,7 +674,6 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 		}
 
 		sourceData := userData.Sources[sourceID]
-		// No nested locks needed since we already hold the global lock
 
 		// Update Others in SourceData
 		sourceData.Others = others

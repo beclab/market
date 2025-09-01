@@ -46,13 +46,14 @@ type AppStoreDataSection struct {
 
 // SyncContext holds the context data for the entire sync process
 type SyncContext struct {
-	Client       *resty.Client          `json:"-"`
-	Cache        *types.CacheData       `json:"-"`
-	MarketSource *settings.MarketSource `json:"-"`       // Current market source being used
-	Version      string                 `json:"version"` // Version to use for API requests
-	RemoteHash   string                 `json:"remote_hash"`
-	LocalHash    string                 `json:"local_hash"`
-	HashMatches  bool                   `json:"hash_matches"` // Indicates if remote and local hashes match
+	Client       *resty.Client               `json:"-"`
+	Cache        *types.CacheData            `json:"-"`       // Keep for backward compatibility
+	CacheManager types.CacheManagerInterface `json:"-"`       // CacheManager for unified lock strategy
+	MarketSource *settings.MarketSource      `json:"-"`       // Current market source being used
+	Version      string                      `json:"version"` // Version to use for API requests
+	RemoteHash   string                      `json:"remote_hash"`
+	LocalHash    string                      `json:"local_hash"`
+	HashMatches  bool                        `json:"hash_matches"` // Indicates if remote and local hashes match
 	// Updated to use structured response instead of generic map
 	LatestData   *AppStoreInfoResponse  `json:"latest_data"`
 	DetailedApps map[string]interface{} `json:"detailed_apps"`
@@ -61,11 +62,12 @@ type SyncContext struct {
 	mutex        sync.RWMutex           `json:"-"`
 }
 
-// NewSyncContext creates a new sync context
-func NewSyncContext(cache *types.CacheData) *SyncContext {
+// NewSyncContextWithManager creates a new sync context with CacheManager
+func NewSyncContextWithManager(cache *types.CacheData, cacheManager types.CacheManagerInterface) *SyncContext {
 	return &SyncContext{
 		Client:       resty.New(),
 		Cache:        cache,
+		CacheManager: cacheManager,
 		LatestData:   &AppStoreInfoResponse{},
 		DetailedApps: make(map[string]interface{}),
 		AppIDs:       make([]string, 0),

@@ -495,9 +495,14 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 					return
 				}
 
-				task := hydrationfn.NewHydrationTask(
+				// Create task with CacheManager for unified lock strategy
+				var cacheManager types.CacheManagerInterface
+				if h.cacheManager != nil {
+					cacheManager = h.cacheManager
+				}
+				task := hydrationfn.NewHydrationTaskWithManager(
 					userID, sourceID, appID,
-					appDataMap, h.cache, h.settingsManager,
+					appDataMap, h.cache, cacheManager, h.settingsManager,
 				)
 
 				if err := h.EnqueueTask(task); err != nil {
@@ -1099,10 +1104,14 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 					continue
 				}
 
-				// Create and submit task using correct NewHydrationTask signature
-				task := hydrationfn.NewHydrationTask(
+				// Create and submit task with CacheManager for unified lock strategy
+				var cacheManager types.CacheManagerInterface
+				if h.cacheManager != nil {
+					cacheManager = h.cacheManager
+				}
+				task := hydrationfn.NewHydrationTaskWithManager(
 					userID, sourceID, appID,
-					appMap, h.cache, h.settingsManager,
+					appMap, h.cache, cacheManager, h.settingsManager,
 				)
 
 				if err := h.EnqueueTask(task); err != nil {
@@ -1576,10 +1585,14 @@ func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestDat
 		return nil
 	}
 
-	// Create and submit task
-	task := hydrationfn.NewHydrationTask(
+	// Create and submit task with CacheManager for unified lock strategy
+	var cacheManager types.CacheManagerInterface
+	if h.cacheManager != nil {
+		cacheManager = h.cacheManager
+	}
+	task := hydrationfn.NewHydrationTaskWithManager(
 		userID, sourceID, appID,
-		appDataMap, h.cache, h.settingsManager,
+		appDataMap, h.cache, cacheManager, h.settingsManager,
 	)
 
 	if err := h.EnqueueTask(task); err != nil {

@@ -199,7 +199,12 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 	log.Printf("-------------------- SOURCE SYNC STARTED: %s --------------------", source.ID)
 
-	syncContext := syncerfn.NewSyncContext(s.cache)
+	// Create sync context with CacheManager for unified lock strategy
+	var cacheManager types.CacheManagerInterface
+	if cm := s.cacheManager.Load(); cm != nil {
+		cacheManager = cm
+	}
+	syncContext := syncerfn.NewSyncContextWithManager(s.cache, cacheManager)
 
 	// Set version for API requests using utils function
 	version := getVersionForSync()

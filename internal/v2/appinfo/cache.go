@@ -44,6 +44,31 @@ type CacheManager struct {
 	}
 }
 
+// Lock acquires the cache manager's write lock
+func (cm *CacheManager) Lock() {
+	cm.mutex.Lock()
+}
+
+// Unlock releases the cache manager's write lock
+func (cm *CacheManager) Unlock() {
+	cm.mutex.Unlock()
+}
+
+// RLock acquires the cache manager's read lock
+func (cm *CacheManager) RLock() {
+	cm.mutex.RLock()
+}
+
+// RUnlock releases the cache manager's read lock
+func (cm *CacheManager) RUnlock() {
+	cm.mutex.RUnlock()
+}
+
+// GetCache returns the underlying cache data
+func (cm *CacheManager) GetCache() *CacheData {
+	return cm.cache
+}
+
 // SyncRequest represents a request to sync data to Redis
 type SyncRequest struct {
 	UserID   string

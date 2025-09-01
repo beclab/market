@@ -141,9 +141,11 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		return fmt.Errorf("task or cache is nil")
 	}
 
-	// Add global cache lock to ensure consistency between write and read
-	task.Cache.Mutex.Lock()
-	defer task.Cache.Mutex.Unlock()
+	// Use CacheManager's lock for unified lock strategy
+	if task.CacheManager != nil {
+		task.CacheManager.Lock()
+		defer task.CacheManager.Unlock()
+	}
 
 	// Convert appData to AppInfoLatestData
 	var appInfoLatest *types.AppInfoLatestData
