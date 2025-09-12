@@ -6,6 +6,10 @@ import (
 	"log"
 	"strconv"
 	"time"
+
+	"context"
+
+	"github.com/go-redis/redis/v8"
 )
 
 // MarketSettings represents user market settings
@@ -130,46 +134,54 @@ func createRedisClient() (RedisClient, error) {
 		return nil, fmt.Errorf("invalid REDIS_DB value: %w", err)
 	}
 
-	// 由于我们不能依赖settings包，这里创建一个简单的Redis客户端实现
-	// 在实际环境中，这里应该创建真正的Redis客户端
 	log.Printf("Creating Redis client for upgrade flow: %s:%s, DB: %d", redisHost, redisPort, redisDB)
 
-	// 返回一个简单的Redis客户端实现
-	return &SimpleRedisClient{
-		host:     redisHost,
-		port:     redisPort,
-		password: redisPassword,
-		db:       redisDB,
+	// 创建真正的Redis客户端
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", redisHost, redisPort),
+		Password: redisPassword,
+		DB:       redisDB,
+	})
+
+	// 测试连接
+	ctx := context.Background()
+	_, err = rdb.Ping(ctx).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	log.Println("Redis client connected successfully")
+
+	// 返回包装的Redis客户端
+	return &RedisClientWrapper{
+		client: rdb,
+		ctx:    ctx,
 	}, nil
 }
 
-// SimpleRedisClient 简单的Redis客户端实现，用于升级流程
-type SimpleRedisClient struct {
-	host     string
-	port     string
-	password string
-	db       int
+// RedisClientWrapper Redis客户端包装器，实现真正的Redis操作
+type RedisClientWrapper struct {
+	client *redis.Client
+	ctx    context.Context
 }
 
 // Get 获取Redis键值
-func (c *SimpleRedisClient) Get(key string) (string, error) {
-	// 这里应该实现真正的Redis GET操作
-	// 由于我们不能依赖外部包，这里返回错误表示不支持
-	return "", fmt.Errorf("Redis GET operation not implemented in upgrade flow")
+func (c *RedisClientWrapper) Get(key string) (string, error) {
+	result, err := c.client.Get(c.ctx, key).Result()
+	if err == redis.Nil {
+		return "", fmt.Errorf("key not found")
+	}
+	return result, err
 }
 
 // Set 设置Redis键值
-func (c *SimpleRedisClient) Set(key string, value interface{}, expiration time.Duration) error {
-	// 这里应该实现真正的Redis SET操作
-	// 由于我们不能依赖外部包，这里返回错误表示不支持
-	return fmt.Errorf("Redis SET operation not implemented in upgrade flow")
+func (c *RedisClientWrapper) Set(key string, value interface{}, expiration time.Duration) error {
+	return c.client.Set(c.ctx, key, value, expiration).Err()
 }
 
 // Keys 获取匹配模式的键列表
-func (c *SimpleRedisClient) Keys(pattern string) ([]string, error) {
-	// 这里应该实现真正的Redis KEYS操作
-	// 由于我们不能依赖外部包，这里返回错误表示不支持
-	return nil, fmt.Errorf("Redis KEYS operation not implemented in upgrade flow")
+func (c *RedisClientWrapper) Keys(pattern string) ([]string, error) {
+	return c.client.Keys(c.ctx, pattern).Result()
 }
 
 // updateAllUsersSelectedSource 更新所有用户的SelectedSource
