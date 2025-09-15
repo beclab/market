@@ -40,18 +40,18 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 
 	// Choose API endpoint based on cfgType
 	var urlStr string
-	if cfgType == "middleware" {
-		// Use middleware API for middleware type
-		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/uninstall", appServiceHost, appServicePort, appName)
-		log.Printf("Using middleware API for uninstall: %s", urlStr)
-	} else if cfgType == "recommend" {
-		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/uninstall", appServiceHost, appServicePort, appName)
-		log.Printf("Using middleware API for installation: %s", urlStr)
-	} else {
-		// Use regular app API for other types
-		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/uninstall", appServiceHost, appServicePort, appName)
-		log.Printf("Using regular app API for uninstall: %s", urlStr)
-	}
+	// if cfgType == "middleware" {
+	// 	// Use middleware API for middleware type
+	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/uninstall", appServiceHost, appServicePort, appName)
+	// 	log.Printf("Using middleware API for uninstall: %s", urlStr)
+	// } else if cfgType == "recommend" {
+	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/uninstall", appServiceHost, appServicePort, appName)
+	// 	log.Printf("Using middleware API for installation: %s", urlStr)
+	// } else {
+	// 	// Use regular app API for other types
+	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/uninstall", appServiceHost, appServicePort, appName)
+	log.Printf("Using regular app API for uninstall: %s", urlStr)
+	// }
 
 	log.Printf("App service URL: %s for task: %s, cfgType: %s", urlStr, task.ID, cfgType)
 

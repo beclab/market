@@ -564,9 +564,9 @@ func (s *Server) resumeApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Type != "app" {
-		log.Printf("Unsupported type: %s, only 'app' type is supported", req.Type)
-		s.sendResponse(w, http.StatusBadRequest, false, "Only 'app' type is supported", nil)
+	if req.Type != "app" && req.Type != "middleware" {
+		log.Printf("Unsupported type: %s, only 'app, middleware' type is supported", req.Type)
+		s.sendResponse(w, http.StatusBadRequest, false, "Only 'app, middleware' type is supported", nil)
 		return
 	}
 
@@ -610,8 +610,8 @@ func resumeByType(name, token, ty, bflUser string) (string, error) {
 	}
 
 	// Only support app type
-	if ty != "app" {
-		return "", fmt.Errorf("%s type %s invalid, only 'app' type is supported", name, ty)
+	if ty != "app" && ty != "middleware" {
+		return "", fmt.Errorf("%s type %s invalid, only 'app, middleware' type is supported", name, ty)
 	}
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/resume", appServiceHost, appServicePort, name)
@@ -724,8 +724,8 @@ func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Type != "app" {
-		log.Printf("Unsupported type: %s, only 'app' type is supported", req.Type)
+	if req.Type != "app" && req.Type != "middleware" {
+		log.Printf("Unsupported type: %s, only 'app, middleware' type is supported", req.Type)
 		s.sendResponse(w, http.StatusBadRequest, false, "Only 'app' type is supported", nil)
 		return
 	}
@@ -769,8 +769,8 @@ func stopByType(name, token, ty, bflUser string) (string, error) {
 	}
 
 	// Only support app type
-	if ty != "app" {
-		return "", fmt.Errorf("%s type %s invalid, only 'app' type is supported", name, ty)
+	if ty != "app" && ty != "middleware" {
+		return "", fmt.Errorf("%s type %s invalid, only 'app, middleware' type is supported", name, ty)
 	}
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/suspend", appServiceHost, appServicePort, name)

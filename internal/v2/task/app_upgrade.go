@@ -61,14 +61,14 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
 
 	var urlStr string
-	if cfgType == "recommend" {
-		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/upgrade", appServiceHost, appServicePort, appName)
-		log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
-	} else {
-		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
-		log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+	// if cfgType == "recommend" {
+	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/upgrade", appServiceHost, appServicePort, appName)
+	// 	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+	// } else {
+	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
+	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
 
-	}
+	// }
 
 	log.Printf("App source: %s, API source: %s: %s for task: %s", source, apiSource, task.ID)
 

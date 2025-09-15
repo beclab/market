@@ -39,15 +39,15 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 
 	// Choose API endpoint based on cfgType
 	var urlStr string
-	if cfgType == "middleware" {
-		// Use middleware API for middleware type
-		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
-		log.Printf("Using middleware API for cancel: %s", urlStr)
-	} else {
-		// Use regular app API for other types
-		urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
-		log.Printf("Using regular app API for cancel: %s", urlStr)
-	}
+	// if cfgType == "middleware" {
+	// 	// Use middleware API for middleware type
+	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
+	// 	log.Printf("Using middleware API for cancel: %s", urlStr)
+	// } else {
+	// 	// Use regular app API for other types
+	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
+	log.Printf("Using regular app API for cancel: %s", urlStr)
+	// }
 
 	log.Printf("App service URL: %s for task: %s, app_name: %s, cfgType: %s", urlStr, task.ID, appName, cfgType)
 
