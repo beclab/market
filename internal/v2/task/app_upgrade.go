@@ -38,10 +38,10 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	}
 
 	// Get cfgType from metadata
-	cfgType, ok := task.Metadata["cfgType"].(string)
+	// cfgType, ok := task.Metadata["cfgType"].(string)
 	if !ok {
 		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
-		cfgType = "app" // Default to app type
+		// cfgType = "app" // Default to app type
 	}
 
 	version, ok := task.Metadata["version"].(string)
