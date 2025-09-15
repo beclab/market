@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -373,6 +374,14 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		return
 	}
 
+	// Special handling for downloading state - check progress difference
+	if msg.State == "downloading" {
+		if dw.shouldSkipDownloadingMessage(msg) {
+			log.Printf("Skipping downloading message for app %s, user %s - progress difference is within 10", msg.Name, msg.User)
+			return
+		}
+	}
+
 	// Add debug logging for entranceStatuses
 	log.Printf("DEBUG: storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
 	for i, entrance := range msg.EntranceStatuses {
@@ -502,4 +511,62 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// shouldSkipDownloadingMessage checks if downloading message should be skipped based on progress difference
+func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bool {
+	userID := msg.User
+	appName := msg.Name
+
+	// Get user data from cache
+	userData := dw.cacheManager.GetUserData(userID)
+	if userData == nil {
+		log.Printf("User data not found for user %s, proceeding with message storage", userID)
+		return false
+	}
+
+	// Find the app in cache across all sources
+	for _, sourceData := range userData.Sources {
+		if sourceData == nil || sourceData.AppStateLatest == nil {
+			continue
+		}
+
+		for _, appState := range sourceData.AppStateLatest {
+			if appState != nil && appState.Status.Name == appName && appState.Status.State == "downloading" {
+				// Found matching app in downloading state, compare progress
+				cachedProgress := appState.Status.Progress
+				newProgress := msg.Progress
+
+				// Convert progress strings to integers for comparison
+				cachedProgressInt, err1 := strconv.Atoi(cachedProgress)
+				newProgressInt, err2 := strconv.Atoi(newProgress)
+
+				if err1 != nil || err2 != nil {
+					log.Printf("Failed to parse progress values: cached=%s, new=%s, err1=%v, err2=%v",
+						cachedProgress, newProgress, err1, err2)
+					return false
+				}
+
+				// Check if progress difference is within 10
+				progressDiff := newProgressInt - cachedProgressInt
+				if progressDiff < 0 {
+					progressDiff = -progressDiff // Make it absolute
+				}
+
+				if progressDiff <= 10 {
+					log.Printf("Progress difference is %d (within 10), skipping message for app %s",
+						progressDiff, appName)
+					return true
+				}
+
+				log.Printf("Progress difference is %d (greater than 10), proceeding with message storage for app %s",
+					progressDiff, appName)
+				return false
+			}
+		}
+	}
+
+	// No matching app found in downloading state, proceed with storage
+	log.Printf("No matching downloading app found in cache for app %s, proceeding with message storage", appName)
+	return false
 }
