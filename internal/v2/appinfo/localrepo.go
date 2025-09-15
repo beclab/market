@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/task"
 	"market/internal/v2/types"
 )
 
@@ -208,6 +209,7 @@ type RenderResponse struct {
 // LocalRepo manages local chart package operations
 type LocalRepo struct {
 	cacheManager *CacheManager
+	taskModule   *task.TaskModule
 }
 
 // NewLocalRepo creates a new local repository manager
@@ -215,6 +217,11 @@ func NewLocalRepo(cacheManager *CacheManager) *LocalRepo {
 	return &LocalRepo{
 		cacheManager: cacheManager,
 	}
+}
+
+// SetTaskModule sets the task module for checking installation status
+func (lr *LocalRepo) SetTaskModule(taskModule *task.TaskModule) {
+	lr.taskModule = taskModule
 }
 
 // UploadAppPackage processes an uploaded chart package by calling chart repo service API
@@ -328,6 +335,18 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 
 func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string) error {
 	log.Printf("Deleting app: %s, version: %s, user: %s", appName, appVersion, userID)
+
+	// Check if the app is currently being installed
+	if lr.taskModule != nil {
+		taskType, source, found := lr.taskModule.GetLatestTaskByAppNameAndUser(appName, userID)
+		if found && taskType == "install" && source == "upload" {
+			log.Printf("Cannot delete app %s: app is currently being installed (task type: %s, source: %s)", appName, taskType, source)
+			return fmt.Errorf("cannot delete app %s: app is currently being installed", appName)
+		}
+		log.Printf("App %s installation check passed: found=%v, taskType=%s, source=%s", appName, found, taskType, source)
+	} else {
+		log.Printf("Task module not available, skipping installation status check for app: %s", appName)
+	}
 
 	// Get chart repo service host from environment variable
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")

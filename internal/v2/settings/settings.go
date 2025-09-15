@@ -42,6 +42,11 @@ func getMarketSettings(redisClient RedisClient, userID string) (*MarketSettings,
 		return nil, err
 	}
 
+	// Convert "Official-Market-Sources" to "market.olares" for backward compatibility
+	if settings.SelectedSource == "Official-Market-Sources" {
+		settings.SelectedSource = "market.olares"
+	}
+
 	return &settings, nil
 }
 

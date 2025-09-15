@@ -458,9 +458,7 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 	token := utils.GetTokenFromRequest(restfulReq)
 
 	// Step 9: Process the uploaded package using LocalRepo
-	localRepo := appinfo.NewLocalRepo(s.cacheManager)
-
-	appInfo, err := localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token)
+	appInfo, err := s.localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token)
 	if err != nil {
 		log.Printf("Failed to process uploaded package: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, fmt.Sprintf("Failed to process package: %v", err), nil)
@@ -1910,10 +1908,8 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 7: Delete chart files using LocalRepo
-	localRepo := appinfo.NewLocalRepo(s.cacheManager)
-
 	// Delete chart package file
-	if err := localRepo.DeleteApp(userID, request.AppName, request.AppVersion, token); err != nil {
+	if err := s.localRepo.DeleteApp(userID, request.AppName, request.AppVersion, token); err != nil {
 		log.Printf("Failed to delete chart package: %v", err)
 		// Continue with deletion even if chart file doesn't exist
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to delete chart package", nil)

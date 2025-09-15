@@ -474,6 +474,12 @@ func (sm *SettingsManager) GetAPIEndpoints() *APIEndpointsConfig {
 func (sm *SettingsManager) BuildAPIURL(baseURL, endpointPath string) string {
 	log.Printf("Building API URL - Base URL: %s, Endpoint Path: %s", baseURL, endpointPath)
 
+	// Add https:// prefix if baseURL doesn't start with http://, https:// or ftp://
+	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") && !strings.HasPrefix(baseURL, "ftp://") {
+		baseURL = "https://" + baseURL
+		log.Printf("Added https:// prefix to baseURL: %s", baseURL)
+	}
+
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	endpointPath = strings.TrimPrefix(endpointPath, "/")
 
@@ -653,10 +659,21 @@ func (sm *SettingsManager) mergeWithDefaultConfig(config *MarketSourcesConfig) *
 
 	// Create a map of existing source IDs for quick lookup
 	existingSourceIDs := make(map[string]bool)
+	var filteredSources []*MarketSource
+
+	// Filter out "Official-Market-Sources" entries and build existing source map
 	for _, existingSource := range config.Sources {
+		if existingSource.ID == "Official-Market-Sources" {
+			log.Printf("Removing deprecated source: %s (%s)", existingSource.Name, existingSource.ID)
+			continue
+		}
 		existingSourceIDs[existingSource.ID] = true
+		filteredSources = append(filteredSources, existingSource)
 		log.Printf("Existing source: %s (%s)", existingSource.Name, existingSource.ID)
 	}
+
+	// Update config sources with filtered list
+	config.Sources = filteredSources
 
 	// Add default sources that don't exist in the current configuration
 	addedSources := 0

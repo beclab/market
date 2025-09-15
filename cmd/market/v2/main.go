@@ -83,6 +83,14 @@ func main() {
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
 
+	// Upgrade flow: Check and update configurations and cache data (pre-execution)
+	log.Println("=== Pre-execution: Running upgrade flow ===")
+	if err := utils.UpgradeFlow(); err != nil {
+		log.Printf("Warning: Upgrade flow failed: %v", err)
+		// Don't fail the startup, just log the warning
+	}
+	log.Println("=== End pre-execution upgrade flow ===")
+
 	// 0. Initialize Settings Module (Required for API)
 	redisHost := utils.GetEnvOrDefault("REDIS_HOST", "localhost")
 	redisPort := utils.GetEnvOrDefault("REDIS_PORT", "6379")
@@ -140,6 +148,7 @@ func main() {
 	}
 	log.Println("=== End pre-startup step ===")
 
+	// Initialize Settings Manager
 	settingsManager := settings.NewSettingsManager(redisClient)
 	if err := settingsManager.Initialize(); err != nil {
 		log.Fatalf("Failed to initialize Settings module: %v", err)
