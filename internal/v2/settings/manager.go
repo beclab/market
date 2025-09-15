@@ -474,6 +474,12 @@ func (sm *SettingsManager) GetAPIEndpoints() *APIEndpointsConfig {
 func (sm *SettingsManager) BuildAPIURL(baseURL, endpointPath string) string {
 	log.Printf("Building API URL - Base URL: %s, Endpoint Path: %s", baseURL, endpointPath)
 
+	// Add https:// prefix if baseURL doesn't start with http://, https:// or ftp://
+	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") && !strings.HasPrefix(baseURL, "ftp://") {
+		baseURL = "https://" + baseURL
+		log.Printf("Added https:// prefix to baseURL: %s", baseURL)
+	}
+
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	endpointPath = strings.TrimPrefix(endpointPath, "/")
 
