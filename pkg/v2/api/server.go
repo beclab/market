@@ -23,6 +23,7 @@ type Server struct {
 	hydrator      *appinfo.Hydrator
 	historyModule *history.HistoryModule
 	taskModule    *task.TaskModule
+	localRepo     *appinfo.LocalRepo
 }
 
 // NewServer creates a new server instance
@@ -33,6 +34,12 @@ func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinf
 	log.Printf("Task module provided: %v", taskModule != nil)
 	log.Printf("History module provided: %v", historyModule != nil)
 
+	// Create LocalRepo instance
+	localRepo := appinfo.NewLocalRepo(cacheManager)
+	if taskModule != nil {
+		localRepo.SetTaskModule(taskModule)
+	}
+
 	log.Printf("Creating router...")
 	s := &Server{
 		router:        mux.NewRouter(),
@@ -41,6 +48,7 @@ func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinf
 		hydrator:      hydrator,
 		historyModule: historyModule,
 		taskModule:    taskModule,
+		localRepo:     localRepo,
 	}
 
 	log.Printf("Server struct created successfully")
