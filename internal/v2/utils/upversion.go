@@ -154,6 +154,22 @@ func checkAndUpdateCacheData() error {
 		// 不返回错误，继续执行其他升级步骤
 	}
 
+	// 扩展迁移：处理其他废弃源并在迁移后删除旧源
+	// market-local -> upload
+	if err := migrateCacheDataSources(redisClient, "market-local", "upload"); err != nil {
+		log.Printf("Failed to migrate cache data sources from 'market-local' to 'upload': %v", err)
+	}
+
+	// dev-local -> studio
+	if err := migrateCacheDataSources(redisClient, "dev-local", "studio"); err != nil {
+		log.Printf("Failed to migrate cache data sources from 'dev-local' to 'studio': %v", err)
+	}
+
+	// local -> upload
+	if err := migrateCacheDataSources(redisClient, "local", "upload"); err != nil {
+		log.Printf("Failed to migrate cache data sources from 'local' to 'upload': %v", err)
+	}
+
 	log.Println("Cache data check completed")
 	return nil
 }
@@ -418,6 +434,80 @@ func updateCacheDataSources(redisClient RedisClient) error {
 		log.Printf("Updated %d users' cache data sources from 'Official-Market-Sources' to 'market.olares'", updatedUsers)
 	} else {
 		log.Println("No users found with 'Official-Market-Sources' cache data")
+	}
+
+	return nil
+}
+
+// migrateCacheDataSources 迁移缓存数据中的源ID（通用）
+func migrateCacheDataSources(redisClient RedisClient, oldSourceID, newSourceID string) error {
+	if redisClient == nil {
+		log.Println("Redis client not available, skipping cache data migration")
+		return nil
+	}
+
+	if oldSourceID == "" || newSourceID == "" || oldSourceID == newSourceID {
+		return nil
+	}
+
+	log.Printf("Migrating cache data sources from '%s' to '%s'...", oldSourceID, newSourceID)
+
+	// 获取所有用户数据键
+	keys, err := redisClient.Keys("cache:user:*")
+	if err != nil {
+		return fmt.Errorf("failed to get cache user keys: %w", err)
+	}
+
+	updatedUsers := 0
+	for _, key := range keys {
+		data, err := redisClient.Get(key)
+		if err != nil {
+			if err.Error() == "key not found" {
+				continue
+			}
+			return fmt.Errorf("failed to get user data for key %s: %w", key, err)
+		}
+
+		var userData UserData
+		if err := json.Unmarshal([]byte(data), &userData); err != nil {
+			return fmt.Errorf("failed to unmarshal user data for key %s: %w", key, err)
+		}
+
+		if userData.Sources == nil {
+			continue
+		}
+
+		// 如果旧源存在，则进行迁移
+		if oldSourceData, exists := userData.Sources[oldSourceID]; exists {
+			// 合并或直接移动到新源
+			if newSourceData, newExists := userData.Sources[newSourceID]; newExists {
+				merged := mergeSourceData(newSourceData, oldSourceData)
+				userData.Sources[newSourceID] = merged
+			} else {
+				userData.Sources[newSourceID] = oldSourceData
+			}
+
+			// 删除旧源
+			delete(userData.Sources, oldSourceID)
+
+			// 保存回Redis
+			updatedData, err := json.Marshal(userData)
+			if err != nil {
+				return fmt.Errorf("failed to marshal updated user data for key %s: %w", key, err)
+			}
+			if err := redisClient.Set(key, string(updatedData), 0); err != nil {
+				return fmt.Errorf("failed to save updated user data for key %s: %w", key, err)
+			}
+
+			updatedUsers++
+			log.Printf("Migrated cache data for key %s: %s -> %s", key, oldSourceID, newSourceID)
+		}
+	}
+
+	if updatedUsers > 0 {
+		log.Printf("Updated %d users' cache data sources from '%s' to '%s'", updatedUsers, oldSourceID, newSourceID)
+	} else {
+		log.Printf("No users found with '%s' cache data", oldSourceID)
 	}
 
 	return nil
