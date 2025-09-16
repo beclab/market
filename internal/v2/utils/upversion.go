@@ -116,6 +116,18 @@ func checkAndUpdateMarketSourceConfig() error {
 		// 不返回错误，继续执行其他升级步骤
 	}
 
+	// 5. 更新所有用户的SelectedSource (local -> upload)
+	if err := updateAllUsersSelectedSourceFromLocal2(redisClient); err != nil {
+		log.Printf("Failed to update users' SelectedSource from local: %v", err)
+		// 不返回错误，继续执行其他升级步骤
+	}
+
+	// 6. 更新MarketSource配置 (local -> upload)
+	if err := updateMarketSourceConfigFromLocal2(redisClient); err != nil {
+		log.Printf("Failed to update market source config from local: %v", err)
+		// 不返回错误，继续执行其他升级步骤
+	}
+
 	log.Println("Market source configuration check completed")
 	return nil
 }
@@ -859,5 +871,111 @@ func updateMarketSourceConfigFromDevLocal(redisClient RedisClient) error {
 	}
 
 	log.Println("Successfully updated market source configuration from 'dev-local' to 'studio'")
+	return nil
+}
+
+// updateAllUsersSelectedSourceFromLocal2 更新所有用户的SelectedSource从local到upload
+func updateAllUsersSelectedSourceFromLocal2(redisClient RedisClient) error {
+	log.Println("Updating all users' SelectedSource from 'local' to 'upload'...")
+
+	// 获取所有market settings的键
+	keys, err := redisClient.Keys("market:settings:*")
+	if err != nil {
+		return fmt.Errorf("failed to get market settings keys: %w", err)
+	}
+
+	updatedCount := 0
+	for _, key := range keys {
+		// 获取用户设置
+		data, err := redisClient.Get(key)
+		if err != nil {
+			log.Printf("Failed to get settings for key %s: %v", key, err)
+			continue
+		}
+
+		var settings MarketSettings
+		if err := json.Unmarshal([]byte(data), &settings); err != nil {
+			log.Printf("Failed to unmarshal settings for key %s: %v", key, err)
+			continue
+		}
+
+		// 检查是否需要更新
+		if settings.SelectedSource == "local" {
+			settings.SelectedSource = "upload"
+
+			// 更新设置
+			updatedData, err := json.Marshal(settings)
+			if err != nil {
+				log.Printf("Failed to marshal updated settings for key %s: %v", key, err)
+				continue
+			}
+
+			if err := redisClient.Set(key, string(updatedData), 0); err != nil {
+				log.Printf("Failed to update settings for key %s: %v", key, err)
+				continue
+			}
+
+			updatedCount++
+			log.Printf("Updated user settings for key %s: local -> upload", key)
+		}
+	}
+
+	if updatedCount == 0 {
+		log.Println("No users found with 'local' as SelectedSource")
+	} else {
+		log.Printf("Updated %d users' SelectedSource from 'local' to 'upload'", updatedCount)
+	}
+
+	return nil
+}
+
+// updateMarketSourceConfigFromLocal2 更新MarketSource配置，将local改为upload
+func updateMarketSourceConfigFromLocal2(redisClient RedisClient) error {
+	log.Println("Updating market source configuration from 'local' to 'upload'...")
+
+	// 获取market sources配置
+	configData, err := redisClient.Get("market:sources:config")
+	if err != nil {
+		if err.Error() == "key not found" {
+			log.Println("No market sources config found, skipping update")
+			return nil
+		}
+		return fmt.Errorf("failed to get market sources config: %w", err)
+	}
+
+	var config MarketSourcesConfig
+	if err := json.Unmarshal([]byte(configData), &config); err != nil {
+		return fmt.Errorf("failed to unmarshal market sources config: %w", err)
+	}
+
+	updated := false
+	// 查找并更新local源
+	for _, source := range config.Sources {
+		if source.ID == "local" {
+			log.Printf("Found deprecated market source: %s (%s), updating to 'upload'", source.Name, source.ID)
+			source.ID = "upload"
+			source.Name = "upload"
+			source.UpdatedAt = time.Now()
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		log.Println("No deprecated market sources found, configuration is up to date")
+		return nil
+	}
+
+	// 保存更新后的配置
+	updatedData, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated market sources config: %w", err)
+	}
+
+	if err := redisClient.Set("market:sources:config", string(updatedData), 0); err != nil {
+		return fmt.Errorf("failed to save updated market sources config: %w", err)
+	}
+
+	log.Println("Successfully updated market source configuration from 'local' to 'upload'")
 	return nil
 }
