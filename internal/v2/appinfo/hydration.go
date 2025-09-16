@@ -53,12 +53,16 @@ type Hydrator struct {
 }
 
 // NewHydrator creates a new hydrator with the given configuration
-func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManager, config HydratorConfig) *Hydrator {
+func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManager, cacheManager *CacheManager, config HydratorConfig) *Hydrator {
+	if cacheManager == nil {
+		log.Panicf("cacheManager must not be nil when creating Hydrator")
+	}
+
 	hydrator := &Hydrator{
 		steps:                make([]hydrationfn.HydrationStep, 0),
 		cache:                cache,
 		settingsManager:      settingsManager,
-		cacheManager:         nil, // Will be set later via SetCacheManager
+		cacheManager:         cacheManager,
 		taskQueue:            make(chan *hydrationfn.HydrationTask, config.QueueSize),
 		workerCount:          config.WorkerCount,
 		stopChan:             make(chan struct{}),
@@ -994,9 +998,9 @@ type HydratorMetrics struct {
 }
 
 // CreateDefaultHydrator creates a hydrator with default configuration
-func CreateDefaultHydrator(cache *types.CacheData, settingsManager *settings.SettingsManager) *Hydrator {
+func CreateDefaultHydrator(cache *types.CacheData, settingsManager *settings.SettingsManager, cacheManager *CacheManager) *Hydrator {
 	config := DefaultHydratorConfig()
-	return NewHydrator(cache, settingsManager, config)
+	return NewHydrator(cache, settingsManager, cacheManager, config)
 }
 
 // NotifyPendingDataUpdate implements HydrationNotifier interface
@@ -1199,12 +1203,7 @@ func (h *Hydrator) looksLikeAppsMap(data map[string]interface{}) bool {
 	return sampleCount > 0
 }
 
-// SetCacheManager sets the cache manager for database synchronization
-func (h *Hydrator) SetCacheManager(cacheManager *CacheManager) {
-	h.cacheManager = cacheManager
-	h.lastSyncTime = time.Now()
-	log.Printf("Cache manager set for hydrator with sync interval: %v", h.syncInterval)
-}
+// SetCacheManager removed: cacheManager must be provided at NewHydrator
 
 // batchCompletionProcessor processes completed tasks in batches
 func (h *Hydrator) batchCompletionProcessor(ctx context.Context) {

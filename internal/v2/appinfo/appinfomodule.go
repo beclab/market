@@ -536,7 +536,7 @@ func (m *AppInfoModule) initHydrator() error {
 		hydratorConfig = *m.config.Hydrator
 	}
 
-	m.hydrator = NewHydrator(cacheData, m.settingsManager, hydratorConfig)
+	m.hydrator = NewHydrator(cacheData, m.settingsManager, m.cacheManager, hydratorConfig)
 
 	// Start hydrator with context
 	if err := m.hydrator.Start(m.ctx); err != nil {

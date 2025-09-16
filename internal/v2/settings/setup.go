@@ -95,7 +95,10 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 		}
 	}
 
-	// 4. Add local source if it doesn't exist
+	// 4. Add local sources if they don't exist
+	// Track errors but don't fail the entire process for individual source failures
+	var syncErrors []string
+
 	if !localSourceExists {
 		log.Println("Step 3: Adding upload source (type=local, name=upload)")
 		localSource := &ChartRepoMarketSource{
@@ -111,12 +114,14 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, localSource); err != nil {
 			log.Printf("Failed to add upload source: %v", err)
-			return fmt.Errorf("failed to add upload source: %w", err)
+			syncErrors = append(syncErrors, fmt.Sprintf("upload source: %v", err))
+		} else {
+			log.Println("upload source added successfully")
 		}
-		log.Println("upload source added successfully")
 	} else {
 		log.Println("upload source already exists, skipping")
 	}
+
 	if !studioSourceExists {
 		log.Println("Step 3: Adding studio source (type=local, name=studio)")
 		studioSource := &ChartRepoMarketSource{
@@ -132,12 +137,14 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, studioSource); err != nil {
 			log.Printf("Failed to add studio source: %v", err)
-			return fmt.Errorf("failed to add studio source: %w", err)
+			syncErrors = append(syncErrors, fmt.Sprintf("studio source: %v", err))
+		} else {
+			log.Println("studio source added successfully")
 		}
-		log.Println("studio source added successfully")
 	} else {
 		log.Println("studio source already exists, skipping")
 	}
+
 	if !cliSourceExists {
 		log.Println("Step 3: Adding cli source (type=local, name=cli)")
 		cliSource := &ChartRepoMarketSource{
@@ -153,9 +160,10 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, cliSource); err != nil {
 			log.Printf("Failed to add cli source: %v", err)
-			return fmt.Errorf("failed to add cli source: %w", err)
+			syncErrors = append(syncErrors, fmt.Sprintf("cli source: %v", err))
+		} else {
+			log.Println("cli source added successfully")
 		}
-		log.Println("cli source added successfully")
 	} else {
 		log.Println("cli source already exists, skipping")
 	}
@@ -196,14 +204,26 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, remoteSource); err != nil {
 			log.Printf("Failed to add remote source: %v", err)
-			return fmt.Errorf("failed to add remote source: %w", err)
+			syncErrors = append(syncErrors, fmt.Sprintf("remote source: %v", err))
+		} else {
+			log.Println("Remote source added successfully")
 		}
-		log.Println("Remote source added successfully")
 	} else {
 		log.Println("Remote source already exists, skipping")
 	}
 
-	log.Println("Market source configuration sync completed successfully")
+	// 7. Report sync results
+	if len(syncErrors) > 0 {
+		log.Printf("Market source configuration sync completed with %d errors:", len(syncErrors))
+		for i, err := range syncErrors {
+			log.Printf("  Error %d: %s", i+1, err)
+		}
+		// Don't return error, just log warnings - individual source failures shouldn't stop the entire process
+		log.Println("Continuing with available sources...")
+	} else {
+		log.Println("Market source configuration sync completed successfully")
+	}
+
 	return nil
 }
 
