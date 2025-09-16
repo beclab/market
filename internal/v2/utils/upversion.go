@@ -194,16 +194,12 @@ func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID str
 
 	log.Printf("Migrating appinfo sources from '%s' to '%s'...", oldSourceID, newSourceID)
 
-	// 遍历所有用户的该源键（使用冒号限定与 SCAN 遍历）
-	userSourcePattern := fmt.Sprintf("appinfo:user:*:source:%s:*", oldSourceID)
-	keys, err := redisClient.ScanAllKeys(userSourcePattern, 2000)
+	// 全量扫描所有键，再在程序中精确过滤，避免依赖 Redis MATCH
+	keys, err := redisClient.ScanAllKeys("*", 5000)
 	if err != nil {
-		return fmt.Errorf("failed to list appinfo keys for source '%s': %w", oldSourceID, err)
+		return fmt.Errorf("failed to scan keys: %w", err)
 	}
-	if len(keys) == 0 {
-		log.Printf("No appinfo keys found for source '%s'", oldSourceID)
-		return nil
-	}
+	log.Printf("Found %d keys to migrate", len(keys))
 
 	// 支持的数据段后缀
 	dataSuffixes := []string{
@@ -216,6 +212,13 @@ func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID str
 
 	migratedUsers := make(map[string]bool)
 	for _, oldKey := range keys {
+		// 仅限 appinfo 键空间，且包含指定旧源段
+		if !strings.HasPrefix(oldKey, "appinfo:user:") {
+			continue
+		}
+		if !strings.Contains(oldKey, ":source:"+oldSourceID+":") {
+			continue
+		}
 		// oldKey 形如 appinfo:user:<uid>:source:<oldSourceID>[:suffix]
 		// 计算基础新key前缀
 		newBase := strings.Replace(oldKey, ":source:"+oldSourceID, ":source:"+newSourceID, 1)
