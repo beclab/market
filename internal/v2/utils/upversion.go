@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"context"
@@ -41,6 +42,7 @@ type RedisClient interface {
 	Get(key string) (string, error)
 	Set(key string, value interface{}, expiration time.Duration) error
 	Keys(pattern string) ([]string, error)
+	Del(keys ...string) error
 }
 
 // UpgradeFlow 执行升级流程 - 作为程序启动前的预执行功能
@@ -154,6 +156,20 @@ func checkAndUpdateCacheData() error {
 		// 不返回错误，继续执行其他升级步骤
 	}
 
+	// 追加：迁移 appinfo 键空间的源数据（旧 -> 新），并清理旧键
+	if err := migrateAppinfoSources(redisClient, "Official-Market-Sources", "market.olares"); err != nil {
+		log.Printf("Failed to migrate appinfo sources from 'Official-Market-Sources' to 'market.olares': %v", err)
+	}
+	if err := migrateAppinfoSources(redisClient, "market-local", "upload"); err != nil {
+		log.Printf("Failed to migrate appinfo sources from 'market-local' to 'upload': %v", err)
+	}
+	if err := migrateAppinfoSources(redisClient, "dev-local", "studio"); err != nil {
+		log.Printf("Failed to migrate appinfo sources from 'dev-local' to 'studio': %v", err)
+	}
+	if err := migrateAppinfoSources(redisClient, "local", "upload"); err != nil {
+		log.Printf("Failed to migrate appinfo sources from 'local' to 'upload': %v", err)
+	}
+
 	// 扩展迁移：处理其他废弃源并在迁移后删除旧源
 	// market-local -> upload
 	if err := migrateCacheDataSources(redisClient, "market-local", "upload"); err != nil {
@@ -172,6 +188,131 @@ func checkAndUpdateCacheData() error {
 
 	log.Println("Cache data check completed")
 	return nil
+}
+
+// migrateAppinfoSources 迁移 appinfo 键空间中某个源到新源
+// 将 appinfo:user:<uid>:source:<old>:(app-info-history|app-state-latest|app-info-latest|app-info-latest-pending|app-render-failed)
+// 迁移为对应的新源键，并在合并后删除旧键。
+func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID string) error {
+	if redisClient == nil {
+		log.Println("Redis client not available, skipping appinfo source migration")
+		return nil
+	}
+	if oldSourceID == "" || newSourceID == "" || oldSourceID == newSourceID {
+		return nil
+	}
+
+	log.Printf("Migrating appinfo sources from '%s' to '%s'...", oldSourceID, newSourceID)
+
+	// 遍历所有用户的该源键
+	userSourcePattern := fmt.Sprintf("appinfo:user:*:source:%s*", oldSourceID)
+	keys, err := redisClient.Keys(userSourcePattern)
+	if err != nil {
+		return fmt.Errorf("failed to list appinfo keys for source '%s': %w", oldSourceID, err)
+	}
+	if len(keys) == 0 {
+		log.Printf("No appinfo keys found for source '%s'", oldSourceID)
+		return nil
+	}
+
+	// 支持的数据段后缀
+	dataSuffixes := []string{":app-info-history", ":app-state-latest", ":app-info-latest", ":app-info-latest-pending", ":app-render-failed"}
+
+	migratedUsers := make(map[string]bool)
+	for _, oldKey := range keys {
+		// oldKey 形如 appinfo:user:<uid>:source:<oldSourceID>[:suffix]
+		// 计算基础新key前缀
+		newBase := strings.Replace(oldKey, ":source:"+oldSourceID, ":source:"+newSourceID, 1)
+
+		// 检查是否是具体数据段键，否则跳过
+		isDataKey := false
+		for _, suffix := range dataSuffixes {
+			if strings.HasSuffix(oldKey, suffix) {
+				isDataKey = true
+				break
+			}
+		}
+		if !isDataKey {
+			// 可能是用户标记等，跳过
+			continue
+		}
+
+		// 读取旧值
+		val, err := redisClient.Get(oldKey)
+		if err != nil {
+			continue
+		}
+
+		// 合并策略：如果新键有值，按 JSON 合并（数组拼接去重），否则直接写入
+		// 先确定新键名
+		newKey := newBase
+		// 读取新值（可能不存在）
+		newVal, err := redisClient.Get(newKey)
+		if err == nil && newVal != "" {
+			merged := mergeJSONArraysIfNeeded(newKey, newVal, val)
+			if err := redisClient.Set(newKey, merged, 0); err != nil {
+				return fmt.Errorf("failed to write merged data to %s: %w", newKey, err)
+			}
+		} else {
+			if err := redisClient.Set(newKey, val, 0); err != nil {
+				return fmt.Errorf("failed to write data to %s: %w", newKey, err)
+			}
+		}
+
+		// 删除旧键
+		if err := redisClient.Del(oldKey); err != nil {
+			log.Printf("Warning: failed to delete old key %s: %v", oldKey, err)
+		}
+
+		// 标记该用户已迁移
+		// 提取 userID
+		// 形如 appinfo:user:<uid>:source:...
+		parts := strings.Split(oldKey, ":")
+		if len(parts) >= 3 {
+			migratedUsers[parts[2]] = true
+		}
+	}
+
+	log.Printf("Migrated appinfo sources for %d users: %s -> %s", len(migratedUsers), oldSourceID, newSourceID)
+	return nil
+}
+
+// mergeJSONArraysIfNeeded 针对数组类型的 JSON 做合并；非数组则以新值覆盖为准
+func mergeJSONArraysIfNeeded(key string, existing, incoming string) string {
+	// 快速判断：如果不是 '[' 开头，则直接覆盖
+	if len(existing) == 0 || existing[0] != '[' || len(incoming) == 0 || incoming[0] != '[' {
+		return incoming
+	}
+	var arr1 []map[string]interface{}
+	var arr2 []map[string]interface{}
+	if err := json.Unmarshal([]byte(existing), &arr1); err != nil {
+		return incoming
+	}
+	if err := json.Unmarshal([]byte(incoming), &arr2); err != nil {
+		return incoming
+	}
+	// 合并并做简单去重（依据 timestamp + type）
+	seen := make(map[string]bool)
+	merged := make([]map[string]interface{}, 0, len(arr1)+len(arr2))
+	for _, it := range arr1 {
+		key := fmt.Sprintf("%v-%v", it["timestamp"], it["type"])
+		if !seen[key] {
+			seen[key] = true
+			merged = append(merged, it)
+		}
+	}
+	for _, it := range arr2 {
+		key := fmt.Sprintf("%v-%v", it["timestamp"], it["type"])
+		if !seen[key] {
+			seen[key] = true
+			merged = append(merged, it)
+		}
+	}
+	out, err := json.Marshal(merged)
+	if err != nil {
+		return incoming
+	}
+	return string(out)
 }
 
 // createRedisClient 创建Redis客户端
@@ -234,6 +375,14 @@ func (c *RedisClientWrapper) Set(key string, value interface{}, expiration time.
 // Keys 获取匹配模式的键列表
 func (c *RedisClientWrapper) Keys(pattern string) ([]string, error) {
 	return c.client.Keys(c.ctx, pattern).Result()
+}
+
+// Del 删除一个或多个键
+func (c *RedisClientWrapper) Del(keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	return c.client.Del(c.ctx, keys...).Err()
 }
 
 // updateAllUsersSelectedSource 更新所有用户的SelectedSource
