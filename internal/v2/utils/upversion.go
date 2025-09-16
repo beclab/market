@@ -43,6 +43,7 @@ type RedisClient interface {
 	Set(key string, value interface{}, expiration time.Duration) error
 	Keys(pattern string) ([]string, error)
 	Del(keys ...string) error
+	ScanAllKeys(pattern string, count int) ([]string, error)
 }
 
 // UpgradeFlow 执行升级流程 - 作为程序启动前的预执行功能
@@ -227,7 +228,13 @@ func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID str
 	}
 
 	// 支持的数据段后缀
-	dataSuffixes := []string{":app-info-history", ":app-state-latest", ":app-info-latest", ":app-info-latest-pending", ":app-render-failed"}
+	dataSuffixes := []string{
+		":app-info-history", ":app_state_history",
+		":app-state-latest", ":app_state_latest",
+		":app-info-latest", ":app_info_latest",
+		":app-info-latest-pending", ":app_info_latest_pending",
+		":app-render-failed", ":app_render_failed",
+	}
 
 	migratedUsers := make(map[string]bool)
 	for _, oldKey := range keys {
@@ -339,8 +346,8 @@ func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]strin
 
 	log.Println("Auto-migrating appinfo sources by normalized mapping...")
 
-	// 仅扫描包含 app-* 段的数据键，避免非数据键
-	keys, err := redisClient.Keys("appinfo:user:*:source:*:app-*")
+	// 仅扫描包含 app* 段的数据键（兼容 app-*/app_*），避免非数据键
+	keys, err := redisClient.Keys("appinfo:user:*:source:*:app*")
 	if err != nil {
 		return fmt.Errorf("failed to list appinfo data keys: %w", err)
 	}
@@ -474,6 +481,31 @@ func (c *RedisClientWrapper) Del(keys ...string) error {
 		return nil
 	}
 	return c.client.Del(c.ctx, keys...).Err()
+}
+
+// ScanAllKeys 使用 SCAN 游标遍历收集所有匹配的键
+func (c *RedisClientWrapper) ScanAllKeys(pattern string, count int) ([]string, error) {
+	var (
+		cursor uint64
+		all    []string
+	)
+	if count <= 0 {
+		count = 1000
+	}
+	for {
+		keys, cur, err := c.client.Scan(c.ctx, cursor, pattern, int64(count)).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(keys) > 0 {
+			all = append(all, keys...)
+		}
+		cursor = cur
+		if cursor == 0 {
+			break
+		}
+	}
+	return all, nil
 }
 
 // updateAllUsersSelectedSource 更新所有用户的SelectedSource
