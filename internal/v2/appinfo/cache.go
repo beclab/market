@@ -907,9 +907,10 @@ func (cm *CacheManager) ForceSync() error {
 
 // GetAllUsersData returns all users data from cache using single global lock with timeout
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
-	// Use timeout to prevent blocking indefinitely
-	timeout := 10 * time.Second
+	// Use shorter timeout to avoid blocking indefinitely
+	timeout := 3 * time.Second
 	done := make(chan map[string]*UserData, 1)
+	cancel := make(chan bool, 1)
 
 	go func() {
 		glog.Infof("[LOCK] cm.mutex.RLock() @635 Start")
@@ -920,6 +921,14 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 			cm.updateLockStats("unlock")
 			glog.Infof("[LOCK] cm.mutex.RUnlock() @635 End")
 		}()
+
+		// Check if cancelled before processing
+		select {
+		case <-cancel:
+			glog.Warningf("GetAllUsersData: Operation cancelled before processing")
+			return
+		default:
+		}
 
 		// Return shallow copy of data directly without nested locks
 		result := make(map[string]*UserData)
@@ -938,14 +947,23 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 			result[userID] = userDataCopy
 		}
 
-		done <- result
+		// Check if cancelled before sending result
+		select {
+		case <-cancel:
+			glog.Warningf("GetAllUsersData: Operation cancelled before sending result")
+			return
+		case done <- result:
+			// Successfully sent result
+		}
 	}()
 
 	select {
 	case result := <-done:
 		return result
 	case <-time.After(timeout):
-		glog.Errorf("GetAllUsersData: Timeout after %v, returning empty result", timeout)
+		// Cancel the goroutine to prevent lock leak
+		close(cancel)
+		glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
 		return make(map[string]*UserData)
 	}
 }

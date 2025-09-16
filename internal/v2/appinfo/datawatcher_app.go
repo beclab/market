@@ -559,18 +559,21 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	glog.Infof("DataWatcher: Found %d completed apps out of %d pending for user=%s, source=%s",
 		len(completedApps), len(pendingApps), userID, sourceID)
 
-	// Step 3: Acquire write lock and move completed apps
+	// Step 3: Try to acquire write lock non-blocking and move completed apps
 	lockStartTime := time.Now()
-	writeLockChan := make(chan bool, 1)
+
+	// Try to acquire write lock non-blocking
+	lockAcquired := make(chan bool, 1)
 	go func() {
 		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Start")
 		dw.cacheManager.mutex.Lock()
 		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Success")
-		writeLockChan <- true
+		lockAcquired <- true
 	}()
 
+	// Use a short timeout to avoid blocking too long
 	select {
-	case <-writeLockChan:
+	case <-lockAcquired:
 		glog.Infof("DataWatcher: Write lock acquired for user=%s, source=%s", userID, sourceID)
 
 		defer func() {
@@ -654,8 +657,8 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 
 		return int64(len(pendingApps)), movedCount
 
-	case <-time.After(10 * time.Second):
-		glog.Errorf("DataWatcher: Timeout acquiring write lock for user=%s, source=%s", userID, sourceID)
+	case <-time.After(2 * time.Second):
+		glog.Warningf("DataWatcher: Skipping write lock acquisition for user=%s, source=%s (timeout after 2s) - will retry in next cycle", userID, sourceID)
 		return int64(len(pendingApps)), 0
 	}
 }
