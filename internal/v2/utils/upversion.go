@@ -170,6 +170,17 @@ func checkAndUpdateCacheData() error {
 		log.Printf("Failed to migrate appinfo sources from 'local' to 'upload': %v", err)
 	}
 
+	// 自动扫描处理：对大小写/空格等变体做统一迁移
+	deprecatedMap := map[string]string{
+		"official-market-sources": "market.olares",
+		"market-local":            "upload",
+		"dev-local":               "studio",
+		"local":                   "upload",
+	}
+	if err := migrateAppinfoSourcesAuto(redisClient, deprecatedMap); err != nil {
+		log.Printf("Failed to auto-migrate appinfo sources by normalization: %v", err)
+	}
+
 	// 扩展迁移：处理其他废弃源并在迁移后删除旧源
 	// market-local -> upload
 	if err := migrateCacheDataSources(redisClient, "market-local", "upload"); err != nil {
@@ -313,6 +324,86 @@ func mergeJSONArraysIfNeeded(key string, existing, incoming string) string {
 		return incoming
 	}
 	return string(out)
+}
+
+// normalizeSourceID 规范化源ID（小写+去首尾空白）
+func normalizeSourceID(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// migrateAppinfoSourcesAuto 扫描 appinfo 键空间，按规范化后的源名映射做迁移
+func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]string) error {
+	if redisClient == nil || len(mapping) == 0 {
+		return nil
+	}
+
+	log.Println("Auto-migrating appinfo sources by normalized mapping...")
+
+	// 仅扫描包含 app-* 段的数据键，避免非数据键
+	keys, err := redisClient.Keys("appinfo:user:*:source:*:app-*")
+	if err != nil {
+		return fmt.Errorf("failed to list appinfo data keys: %w", err)
+	}
+	if len(keys) == 0 {
+		log.Println("No appinfo data keys found for auto migration")
+		return nil
+	}
+
+	migratedUsers := make(map[string]bool)
+	for _, oldKey := range keys {
+		parts := strings.Split(oldKey, ":")
+		// 期待格式 appinfo:user:<uid>:source:<sourceID>:<segment>
+		if len(parts) < 6 || parts[0] != "appinfo" || parts[1] != "user" || parts[3] != "source" {
+			continue
+		}
+		userID := parts[2]
+		sourceID := parts[4]
+		norm := normalizeSourceID(sourceID)
+		newSourceID, ok := mapping[norm]
+		if !ok || newSourceID == sourceID {
+			continue
+		}
+
+		// 构造新键（仅替换 :source:<old>：带冒号避免部分匹配）
+		needle := ":source:" + sourceID + ":"
+		replacement := ":source:" + newSourceID + ":"
+		if !strings.Contains(oldKey, needle) {
+			continue
+		}
+		newKey := strings.Replace(oldKey, needle, replacement, 1)
+
+		// 读取旧值
+		oldVal, err := redisClient.Get(oldKey)
+		if err != nil {
+			continue
+		}
+
+		// 读取新值并合并（数组JSON走合并）
+		if newVal, err := redisClient.Get(newKey); err == nil && newVal != "" {
+			merged := mergeJSONArraysIfNeeded(newKey, newVal, oldVal)
+			if err := redisClient.Set(newKey, merged, 0); err != nil {
+				return fmt.Errorf("failed to write merged data to %s: %w", newKey, err)
+			}
+		} else {
+			if err := redisClient.Set(newKey, oldVal, 0); err != nil {
+				return fmt.Errorf("failed to write data to %s: %w", newKey, err)
+			}
+		}
+
+		// 删除旧键
+		if err := redisClient.Del(oldKey); err != nil {
+			log.Printf("Warning: failed to delete old key %s: %v", oldKey, err)
+		}
+
+		migratedUsers[userID] = true
+	}
+
+	if len(migratedUsers) > 0 {
+		log.Printf("Auto-migrated appinfo sources for %d users by normalization", len(migratedUsers))
+	} else {
+		log.Println("No appinfo sources required auto migration by normalization")
+	}
+	return nil
 }
 
 // createRedisClient 创建Redis客户端
