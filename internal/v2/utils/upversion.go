@@ -89,6 +89,11 @@ func checkAndUpdateMarketSourceConfig() error {
 		// 不返回错误，继续执行其他升级步骤
 	}
 
+	// 1.x 清理配置中的 default 源（统一在此处处理一次）
+	if err := removeDefaultSourceInConfig(redisClient); err != nil {
+		log.Printf("Failed to remove 'default' source from config: %v", err)
+	}
+
 	// 1.1 更新所有用户的SelectedSource (market-local -> upload)
 	if err := updateAllUsersSelectedSourceFromLocal(redisClient); err != nil {
 		log.Printf("Failed to update users' SelectedSource from local: %v", err)
@@ -391,6 +396,63 @@ func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]strin
 	} else {
 		log.Println("No appinfo sources required auto migration by normalization")
 	}
+	return nil
+}
+
+// removeDefaultSourceInConfig 读取并清理 market sources 配置中的 id == "default" 的源
+func removeDefaultSourceInConfig(redisClient RedisClient) error {
+	if redisClient == nil {
+		return nil
+	}
+
+	configKey := "market:sources:config"
+	data, err := redisClient.Get(configKey)
+	if err != nil {
+		if err.Error() == "key not found" {
+			// 配置不存在，跳过
+			return nil
+		}
+		return fmt.Errorf("failed to get market sources config: %w", err)
+	}
+
+	var config MarketSourcesConfig
+	if err := json.Unmarshal([]byte(data), &config); err != nil {
+		return fmt.Errorf("failed to unmarshal market sources config: %w", err)
+	}
+
+	if len(config.Sources) == 0 {
+		return nil
+	}
+
+	filtered := make([]*MarketSource, 0, len(config.Sources))
+	removed := false
+	for _, src := range config.Sources {
+		if src != nil && src.ID == "default" {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, src)
+	}
+
+	if !removed {
+		return nil
+	}
+
+	config.Sources = filtered
+	if config.DefaultSource == "default" {
+		config.DefaultSource = ""
+	}
+	config.UpdatedAt = time.Now()
+
+	updatedData, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated market sources config: %w", err)
+	}
+	if err := redisClient.Set(configKey, string(updatedData), 0); err != nil {
+		return fmt.Errorf("failed to save updated market sources config: %w", err)
+	}
+
+	log.Println("Removed deprecated source with id 'default'")
 	return nil
 }
 
