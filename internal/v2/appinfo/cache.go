@@ -936,6 +936,7 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 	done := make(chan map[string]*UserData, 1)
 	cancel := make(chan bool, 1)
 	lockAcquired := make(chan bool, 1)
+	lockReleased := make(chan bool, 1)
 
 	go func() {
 		glog.Infof("[LOCK] cm.mutex.RLock() @635 Start")
@@ -943,10 +944,12 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 		cm.mutex.RLock()
 		lockAcquired <- true
 
+		// Ensure lock is always released
 		defer func() {
 			cm.mutex.RUnlock()
 			cm.updateLockStats("unlock")
 			glog.Infof("[LOCK] cm.mutex.RUnlock() @635 End")
+			lockReleased <- true
 		}()
 
 		// Check if cancelled before processing
@@ -993,16 +996,32 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 		case result := <-done:
 			return result
 		case <-time.After(timeout):
-			// Cancel the goroutine to prevent lock leak
+			// Cancel the goroutine and wait for lock release
 			close(cancel)
-			glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
-			return make(map[string]*UserData)
+			// Wait for lock to be released
+			select {
+			case <-lockReleased:
+				glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
+				return make(map[string]*UserData)
+			case <-time.After(1 * time.Second):
+				// Force timeout if lock not released within 1 second
+				glog.Errorf("GetAllUsersData: Lock not released within 1 second after timeout")
+				return make(map[string]*UserData)
+			}
 		}
 	case <-time.After(timeout):
-		// Cancel the goroutine to prevent lock leak
+		// Cancel the goroutine and wait for lock release
 		close(cancel)
-		glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
-		return make(map[string]*UserData)
+		// Wait for lock to be released
+		select {
+		case <-lockReleased:
+			glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
+			return make(map[string]*UserData)
+		case <-time.After(1 * time.Second):
+			// Force timeout if lock not released within 1 second
+			glog.Errorf("GetAllUsersData: Lock not released within 1 second after timeout")
+			return make(map[string]*UserData)
+		}
 	}
 }
 
