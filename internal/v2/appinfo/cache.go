@@ -378,10 +378,39 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	glog.Infof("[LOCK] cm.mutex.Lock() @269 Start")
 	cm.updateLockStats("lock")
 	cm.mutex.Lock()
+
+	// Collect state change notifications inside lock, send them after unlock in defer
+	type pendingNotify struct {
+		userID   string
+		sourceID string
+		appName  string
+		state    *types.AppStateLatestData
+		existing []*types.AppStateLatestData
+		latest   []*types.AppInfoLatestData
+	}
+	pendingNotifications := make([]pendingNotify, 0, 8)
+
 	defer func() {
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
 		glog.Infof("[LOCK] cm.mutex.Unlock() @269 End")
+
+		// Send notifications after the global lock is released to avoid deadlocks
+		if cm.stateMonitor != nil {
+			for _, p := range pendingNotifications {
+				if p.appName == "" || p.state == nil {
+					continue
+				}
+				if err := cm.stateMonitor.CheckAndNotifyStateChange(
+					p.userID, p.sourceID, p.appName,
+					p.state,
+					p.existing,
+					p.latest,
+				); err != nil {
+					glog.Warningf("Failed to check and notify state change for app %s: %v", p.appName, err)
+				}
+			}
+		}
 	}()
 
 	if !cm.isRunning {
@@ -445,25 +474,24 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	case AppStateLatest:
 		// Check if this is a list of app states
 		if appStatesData, hasAppStates := data["app_states"].([]*types.AppStateLatestData); hasAppStates {
-			// Check for state changes and send notifications for each app state
+			// Collect state change notifications for each app state (send after unlock)
 			if cm.stateMonitor != nil {
 				for _, appState := range appStatesData {
-					if appState != nil {
-						// Extract app name from app state for state monitoring
-						appName := appState.Status.Name
-
-						if appName != "" {
-							// Check state changes and send notifications
-							if err := cm.stateMonitor.CheckAndNotifyStateChange(
-								userID, sourceID, appName,
-								appState,
-								sourceData.AppStateLatest,
-								sourceData.AppInfoLatest,
-							); err != nil {
-								glog.Warningf("Failed to check and notify state change for app %s: %v", appName, err)
-							}
-						}
+					if appState == nil {
+						continue
 					}
+					appName := appState.Status.Name
+					if appName == "" {
+						continue
+					}
+					pendingNotifications = append(pendingNotifications, pendingNotify{
+						userID:   userID,
+						sourceID: sourceID,
+						appName:  appName,
+						state:    appState,
+						existing: sourceData.AppStateLatest,
+						latest:   sourceData.AppInfoLatest,
+					})
 				}
 			}
 
@@ -492,21 +520,18 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				return fmt.Errorf("invalid app state data: missing name field")
 			}
 
-			// Check for state changes and send notifications
+			// Collect single state change notification (send after unlock)
 			if cm.stateMonitor != nil {
-				// Extract app name from app state for state monitoring
 				appName := appData.Status.Name
-
 				if appName != "" {
-					// Check state changes and send notifications
-					if err := cm.stateMonitor.CheckAndNotifyStateChange(
-						userID, sourceIDFromRecord, appName,
-						appData,
-						sourceData.AppStateLatest,
-						sourceData.AppInfoLatest,
-					); err != nil {
-						glog.Warningf("Failed to check and notify state change for app %s: %v", appName, err)
-					}
+					pendingNotifications = append(pendingNotifications, pendingNotify{
+						userID:   userID,
+						sourceID: sourceIDFromRecord,
+						appName:  appName,
+						state:    appData,
+						existing: sourceData.AppStateLatest,
+						latest:   sourceData.AppInfoLatest,
+					})
 				}
 			}
 
