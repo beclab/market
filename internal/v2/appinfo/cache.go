@@ -11,7 +11,9 @@ import (
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
+	"os"
 	"runtime/debug"
+	"runtime/pprof"
 
 	"github.com/golang/glog"
 )
@@ -1079,8 +1081,11 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 				glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
 				return make(map[string]*UserData)
 			case <-time.After(1 * time.Second):
-				// Force timeout if lock not released within 1 second
-				glog.Errorf("GetAllUsersData: Lock not released within 1 second after timeout")
+				// Force timeout if lock not released within 1 second → dump goroutines
+				glog.Errorf("GetAllUsersData: Lock not released within 1 second after timeout — dumping goroutines")
+				if p := pprof.Lookup("goroutine"); p != nil {
+					_ = p.WriteTo(os.Stderr, 2)
+				}
 				return make(map[string]*UserData)
 			}
 		}
@@ -1093,8 +1098,11 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 			glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
 			return make(map[string]*UserData)
 		case <-time.After(1 * time.Second):
-			// Force timeout if lock not released within 1 second
-			glog.Errorf("GetAllUsersData: Lock not released within 1 second after timeout")
+			// Force timeout if lock not released within 1 second → dump goroutines
+			glog.Errorf("GetAllUsersData: Lock not released within 1 second after timeout — dumping goroutines")
+			if p := pprof.Lookup("goroutine"); p != nil {
+				_ = p.WriteTo(os.Stderr, 2)
+			}
 			return make(map[string]*UserData)
 		}
 	}
@@ -1729,7 +1737,8 @@ func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSourc
 
 func (cm *CacheManager) resynceUserInternal() error {
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	_wd := cm.startLockWatchdog("@resynceUserInternal")
+	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	if cm.cache == nil {
 		return fmt.Errorf("cache is not initialized")
