@@ -1701,29 +1701,61 @@ func (cm *CacheManager) cleanupWorker() {
 func (cm *CacheManager) ClearAppRenderFailedData() {
 	log.Printf("INFO: Starting periodic cleanup of AppRenderFailed data")
 
+	start := time.Now()
+	// 1) Short lock phase: collect keys to be cleaned and count the number
+	type target struct{ userID, sourceID string }
+	targets := make([]target, 0, 128)
+	counts := make(map[target]int)
+
+	log.Printf("INFO: [Cleanup] Attempting to acquire write lock for scan phase")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	scanLockAcquiredAt := time.Now()
+	log.Printf("INFO: [Cleanup] Write lock acquired (scan). Hold minimal time")
 
 	if cm.cache == nil {
+		cm.mutex.Unlock()
 		log.Printf("WARN: Cache is nil, skipping AppRenderFailed cleanup")
 		return
 	}
 
-	totalCleared := 0
 	for userID, userData := range cm.cache.Users {
 		for sourceID, sourceData := range userData.Sources {
-			originalCount := len(sourceData.AppRenderFailed)
-			if originalCount > 0 {
-				sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
-				totalCleared += originalCount
-				log.Printf("INFO: Cleared %d AppRenderFailed entries for user=%s, source=%s", originalCount, userID, sourceID)
+			if n := len(sourceData.AppRenderFailed); n > 0 {
+				t := target{userID: userID, sourceID: sourceID}
+				targets = append(targets, t)
+				counts[t] = n
 			}
 		}
 	}
 
+	// 2) Reset after releasing the lock to avoid holding the write lock for a long time
+	cm.mutex.Unlock()
+	log.Printf("INFO: [Cleanup] Released write lock after scan (held %v), targets=%d", time.Since(scanLockAcquiredAt), len(targets))
+
+	// 3) Processing phase: reset specific entries in batches, only briefly acquire the lock when entering each target
+	totalCleared := 0
+	for _, t := range targets {
+		// Reset each source in a very short lock
+		cm.mutex.Lock()
+		if userData, ok := cm.cache.Users[t.userID]; ok {
+			if sourceData, ok2 := userData.Sources[t.sourceID]; ok2 {
+				originalCount := len(sourceData.AppRenderFailed)
+				if originalCount > 0 {
+					sourceData.AppRenderFailed = sourceData.AppRenderFailed[:0]
+					totalCleared += originalCount
+				}
+			}
+		}
+		cm.mutex.Unlock()
+
+		if c := counts[t]; c > 0 {
+			log.Printf("INFO: [Cleanup] Cleared %d AppRenderFailed entries for user=%s, source=%s", c, t.userID, t.sourceID)
+		}
+	}
+
 	if totalCleared > 0 {
-		log.Printf("INFO: Periodic cleanup completed, cleared %d total AppRenderFailed entries", totalCleared)
+		log.Printf("INFO: Periodic cleanup completed, cleared %d total AppRenderFailed entries in %v", totalCleared, time.Since(start))
 	} else {
-		log.Printf("DEBUG: No AppRenderFailed entries found during periodic cleanup")
+		log.Printf("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
 	}
 }
