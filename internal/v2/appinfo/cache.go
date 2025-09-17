@@ -47,6 +47,26 @@ type CacheManager struct {
 	}
 }
 
+// startLockWatchdog starts a 1s watchdog for write lock sections and returns a stopper.
+func (cm *CacheManager) startLockWatchdog(tag string) func() {
+	fired := make(chan struct{}, 1)
+	timer := time.AfterFunc(1*time.Second, func() {
+		select {
+		case fired <- struct{}{}:
+		default:
+		}
+		glog.Errorf("[WATCHDOG] Write lock held >1s at %s\nStack:\n%s", tag, string(debug.Stack()))
+	})
+	return func() {
+		if timer.Stop() {
+			select {
+			case <-fired:
+			default:
+			}
+		}
+	}
+}
+
 // Lock acquires the cache manager's write lock
 func (cm *CacheManager) Lock() {
 	cm.mutex.Lock()
@@ -129,8 +149,10 @@ func (cm *CacheManager) Start() error {
 			}
 			glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
 			cm.mutex.Lock()
+			_wd := cm.startLockWatchdog("@81:loadCache")
 			cm.cache = cache
 			cm.mutex.Unlock()
+			_wd()
 		}
 
 	} else {
@@ -146,8 +168,10 @@ func (cm *CacheManager) Start() error {
 
 		glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
 		cm.mutex.Lock()
+		_wd := cm.startLockWatchdog("@81:newCache")
 		cm.cache = NewCacheData()
 		cm.mutex.Unlock()
+		_wd()
 	}
 
 	// Ensure all users from userConfig.UserList have their data structures initialized
@@ -156,6 +180,7 @@ func (cm *CacheManager) Start() error {
 
 		glog.Infof("[LOCK] cm.mutex.Lock() @102 Start")
 		cm.mutex.Lock()
+		_wd := cm.startLockWatchdog("@102:initUsers")
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.Infof("Creating data structure for new user: %s", userID)
@@ -163,14 +188,17 @@ func (cm *CacheManager) Start() error {
 			}
 		}
 		cm.mutex.Unlock()
+		_wd()
 
 		glog.Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
 	}
 
 	glog.Infof("[LOCK] cm.mutex.Lock() @114 Start")
 	cm.mutex.Lock()
+	_wd := cm.startLockWatchdog("@114:setRunning")
 	cm.isRunning = true
 	cm.mutex.Unlock()
+	_wd()
 
 	// Start sync worker goroutine
 	go cm.syncWorker()
@@ -720,10 +748,12 @@ func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataTyp
 	glog.Infof("[LOCK] cm.mutex.Lock() @SetLocalAppData Start")
 	cm.updateLockStats("lock")
 	cm.mutex.Lock()
+	_wd := cm.startLockWatchdog("@SetLocalAppData")
 	defer func() {
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
 		glog.Infof("[LOCK] cm.mutex.Unlock() @SetLocalAppData End")
+		_wd()
 	}()
 
 	if !cm.isRunning {
@@ -822,7 +852,8 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 func (cm *CacheManager) removeUserDataInternal(userID string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @568 Start")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	_wd := cm.startLockWatchdog("@568:removeUser")
+	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	// Remove from cache
 	delete(cm.cache.Users, userID)
@@ -851,7 +882,8 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 func (cm *CacheManager) addUserInternal(userID string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @AddUser Start")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	_wd := cm.startLockWatchdog("@AddUser")
+	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	if _, exists := cm.cache.Users[userID]; exists {
 		glog.Infof("User %s already exists in cache", userID)
@@ -1100,7 +1132,8 @@ func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
 func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @660 Start")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	_wd := cm.startLockWatchdog("@660:updateUserConfig")
+	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	if newUserConfig == nil {
 		return fmt.Errorf("user config cannot be nil")
@@ -1169,7 +1202,8 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 func (cm *CacheManager) syncUserListToCacheInternal() error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @718 Start")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	_wd := cm.startLockWatchdog("@718:syncUserList")
+	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	if cm.userConfig == nil || len(cm.userConfig.UserList) == 0 {
 		glog.Warningf("No user configuration available for syncing")
@@ -1213,7 +1247,8 @@ func (cm *CacheManager) SyncUserListToCache() error {
 func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
 	glog.Infof("[LOCK] cm.mutex.Lock() @751 Start")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	_wd := cm.startLockWatchdog("@751:cleanupInvalidPending")
+	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	totalCleaned := 0
 
@@ -1485,7 +1520,8 @@ func (cm *CacheManager) updateLockStats(lockType string) {
 func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppStateData Start")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	_wd := cm.startLockWatchdog("@RemoveAppStateData")
+	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	if !cm.isRunning {
 		return fmt.Errorf("cache manager is not running")
@@ -1538,7 +1574,8 @@ func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) err
 func (cm *CacheManager) removeAppInfoLatestDataInternal(userID, sourceID, appName string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppInfoLatestData Start")
 	cm.mutex.Lock()
-	defer cm.mutex.Unlock()
+	_wd := cm.startLockWatchdog("@RemoveAppInfoLatestData")
+	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	if !cm.isRunning {
 		return fmt.Errorf("cache manager is not running")
@@ -1619,9 +1656,11 @@ func (cm *CacheManager) SetSettingsManager(sm *settings.SettingsManager) {
 func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.MarketSource) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @SyncMarketSourcesToCache Start")
 	cm.mutex.Lock()
+	_wd := cm.startLockWatchdog("@SyncMarketSourcesToCache")
 	defer func() {
 		cm.mutex.Unlock()
 		glog.Infof("[LOCK] cm.mutex.Unlock() @SyncMarketSourcesToCache End")
+		_wd()
 	}()
 
 	if !cm.isRunning {
