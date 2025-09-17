@@ -935,11 +935,14 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 	timeout := 3 * time.Second
 	done := make(chan map[string]*UserData, 1)
 	cancel := make(chan bool, 1)
+	lockAcquired := make(chan bool, 1)
 
 	go func() {
 		glog.Infof("[LOCK] cm.mutex.RLock() @635 Start")
 		cm.updateLockStats("lock")
 		cm.mutex.RLock()
+		lockAcquired <- true
+
 		defer func() {
 			cm.mutex.RUnlock()
 			cm.updateLockStats("unlock")
@@ -984,6 +987,17 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 	select {
 	case result := <-done:
 		return result
+	case <-lockAcquired:
+		// Lock was acquired, wait for result or timeout
+		select {
+		case result := <-done:
+			return result
+		case <-time.After(timeout):
+			// Cancel the goroutine to prevent lock leak
+			close(cancel)
+			glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
+			return make(map[string]*UserData)
+		}
 	case <-time.After(timeout):
 		// Cancel the goroutine to prevent lock leak
 		close(cancel)
