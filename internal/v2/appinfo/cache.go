@@ -11,6 +11,8 @@ import (
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
+	"runtime/debug"
+
 	"github.com/golang/glog"
 )
 
@@ -378,6 +380,15 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	glog.Infof("[LOCK] cm.mutex.Lock() @269 Start")
 	cm.updateLockStats("lock")
 	cm.mutex.Lock()
+	// Watchdog: warn if write lock is held >1s
+	watchdogFired := make(chan struct{}, 1)
+	timer := time.AfterFunc(1*time.Second, func() {
+		select {
+		case watchdogFired <- struct{}{}:
+		default:
+		}
+		glog.Errorf("[WATCHDOG] Write lock held >1s in setAppDataInternal (user=%s, source=%s, type=%v)\nStack:\n%s", userID, sourceID, dataType, string(debug.Stack()))
+	})
 
 	// Collect state change notifications inside lock, send them after unlock in defer
 	type pendingNotify struct {
@@ -394,6 +405,13 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
 		glog.Infof("[LOCK] cm.mutex.Unlock() @269 End")
+		if timer.Stop() {
+			// timer stopped before firing; try to drain channel if any
+			select {
+			case <-watchdogFired:
+			default:
+			}
+		}
 
 		// Send notifications after the global lock is released to avoid deadlocks
 		if cm.stateMonitor != nil {
