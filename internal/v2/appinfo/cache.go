@@ -1184,14 +1184,33 @@ func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
 // CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
 func (cm *CacheManager) CleanupInvalidPendingData() int {
 	result := make(chan int, 1)
+	cancel := make(chan bool, 1)
+
 	go func() {
-		result <- cm.cleanupInvalidPendingDataInternal()
+		// Use a non-blocking approach with cancellation support
+		done := make(chan int, 1)
+		go func() {
+			done <- cm.cleanupInvalidPendingDataInternal()
+		}()
+
+		select {
+		case cleaned := <-done:
+			// Successfully completed, send result
+			select {
+			case result <- cleaned:
+			case <-cancel:
+				glog.Warningf("CleanupInvalidPendingData: Operation cancelled before sending result")
+			}
+		case <-cancel:
+			glog.Warningf("CleanupInvalidPendingData: Operation cancelled")
+		}
 	}()
 
 	select {
 	case cleaned := <-result:
 		return cleaned
 	case <-time.After(5 * time.Second):
+		close(cancel) // Cancel the goroutine
 		glog.Warningf("CleanupInvalidPendingData timeout, returning 0")
 		return 0
 	}
