@@ -1,6 +1,7 @@
 package appinfo
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"market/internal/v2/types"
@@ -897,15 +898,35 @@ func (cm *CacheManager) ForceSync() error {
 
 	glog.Infof("Force syncing all cache data to Redis")
 
-	for userID, userData := range cm.cache.Users {
-		if err := cm.redisClient.SaveUserDataToRedis(userID, userData); err != nil {
-			glog.Errorf("Failed to force sync user data: %v", err)
+	// Add timeout context to prevent indefinite blocking
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Use a channel to handle the sync operation with timeout
+	done := make(chan error, 1)
+	go func() {
+		var err error
+		for userID, userData := range cm.cache.Users {
+			if err = cm.redisClient.SaveUserDataToRedis(userID, userData); err != nil {
+				glog.Errorf("Failed to force sync user data: %v", err)
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
 			return err
 		}
+		glog.Infof("Force sync completed successfully")
+		return nil
+	case <-ctx.Done():
+		glog.Errorf("Force sync timed out after 5 seconds")
+		return fmt.Errorf("force sync timed out: %v", ctx.Err())
 	}
-
-	glog.Infof("Force sync completed successfully")
-	return nil
 }
 
 // GetAllUsersData returns all users data from cache using single global lock with timeout
