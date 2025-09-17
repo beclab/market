@@ -1798,13 +1798,13 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	targets := make([]target, 0, 128)
 	counts := make(map[target]int)
 
-	log.Printf("INFO: [Cleanup] Attempting to acquire write lock for scan phase")
-	cm.mutex.Lock()
+	log.Printf("INFO: [Cleanup] Attempting to acquire read lock for scan phase")
+	cm.mutex.RLock()
 	scanLockAcquiredAt := time.Now()
-	log.Printf("INFO: [Cleanup] Write lock acquired (scan). Hold minimal time")
+	log.Printf("INFO: [Cleanup] Read lock acquired (scan). Hold minimal time")
 
 	if cm.cache == nil {
-		cm.mutex.Unlock()
+		cm.mutex.RUnlock()
 		log.Printf("WARN: Cache is nil, skipping AppRenderFailed cleanup")
 		return
 	}
@@ -1819,28 +1819,46 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 		}
 	}
 
-	// 2) Reset after releasing the lock to avoid holding the write lock for a long time
-	cm.mutex.Unlock()
-	log.Printf("INFO: [Cleanup] Released write lock after scan (held %v), targets=%d", time.Since(scanLockAcquiredAt), len(targets))
+	// 2) Release read lock after scan
+	cm.mutex.RUnlock()
+	log.Printf("INFO: [Cleanup] Released read lock after scan (held %v), targets=%d", time.Since(scanLockAcquiredAt), len(targets))
 
-	// 3) Processing phase: reset specific entries in batches, only briefly acquire the lock when entering each target
+	// 3) Processing phase: per-target TRY write lock; skip if lock not immediately available
 	totalCleared := 0
+	tryLockTimeout := 5 * time.Millisecond
 	for _, t := range targets {
-		// Reset each source in a very short lock
-		cm.mutex.Lock()
-		if userData, ok := cm.cache.Users[t.userID]; ok {
-			if sourceData, ok2 := userData.Sources[t.sourceID]; ok2 {
-				originalCount := len(sourceData.AppRenderFailed)
-				if originalCount > 0 {
-					sourceData.AppRenderFailed = sourceData.AppRenderFailed[:0]
-					totalCleared += originalCount
+		locked := make(chan struct{}, 1)
+		cancelled := make(chan struct{})
+
+		go func(t target) {
+			cm.mutex.Lock()
+			defer cm.mutex.Unlock()
+			// If timed out, exit immediately and let defer release the lock
+			select {
+			case <-cancelled:
+				return
+			default:
+			}
+			if userData, ok := cm.cache.Users[t.userID]; ok {
+				if sourceData, ok2 := userData.Sources[t.sourceID]; ok2 {
+					originalCount := len(sourceData.AppRenderFailed)
+					if originalCount > 0 {
+						sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
+						totalCleared += originalCount
+					}
 				}
 			}
-		}
-		cm.mutex.Unlock()
+			locked <- struct{}{}
+		}(t)
 
-		if c := counts[t]; c > 0 {
-			log.Printf("INFO: [Cleanup] Cleared %d AppRenderFailed entries for user=%s, source=%s", c, t.userID, t.sourceID)
+		select {
+		case <-locked:
+			if c := counts[t]; c > 0 {
+				log.Printf("INFO: [Cleanup] Cleared %d AppRenderFailed entries for user=%s, source=%s", c, t.userID, t.sourceID)
+			}
+		case <-time.After(tryLockTimeout):
+			close(cancelled)
+			log.Printf("DEBUG: [Cleanup] Skipped clearing for user=%s, source=%s due to lock contention", t.userID, t.sourceID)
 		}
 	}
 
