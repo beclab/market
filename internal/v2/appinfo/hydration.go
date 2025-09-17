@@ -941,32 +941,81 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 
 // removeFromPendingList removes an app from the pending list
 func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
-	if h.cacheManager != nil {
+	if h.cacheManager == nil {
+		log.Printf("Warning: CacheManager not available for removeFromPendingList")
+		return
+	}
+
+	// 1) Read-lock phase: locate index to remove (no writes under RLock)
+	h.cacheManager.mutex.RLock()
+	userData, userExists := h.cache.Users[userID]
+	if !userExists {
+		h.cacheManager.mutex.RUnlock()
+		return
+	}
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		h.cacheManager.mutex.RUnlock()
+		return
+	}
+	removeIdx := -1
+	for i, pending := range sourceData.AppInfoLatestPending {
+		if pending != nil && pending.RawData != nil &&
+			(pending.RawData.ID == appID || pending.RawData.AppID == appID || pending.RawData.Name == appID) {
+			removeIdx = i
+			break
+		}
+	}
+	h.cacheManager.mutex.RUnlock()
+
+	if removeIdx == -1 {
+		return
+	}
+
+	// 2) Try to acquire short write-lock and apply removal with new slice; skip if contended
+	done := make(chan struct{}, 1)
+	cancelled := make(chan struct{})
+	const tryLockTimeout = 5 * time.Millisecond
+
+	go func(idx int) {
 		h.cacheManager.mutex.Lock()
 		defer h.cacheManager.mutex.Unlock()
-
-		userData, userExists := h.cache.Users[userID]
-		if !userExists {
+		select {
+		case <-cancelled:
 			return
+		default:
 		}
 
-		sourceData, sourceExists := userData.Sources[sourceID]
-		if !sourceExists {
-			return
-		}
-
-		// Find and remove the app from pending list
-		for i, pending := range sourceData.AppInfoLatestPending {
-			if pending.RawData != nil &&
-				(pending.RawData.ID == appID || pending.RawData.AppID == appID || pending.RawData.Name == appID) {
-				// Remove from slice
-				sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending[:i], sourceData.AppInfoLatestPending[i+1:]...)
-				log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
-				break
+		// Re-validate pointers under write-lock
+		if userData2, ok := h.cache.Users[userID]; ok {
+			if sourceData2, ok2 := userData2.Sources[sourceID]; ok2 {
+				if idx >= 0 && idx < len(sourceData2.AppInfoLatestPending) {
+					// Re-check match to be safe
+					p := sourceData2.AppInfoLatestPending[idx]
+					if p != nil && p.RawData != nil && (p.RawData.ID == appID || p.RawData.AppID == appID || p.RawData.Name == appID) {
+						// Create new slice dropping index idx
+						old := sourceData2.AppInfoLatestPending
+						newSlice := make([]*types.AppInfoLatestPendingData, 0, len(old)-1)
+						newSlice = append(newSlice, old[:idx]...)
+						if idx+1 <= len(old)-1 {
+							newSlice = append(newSlice, old[idx+1:]...)
+						}
+						sourceData2.AppInfoLatestPending = newSlice
+						log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
+					}
+				}
 			}
 		}
-	} else {
-		log.Printf("Warning: CacheManager not available for removeFromPendingList")
+		done <- struct{}{}
+	}(removeIdx)
+
+	select {
+	case <-done:
+		return
+	case <-time.After(tryLockTimeout):
+		close(cancelled)
+		log.Printf("DEBUG: removeFromPendingList skipped (lock contention) for user=%s source=%s app=%s", userID, sourceID, appID)
+		return
 	}
 }
 

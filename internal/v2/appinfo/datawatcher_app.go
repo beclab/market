@@ -401,6 +401,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	writeTimeout := 5 * time.Second
 	writeLockAcquired := make(chan bool, 1)
 	writeLockError := make(chan error, 1)
+	cancel := make(chan bool, 1)
 
 	go func() {
 		defer func() {
@@ -413,9 +414,31 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		glog.Infof("DataWatcher: Attempting to acquire write lock for user %s", userID)
 		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Start")
 		dw.cacheManager.mutex.Lock()
+		defer func() {
+			dw.cacheManager.mutex.Unlock()
+			glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @453 Start")
+			glog.Infof("DataWatcher: Write lock released for user %s", userID)
+		}()
+
+		// Check if cancelled before sending signal
+		select {
+		case <-cancel:
+			glog.Warningf("DataWatcher: Write lock acquisition cancelled for user %s", userID)
+			return
+		default:
+		}
+
 		glog.Infof("DataWatcher: Write lock acquired for user %s", userID)
 		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Success")
-		writeLockAcquired <- true
+
+		// Send signal and wait for processing
+		select {
+		case writeLockAcquired <- true:
+			// Successfully sent signal, wait for cancellation or completion
+			<-cancel
+		case <-cancel:
+			glog.Warningf("DataWatcher: Write lock acquisition cancelled before signal for user %s", userID)
+		}
 	}()
 
 	select {
@@ -427,16 +450,17 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		originalUserData.Hash = newHash
 		glog.Infof("DataWatcher: Hash updated in memory for user %s", userID)
 
-		glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @453 Start")
-		dw.cacheManager.mutex.Unlock()
-		glog.Infof("DataWatcher: Write lock released for user %s", userID)
+		// Cancel the goroutine to release the lock
+		close(cancel)
 
 	case err := <-writeLockError:
 		glog.Errorf("DataWatcher: Error acquiring write lock for user %s: %v", userID, err)
+		close(cancel)
 		return false
 
 	case <-time.After(writeTimeout):
 		glog.Errorf("DataWatcher: Timeout acquiring write lock for hash update, user %s", userID)
+		close(cancel)
 		return false
 	}
 
@@ -562,13 +586,36 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	// Step 3: Try to acquire write lock non-blocking and move completed apps
 	lockStartTime := time.Now()
 
-	// Try to acquire write lock non-blocking
+	// Try to acquire write lock non-blocking with cancellation support
 	lockAcquired := make(chan bool, 1)
+	lockCancel := make(chan bool, 1)
+
 	go func() {
 		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Start")
 		dw.cacheManager.mutex.Lock()
+		defer func() {
+			dw.cacheManager.mutex.Unlock()
+			glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @725 Start")
+		}()
+
+		// Check if cancelled before sending signal
+		select {
+		case <-lockCancel:
+			glog.Warningf("DataWatcher: Write lock acquisition cancelled for user=%s, source=%s", userID, sourceID)
+			return
+		default:
+		}
+
 		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Success")
-		lockAcquired <- true
+
+		// Send signal and wait for processing
+		select {
+		case lockAcquired <- true:
+			// Successfully sent signal, wait for cancellation
+			<-lockCancel
+		case <-lockCancel:
+			glog.Warningf("DataWatcher: Write lock acquisition cancelled before signal for user=%s, source=%s", userID, sourceID)
+		}
 	}()
 
 	// Use a short timeout to avoid blocking too long
@@ -577,10 +624,10 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		glog.Infof("DataWatcher: Write lock acquired for user=%s, source=%s", userID, sourceID)
 
 		defer func() {
-			glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @725 Start")
-			dw.cacheManager.mutex.Unlock()
 			totalLockTime := time.Since(lockStartTime)
 			glog.Infof("DataWatcher: Write lock released after %v for user=%s, source=%s", totalLockTime, userID, sourceID)
+			// Cancel the goroutine to release the lock
+			close(lockCancel)
 		}()
 
 		// Move completed apps from pending to latest
@@ -658,6 +705,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		return int64(len(pendingApps)), movedCount
 
 	case <-time.After(2 * time.Second):
+		close(lockCancel) // Cancel the goroutine to release the lock
 		glog.Warningf("DataWatcher: Skipping write lock acquisition for user=%s, source=%s (timeout after 2s) - will retry in next cycle", userID, sourceID)
 		return int64(len(pendingApps)), 0
 	}
