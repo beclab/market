@@ -1825,20 +1825,34 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 
 	// 3) Processing phase: per-target TRY write lock; skip if lock not immediately available
 	totalCleared := 0
-	tryLockTimeout := 5 * time.Millisecond
+	tryLockTimeout := 2000 * time.Millisecond
 	for _, t := range targets {
 		locked := make(chan struct{}, 1)
 		cancelled := make(chan struct{})
+		done := make(chan struct{}, 1) // 添加done通道确保goroutine完成
 
 		go func(t target) {
-			cm.mutex.Lock()
-			defer cm.mutex.Unlock()
-			// If timed out, exit immediately and let defer release the lock
+			defer func() {
+				done <- struct{}{} // 确保goroutine结束时发送信号
+			}()
+
+			// 检查是否已被取消
 			select {
 			case <-cancelled:
 				return
 			default:
 			}
+
+			cm.mutex.Lock()
+			defer cm.mutex.Unlock()
+
+			// 再次检查是否已被取消（在获取锁后）
+			select {
+			case <-cancelled:
+				return
+			default:
+			}
+
 			if userData, ok := cm.cache.Users[t.userID]; ok {
 				if sourceData, ok2 := userData.Sources[t.sourceID]; ok2 {
 					originalCount := len(sourceData.AppRenderFailed)
@@ -1859,6 +1873,14 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 		case <-time.After(tryLockTimeout):
 			close(cancelled)
 			log.Printf("DEBUG: [Cleanup] Skipped clearing for user=%s, source=%s due to lock contention", t.userID, t.sourceID)
+			// 等待goroutine完成，防止泄漏
+			select {
+			case <-done:
+				// goroutine已完成
+			case <-time.After(100 * time.Millisecond):
+				// 如果goroutine在100ms内没有完成，记录警告但继续
+				log.Printf("WARN: [Cleanup] Goroutine for user=%s, source=%s did not complete within 100ms after cancellation", t.userID, t.sourceID)
+			}
 		}
 	}
 
