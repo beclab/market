@@ -192,9 +192,6 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		return fmt.Errorf("pendingData not found in cache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	}
 
-	// Debug: print address and RawPackage before assignment
-	log.Printf("[DEBUG] Before update: pendingData addr=%p, RawPackage=%s", pendingData, pendingData.RawPackage)
-
 	// Fix version history data
 	appInfoLatest.RawData.VersionHistory = pendingData.RawData.VersionHistory
 	appInfoLatest.AppInfo.AppEntry.VersionHistory = pendingData.RawData.VersionHistory
@@ -210,16 +207,9 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	pendingData.RenderedPackage = appInfoLatest.RenderedPackage
 	pendingData.AppSimpleInfo = appInfoLatest.AppSimpleInfo
 
-	// Debug: print address and RawPackage after assignment
-	log.Printf("[DEBUG] After update: pendingData addr=%p, RawPackage=%s", pendingData, pendingData.RawPackage)
-
 	log.Printf("Updated AppInfoLatestPendingData in cache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	log.Printf("Type=%s, Version=%s, RawPackage=%s, RenderedPackage=%s", pendingData.Type, pendingData.Version, pendingData.RawPackage, pendingData.RenderedPackage)
-	log.Printf("RawData.Entrances: %+v", pendingData.RawData.Entrances)
-	log.Printf("AppSimpleInfo: %+v", pendingData.AppSimpleInfo)
-	log.Printf("Dependencies: %+v", pendingData.RawData.Options["dependencies"])
-	log.Printf("SubCharts: %+v", pendingData.RawData.SubCharts)
-	log.Printf("SupportClient: %+v", pendingData.RawData.SupportClient)
+	// Removed heavy logging that could cause goroutine blocking
 
 	return nil
 }
