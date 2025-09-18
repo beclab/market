@@ -442,11 +442,16 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		}
 
 		// Send notifications after the global lock is released to avoid deadlocks
+		glog.Infof("DEBUG: Processing %d pending notifications", len(pendingNotifications))
 		if cm.stateMonitor != nil {
-			for _, p := range pendingNotifications {
+			glog.Infof("DEBUG: State monitor is available for processing notifications")
+			for i, p := range pendingNotifications {
+				glog.Infof("DEBUG: Processing notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
 				if p.appName == "" || p.state == nil {
+					glog.Warningf("DEBUG: Skipping notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
 					continue
 				}
+				glog.Infof("DEBUG: Calling CheckAndNotifyStateChange for app=%s", p.appName)
 				if err := cm.stateMonitor.CheckAndNotifyStateChange(
 					p.userID, p.sourceID, p.appName,
 					p.state,
@@ -454,8 +459,12 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 					p.latest,
 				); err != nil {
 					glog.Warningf("Failed to check and notify state change for app %s: %v", p.appName, err)
+				} else {
+					glog.Infof("DEBUG: Successfully processed notification for app=%s", p.appName)
 				}
 			}
+		} else {
+			glog.Warningf("DEBUG: State monitor is nil, cannot process %d pending notifications", len(pendingNotifications))
 		}
 	}()
 
@@ -520,16 +529,21 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	case AppStateLatest:
 		// Check if this is a list of app states
 		if appStatesData, hasAppStates := data["app_states"].([]*types.AppStateLatestData); hasAppStates {
+			glog.Infof("DEBUG: Processing batch of %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
 			// Collect state change notifications for each app state (send after unlock)
 			if cm.stateMonitor != nil {
-				for _, appState := range appStatesData {
+				glog.Infof("DEBUG: State monitor available for batch processing")
+				for i, appState := range appStatesData {
 					if appState == nil {
+						glog.Warningf("DEBUG: App state %d is nil, skipping", i)
 						continue
 					}
 					appName := appState.Status.Name
 					if appName == "" {
+						glog.Warningf("DEBUG: App state %d has empty name, skipping", i)
 						continue
 					}
+					glog.Infof("DEBUG: Adding batch pending notification for app=%s (index=%d)", appName, i)
 					pendingNotifications = append(pendingNotifications, pendingNotify{
 						userID:   userID,
 						sourceID: sourceID,
@@ -538,7 +552,10 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						existing: sourceData.AppStateLatest,
 						latest:   sourceData.AppInfoLatest,
 					})
+					glog.Infof("DEBUG: Added batch pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
 				}
+			} else {
+				glog.Warningf("DEBUG: State monitor is nil, skipping batch pending notifications for %d app states", len(appStatesData))
 			}
 
 			// Update each app state individually using name matching
@@ -569,6 +586,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			// Collect single state change notification (send after unlock)
 			if cm.stateMonitor != nil {
 				appName := appData.Status.Name
+				glog.Infof("DEBUG: State monitor available, appName=%s, appData=%v", appName, appData != nil)
 				if appName != "" {
 					pendingNotifications = append(pendingNotifications, pendingNotify{
 						userID:   userID,
@@ -578,7 +596,12 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						existing: sourceData.AppStateLatest,
 						latest:   sourceData.AppInfoLatest,
 					})
+					glog.Infof("DEBUG: Added pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
+				} else {
+					glog.Warningf("DEBUG: AppName is empty, skipping pending notification")
 				}
+			} else {
+				glog.Warningf("DEBUG: State monitor is nil, skipping pending notification for app=%s", appData.Status.Name)
 			}
 
 			// Update or add the app state using name matching
