@@ -635,6 +635,10 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	select {
 	case <-ctx.Done():
 		log.Printf("Request timeout or cancelled for /api/v2/market/hash")
+		// On timeout, dump lock info to find who holds the lock
+		if s.cacheManager != nil {
+			s.cacheManager.DumpLockInfo("getMarketHash timeout")
+		}
 		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - hash retrieval took too long", nil)
 		return
 	case res := <-resultChan:

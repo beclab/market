@@ -11,6 +11,7 @@ import (
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
+	"runtime"
 	"runtime/debug"
 
 	"github.com/golang/glog"
@@ -1483,6 +1484,20 @@ func (cm *CacheManager) GetLockStats() map[string]interface{} {
 	}
 
 	return stats
+}
+
+// DumpLockInfo prints lock stats and all goroutine stacks for diagnosing lock holders
+func (cm *CacheManager) DumpLockInfo(reason string) {
+	log.Printf("LOCK DIAG: reason=%s", reason)
+	// Print current lock stats snapshot
+	stats := cm.GetLockStats()
+	log.Printf("LOCK DIAG: stats=%v", stats)
+
+	// Dump all goroutine stacks to identify who might be holding the lock
+	// Note: This is safe but can be large; only used on timeouts.
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	log.Printf("LOCK DIAG: goroutine dump (%d bytes)\n%s", n, string(buf[:n]))
 }
 
 // updateLockStats updates lock statistics
