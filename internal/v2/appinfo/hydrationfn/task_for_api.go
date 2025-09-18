@@ -141,18 +141,7 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		return fmt.Errorf("task or cache is nil")
 	}
 
-	// Use CacheManager's lock for unified lock strategy
-	if task.CacheManager != nil {
-		log.Printf("[DEBUG] writeAppDataToCache: Acquiring lock for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
-		task.CacheManager.Lock()
-		log.Printf("[DEBUG] writeAppDataToCache: Lock acquired for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
-		defer func() {
-			log.Printf("[DEBUG] writeAppDataToCache: Releasing lock for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
-			task.CacheManager.Unlock()
-		}()
-	}
-
-	// Convert appData to AppInfoLatestData
+	// Convert appData to AppInfoLatestData OUTSIDE the lock to avoid blocking
 	log.Printf("[DEBUG] writeAppDataToCache: Starting data conversion for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	var appInfoLatest *types.AppInfoLatestData
 	if appDataMap, ok := appData.(map[string]interface{}); ok {
@@ -197,6 +186,17 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		}
 	} else {
 		return fmt.Errorf("app_data is not in expected format")
+	}
+
+	// Now acquire the lock for cache operations
+	if task.CacheManager != nil {
+		log.Printf("[DEBUG] writeAppDataToCache: Acquiring lock for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+		task.CacheManager.Lock()
+		log.Printf("[DEBUG] writeAppDataToCache: Lock acquired for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+		defer func() {
+			log.Printf("[DEBUG] writeAppDataToCache: Releasing lock for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+			task.CacheManager.Unlock()
+		}()
 	}
 
 	// Find the pendingData in cache
