@@ -537,9 +537,9 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 				cachedProgress := appState.Status.Progress
 				newProgress := msg.Progress
 
-				// Convert progress strings to integers for comparison
-				cachedProgressInt, err1 := strconv.Atoi(cachedProgress)
-				newProgressInt, err2 := strconv.Atoi(newProgress)
+				// Convert progress strings to floats for comparison
+				cachedProgressFloat, err1 := strconv.ParseFloat(cachedProgress, 64)
+				newProgressFloat, err2 := strconv.ParseFloat(newProgress, 64)
 
 				if err1 != nil || err2 != nil {
 					log.Printf("Failed to parse progress values: cached=%s, new=%s, err1=%v, err2=%v",
@@ -547,19 +547,19 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 					return false
 				}
 
-				// Check if progress difference is within 10
-				progressDiff := newProgressInt - cachedProgressInt
+				// Check if progress difference is within 10.0
+				progressDiff := newProgressFloat - cachedProgressFloat
 				if progressDiff < 0 {
 					progressDiff = -progressDiff // Make it absolute
 				}
 
-				if progressDiff <= 10 {
-					log.Printf("Progress difference is %d (within 10), skipping message for app %s",
+				if progressDiff <= 10.0 {
+					log.Printf("Progress difference is %.2f (within 10.0), skipping message for app %s",
 						progressDiff, appName)
 					return true
 				}
 
-				log.Printf("Progress difference is %d (greater than 10), proceeding with message storage for app %s",
+				log.Printf("Progress difference is %.2f (greater than 10.0), proceeding with message storage for app %s",
 					progressDiff, appName)
 				return false
 			}
