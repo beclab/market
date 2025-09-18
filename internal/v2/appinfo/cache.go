@@ -1823,73 +1823,68 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	cm.mutex.RUnlock()
 	log.Printf("INFO: [Cleanup] Released read lock after scan (held %v), targets=%d", time.Since(scanLockAcquiredAt), len(targets))
 
-	// 3) Processing phase: per-target TRY write lock; skip if lock not immediately available
+	// 3) Processing phase: 使用批量处理避免锁竞争
 	totalCleared := 0
-	tryLockTimeout := 2000 * time.Millisecond
 
-	// 使用context控制所有goroutine的生命周期
-	ctx, cancel := context.WithTimeout(context.Background(), tryLockTimeout)
+	if len(targets) == 0 {
+		log.Printf("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
+		return
+	}
+
+	// 使用单个写锁批量处理所有targets，避免锁竞争
+	log.Printf("INFO: [Cleanup] Processing %d targets in batch mode", len(targets))
+
+	// 使用context控制锁获取超时
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	for _, t := range targets {
-		// 使用非阻塞的锁获取方式
-		lockAcquired := make(chan struct{}, 1)
-		lockFailed := make(chan struct{}, 1)
+	// 使用channel实现非阻塞锁获取
+	lockAcquired := make(chan struct{}, 1)
+	lockFailed := make(chan struct{}, 1)
 
-		go func(t target) {
-			// 尝试获取锁，带超时
-			lockCtx, lockCancel := context.WithTimeout(ctx, 100*time.Millisecond)
-			defer lockCancel()
+	// 启动goroutine尝试获取锁
+	go func() {
+		// 尝试获取锁
+		cm.mutex.Lock()
 
-			// 使用channel实现非阻塞锁获取
-			lockChan := make(chan struct{}, 1)
-			go func() {
-				cm.mutex.Lock()
-				lockChan <- struct{}{}
-			}()
+		// 检查context是否已取消
+		select {
+		case <-ctx.Done():
+			// 已取消，释放锁并退出
+			cm.mutex.Unlock()
+			lockFailed <- struct{}{}
+			return
+		default:
+			// 成功获取锁
+			lockAcquired <- struct{}{}
+		}
+	}()
 
-			select {
-			case <-lockChan:
-				// 成功获取锁
-				defer cm.mutex.Unlock()
+	// 等待锁获取结果
+	select {
+	case <-lockAcquired:
+		// 成功获取锁，批量处理所有targets
+		defer cm.mutex.Unlock()
 
-				// 检查context是否已取消
-				select {
-				case <-ctx.Done():
-					lockFailed <- struct{}{}
-					return
-				default:
-				}
-
-				// 执行清理逻辑
-				if userData, ok := cm.cache.Users[t.userID]; ok {
-					if sourceData, ok2 := userData.Sources[t.sourceID]; ok2 {
-						originalCount := len(sourceData.AppRenderFailed)
-						if originalCount > 0 {
-							sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
-							totalCleared += originalCount
-						}
+		for _, t := range targets {
+			if userData, ok := cm.cache.Users[t.userID]; ok {
+				if sourceData, ok2 := userData.Sources[t.sourceID]; ok2 {
+					originalCount := len(sourceData.AppRenderFailed)
+					if originalCount > 0 {
+						sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
+						totalCleared += originalCount
+						log.Printf("INFO: [Cleanup] Cleared %d AppRenderFailed entries for user=%s, source=%s", originalCount, t.userID, t.sourceID)
 					}
 				}
-				lockAcquired <- struct{}{}
-
-			case <-lockCtx.Done():
-				// 获取锁超时
-				lockFailed <- struct{}{}
 			}
-		}(t)
-
-		select {
-		case <-lockAcquired:
-			if c := counts[t]; c > 0 {
-				log.Printf("INFO: [Cleanup] Cleared %d AppRenderFailed entries for user=%s, source=%s", c, t.userID, t.sourceID)
-			}
-		case <-lockFailed:
-			log.Printf("DEBUG: [Cleanup] Skipped clearing for user=%s, source=%s due to lock contention", t.userID, t.sourceID)
-		case <-ctx.Done():
-			log.Printf("DEBUG: [Cleanup] Cleanup timeout reached, stopping remaining operations")
-			return
 		}
+
+	case <-lockFailed:
+		log.Printf("DEBUG: [Cleanup] Failed to acquire write lock within timeout, skipping cleanup")
+		return
+	case <-ctx.Done():
+		log.Printf("DEBUG: [Cleanup] Cleanup timeout reached, skipping cleanup")
+		return
 	}
 
 	if totalCleared > 0 {
