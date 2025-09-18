@@ -78,6 +78,12 @@ func (cm *CacheManager) Unlock() {
 	cm.mutex.Unlock()
 }
 
+// TryLock attempts to acquire the cache manager's write lock without blocking
+// Returns true if lock acquired, false if would block
+func (cm *CacheManager) TryLock() bool {
+	return cm.mutex.TryLock()
+}
+
 // RLock acquires the cache manager's read lock
 func (cm *CacheManager) RLock() {
 	cm.mutex.RLock()
@@ -86,6 +92,50 @@ func (cm *CacheManager) RLock() {
 // RUnlock releases the cache manager's read lock
 func (cm *CacheManager) RUnlock() {
 	cm.mutex.RUnlock()
+}
+
+// TryRLock attempts to acquire the cache manager's read lock without blocking
+// Returns true if lock acquired, false if would block
+func (cm *CacheManager) TryRLock() bool {
+	return cm.mutex.TryRLock()
+}
+
+// GetUserDataWithFallback retrieves user data with fallback mechanism
+// Uses TryRLock to avoid blocking - returns nil if lock is not available immediately
+func (cm *CacheManager) GetUserDataWithFallback(userID string) *UserData {
+	if !cm.mutex.TryRLock() {
+		// Lock not available immediately, return nil to avoid blocking
+		log.Printf("GetUserData: Read lock not available for user %s, returning nil", userID)
+		return nil
+	}
+	defer cm.mutex.RUnlock()
+
+	if cm.cache == nil {
+		return nil
+	}
+
+	return cm.cache.Users[userID]
+}
+
+// GetAllUsersDataWithFallback returns all users data with fallback mechanism
+// Uses TryRLock to avoid blocking - returns empty map if lock is not available immediately
+func (cm *CacheManager) GetAllUsersDataWithFallback() map[string]*UserData {
+	if !cm.mutex.TryRLock() {
+		// Lock not available immediately, return empty map to avoid blocking
+		log.Printf("GetAllUsersData: Read lock not available, returning empty map")
+		return make(map[string]*UserData)
+	}
+	defer cm.mutex.RUnlock()
+
+	if cm.cache == nil {
+		return make(map[string]*UserData)
+	}
+
+	result := make(map[string]*UserData)
+	for userID, userData := range cm.cache.Users {
+		result[userID] = userData
+	}
+	return result
 }
 
 // GetCache returns the underlying cache data
@@ -287,8 +337,11 @@ func (cm *CacheManager) processSyncRequest(req SyncRequest) {
 
 // GetUserData retrieves user data from cache
 func (cm *CacheManager) GetUserData(userID string) *UserData {
-	glog.Infof("[LOCK] cm.mutex.RLock() @184 Start")
-	cm.mutex.RLock()
+	glog.Infof("[LOCK] cm.mutex.TryRLock() @184 Start")
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("GetUserData: Read lock not available for user %s, returning nil", userID)
+		return nil
+	}
 	defer cm.mutex.RUnlock()
 
 	return cm.cache.Users[userID]
@@ -301,8 +354,11 @@ func (cm *CacheManager) getUserData(userID string) *UserData {
 
 // GetSourceData retrieves source data from cache
 func (cm *CacheManager) GetSourceData(userID, sourceID string) *SourceData {
-	glog.Infof("[LOCK] cm.mutex.RLock() @197 Start")
-	cm.mutex.RLock()
+	glog.Infof("[LOCK] cm.mutex.TryRLock() @197 Start")
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("GetSourceData: Read lock not available for user %s, source %s, returning nil", userID, sourceID)
+		return nil
+	}
 	defer cm.mutex.RUnlock()
 
 	if userData, exists := cm.cache.Users[userID]; exists {
@@ -881,8 +937,11 @@ func (cm *CacheManager) SetLocalAppData(userID, sourceID string, dataType AppDat
 
 // GetAppData retrieves app data from cache using single global lock
 func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
-	glog.Infof("[LOCK] cm.mutex.RLock() @543 Start")
-	cm.mutex.RLock()
+	glog.Infof("[LOCK] cm.mutex.TryRLock() @543 Start")
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("GetAppData: Read lock not available for user %s, source %s, type %v, returning nil", userID, sourceID, dataType)
+		return nil
+	}
 	defer cm.mutex.RUnlock()
 
 	if userData, exists := cm.cache.Users[userID]; exists {
@@ -993,8 +1052,11 @@ func (cm *CacheManager) AddUser(userID string) error {
 
 // GetCacheStats returns cache statistics using single global lock
 func (cm *CacheManager) GetCacheStats() map[string]interface{} {
-	glog.Infof("[LOCK] cm.mutex.RLock() @586 Start")
-	cm.mutex.RLock()
+	glog.Infof("[LOCK] cm.mutex.TryRLock() @586 Start")
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("GetCacheStats: Read lock not available, returning empty stats")
+		return map[string]interface{}{"error": "lock not available"}
+	}
 	defer cm.mutex.RUnlock()
 
 	stats := make(map[string]interface{})
@@ -1025,8 +1087,11 @@ func (cm *CacheManager) requestSync(req SyncRequest) {
 
 // ForceSync forces immediate synchronization of all data to Redis
 func (cm *CacheManager) ForceSync() error {
-	glog.Infof("[LOCK] cm.mutex.RLock() @617 Start")
-	cm.mutex.RLock()
+	glog.Infof("[LOCK] cm.mutex.TryRLock() @617 Start")
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("ForceSync: Read lock not available, returning error")
+		return fmt.Errorf("read lock not available for force sync")
+	}
 	defer func() {
 		cm.mutex.RUnlock()
 		glog.Infof("[LOCK] cm.mutex.RUnlock() @617 End")
@@ -1067,7 +1132,10 @@ func (cm *CacheManager) ForceSync() error {
 
 // GetAllUsersData returns all users data from cache using single global lock
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
-	cm.mutex.RLock()
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("GetAllUsersData: Read lock not available, returning empty map")
+		return make(map[string]*UserData)
+	}
 	defer cm.mutex.RUnlock()
 
 	if cm.cache == nil {
@@ -1090,8 +1158,11 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 
 // HasUserStateDataForSource checks if any user has non-empty state data for a specific source
 func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
-	glog.Infof("[LOCK] cm.mutex.RLock() @HasUserStateDataForSource Start")
-	cm.mutex.RLock()
+	glog.Infof("[LOCK] cm.mutex.TryRLock() @HasUserStateDataForSource Start")
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("HasUserStateDataForSource: Read lock not available for source %s, returning false", sourceID)
+		return false
+	}
 	defer func() {
 		cm.mutex.RUnlock()
 		glog.Infof("[LOCK] cm.mutex.RUnlock() @HasUserStateDataForSource End")
@@ -1237,10 +1308,11 @@ func (cm *CacheManager) SyncUserListToCache() error {
 
 // CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
 func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
-	glog.Infof("[LOCK] cm.mutex.Lock() @751 Start")
-	lockStart := time.Now()
-	cm.mutex.Lock()
-	glog.Infof("[LOCK] cm.mutex.Lock() @751 Success (wait=%v)", time.Since(lockStart))
+	glog.Infof("[LOCK] cm.mutex.TryLock() @751 Start")
+	if !cm.mutex.TryLock() {
+		glog.Warningf("CleanupInvalidPendingData: Write lock not available, skipping cleanup")
+		return 0
+	}
 	_wd := cm.startLockWatchdog("@751:cleanupInvalidPending")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1526,10 +1598,11 @@ func (cm *CacheManager) updateLockStats(lockType string) {
 
 // RemoveAppStateData removes a specific app from AppStateLatest for a user and source
 func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName string) error {
-	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppStateData Start")
-	lockStart := time.Now()
-	cm.mutex.Lock()
-	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppStateData Success (wait=%v)", time.Since(lockStart))
+	glog.Infof("[LOCK] cm.mutex.TryLock() @RemoveAppStateData Start")
+	if !cm.mutex.TryLock() {
+		glog.Warningf("RemoveAppStateData: Write lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appName)
+		return fmt.Errorf("write lock not available")
+	}
 	_wd := cm.startLockWatchdog("@RemoveAppStateData")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1808,7 +1881,10 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	counts := make(map[target]int)
 
 	log.Printf("INFO: [Cleanup] Attempting to acquire read lock for scan phase")
-	cm.mutex.RLock()
+	if !cm.mutex.TryRLock() {
+		log.Printf("INFO: [Cleanup] Read lock not available for scan phase, skipping cleanup")
+		return
+	}
 	scanLockAcquiredAt := time.Now()
 	log.Printf("INFO: [Cleanup] Read lock acquired (scan). Hold minimal time")
 

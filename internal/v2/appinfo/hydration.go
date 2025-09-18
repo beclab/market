@@ -15,6 +15,8 @@ import (
 	"market/internal/v2/appinfo/hydrationfn"
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
+
+	"github.com/golang/glog"
 )
 
 // Hydrator manages the hydration process with task queue and workers
@@ -422,7 +424,10 @@ func (h *Hydrator) pendingDataMonitor(ctx context.Context) {
 func (h *Hydrator) checkForPendingData() {
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
-		h.cacheManager.mutex.RLock()
+		if !h.cacheManager.mutex.TryRLock() {
+			glog.Warningf("Hydrator.checkForPendingData: CacheManager read lock not available, skipping")
+			return
+		}
 		defer h.cacheManager.mutex.RUnlock()
 
 		for userID, userData := range h.cache.Users {
@@ -581,7 +586,10 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 func (h *Hydrator) isAppDataHydrationComplete(userID, sourceID, appID string) bool {
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
-		h.cacheManager.mutex.RLock()
+		if !h.cacheManager.mutex.TryRLock() {
+			glog.Warningf("Hydrator.isAppDataHydrationComplete: CacheManager read lock not available for user %s, source %s, app %s, returning false", userID, sourceID, appID)
+			return false
+		}
 		defer h.cacheManager.mutex.RUnlock()
 
 		userData, userExists := h.cache.Users[userID]
@@ -887,7 +895,10 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 	// Find the pending data for this task
 	var pendingData *types.AppInfoLatestPendingData
 	if h.cacheManager != nil {
-		h.cacheManager.mutex.RLock()
+		if !h.cacheManager.mutex.TryRLock() {
+			glog.Warningf("Hydrator.moveTaskToRenderFailed: CacheManager read lock not available for user %s, skipping", task.UserID)
+			return
+		}
 		userData, userExists := h.cache.Users[task.UserID]
 		if !userExists {
 			h.cacheManager.mutex.RUnlock()
@@ -947,7 +958,10 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
 	}
 
 	// 1) Read-lock phase: locate index to remove (no writes under RLock)
-	h.cacheManager.mutex.RLock()
+	if !h.cacheManager.mutex.TryRLock() {
+		glog.Warningf("Hydrator.removeFromPendingList: CacheManager read lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appID)
+		return
+	}
 	userData, userExists := h.cache.Users[userID]
 	if !userExists {
 		h.cacheManager.mutex.RUnlock()
@@ -1498,7 +1512,10 @@ func (h *Hydrator) cleanupOldTasks() {
 func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) bool {
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
-		h.cacheManager.mutex.RLock()
+		if !h.cacheManager.mutex.TryRLock() {
+			glog.Warningf("Hydrator.isAppInLatestQueue: CacheManager read lock not available for user %s, source %s, app %s, returning false", userID, sourceID, appID)
+			return false
+		}
 		defer h.cacheManager.mutex.RUnlock()
 
 		userData, userExists := h.cache.Users[userID]
@@ -1718,7 +1735,10 @@ func (h *Hydrator) convertLatestDataToMap(latestData *types.AppInfoLatestData) m
 func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool {
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
-		h.cacheManager.mutex.RLock()
+		if !h.cacheManager.mutex.TryRLock() {
+			glog.Warningf("Hydrator.isAppInRenderFailedList: CacheManager read lock not available for user %s, source %s, app %s, returning false", userID, sourceID, appID)
+			return false
+		}
 		defer h.cacheManager.mutex.RUnlock()
 
 		userData, userExists := h.cache.Users[userID]
