@@ -27,15 +27,14 @@ func NewStateMonitor(dataSender DataSenderInterface) *StateMonitor {
 }
 
 // CheckAndNotifyStateChange checks if app state has changed and sends notification if needed
-func (sm *StateMonitor) CheckAndNotifyStateChange(
+func (sm *StateMonitor) NotifyStateChange(
 	userID, sourceID, appName string,
 	newStateData *types.AppStateLatestData,
 	existingStateData []*types.AppStateLatestData,
 	appInfoLatestData []*types.AppInfoLatestData,
+	hasChanged bool,
+	changeReason string,
 ) error {
-	// Check if state has changed
-	hasChanged, changeReason := sm.hasStateChanged(appName, newStateData, existingStateData)
-
 	if !hasChanged {
 		// Only log at debug level for no changes to reduce log noise
 		log.Printf("No state change detected for app %s (user=%s, source=%s), reason: %s",
@@ -69,8 +68,8 @@ func (sm *StateMonitor) CheckAndNotifyStateChange(
 	return sm.dataSender.SendAppInfoUpdate(update)
 }
 
-// hasStateChanged checks if the app state has changed compared to existing state
-func (sm *StateMonitor) hasStateChanged(
+// HasStateChanged checks if the app state has changed compared to existing state
+func (sm *StateMonitor) HasStateChanged(
 	appName string,
 	newStateData *types.AppStateLatestData,
 	existingStateData []*types.AppStateLatestData,

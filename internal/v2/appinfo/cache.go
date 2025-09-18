@@ -420,12 +420,14 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 	// Collect state change notifications inside lock, send them after unlock in defer
 	type pendingNotify struct {
-		userID   string
-		sourceID string
-		appName  string
-		state    *types.AppStateLatestData
-		existing []*types.AppStateLatestData
-		latest   []*types.AppInfoLatestData
+		userID       string
+		sourceID     string
+		appName      string
+		state        *types.AppStateLatestData
+		existing     []*types.AppStateLatestData
+		latest       []*types.AppInfoLatestData
+		hasChanged   bool
+		changeReason string
 	}
 	pendingNotifications := make([]pendingNotify, 0, 8)
 
@@ -451,12 +453,14 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 					glog.Warningf("DEBUG: Skipping notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
 					continue
 				}
-				glog.Infof("DEBUG: Calling CheckAndNotifyStateChange for app=%s", p.appName)
-				if err := cm.stateMonitor.CheckAndNotifyStateChange(
+				glog.Infof("DEBUG: Calling NotifyStateChange for app=%s", p.appName)
+				if err := cm.stateMonitor.NotifyStateChange(
 					p.userID, p.sourceID, p.appName,
 					p.state,
 					p.existing,
 					p.latest,
+					p.hasChanged,
+					p.changeReason,
 				); err != nil {
 					glog.Warningf("Failed to check and notify state change for app %s: %v", p.appName, err)
 				} else {
@@ -544,13 +548,20 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						continue
 					}
 					glog.Infof("DEBUG: Adding batch pending notification for app=%s (index=%d)", appName, i)
+
+					// Check if state has changed before creating notification
+					hasChanged, changeReason := cm.stateMonitor.HasStateChanged(appName, appState, sourceData.AppStateLatest)
+					glog.Infof("DEBUG: Batch state change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
+
 					pendingNotifications = append(pendingNotifications, pendingNotify{
-						userID:   userID,
-						sourceID: sourceID,
-						appName:  appName,
-						state:    appState,
-						existing: sourceData.AppStateLatest,
-						latest:   sourceData.AppInfoLatest,
+						userID:       userID,
+						sourceID:     sourceID,
+						appName:      appName,
+						state:        appState,
+						existing:     sourceData.AppStateLatest,
+						latest:       sourceData.AppInfoLatest,
+						hasChanged:   hasChanged,
+						changeReason: changeReason,
 					})
 					glog.Infof("DEBUG: Added batch pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
 				}
@@ -588,13 +599,19 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				appName := appData.Status.Name
 				glog.Infof("DEBUG: State monitor available, appName=%s, appData=%v", appName, appData != nil)
 				if appName != "" {
+					// Check if state has changed before creating notification
+					hasChanged, changeReason := cm.stateMonitor.HasStateChanged(appName, appData, sourceData.AppStateLatest)
+					glog.Infof("DEBUG: State change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
+
 					pendingNotifications = append(pendingNotifications, pendingNotify{
-						userID:   userID,
-						sourceID: sourceIDFromRecord,
-						appName:  appName,
-						state:    appData,
-						existing: sourceData.AppStateLatest,
-						latest:   sourceData.AppInfoLatest,
+						userID:       userID,
+						sourceID:     sourceIDFromRecord,
+						appName:      appName,
+						state:        appData,
+						existing:     sourceData.AppStateLatest,
+						latest:       sourceData.AppInfoLatest,
+						hasChanged:   hasChanged,
+						changeReason: changeReason,
 					})
 					glog.Infof("DEBUG: Added pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
 				} else {
