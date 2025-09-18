@@ -973,18 +973,20 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
 	}
 
 	// 2) Try to acquire short write-lock and apply removal with new slice; skip if contended
-	const tryLockTimeout = 100 * time.Millisecond
+	// 使用超时机制避免无限期阻塞
+	done := make(chan bool, 1)
+	go func() {
+		h.cacheManager.Lock()
+		done <- true
+	}()
 
-	// 使用context控制超时
-	ctx, cancel := context.WithTimeout(context.Background(), tryLockTimeout)
-	defer cancel()
-
-	// 使用TryLock模式避免goroutine泄漏
-	if !h.cacheManager.TryLockWithContext(ctx) {
-		log.Printf("DEBUG: removeFromPendingList skipped (lock contention) for user=%s source=%s app=%s", userID, sourceID, appID)
+	select {
+	case <-done:
+		defer h.cacheManager.Unlock()
+	case <-time.After(100 * time.Millisecond):
+		log.Printf("DEBUG: removeFromPendingList skipped (lock timeout) for user=%s source=%s app=%s", userID, sourceID, appID)
 		return
 	}
-	defer h.cacheManager.Unlock()
 
 	// Re-validate pointers under write-lock
 	if userData2, ok := h.cache.Users[userID]; ok {

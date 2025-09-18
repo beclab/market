@@ -143,16 +143,20 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	}
 
 	// Use CacheManager's lock for unified lock strategy with timeout
+	// 使用超时机制避免无限期阻塞
 	if task.CacheManager != nil {
-		// 使用context控制超时，避免无限等待
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		done := make(chan bool, 1)
+		go func() {
+			task.CacheManager.Lock()
+			done <- true
+		}()
 
-		// 使用TryLock模式避免goroutine泄漏
-		if !task.CacheManager.TryLockWithContext(ctx) {
+		select {
+		case <-done:
+			defer task.CacheManager.Unlock()
+		case <-time.After(5 * time.Second):
 			return fmt.Errorf("failed to acquire cache lock within timeout")
 		}
-		defer task.CacheManager.Unlock()
 	}
 
 	// Convert appData to AppInfoLatestData
