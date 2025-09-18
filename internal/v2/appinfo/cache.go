@@ -89,6 +89,44 @@ func (cm *CacheManager) RUnlock() {
 	cm.mutex.RUnlock()
 }
 
+// TryLockWithContext attempts to acquire the write lock with context cancellation
+// Returns true if lock was acquired, false if context was cancelled or timeout occurred
+func (cm *CacheManager) TryLockWithContext(ctx context.Context) bool {
+	lockAcquired := make(chan struct{}, 1)
+
+	go func() {
+		cm.mutex.Lock()
+		lockAcquired <- struct{}{}
+	}()
+
+	select {
+	case <-lockAcquired:
+		return true
+	case <-ctx.Done():
+		// Context cancelled, goroutine will be abandoned but will eventually release the lock
+		return false
+	}
+}
+
+// TryRLockWithContext attempts to acquire the read lock with context cancellation
+// Returns true if lock was acquired, false if context was cancelled or timeout occurred
+func (cm *CacheManager) TryRLockWithContext(ctx context.Context) bool {
+	lockAcquired := make(chan struct{}, 1)
+
+	go func() {
+		cm.mutex.RLock()
+		lockAcquired <- struct{}{}
+	}()
+
+	select {
+	case <-lockAcquired:
+		return true
+	case <-ctx.Done():
+		// Context cancelled, goroutine will be abandoned but will eventually release the lock
+		return false
+	}
+}
+
 // GetCache returns the underlying cache data
 func (cm *CacheManager) GetCache() *CacheData {
 	return cm.cache

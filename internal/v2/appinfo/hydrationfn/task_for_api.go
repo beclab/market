@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"market/internal/v2/types"
 
@@ -141,9 +142,16 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		return fmt.Errorf("task or cache is nil")
 	}
 
-	// Use CacheManager's lock for unified lock strategy
+	// Use CacheManager's lock for unified lock strategy with timeout
 	if task.CacheManager != nil {
-		task.CacheManager.Lock()
+		// 使用context控制超时，避免无限等待
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// 使用TryLock模式避免goroutine泄漏
+		if !task.CacheManager.TryLockWithContext(ctx) {
+			return fmt.Errorf("failed to acquire cache lock within timeout")
+		}
 		defer task.CacheManager.Unlock()
 	}
 

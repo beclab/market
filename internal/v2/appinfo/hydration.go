@@ -973,49 +973,38 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
 	}
 
 	// 2) Try to acquire short write-lock and apply removal with new slice; skip if contended
-	done := make(chan struct{}, 1)
-	cancelled := make(chan struct{})
-	const tryLockTimeout = 5 * time.Millisecond
+	const tryLockTimeout = 100 * time.Millisecond
 
-	go func(idx int) {
-		h.cacheManager.mutex.Lock()
-		defer h.cacheManager.mutex.Unlock()
-		select {
-		case <-cancelled:
-			return
-		default:
-		}
+	// 使用context控制超时
+	ctx, cancel := context.WithTimeout(context.Background(), tryLockTimeout)
+	defer cancel()
 
-		// Re-validate pointers under write-lock
-		if userData2, ok := h.cache.Users[userID]; ok {
-			if sourceData2, ok2 := userData2.Sources[sourceID]; ok2 {
-				if idx >= 0 && idx < len(sourceData2.AppInfoLatestPending) {
-					// Re-check match to be safe
-					p := sourceData2.AppInfoLatestPending[idx]
-					if p != nil && p.RawData != nil && (p.RawData.ID == appID || p.RawData.AppID == appID || p.RawData.Name == appID) {
-						// Create new slice dropping index idx
-						old := sourceData2.AppInfoLatestPending
-						newSlice := make([]*types.AppInfoLatestPendingData, 0, len(old)-1)
-						newSlice = append(newSlice, old[:idx]...)
-						if idx+1 <= len(old)-1 {
-							newSlice = append(newSlice, old[idx+1:]...)
-						}
-						sourceData2.AppInfoLatestPending = newSlice
-						log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
+	// 使用TryLock模式避免goroutine泄漏
+	if !h.cacheManager.TryLockWithContext(ctx) {
+		log.Printf("DEBUG: removeFromPendingList skipped (lock contention) for user=%s source=%s app=%s", userID, sourceID, appID)
+		return
+	}
+	defer h.cacheManager.Unlock()
+
+	// Re-validate pointers under write-lock
+	if userData2, ok := h.cache.Users[userID]; ok {
+		if sourceData2, ok2 := userData2.Sources[sourceID]; ok2 {
+			if removeIdx >= 0 && removeIdx < len(sourceData2.AppInfoLatestPending) {
+				// Re-check match to be safe
+				p := sourceData2.AppInfoLatestPending[removeIdx]
+				if p != nil && p.RawData != nil && (p.RawData.ID == appID || p.RawData.AppID == appID || p.RawData.Name == appID) {
+					// Create new slice dropping index removeIdx
+					old := sourceData2.AppInfoLatestPending
+					newSlice := make([]*types.AppInfoLatestPendingData, 0, len(old)-1)
+					newSlice = append(newSlice, old[:removeIdx]...)
+					if removeIdx+1 <= len(old)-1 {
+						newSlice = append(newSlice, old[removeIdx+1:]...)
 					}
+					sourceData2.AppInfoLatestPending = newSlice
+					log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
 				}
 			}
 		}
-		done <- struct{}{}
-	}(removeIdx)
-
-	select {
-	case <-done:
-		return
-	case <-time.After(tryLockTimeout):
-		close(cancelled)
-		log.Printf("DEBUG: removeFromPendingList skipped (lock contention) for user=%s source=%s app=%s", userID, sourceID, appID)
-		return
 	}
 }
 
