@@ -1029,7 +1029,7 @@ func getCurrentTimestamp() int64 {
 // NewAppInfoLatestPendingDataFromLegacyData creates AppInfoLatestPendingData from a single app data
 func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *AppInfoLatestPendingData {
 	// Add debug logging to inspect input data
-	log.Printf("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
+	// log.Printf("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
 	// if appData != nil {
 	// 	log.Printf("DEBUG: appData length: %d", len(appData))
 	// 	for key, value := range appData {

@@ -3,6 +3,7 @@ package appinfo
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -571,7 +572,6 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 
 		if dw.isAppHydrationCompletedWithTimeout(ctx, pendingApp) {
 			completedApps = append(completedApps, pendingApp)
-			glog.Infof("DataWatcher: App hydration completed: %s", dw.getAppID(pendingApp))
 		}
 	}
 
@@ -580,8 +580,12 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		return int64(len(pendingApps)), 0
 	}
 
-	glog.Infof("DataWatcher: Found %d completed apps out of %d pending for user=%s, source=%s",
-		len(completedApps), len(pendingApps), userID, sourceID)
+	// Build single-line summary with all completed app IDs
+	completedIDs := make([]string, 0, len(completedApps))
+	for _, ca := range completedApps {
+		completedIDs = append(completedIDs, dw.getAppID(ca))
+	}
+	glog.Infof("DataWatcher: user=%s source=%s completed=%d/%d apps=[%s]", userID, sourceID, len(completedApps), len(pendingApps), strings.Join(completedIDs, ","))
 
 	// Step 3: Try to acquire write lock non-blocking and move completed apps
 	lockStartTime := time.Now()
