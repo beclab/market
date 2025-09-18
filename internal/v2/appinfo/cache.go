@@ -11,9 +11,7 @@ import (
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
-	"os"
 	"runtime/debug"
-	"runtime/pprof"
 
 	"github.com/golang/glog"
 )
@@ -1006,106 +1004,27 @@ func (cm *CacheManager) ForceSync() error {
 	}
 }
 
-// GetAllUsersData returns all users data from cache using single global lock with timeout
+// GetAllUsersData returns all users data from cache using single global lock
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
-	// Use shorter timeout to avoid blocking indefinitely
-	timeout := 3 * time.Second
-	done := make(chan map[string]*UserData, 1)
-	cancel := make(chan bool, 1)
-	lockAcquired := make(chan bool, 1)
-	lockReleased := make(chan bool, 1)
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
 
-	go func() {
-		glog.Infof("[LOCK] cm.mutex.RLock() @635 Start")
-		cm.updateLockStats("lock")
-		cm.mutex.RLock()
-		lockAcquired <- true
-
-		// Ensure lock is always released
-		defer func() {
-			cm.mutex.RUnlock()
-			cm.updateLockStats("unlock")
-			glog.Infof("[LOCK] cm.mutex.RUnlock() @635 End")
-			lockReleased <- true
-		}()
-
-		// Check if cancelled before processing
-		select {
-		case <-cancel:
-			glog.Warningf("GetAllUsersData: Operation cancelled before processing")
-			return
-		default:
-		}
-
-		// Return shallow copy of data directly without nested locks
-		result := make(map[string]*UserData)
-		for userID, userData := range cm.cache.Users {
-			// Create shallow copy
-			userDataCopy := &UserData{
-				Sources: make(map[string]*SourceData),
-				Hash:    userData.Hash,
-			}
-
-			// Copy source data references
-			for sourceID, sourceData := range userData.Sources {
-				userDataCopy.Sources[sourceID] = sourceData
-			}
-
-			result[userID] = userDataCopy
-		}
-
-		// Check if cancelled before sending result
-		select {
-		case <-cancel:
-			glog.Warningf("GetAllUsersData: Operation cancelled before sending result")
-			return
-		case done <- result:
-			// Successfully sent result
-		}
-	}()
-
-	select {
-	case result := <-done:
-		return result
-	case <-lockAcquired:
-		// Lock was acquired, wait for result or timeout
-		select {
-		case result := <-done:
-			return result
-		case <-time.After(timeout):
-			// Cancel the goroutine and wait for lock release
-			close(cancel)
-			// Wait for lock to be released
-			select {
-			case <-lockReleased:
-				glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
-				return make(map[string]*UserData)
-			case <-time.After(1 * time.Second):
-				// Force timeout if lock not released within 1 second → dump goroutines
-				glog.Errorf("GetAllUsersData: Lock not released within 1 second after timeout — dumping goroutines")
-				if p := pprof.Lookup("goroutine"); p != nil {
-					_ = p.WriteTo(os.Stderr, 2)
-				}
-				return make(map[string]*UserData)
-			}
-		}
-	case <-time.After(timeout):
-		// Cancel the goroutine and wait for lock release
-		close(cancel)
-		// Wait for lock to be released
-		select {
-		case <-lockReleased:
-			glog.Warningf("GetAllUsersData: Skipping data retrieval (timeout after %v) - will retry in next cycle", timeout)
-			return make(map[string]*UserData)
-		case <-time.After(1 * time.Second):
-			// Force timeout if lock not released within 1 second → dump goroutines
-			glog.Errorf("GetAllUsersData: Lock not released within 1 second after timeout — dumping goroutines")
-			if p := pprof.Lookup("goroutine"); p != nil {
-				_ = p.WriteTo(os.Stderr, 2)
-			}
-			return make(map[string]*UserData)
-		}
+	if cm.cache == nil {
+		return make(map[string]*UserData)
 	}
+
+	result := make(map[string]*UserData)
+	for userID, userData := range cm.cache.Users {
+		userDataCopy := &UserData{
+			Sources: make(map[string]*SourceData),
+			Hash:    userData.Hash,
+		}
+		for sourceID, sourceData := range userData.Sources {
+			userDataCopy.Sources[sourceID] = sourceData
+		}
+		result[userID] = userDataCopy
+	}
+	return result
 }
 
 // HasUserStateDataForSource checks if any user has non-empty state data for a specific source
