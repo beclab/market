@@ -1753,29 +1753,28 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	// 使用单个写锁批量处理所有targets，避免锁竞争
 	log.Printf("INFO: [Cleanup] Processing %d targets in batch mode", len(targets))
 
-	// 使用context控制锁获取超时
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// 使用超短超时快速尝试获取写锁，避免写者等待导致读者饥饿
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
 	// 使用channel实现非阻塞锁获取
 	lockAcquired := make(chan struct{}, 1)
 	lockFailed := make(chan struct{}, 1)
 
-	// 启动goroutine尝试获取锁
+	// 启动goroutine尝试获取锁（仅作极短时间尝试，抢不到立即放弃）
 	go func() {
-		// 尝试获取锁
-		cm.mutex.Lock()
-
-		// 检查context是否已取消
+		done := make(chan struct{}, 1)
+		go func() {
+			cm.mutex.Lock()
+			done <- struct{}{}
+		}()
 		select {
-		case <-ctx.Done():
-			// 已取消，释放锁并退出
-			cm.mutex.Unlock()
-			lockFailed <- struct{}{}
-			return
-		default:
+		case <-done:
 			// 成功获取锁
 			lockAcquired <- struct{}{}
+		case <-ctx.Done():
+			// 未能在极短时间内获取写锁，直接放弃，避免阻塞读者
+			lockFailed <- struct{}{}
 		}
 	}()
 
@@ -1799,10 +1798,7 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 		}
 
 	case <-lockFailed:
-		log.Printf("DEBUG: [Cleanup] Failed to acquire write lock within timeout, skipping cleanup")
-		return
-	case <-ctx.Done():
-		log.Printf("DEBUG: [Cleanup] Cleanup timeout reached, skipping cleanup")
+		log.Printf("DEBUG: [Cleanup] Failed to acquire write lock quickly, skipping cleanup to avoid reader starvation")
 		return
 	}
 
