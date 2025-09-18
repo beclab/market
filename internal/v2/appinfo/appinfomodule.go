@@ -739,7 +739,11 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 		return fmt.Errorf("cache manager not available")
 	}
 
+	// Add detailed lock logs for diagnosis
+	glog.Infof("[LOCK] m.cacheManager.mutex.Lock() @appinfomodule:cleanup Start")
+	__lockStartAppInfo := time.Now()
 	m.cacheManager.mutex.Lock()
+	glog.Infof("[LOCK] m.cacheManager.mutex.Lock() @appinfomodule:cleanup Success (wait=%v)", time.Since(__lockStartAppInfo))
 	defer m.cacheManager.mutex.Unlock()
 	removedCount := 0
 	for userID, userData := range m.cacheManager.cache.Users {

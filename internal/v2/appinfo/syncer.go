@@ -310,7 +310,10 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 			// If no users exist, create a system user as fallback
 			if len(userIDs) == 0 {
+				log.Printf("[LOCK] cacheManager.mutex.Lock() @syncer:createSystemUser Start")
+				__lockStartCreate := time.Now()
 				cacheManager.mutex.Lock()
+				log.Printf("[LOCK] cacheManager.mutex.Lock() @syncer:createSystemUser Success (wait=%v)", time.Since(__lockStartCreate))
 				// Double-check after acquiring write lock
 				if len(s.cache.Users) == 0 {
 					systemUserID := "system"
@@ -357,7 +360,10 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
 	// Use CacheManager's lock if available
 	if cacheManager := s.cacheManager.Load(); cacheManager != nil {
+		log.Printf("[LOCK] cacheManager.mutex.Lock() @syncer:storeDataDirectly Start")
+		__lockStartStore := time.Now()
 		cacheManager.mutex.Lock()
+		log.Printf("[LOCK] cacheManager.mutex.Lock() @syncer:storeDataDirectly Success (wait=%v)", time.Since(__lockStartStore))
 		defer cacheManager.mutex.Unlock()
 	} else {
 		// Fallback: no lock protection (not recommended)
