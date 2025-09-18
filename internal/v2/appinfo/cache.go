@@ -148,7 +148,9 @@ func (cm *CacheManager) Start() error {
 				return err
 			}
 			glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
+			lockStart := time.Now()
 			cm.mutex.Lock()
+			glog.Infof("[LOCK] cm.mutex.Lock() @81 Success (wait=%v)", time.Since(lockStart))
 			_wd := cm.startLockWatchdog("@81:loadCache")
 			cm.cache = cache
 			cm.mutex.Unlock()
@@ -167,7 +169,9 @@ func (cm *CacheManager) Start() error {
 		}
 
 		glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
+		lockStart := time.Now()
 		cm.mutex.Lock()
+		glog.Infof("[LOCK] cm.mutex.Lock() @81 Success (wait=%v)", time.Since(lockStart))
 		_wd := cm.startLockWatchdog("@81:newCache")
 		cm.cache = NewCacheData()
 		cm.mutex.Unlock()
@@ -179,7 +183,9 @@ func (cm *CacheManager) Start() error {
 		glog.Infof("Initializing data structures for configured users")
 
 		glog.Infof("[LOCK] cm.mutex.Lock() @102 Start")
+		lockStart := time.Now()
 		cm.mutex.Lock()
+		glog.Infof("[LOCK] cm.mutex.Lock() @102 Success (wait=%v)", time.Since(lockStart))
 		_wd := cm.startLockWatchdog("@102:initUsers")
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
@@ -194,7 +200,9 @@ func (cm *CacheManager) Start() error {
 	}
 
 	glog.Infof("[LOCK] cm.mutex.Lock() @114 Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @114 Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@114:setRunning")
 	cm.isRunning = true
 	cm.mutex.Unlock()
@@ -216,7 +224,9 @@ func (cm *CacheManager) Stop() {
 	glog.Infof("Stopping cache manager")
 
 	glog.Infof("[LOCK] cm.mutex.Lock() @129 Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @129 Success (wait=%v)", time.Since(lockStart))
 	if cm.isRunning {
 		cm.isRunning = false
 		cm.stopChannel <- true
@@ -311,7 +321,9 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 // SetHydrationNotifier sets the hydration notifier for real-time updates
 func (cm *CacheManager) setHydrationNotifierInternal(notifier HydrationNotifier) {
 	glog.Infof("[LOCK] cm.mutex.Lock() @216 Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @216 Success (wait=%v)", time.Since(lockStart))
 	defer cm.mutex.Unlock()
 	cm.hydrationNotifier = notifier
 	glog.Infof("Hydration notifier set successfully")
@@ -407,7 +419,9 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @269 Start")
 	cm.updateLockStats("lock")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @269 Success (wait=%v)", time.Since(lockStart))
 	// Watchdog: warn if write lock is held >1s
 	watchdogFired := make(chan struct{}, 1)
 	timer := time.AfterFunc(1*time.Second, func() {
@@ -787,7 +801,9 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @SetLocalAppData Start")
 	cm.updateLockStats("lock")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @SetLocalAppData Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@SetLocalAppData")
 	defer func() {
 		cm.mutex.Unlock()
@@ -891,7 +907,9 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 // RemoveUserData removes user data from cache and Redis
 func (cm *CacheManager) removeUserDataInternal(userID string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @568 Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @568 Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@568:removeUser")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -921,7 +939,9 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 // AddUser adds a new user to the cache
 func (cm *CacheManager) addUserInternal(userID string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @AddUser Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @AddUser Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@AddUser")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1098,7 +1118,9 @@ func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
 // UpdateUserConfig updates the user configuration and ensures all users have data structures
 func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @660 Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @660 Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@660:updateUserConfig")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1168,7 +1190,9 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 // SyncUserListToCache ensures all users from current userConfig have initialized data structures
 func (cm *CacheManager) syncUserListToCacheInternal() error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @718 Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @718 Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@718:syncUserList")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1213,7 +1237,9 @@ func (cm *CacheManager) SyncUserListToCache() error {
 // CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
 func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
 	glog.Infof("[LOCK] cm.mutex.Lock() @751 Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @751 Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@751:cleanupInvalidPending")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1486,7 +1512,9 @@ func (cm *CacheManager) updateLockStats(lockType string) {
 // RemoveAppStateData removes a specific app from AppStateLatest for a user and source
 func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppStateData Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppStateData Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@RemoveAppStateData")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1540,7 +1568,9 @@ func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) err
 // RemoveAppInfoLatestData removes a specific app from AppInfoLatest for a user and source
 func (cm *CacheManager) removeAppInfoLatestDataInternal(userID, sourceID, appName string) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppInfoLatestData Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @RemoveAppInfoLatestData Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@RemoveAppInfoLatestData")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1622,7 +1652,9 @@ func (cm *CacheManager) SetSettingsManager(sm *settings.SettingsManager) {
 // SyncMarketSourcesToCache synchronizes market sources to all users in cache
 func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.MarketSource) error {
 	glog.Infof("[LOCK] cm.mutex.Lock() @SyncMarketSourcesToCache Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @SyncMarketSourcesToCache Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@SyncMarketSourcesToCache")
 	defer func() {
 		cm.mutex.Unlock()
@@ -1695,7 +1727,10 @@ func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSourc
 }
 
 func (cm *CacheManager) resynceUserInternal() error {
+	glog.Infof("[LOCK] cm.mutex.Lock() @resynceUserInternal Start")
+	lockStart := time.Now()
 	cm.mutex.Lock()
+	glog.Infof("[LOCK] cm.mutex.Lock() @resynceUserInternal Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@resynceUserInternal")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
