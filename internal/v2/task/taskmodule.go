@@ -649,7 +649,7 @@ func (tm *TaskModule) recordTaskResult(task *Task, result string, err error) {
 	}
 }
 
-func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskType string, source string, found bool) {
+func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskType string, source string, found bool, completed bool) {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
@@ -686,7 +686,7 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 			log.Printf("  Pending task: ID=%s, Type=%s, AppName=%s, User=%s, Status=%d, CreatedAt=%v",
 				t.ID, getTaskTypeString(t.Type), t.AppName, t.User, t.Status, t.CreatedAt)
 		}
-		return "", "", false
+		return "", "", false, false
 	}
 
 	typeStr := getTaskTypeString(latestTask.Type)
@@ -694,7 +694,8 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 	if s, ok := latestTask.Metadata["source"].(string); ok {
 		source = s
 	}
-	return typeStr, source, true
+	// Since we only search pending/running tasks here, the task is not completed
+	return typeStr, source, true, false
 }
 
 // GetInstanceID returns the unique instance identifier

@@ -439,7 +439,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	}
 
 	if sourceID == "" && dw.taskModule != nil {
-		_, src, found := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
+		_, src, found, _ := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
 		if found && src != "" {
 			sourceID = src
 			log.Printf("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
