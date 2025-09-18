@@ -143,14 +143,22 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 
 	// Use CacheManager's lock for unified lock strategy
 	if task.CacheManager != nil {
+		log.Printf("[DEBUG] writeAppDataToCache: Acquiring lock for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 		task.CacheManager.Lock()
-		defer task.CacheManager.Unlock()
+		log.Printf("[DEBUG] writeAppDataToCache: Lock acquired for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+		defer func() {
+			log.Printf("[DEBUG] writeAppDataToCache: Releasing lock for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+			task.CacheManager.Unlock()
+		}()
 	}
 
 	// Convert appData to AppInfoLatestData
+	log.Printf("[DEBUG] writeAppDataToCache: Starting data conversion for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	var appInfoLatest *types.AppInfoLatestData
 	if appDataMap, ok := appData.(map[string]interface{}); ok {
+		log.Printf("[DEBUG] writeAppDataToCache: Calling NewAppInfoLatestData for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 		appInfoLatest = types.NewAppInfoLatestData(appDataMap)
+		log.Printf("[DEBUG] writeAppDataToCache: NewAppInfoLatestData completed for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 		if appInfoLatest == nil {
 			return fmt.Errorf("failed to create AppInfoLatestData from response data")
 		}
@@ -161,8 +169,12 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 			appInfoLatest.RenderedPackage = renderedPkg
 		}
 		if values, ok := appDataMap["values"].([]interface{}); ok {
+			log.Printf("[DEBUG] writeAppDataToCache: Processing %d values for user=%s, source=%s, app=%s", len(values), task.UserID, task.SourceID, task.AppID)
 			parsedValues := make([]*types.Values, 0, len(values))
-			for _, v := range values {
+			for i, v := range values {
+				if i%100 == 0 { // Log every 100 values to avoid spam
+					log.Printf("[DEBUG] writeAppDataToCache: Processing value %d/%d for user=%s, source=%s, app=%s", i, len(values), task.UserID, task.SourceID, task.AppID)
+				}
 				if vMap, ok := v.(map[string]interface{}); ok {
 					val := &types.Values{}
 					if fileName, ok := vMap["file_name"].(string); ok {
@@ -181,13 +193,16 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 				}
 			}
 			appInfoLatest.Values = parsedValues
+			log.Printf("[DEBUG] writeAppDataToCache: Values processing completed for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 		}
 	} else {
 		return fmt.Errorf("app_data is not in expected format")
 	}
 
 	// Find the pendingData in cache
+	log.Printf("[DEBUG] writeAppDataToCache: Calling findPendingDataFromCache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	pendingData := s.findPendingDataFromCache(task)
+	log.Printf("[DEBUG] writeAppDataToCache: findPendingDataFromCache completed for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	if pendingData == nil {
 		return fmt.Errorf("pendingData not found in cache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	}
@@ -207,33 +222,46 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	pendingData.RenderedPackage = appInfoLatest.RenderedPackage
 	pendingData.AppSimpleInfo = appInfoLatest.AppSimpleInfo
 
+	log.Printf("[DEBUG] writeAppDataToCache: Starting final logging for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	log.Printf("Updated AppInfoLatestPendingData in cache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	log.Printf("Type=%s, Version=%s, RawPackage=%s, RenderedPackage=%s", pendingData.Type, pendingData.Version, pendingData.RawPackage, pendingData.RenderedPackage)
 	// Removed heavy logging that could cause goroutine blocking
 
+	log.Printf("[DEBUG] writeAppDataToCache: Method completed successfully for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	return nil
 }
 
 // findPendingDataFromCache finds AppInfoLatestPendingData from cache based on task information
 func (s *TaskForApiStep) findPendingDataFromCache(task *HydrationTask) *types.AppInfoLatestPendingData {
+	log.Printf("[DEBUG] findPendingDataFromCache: Starting for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+
 	if task == nil || task.Cache == nil {
+		log.Printf("[DEBUG] findPendingDataFromCache: task or cache is nil for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 		return nil
 	}
 
 	// Get user data from cache
+	log.Printf("[DEBUG] findPendingDataFromCache: Getting user data for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	userData := task.Cache.Users[task.UserID]
 	if userData == nil {
+		log.Printf("[DEBUG] findPendingDataFromCache: userData is nil for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 		return nil
 	}
 
 	// Get source data from user data
+	log.Printf("[DEBUG] findPendingDataFromCache: Getting source data for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	sourceData := userData.Sources[task.SourceID]
 	if sourceData == nil {
+		log.Printf("[DEBUG] findPendingDataFromCache: sourceData is nil for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 		return nil
 	}
 
 	// Find matching AppInfoLatestPendingData by app ID
-	for _, pendingData := range sourceData.AppInfoLatestPending {
+	log.Printf("[DEBUG] findPendingDataFromCache: Searching through %d pending data items for user=%s, source=%s, app=%s", len(sourceData.AppInfoLatestPending), task.UserID, task.SourceID, task.AppID)
+	for i, pendingData := range sourceData.AppInfoLatestPending {
+		if i%50 == 0 { // Log every 50 items to avoid spam
+			log.Printf("[DEBUG] findPendingDataFromCache: Checking item %d/%d for user=%s, source=%s, app=%s", i, len(sourceData.AppInfoLatestPending), task.UserID, task.SourceID, task.AppID)
+		}
 		if pendingData == nil {
 			continue
 		}
@@ -243,6 +271,7 @@ func (s *TaskForApiStep) findPendingDataFromCache(task *HydrationTask) *types.Ap
 			if pendingData.RawData.ID == task.AppID ||
 				pendingData.RawData.AppID == task.AppID ||
 				pendingData.RawData.Name == task.AppID {
+				log.Printf("[DEBUG] findPendingDataFromCache: Found match in RawData for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 				return pendingData
 			}
 		}
@@ -252,11 +281,13 @@ func (s *TaskForApiStep) findPendingDataFromCache(task *HydrationTask) *types.Ap
 			if pendingData.AppInfo.AppEntry.ID == task.AppID ||
 				pendingData.AppInfo.AppEntry.AppID == task.AppID ||
 				pendingData.AppInfo.AppEntry.Name == task.AppID {
+				log.Printf("[DEBUG] findPendingDataFromCache: Found match in AppInfo.AppEntry for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 				return pendingData
 			}
 		}
 	}
 
+	log.Printf("[DEBUG] findPendingDataFromCache: No match found for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
 	return nil
 }
 
