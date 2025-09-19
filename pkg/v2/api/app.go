@@ -247,7 +247,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		// Get user data from cache
-		userData := s.cacheManager.GetUserData(userID)
+		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
 			log.Printf("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}
@@ -602,7 +602,7 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		// Get user data from cache with fallback (non-blocking)
-		userData := s.cacheManager.GetUserDataWithFallback(userID)
+		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
 			log.Printf("User data not found for user: %s, attempting to resync user data", userID)
 
@@ -614,7 +614,7 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Try to get user data again after resync
-			userData = s.cacheManager.GetUserDataWithFallback(userID)
+			userData = s.cacheManager.GetUserDataNoLock(userID)
 			if userData == nil {
 				log.Printf("User data still not found for user: %s after resync", userID)
 				resultChan <- result{err: fmt.Errorf("user data not found even after resync")}
@@ -819,7 +819,7 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 
 		// Get user data from cache with timeout check
 		start := time.Now()
-		userData := s.cacheManager.GetUserData(userID)
+		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
 			log.Printf("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}
