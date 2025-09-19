@@ -46,6 +46,10 @@ type CacheManager struct {
 		lockCount      int64
 		unlockCount    int64
 	}
+
+	// ForceSync rate limiting
+	forceSyncMutex sync.Mutex
+	lastForceSync  time.Time
 }
 
 // startLockWatchdog starts a 1s watchdog for write lock sections and returns a stopper.
@@ -1102,28 +1106,53 @@ func (cm *CacheManager) requestSync(req SyncRequest) {
 }
 
 // ForceSync forces immediate synchronization of all data to Redis
+// Rate limited to once per minute to prevent excessive Redis operations
 func (cm *CacheManager) ForceSync() error {
-	glog.Infof("[LOCK] cm.mutex.TryRLock() @617 Start")
-	if !cm.mutex.TryRLock() {
-		glog.Warningf("ForceSync: Read lock not available, returning error")
-		return fmt.Errorf("read lock not available for force sync")
+	// Check rate limiting first
+	cm.forceSyncMutex.Lock()
+	now := time.Now()
+	if !cm.lastForceSync.IsZero() && now.Sub(cm.lastForceSync) < time.Minute {
+		cm.forceSyncMutex.Unlock()
+		glog.Warningf("ForceSync: Rate limited, last sync was %v ago", now.Sub(cm.lastForceSync))
+		return fmt.Errorf("force sync rate limited, please wait %v", time.Minute-now.Sub(cm.lastForceSync))
 	}
-	defer func() {
-		cm.mutex.RUnlock()
-		glog.Infof("[LOCK] cm.mutex.RUnlock() @617 End")
-	}()
+	cm.lastForceSync = now
+	cm.forceSyncMutex.Unlock()
 
 	glog.Infof("Force syncing all cache data to Redis")
 
-	// Add timeout context to prevent indefinite blocking
+	// 1. Quickly obtain a data snapshot to minimize lock holding time
+	var userDataSnapshot map[string]*UserData
+	func() {
+		glog.Infof("[LOCK] cm.mutex.TryRLock() @617 Start")
+		if !cm.mutex.TryRLock() {
+			glog.Warningf("ForceSync: Read lock not available, returning error")
+			return
+		}
+		defer func() {
+			cm.mutex.RUnlock()
+			glog.Infof("[LOCK] cm.mutex.RUnlock() @617 End")
+		}()
+
+		// Quickly copy data to minimize lock holding time
+		userDataSnapshot = make(map[string]*UserData)
+		for userID, userData := range cm.cache.Users {
+			userDataSnapshot[userID] = userData
+		}
+	}()
+
+	if userDataSnapshot == nil {
+		return fmt.Errorf("read lock not available for force sync")
+	}
+
+	// 2. Perform Redis operations outside the lock
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Use a channel to handle the sync operation with timeout
 	done := make(chan error, 1)
 	go func() {
 		var err error
-		for userID, userData := range cm.cache.Users {
+		for userID, userData := range userDataSnapshot {
 			if err = cm.redisClient.SaveUserDataToRedis(userID, userData); err != nil {
 				glog.Errorf("Failed to force sync user data: %v", err)
 				done <- err
@@ -1144,6 +1173,33 @@ func (cm *CacheManager) ForceSync() error {
 		glog.Errorf("Force sync timed out after 5 seconds")
 		return fmt.Errorf("force sync timed out: %v", ctx.Err())
 	}
+}
+
+// CanForceSync checks if ForceSync can be executed (not rate limited)
+func (cm *CacheManager) CanForceSync() bool {
+	cm.forceSyncMutex.Lock()
+	defer cm.forceSyncMutex.Unlock()
+
+	now := time.Now()
+	return cm.lastForceSync.IsZero() || now.Sub(cm.lastForceSync) >= time.Minute
+}
+
+// GetForceSyncCooldown returns the remaining cooldown time for ForceSync
+func (cm *CacheManager) GetForceSyncCooldown() time.Duration {
+	cm.forceSyncMutex.Lock()
+	defer cm.forceSyncMutex.Unlock()
+
+	now := time.Now()
+	if cm.lastForceSync.IsZero() {
+		return 0
+	}
+
+	elapsed := now.Sub(cm.lastForceSync)
+	if elapsed >= time.Minute {
+		return 0
+	}
+
+	return time.Minute - elapsed
 }
 
 // GetAllUsersData returns all users data from cache using single global lock
@@ -1934,7 +1990,7 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	cm.mutex.RUnlock()
 	log.Printf("INFO: [Cleanup] Released read lock after scan (held %v), targets=%d", time.Since(scanLockAcquiredAt), len(targets))
 
-	// 3) Processing phase: 使用批量处理避免锁竞争
+	// 3) Processing phase: Use batch processing to avoid lock contention
 	totalCleared := 0
 
 	if len(targets) == 0 {
@@ -1942,18 +1998,18 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 		return
 	}
 
-	// 使用单个写锁批量处理所有targets，避免锁竞争
+	// Use single write lock to batch process all targets to avoid lock contention
 	log.Printf("INFO: [Cleanup] Processing %d targets in batch mode", len(targets))
 
-	// 使用超短超时快速尝试获取写锁，避免写者等待导致读者饥饿
+	// Use short timeout to quickly acquire write lock to avoid writer starvation
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	// 使用channel实现非阻塞锁获取
+	// Use channel to implement non-blocking lock acquisition
 	lockAcquired := make(chan struct{}, 1)
 	lockFailed := make(chan struct{}, 1)
 
-	// 启动goroutine尝试获取锁（仅作极短时间尝试，抢不到立即放弃）
+	// Start goroutine to attempt lock acquisition (only for very short time, give up immediately if not acquired)
 	go func() {
 		done := make(chan struct{}, 1)
 		go func() {
@@ -1963,18 +2019,18 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 		}()
 		select {
 		case <-done:
-			// 成功获取锁
+			// Successfully acquired lock
 			lockAcquired <- struct{}{}
 		case <-ctx.Done():
-			// 未能在极短时间内获取写锁，直接放弃，避免阻塞读者
+			// Failed to acquire write lock quickly, give up immediately to avoid reader starvation
 			lockFailed <- struct{}{}
 		}
 	}()
 
-	// 等待锁获取结果
+	// Wait for lock acquisition result
 	select {
 	case <-lockAcquired:
-		// 成功获取锁，批量处理所有targets
+		// Successfully acquired lock, batch process all targets
 		defer cm.mutex.Unlock()
 
 		for _, t := range targets {
