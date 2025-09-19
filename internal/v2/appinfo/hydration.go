@@ -184,6 +184,7 @@ func (h *Hydrator) worker(ctx context.Context, workerID int) {
 			return
 		case task := <-h.taskQueue:
 			if task != nil {
+				log.Printf("DEBUG: Worker %d received task from queue: %s for app: %s (user: %s, source: %s)", workerID, task.ID, task.AppID, task.UserID, task.SourceID)
 				h.processTask(ctx, task, workerID)
 			}
 		}
