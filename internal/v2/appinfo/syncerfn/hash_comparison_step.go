@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
@@ -58,6 +59,10 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	// Build complete URL from market source base URL and endpoint path
 	hashURL := h.SettingsManager.BuildAPIURL(marketSource.BaseURL, h.HashEndpointPath)
 	log.Printf("Using hash URL: %s", hashURL)
+
+	if strings.HasPrefix(hashURL, "file://") {
+		return nil
+	}
 
 	// Fetch remote hash with version parameter
 	resp, err := data.Client.R().
