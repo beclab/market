@@ -561,35 +561,37 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 		appID, appName, pendingData.RawPackage, pendingData.RenderedPackage)
 
 	if pendingData.RawPackage == "" {
-		log.Printf("isAppHydrationComplete: RawPackage is empty for appID=%s, name=%s", appID, appName)
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - RawPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.RenderedPackage == "" {
-		log.Printf("isAppHydrationComplete: RenderedPackage is empty for appID=%s, name=%s", appID, appName)
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - RenderedPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.AppInfo == nil {
-		log.Printf("isAppHydrationComplete: AppInfo is nil for appID=%s, name=%s", appID, appName)
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - AppInfo is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	imageAnalysis := pendingData.AppInfo.ImageAnalysis
 	if imageAnalysis == nil {
-		log.Printf("isAppHydrationComplete: ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if imageAnalysis.TotalImages > 0 {
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages > 0 for appID=%s, name=%s, TotalImages: %d", appID, appName, imageAnalysis.TotalImages)
 		return true
 	}
 
 	if imageAnalysis.TotalImages == 0 && imageAnalysis.Images != nil {
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages=0 but Images not nil for appID=%s, name=%s, Images: %v", appID, appName, imageAnalysis.Images)
 		return true
 	}
 
-	log.Printf("isAppHydrationComplete: ImageAnalysis incomplete for appID=%s, name=%s, TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
+	log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis incomplete for appID=%s, name=%s, TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
 	return false
 }
 
