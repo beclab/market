@@ -163,10 +163,12 @@ func (h *Hydrator) EnqueueTask(task *hydrationfn.HydrationTask) error {
 	select {
 	case h.taskQueue <- task:
 		h.trackTask(task)
-		log.Printf("Enqueued hydration task: %s for app: %s (user: %s, source: %s)",
-			task.ID, task.AppID, task.UserID, task.SourceID)
+		log.Printf("Enqueued hydration task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
+			task.ID, task.AppID, task.UserID, task.SourceID, len(h.taskQueue))
 		return nil
 	default:
+		log.Printf("ERROR: Task queue is full! Cannot enqueue task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
+			task.ID, task.AppID, task.UserID, task.SourceID, len(h.taskQueue))
 		return fmt.Errorf("task queue is full")
 	}
 }

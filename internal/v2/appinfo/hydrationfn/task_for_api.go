@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"market/internal/v2/types"
 
@@ -70,13 +71,21 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		UserName:                 task.UserID,
 	}
 
-	// 4. Send POST request to chart repo
+	// 4. Send POST request to chart repo with 3 second timeout
 	url := "http://" + host + "/chart-repo/api/v2/dcr/sync-app"
+	log.Printf("DEBUG: TaskForApiStep - Sending request to %s for user=%s, source=%s, app=%s (timeout: 3s)", url, task.UserID, task.SourceID, task.AppID)
+	startTime := time.Now()
+
+	// Set timeout on the client
+	s.client.SetTimeout(3 * time.Second)
+
 	resp, err := s.client.R().
 		SetContext(ctx).
 		SetHeader("Content-Type", "application/json").
 		SetBody(request).
 		Post(url)
+	duration := time.Since(startTime)
+	log.Printf("DEBUG: TaskForApiStep - Request completed in %v for user=%s, source=%s, app=%s", duration, task.UserID, task.SourceID, task.AppID)
 	if err != nil {
 		return fmt.Errorf("failed to call chart repo sync-app: %w", err)
 	}
