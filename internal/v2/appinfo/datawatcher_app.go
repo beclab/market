@@ -3,6 +3,7 @@ package appinfo
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -133,19 +134,8 @@ func (dw *DataWatcher) processCompletedApps() {
 	// Get all users data from cache manager with timeout
 	var allUsersData map[string]*types.UserData
 
-	userDataChan := make(chan map[string]*types.UserData, 1)
-	go func() {
-		data := dw.cacheManager.GetAllUsersData()
-		userDataChan <- data
-	}()
-
-	select {
-	case allUsersData = <-userDataChan:
-		// Successfully got user data
-	case <-ctx.Done():
-		glog.Errorf("DataWatcher: Timeout getting all users data")
-		return
-	}
+	// Use fallback method with TryRLock to avoid blocking
+	allUsersData = dw.cacheManager.GetAllUsersDataWithFallback()
 
 	if len(allUsersData) == 0 {
 		glog.Infof("DataWatcher: No users data found, processing cycle completed")
@@ -412,8 +402,12 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		}()
 
 		glog.Infof("DataWatcher: Attempting to acquire write lock for user %s", userID)
-		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Start")
-		dw.cacheManager.mutex.Lock()
+		glog.Infof("[LOCK] dw.cacheManager.mutex.TryLock() @439 Start")
+		if !dw.cacheManager.mutex.TryLock() {
+			glog.Warningf("DataWatcher: Write lock not available for user %s, skipping hash update", userID)
+			writeLockError <- fmt.Errorf("write lock not available")
+			return
+		}
 		defer func() {
 			dw.cacheManager.mutex.Unlock()
 			glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @453 Start")
@@ -527,8 +521,11 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 
 	// Step 1: Quick check and data copy with minimal lock time
 	func() {
-		glog.Infof("[LOCK] dw.cacheManager.mutex.RLock() @660 Start")
-		dw.cacheManager.mutex.RLock()
+		glog.Infof("[LOCK] dw.cacheManager.mutex.TryRLock() @660 Start")
+		if !dw.cacheManager.mutex.TryRLock() {
+			glog.Warningf("processSourceData: Read lock not available for user %s, source %s, skipping", userID, sourceID)
+			return
+		}
 		defer func() {
 			dw.cacheManager.mutex.RUnlock()
 			glog.Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @660 End")
@@ -571,7 +568,6 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 
 		if dw.isAppHydrationCompletedWithTimeout(ctx, pendingApp) {
 			completedApps = append(completedApps, pendingApp)
-			glog.Infof("DataWatcher: App hydration completed: %s", dw.getAppID(pendingApp))
 		}
 	}
 
@@ -580,8 +576,12 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		return int64(len(pendingApps)), 0
 	}
 
-	glog.Infof("DataWatcher: Found %d completed apps out of %d pending for user=%s, source=%s",
-		len(completedApps), len(pendingApps), userID, sourceID)
+	// Build single-line summary with all completed app IDs
+	completedIDs := make([]string, 0, len(completedApps))
+	for _, ca := range completedApps {
+		completedIDs = append(completedIDs, dw.getAppID(ca))
+	}
+	glog.Infof("DataWatcher: user=%s source=%s completed=%d/%d apps=[%s]", userID, sourceID, len(completedApps), len(pendingApps), strings.Join(completedIDs, ","))
 
 	// Step 3: Try to acquire write lock non-blocking and move completed apps
 	lockStartTime := time.Now()
@@ -591,8 +591,11 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	lockCancel := make(chan bool, 1)
 
 	go func() {
-		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Start")
-		dw.cacheManager.mutex.Lock()
+		glog.Infof("[LOCK] dw.cacheManager.mutex.TryLock() @716 Start")
+		if !dw.cacheManager.mutex.TryLock() {
+			glog.Warningf("DataWatcher: Write lock not available for user %s, source %s, skipping app move", userID, sourceID)
+			return
+		}
 		defer func() {
 			dw.cacheManager.mutex.Unlock()
 			glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @725 Start")

@@ -740,6 +740,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 
 // NewAppInfoLatestData creates a new app info latest data structure
 func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
+	log.Printf("[DEBUG] NewAppInfoLatestData: Starting with %d fields", len(data))
 	if data == nil || len(data) == 0 {
 		log.Printf("DEBUG: NewAppInfoLatestData called with nil or empty data, returning nil")
 		return nil
@@ -940,6 +941,7 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 		ImageAnalysis: imageAnalysis, // Set ImageAnalysis if present
 	}
 
+	log.Printf("[DEBUG] NewAppInfoLatestData: Completed successfully")
 	return appInfoLatest
 }
 
@@ -1027,7 +1029,7 @@ func getCurrentTimestamp() int64 {
 // NewAppInfoLatestPendingDataFromLegacyData creates AppInfoLatestPendingData from a single app data
 func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *AppInfoLatestPendingData {
 	// Add debug logging to inspect input data
-	log.Printf("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
+	// log.Printf("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
 	// if appData != nil {
 	// 	log.Printf("DEBUG: appData length: %d", len(appData))
 	// 	for key, value := range appData {
@@ -1164,7 +1166,9 @@ func NewAppInfoLatestPendingDataFromLegacyCompleteData(appData map[string]interf
 // mapAllApplicationInfoEntryFields maps all fields from source data to ApplicationInfoEntry
 // This function ensures no data is lost during conversion
 func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *ApplicationInfoEntry) {
+	log.Printf("[DEBUG] mapAllApplicationInfoEntryFields: Starting with %d fields", len(sourceData))
 	if sourceData == nil || entry == nil {
+		log.Printf("[DEBUG] mapAllApplicationInfoEntryFields: sourceData or entry is nil")
 		return
 	}
 
@@ -1530,6 +1534,7 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 
 	// Validate and fix SupportClient data after mapping
 	ValidateAndFixSupportClient(sourceData, entry)
+	log.Printf("[DEBUG] mapAllApplicationInfoEntryFields: Completed successfully")
 }
 
 // NewApplicationInfoEntry creates a complete ApplicationInfoEntry from source data

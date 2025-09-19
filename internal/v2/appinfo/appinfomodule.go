@@ -379,7 +379,10 @@ func (m *AppInfoModule) GetRedisConfig() *RedisConfig {
 // IsStarted returns whether the module is currently running
 func (m *AppInfoModule) IsStarted() bool {
 	// Boolean read is atomic, but we need to ensure consistency with Start/Stop operations
-	m.mutex.RLock()
+	if !m.mutex.TryRLock() {
+		glog.Warningf("AppInfoModule.IsStarted: Read lock not available, returning false")
+		return false
+	}
 	defer m.mutex.RUnlock()
 	return m.isStarted
 }
@@ -387,7 +390,13 @@ func (m *AppInfoModule) IsStarted() bool {
 // GetModuleStatus returns the current status of the module and all components
 func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	// Need read lock to ensure consistent snapshot of all component states
-	m.mutex.RLock()
+	if !m.mutex.TryRLock() {
+		glog.Warningf("AppInfoModule.GetModuleStatus: Read lock not available, returning error status")
+		return map[string]interface{}{
+			"error":  "lock not available",
+			"status": "unknown",
+		}
+	}
 	defer m.mutex.RUnlock()
 
 	status := map[string]interface{}{
@@ -739,7 +748,12 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 		return fmt.Errorf("cache manager not available")
 	}
 
-	m.cacheManager.mutex.Lock()
+	// Add detailed lock logs for diagnosis
+	glog.Infof("[LOCK] m.cacheManager.mutex.TryLock() @appinfomodule:cleanup Start")
+	if !m.cacheManager.mutex.TryLock() {
+		glog.Warningf("AppInfoModule cleanup: CacheManager write lock not available, skipping cleanup")
+		return nil
+	}
 	defer m.cacheManager.mutex.Unlock()
 	removedCount := 0
 	for userID, userData := range m.cacheManager.cache.Users {
@@ -1339,7 +1353,13 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 		},
 	}
 
-	m.cacheManager.mutex.RLock()
+	if !m.cacheManager.mutex.TryRLock() {
+		glog.Warningf("AppInfoModule: CacheManager read lock not available, skipping operation")
+		return map[string]interface{}{
+			"error":  "lock not available",
+			"status": "unknown",
+		}
+	}
 	defer m.cacheManager.mutex.RUnlock()
 
 	totalUsers := 0

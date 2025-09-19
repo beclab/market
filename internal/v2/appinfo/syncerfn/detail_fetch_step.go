@@ -473,48 +473,93 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 	sourceID := data.GetMarketSource().Name
 	log.Printf("Removing app %s (name: %s) from cache for source: %s", appID, appName, sourceID)
 
-	// Use CacheManager's lock for unified lock strategy
-	if data.CacheManager != nil {
-		data.CacheManager.Lock()
-		defer data.CacheManager.Unlock()
+	if data.CacheManager == nil {
+		log.Printf("Warning: CacheManager is nil, cannot remove app from cache")
+		return
 	}
 
-	log.Printf("Processing %d users for app removal", len(data.Cache.Users))
+	// Step 1: Use read lock to find all data that needs to be removed
+	log.Printf("Step 1: Acquiring read lock to find data for removal")
+	data.CacheManager.RLock()
+
+	// Collect all data that needs to be removed
+	type RemovalData struct {
+		userID               string
+		sourceID             string
+		newLatestList        []*types.AppInfoLatestData
+		newPendingList       []*types.AppInfoLatestPendingData
+		originalLatestCount  int
+		originalPendingCount int
+	}
+
+	var removals []RemovalData
+
+	log.Printf("Processing %d users for app removal (read phase)", len(data.Cache.Users))
 
 	for userID, userData := range data.Cache.Users {
-		log.Printf("Processing user %s for app removal", userID)
 		sourceData, sourceExists := userData.Sources[sourceID]
 		if !sourceExists {
-			log.Printf("Source %s not found for user %s, skipping", sourceID, userID)
 			continue
 		}
 
-		// Remove from latest list
-		originalLatestCount := len(sourceData.AppInfoLatest)
-		log.Printf("User %s, source %s: checking %d apps in latest list", userID, sourceID, originalLatestCount)
-		for i := len(sourceData.AppInfoLatest) - 1; i >= 0; i-- {
-			latestApp := sourceData.AppInfoLatest[i]
-			if latestApp.RawData != nil && latestApp.RawData.Name == appName {
-				sourceData.AppInfoLatest = append(sourceData.AppInfoLatest[:i], sourceData.AppInfoLatest[i+1:]...)
-				log.Printf("Removed app %s from latest list for user: %s, source: %s", appName, userID, sourceID)
+		// Create new lists without the target app
+		var newLatestList []*types.AppInfoLatestData
+		var newPendingList []*types.AppInfoLatestPendingData
+
+		// Filter latest list
+		for _, latestApp := range sourceData.AppInfoLatest {
+			if latestApp.RawData == nil || latestApp.RawData.Name != appName {
+				newLatestList = append(newLatestList, latestApp)
 			}
 		}
 
-		// Remove from pending list
-		originalPendingCount := len(sourceData.AppInfoLatestPending)
-		log.Printf("User %s, source %s: checking %d apps in pending list", userID, sourceID, originalPendingCount)
-		for i := len(sourceData.AppInfoLatestPending) - 1; i >= 0; i-- {
-			pendingApp := sourceData.AppInfoLatestPending[i]
-			if pendingApp.RawData != nil && pendingApp.RawData.Name == appName {
-				sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending[:i], sourceData.AppInfoLatestPending[i+1:]...)
-				log.Printf("Removed app %s from pending list for user: %s, source: %s", appName, userID, sourceID)
+		// Filter pending list
+		for _, pendingApp := range sourceData.AppInfoLatestPending {
+			if pendingApp.RawData == nil || pendingApp.RawData.Name != appName {
+				newPendingList = append(newPendingList, pendingApp)
 			}
 		}
 
-		log.Printf("Cache cleanup completed for user: %s, source: %s, app: %s (latest: %d->%d, pending: %d->%d)",
-			userID, sourceID, appName,
-			originalLatestCount, len(sourceData.AppInfoLatest),
-			originalPendingCount, len(sourceData.AppInfoLatestPending))
+		// Only add to removals if there were actually items to remove
+		if len(newLatestList) != len(sourceData.AppInfoLatest) || len(newPendingList) != len(sourceData.AppInfoLatestPending) {
+			removals = append(removals, RemovalData{
+				userID:               userID,
+				sourceID:             sourceID,
+				newLatestList:        newLatestList,
+				newPendingList:       newPendingList,
+				originalLatestCount:  len(sourceData.AppInfoLatest),
+				originalPendingCount: len(sourceData.AppInfoLatestPending),
+			})
+		}
+	}
+
+	// Release read lock
+	data.CacheManager.RUnlock()
+	log.Printf("Step 1 completed: Found %d users with data to remove", len(removals))
+
+	// Step 2: Use write lock to quickly update the data
+	if len(removals) == 0 {
+		log.Printf("No data found to remove for app: %s", appID)
+		return
+	}
+
+	log.Printf("Step 2: Acquiring write lock to update data")
+	data.CacheManager.Lock()
+	defer data.CacheManager.Unlock()
+
+	// Quickly update all the data by replacing array pointers
+	for _, removal := range removals {
+		userData := data.Cache.Users[removal.userID]
+		sourceData := userData.Sources[removal.sourceID]
+
+		// Replace array pointers (atomic operation)
+		sourceData.AppInfoLatest = removal.newLatestList
+		sourceData.AppInfoLatestPending = removal.newPendingList
+
+		log.Printf("Updated user: %s, source: %s, app: %s (latest: %d->%d, pending: %d->%d)",
+			removal.userID, removal.sourceID, appName,
+			removal.originalLatestCount, len(removal.newLatestList),
+			removal.originalPendingCount, len(removal.newPendingList))
 	}
 
 	log.Printf("App removal from cache completed for app: %s", appID)

@@ -12,6 +12,8 @@ import (
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
+
+	"github.com/golang/glog"
 )
 
 // Syncer manages the synchronization process with multiple steps
@@ -302,7 +304,10 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		// Use CacheManager if available, otherwise use direct cache access
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			// Use CacheManager's lock
-			cacheManager.mutex.RLock()
+			if !cacheManager.mutex.TryRLock() {
+				glog.Warningf("Syncer: CacheManager read lock not available, skipping user ID collection")
+				return fmt.Errorf("read lock not available")
+			}
 			for userID := range s.cache.Users {
 				userIDs = append(userIDs, userID)
 			}
@@ -310,7 +315,11 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 			// If no users exist, create a system user as fallback
 			if len(userIDs) == 0 {
-				cacheManager.mutex.Lock()
+				log.Printf("[LOCK] cacheManager.mutex.TryLock() @syncer:createSystemUser Start")
+				if !cacheManager.mutex.TryLock() {
+					glog.Warningf("Syncer: CacheManager write lock not available for system user creation, skipping")
+					return fmt.Errorf("write lock not available")
+				}
 				// Double-check after acquiring write lock
 				if len(s.cache.Users) == 0 {
 					systemUserID := "system"
@@ -357,7 +366,11 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
 	// Use CacheManager's lock if available
 	if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-		cacheManager.mutex.Lock()
+		log.Printf("[LOCK] cacheManager.mutex.TryLock() @syncer:storeDataDirectly Start")
+		if !cacheManager.mutex.TryLock() {
+			glog.Warningf("Syncer: CacheManager write lock not available for data storage, skipping")
+			return
+		}
 		defer cacheManager.mutex.Unlock()
 	} else {
 		// Fallback: no lock protection (not recommended)
@@ -621,7 +634,10 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 	for _, userID := range userIDs {
 		// Check if the source is local type - skip syncer operations for local sources
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-			cacheManager.mutex.RLock()
+			if !cacheManager.mutex.TryRLock() {
+				glog.Warningf("Syncer.storeDataViaCacheManager: CacheManager read lock not available for user %s, source %s, skipping", userID, sourceID)
+				continue
+			}
 			userData, userExists := s.cache.Users[userID]
 			if userExists {
 				sourceData, sourceExists := userData.Sources[sourceID]

@@ -338,12 +338,12 @@ func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string)
 
 	// Check if the app is currently being installed
 	if lr.taskModule != nil {
-		taskType, source, found := lr.taskModule.GetLatestTaskByAppNameAndUser(appName, userID)
-		if found && taskType == "install" && source == "upload" {
+		taskType, source, found, completed := lr.taskModule.GetLatestTaskByAppNameAndUser(appName, userID)
+		if found && !completed && taskType == "install" && source == "upload" {
 			log.Printf("Cannot delete app %s: app is currently being installed (task type: %s, source: %s)", appName, taskType, source)
 			return fmt.Errorf("cannot delete app %s: app is currently being installed", appName)
 		}
-		log.Printf("App %s installation check passed: found=%v, taskType=%s, source=%s", appName, found, taskType, source)
+		log.Printf("App %s installation check passed: found=%v, completed=%v, taskType=%s, source=%s", appName, found, completed, taskType, source)
 	} else {
 		log.Printf("Task module not available, skipping installation status check for app: %s", appName)
 	}

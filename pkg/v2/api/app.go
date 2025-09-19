@@ -247,7 +247,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		// Get user data from cache
-		userData := s.cacheManager.GetUserData(userID)
+		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
 			log.Printf("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}
@@ -601,8 +601,8 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 
-		// Get user data from cache
-		userData := s.cacheManager.GetUserData(userID)
+		// Get user data from cache with fallback (non-blocking)
+		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
 			log.Printf("User data not found for user: %s, attempting to resync user data", userID)
 
@@ -614,7 +614,7 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Try to get user data again after resync
-			userData = s.cacheManager.GetUserData(userID)
+			userData = s.cacheManager.GetUserDataNoLock(userID)
 			if userData == nil {
 				log.Printf("User data still not found for user: %s after resync", userID)
 				resultChan <- result{err: fmt.Errorf("user data not found even after resync")}
@@ -635,6 +635,10 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	select {
 	case <-ctx.Done():
 		log.Printf("Request timeout or cancelled for /api/v2/market/hash")
+		// On timeout, dump lock info to find who holds the lock
+		if s.cacheManager != nil {
+			s.cacheManager.DumpLockInfo("getMarketHash timeout")
+		}
 		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - hash retrieval took too long", nil)
 		return
 	case res := <-resultChan:
@@ -815,7 +819,7 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 
 		// Get user data from cache with timeout check
 		start := time.Now()
-		userData := s.cacheManager.GetUserData(userID)
+		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
 			log.Printf("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}
@@ -971,8 +975,8 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 				var safeAppSimpleInfo map[string]interface{}
 				if appInfoData.AppSimpleInfo != nil {
 					// Debug: Log the original AppSimpleInfo data
-					log.Printf("DEBUG: Original AppSimpleInfo - SupportArch: %+v (length: %d)",
-						appInfoData.AppSimpleInfo.SupportArch, len(appInfoData.AppSimpleInfo.SupportArch))
+					// log.Printf("DEBUG: Original AppSimpleInfo - SupportArch: %+v (length: %d)",
+					// 	appInfoData.AppSimpleInfo.SupportArch, len(appInfoData.AppSimpleInfo.SupportArch))
 
 					// Check if SupportArch is empty, try to get it from RawData or AppInfo
 					if len(appInfoData.AppSimpleInfo.SupportArch) == 0 {
@@ -986,7 +990,7 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 					}
 
 					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo)
-					log.Printf("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
+					// log.Printf("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
 				}
 
 				filteredAppInfo := &FilteredAppInfoLatestData{

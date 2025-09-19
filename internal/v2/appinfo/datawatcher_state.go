@@ -345,6 +345,14 @@ func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage s
 		return
 	}
 
+	// Special handling for downloading state - check progress difference
+	if msg.State == "downloading" {
+		if dw.shouldSkipDownloadingMessage(msg) {
+			log.Printf("Skipping downloading message for app %s, user %s - progress difference is within 10", msg.Name, msg.User)
+			return
+		}
+	}
+
 	record := &history.HistoryRecord{
 		Type:     history.TypeSystem, // Use system type
 		Message:  "",                 // Leave message empty as requested
@@ -372,14 +380,6 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	if userID == "" {
 		log.Printf("User ID is empty, skipping cache storage for app %s", msg.Name)
 		return
-	}
-
-	// Special handling for downloading state - check progress difference
-	if msg.State == "downloading" {
-		if dw.shouldSkipDownloadingMessage(msg) {
-			log.Printf("Skipping downloading message for app %s, user %s - progress difference is within 10", msg.Name, msg.User)
-			return
-		}
 	}
 
 	// Add debug logging for entranceStatuses
@@ -439,7 +439,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	}
 
 	if sourceID == "" && dw.taskModule != nil {
-		_, src, found := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
+		_, src, found, _ := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
 		if found && src != "" {
 			sourceID = src
 			log.Printf("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
@@ -518,55 +518,69 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 	userID := msg.User
 	appName := msg.Name
 
-	// Get user data from cache
-	userData := dw.cacheManager.GetUserData(userID)
-	if userData == nil {
-		log.Printf("User data not found for user %s, proceeding with message storage", userID)
+	if dw.historyModule == nil {
+		log.Printf("History module not available, cannot compare with DB, proceeding with message storage")
 		return false
 	}
 
-	// Find the app in cache across all sources
-	for _, sourceData := range userData.Sources {
-		if sourceData == nil || sourceData.AppStateLatest == nil {
+	// Query recent records for this app/account from DB (type=system)
+	cond := &history.QueryCondition{
+		Type:    history.TypeSystem,
+		App:     appName,
+		Account: userID,
+		Limit:   50,
+		Offset:  0,
+	}
+
+	records, err := dw.historyModule.QueryRecords(cond)
+	if err != nil {
+		log.Printf("Failed to query history records for app %s, user %s: %v", appName, userID, err)
+		return false
+	}
+
+	// Find the most recent downloading record and compare progress
+	for _, rec := range records {
+		if rec == nil || rec.Extended == "" {
+			continue
+		}
+		var lastMsg AppStateMessage
+		if err := json.Unmarshal([]byte(rec.Extended), &lastMsg); err != nil {
+			log.Printf("Failed to unmarshal extended history for record %d: %v", rec.ID, err)
+			continue
+		}
+		if lastMsg.Name != appName || lastMsg.User != userID {
+			continue
+		}
+		if lastMsg.State != "downloading" {
+			// keep searching older records until we find a downloading one
 			continue
 		}
 
-		for _, appState := range sourceData.AppStateLatest {
-			if appState != nil && appState.Status.Name == appName && appState.Status.State == "downloading" {
-				// Found matching app in downloading state, compare progress
-				cachedProgress := appState.Status.Progress
-				newProgress := msg.Progress
+		cachedProgress := lastMsg.Progress
+		newProgress := msg.Progress
 
-				// Convert progress strings to integers for comparison
-				cachedProgressInt, err1 := strconv.Atoi(cachedProgress)
-				newProgressInt, err2 := strconv.Atoi(newProgress)
-
-				if err1 != nil || err2 != nil {
-					log.Printf("Failed to parse progress values: cached=%s, new=%s, err1=%v, err2=%v",
-						cachedProgress, newProgress, err1, err2)
-					return false
-				}
-
-				// Check if progress difference is within 10
-				progressDiff := newProgressInt - cachedProgressInt
-				if progressDiff < 0 {
-					progressDiff = -progressDiff // Make it absolute
-				}
-
-				if progressDiff <= 10 {
-					log.Printf("Progress difference is %d (within 10), skipping message for app %s",
-						progressDiff, appName)
-					return true
-				}
-
-				log.Printf("Progress difference is %d (greater than 10), proceeding with message storage for app %s",
-					progressDiff, appName)
-				return false
-			}
+		cachedProgressFloat, err1 := strconv.ParseFloat(cachedProgress, 64)
+		newProgressFloat, err2 := strconv.ParseFloat(newProgress, 64)
+		if err1 != nil || err2 != nil {
+			log.Printf("Failed to parse progress values: cached=%s, new=%s, err1=%v, err2=%v", cachedProgress, newProgress, err1, err2)
+			return false
 		}
+
+		progressDiff := newProgressFloat - cachedProgressFloat
+		if progressDiff < 0 {
+			progressDiff = -progressDiff
+		}
+
+		if progressDiff <= 10.0 {
+			log.Printf("Progress difference is %.2f (within 10.0), skipping message for app %s", progressDiff, appName)
+			return true
+		}
+
+		log.Printf("Progress difference is %.2f (greater than 10.0), proceeding with message storage for app %s", progressDiff, appName)
+		return false
 	}
 
-	// No matching app found in downloading state, proceed with storage
-	log.Printf("No matching downloading app found in cache for app %s, proceeding with message storage", appName)
+	// No previous downloading record found in DB
+	log.Printf("No previous downloading record found in DB for app %s, user %s, proceeding with message storage", appName, userID)
 	return false
 }

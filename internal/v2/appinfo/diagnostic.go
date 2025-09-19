@@ -45,7 +45,10 @@ func (cm *CacheManager) DiagnoseCacheAndRedis() error {
 	glog.Infof("Redis Keys Found: %d", len(redisKeys))
 
 	// Analyze cache state
-	cm.mutex.RLock()
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("Diagnostic: CacheManager read lock not available, skipping cache analysis")
+		return fmt.Errorf("read lock not available")
+	}
 	userCount := len(cm.cache.Users)
 	totalSources := 0
 	issues := 0
@@ -140,7 +143,10 @@ func (cm *CacheManager) ForceReloadFromRedis() error {
 		return err
 	}
 
-	cm.mutex.Lock()
+	if !cm.mutex.TryLock() {
+		glog.Warningf("Diagnostic: Write lock not available for cache reload, skipping")
+		return fmt.Errorf("write lock not available")
+	}
 	cm.cache = cache
 	cm.mutex.Unlock()
 
@@ -150,7 +156,10 @@ func (cm *CacheManager) ForceReloadFromRedis() error {
 
 // ValidateSourceData validates source data integrity
 func (cm *CacheManager) ValidateSourceData(userID, sourceID string) (*SourceAnalysis, error) {
-	cm.mutex.RLock()
+	if !cm.mutex.TryRLock() {
+		glog.Warningf("Diagnostic.ValidateSourceData: CacheManager read lock not available for user %s, source %s", userID, sourceID)
+		return nil, fmt.Errorf("read lock not available")
+	}
 	defer cm.mutex.RUnlock()
 
 	userData, exists := cm.cache.Users[userID]
