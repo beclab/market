@@ -860,11 +860,11 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 
-	go func() {
-		if err := cm.setAppDataInternal(userID, sourceID, dataType, data); err != nil {
-			glog.Errorf("Failed to set app data in goroutine: %v", err)
-		}
-	}()
+	// go func() {
+	if err := cm.setAppDataInternal(userID, sourceID, dataType, data); err != nil {
+		glog.Errorf("Failed to set app data in goroutine: %v", err)
+	}
+	// }()
 
 	return nil
 }
