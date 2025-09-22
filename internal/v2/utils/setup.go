@@ -661,7 +661,7 @@ func checkDependencyService() error {
 	}
 
 	// Build the API endpoint URL
-	apiURL := chartRepoHost + "/chart-repo/api/v2/version"
+	apiURL := "http://" + chartRepoHost + "/chart-repo/api/v2/version"
 	log.Printf("Checking dependency service at: %s", apiURL)
 
 	// Create HTTP client with timeout
