@@ -313,6 +313,13 @@ type AppInfo struct {
 	AppEntry      *ApplicationInfoEntry `json:"app_entry"`
 	ImageAnalysis *ImageAnalysisResult  `json:"image_analysis"`
 	Price         *PriceConfig          `json:"price,omitempty"`
+	PurchaseInfo  *PurchaseInfo         `json:"purchase_info,omitempty"`
+}
+
+// PurchaseInfo represents VC and purchase state stored in Redis
+type PurchaseInfo struct {
+	VC     string `json:"vc"`
+	Status string `json:"status"` // e.g., "purchased" | "pending" | "unknown"
 }
 
 // AppsInfoRequest represents the request body for applications/info API
