@@ -645,10 +645,14 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 
 // DependencyServiceResponse represents the response structure from dependency service
 type DependencyServiceResponse struct {
-	Version   string `json:"version"`
-	BuildTime string `json:"build_time"`
-	GitCommit string `json:"git_commit"`
-	Timestamp int64  `json:"timestamp"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Version   string `json:"version"`
+		BuildTime string `json:"build_time"`
+		GitCommit string `json:"git_commit"`
+		Timestamp int64  `json:"timestamp"`
+	} `json:"data"`
 }
 
 // checkDependencyService checks if the dependency service is available and has correct version
@@ -709,16 +713,22 @@ func checkDependencyService() error {
 	}
 
 	log.Printf("Parsed response data: %+v", responseData)
-	log.Printf("Dependency service response: version=%s, build_time=%s, git_commit=%s",
-		responseData.Version, responseData.BuildTime, responseData.GitCommit)
+	log.Printf("Dependency service response: success=%t, message=%s", responseData.Success, responseData.Message)
+	log.Printf("Version data: version=%s, build_time=%s, git_commit=%s, timestamp=%d",
+		responseData.Data.Version, responseData.Data.BuildTime, responseData.Data.GitCommit, responseData.Data.Timestamp)
+
+	// Check if the response indicates success
+	if !responseData.Success {
+		return fmt.Errorf("dependency service returned success=false, message: %s", responseData.Message)
+	}
 
 	// Check version constraints: >= 0.2.0 and < 0.3.0
-	if err := validateDependencyVersion(responseData.Version); err != nil {
+	if err := validateDependencyVersion(responseData.Data.Version); err != nil {
 		log.Printf("Version validation failed: %v", err)
 		return fmt.Errorf("version validation failed: %w", err)
 	}
 
-	log.Printf("Dependency service check passed: version %s is valid", responseData.Version)
+	log.Printf("Dependency service check passed: version %s is valid", responseData.Data.Version)
 	return nil
 }
 
