@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"market/internal/v2/types"
+
+	"github.com/Masterminds/semver/v3"
 )
 
 // AppServiceResponse represents the response structure from app-service
@@ -639,4 +641,152 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	data["entranceStatuses"] = entrances
 
 	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppInfoFromDownloadRecord)
+}
+
+// DependencyServiceResponse represents the response structure from dependency service
+type DependencyServiceResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Version   string `json:"version"`
+		BuildTime string `json:"build_time"`
+		GitCommit string `json:"git_commit"`
+		Timestamp int64  `json:"timestamp"`
+	} `json:"data"`
+}
+
+// checkDependencyService checks if the dependency service is available and has correct version
+func checkDependencyService() error {
+	// Get chart repo service host from environment
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		chartRepoHost = "http://localhost:8080" // Default fallback
+		log.Printf("CHART_REPO_SERVICE_HOST not set, using default: %s", chartRepoHost)
+	}
+
+	// Build the API endpoint URL
+	apiURL := "http://" + chartRepoHost + "/chart-repo/api/v2/version"
+	log.Printf("Checking dependency service at: %s", apiURL)
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	// Print request details
+	log.Printf("Making GET request to: %s", apiURL)
+	log.Printf("Request timeout: 10 seconds")
+
+	// Make GET request to the dependency service
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		log.Printf("Request failed with error: %v", err)
+		return fmt.Errorf("failed to connect to dependency service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Print response details
+	log.Printf("Response status code: %d", resp.StatusCode)
+	log.Printf("Response headers: %v", resp.Header)
+
+	// Check if response is successful
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Non-OK status code received: %d", resp.StatusCode)
+		return fmt.Errorf("dependency service returned status %d", resp.StatusCode)
+	}
+
+	// Read response body for debugging
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Failed to read response body: %v", err)
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	log.Printf("Raw response body: %s", string(bodyBytes))
+
+	// Parse response body
+	var responseData DependencyServiceResponse
+	if err := json.Unmarshal(bodyBytes, &responseData); err != nil {
+		log.Printf("Failed to parse JSON response: %v", err)
+		log.Printf("Response was: %s", string(bodyBytes))
+		return fmt.Errorf("failed to parse dependency service response: %w", err)
+	}
+
+	log.Printf("Parsed response data: %+v", responseData)
+	log.Printf("Dependency service response: success=%t, message=%s", responseData.Success, responseData.Message)
+	log.Printf("Version data: version=%s, build_time=%s, git_commit=%s, timestamp=%d",
+		responseData.Data.Version, responseData.Data.BuildTime, responseData.Data.GitCommit, responseData.Data.Timestamp)
+
+	// Check if the response indicates success
+	if !responseData.Success {
+		return fmt.Errorf("dependency service returned success=false, message: %s", responseData.Message)
+	}
+
+	// Check version constraints: >= 0.2.0 and < 0.3.0
+	if err := validateDependencyVersion(responseData.Data.Version); err != nil {
+		log.Printf("Version validation failed: %v", err)
+		return fmt.Errorf("version validation failed: %w", err)
+	}
+
+	log.Printf("Dependency service check passed: version %s is valid", responseData.Data.Version)
+	return nil
+}
+
+// validateDependencyVersion validates that the version is >= 0.2.0 and < 0.3.0
+func validateDependencyVersion(version string) error {
+	if version == "" {
+		return fmt.Errorf("version is empty")
+	}
+
+	// Parse the version using semver
+	v, err := semver.NewVersion(version)
+	if err != nil {
+		return fmt.Errorf("invalid version format '%s': %w", version, err)
+	}
+
+	// Define version constraints
+	minVersion, err := semver.NewVersion("0.2.0")
+	if err != nil {
+		return fmt.Errorf("failed to parse min version: %w", err)
+	}
+
+	maxVersion, err := semver.NewVersion("0.3.0")
+	if err != nil {
+		return fmt.Errorf("failed to parse max version: %w", err)
+	}
+
+	// Check if version is >= 0.2.0
+	if v.LessThan(minVersion) {
+		return fmt.Errorf("version %s is less than required minimum 0.2.0", version)
+	}
+
+	// Check if version is < 0.3.0
+	if !v.LessThan(maxVersion) {
+		return fmt.Errorf("version %s is not less than 0.3.0", version)
+	}
+
+	return nil
+}
+
+// WaitForDependencyService waits for dependency service to be available with retry logic
+func WaitForDependencyService() {
+	log.Println("=== Checking dependency service availability ===")
+	log.Println("WaitForDependencyService function called successfully")
+
+	retryCount := 0
+	for {
+		retryCount++
+		log.Printf("Starting dependency service check iteration #%d...", retryCount)
+
+		if err := checkDependencyService(); err != nil {
+			log.Printf("Dependency service check failed (attempt #%d): %v", retryCount, err)
+			log.Println("Retrying in 5 seconds...")
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		log.Printf("Dependency service is available and version is valid (succeeded on attempt #%d)", retryCount)
+		break
+	}
+	log.Println("=== End dependency service check ===")
 }

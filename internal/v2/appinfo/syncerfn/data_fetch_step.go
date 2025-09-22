@@ -52,6 +52,10 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 	dataURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DataEndpointPath)
 	log.Printf("Using data URL: %s", dataURL)
 
+	if strings.HasPrefix(dataURL, "file://") {
+		return nil
+	}
+
 	// Initialize response struct
 	response := &AppStoreInfoResponse{}
 

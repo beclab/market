@@ -163,10 +163,12 @@ func (h *Hydrator) EnqueueTask(task *hydrationfn.HydrationTask) error {
 	select {
 	case h.taskQueue <- task:
 		h.trackTask(task)
-		log.Printf("Enqueued hydration task: %s for app: %s (user: %s, source: %s)",
-			task.ID, task.AppID, task.UserID, task.SourceID)
+		log.Printf("Enqueued hydration task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
+			task.ID, task.AppID, task.UserID, task.SourceID, len(h.taskQueue))
 		return nil
 	default:
+		log.Printf("ERROR: Task queue is full! Cannot enqueue task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
+			task.ID, task.AppID, task.UserID, task.SourceID, len(h.taskQueue))
 		return fmt.Errorf("task queue is full")
 	}
 }
@@ -184,6 +186,7 @@ func (h *Hydrator) worker(ctx context.Context, workerID int) {
 			return
 		case task := <-h.taskQueue:
 			if task != nil {
+				log.Printf("DEBUG: Worker %d received task from queue: %s for app: %s (user: %s, source: %s)", workerID, task.ID, task.AppID, task.UserID, task.SourceID)
 				h.processTask(ctx, task, workerID)
 			}
 		}
@@ -436,13 +439,15 @@ func (h *Hydrator) checkForPendingData() {
 				// No nested locks needed since we already hold the global lock
 
 				// Log source type for debugging - both local and remote should be processed
-				log.Printf("Checking pending data for user: %s, source: %s, type: %s", userID, sourceID, sourceData.Type)
+				log.Printf("Checking pending data for user: %s, source: %s, type: %s, pending: %d", userID, sourceID, sourceData.Type, len(sourceData.AppInfoLatestPending))
 
 				// Check if there's pending data - process both local and remote sources
 				if len(sourceData.AppInfoLatestPending) > 0 {
 					log.Printf("Found %d pending apps for user: %s, source: %s, type: %s",
 						len(sourceData.AppInfoLatestPending), userID, sourceID, sourceData.Type)
-					for _, pendingData := range sourceData.AppInfoLatestPending {
+					log.Printf("DEBUG: About to process %d pending apps for user: %s, source: %s", len(sourceData.AppInfoLatestPending), userID, sourceID)
+					for i, pendingData := range sourceData.AppInfoLatestPending {
+						log.Printf("DEBUG: Processing pending data %d/%d for user: %s, source: %s, pendingData: %v", i+1, len(sourceData.AppInfoLatestPending), userID, sourceID, pendingData != nil)
 						h.createTasksFromPendingData(userID, sourceID, pendingData)
 					}
 				}
@@ -456,8 +461,11 @@ func (h *Hydrator) checkForPendingData() {
 // createTasksFromPendingData creates hydration tasks from pending app data
 func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingData *types.AppInfoLatestPendingData) {
 	if pendingData == nil {
+		log.Printf("DEBUG: createTasksFromPendingData called with nil pendingData for user: %s, source: %s", userID, sourceID)
 		return
 	}
+
+	log.Printf("DEBUG: createTasksFromPendingData called for user: %s, source: %s, pendingData.RawData: %v", userID, sourceID, pendingData.RawData != nil)
 
 	// For the new structure, we can work with RawData if it exists
 	if pendingData.RawData != nil {
@@ -466,6 +474,8 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 		if appID == "" {
 			appID = pendingData.RawData.ID
 		}
+
+		log.Printf("DEBUG: Processing appID: %s for user: %s, source: %s", appID, userID, sourceID)
 
 		if appID != "" {
 			// Check if app is already in render failed list
@@ -477,8 +487,8 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 
 			// Check if app hydration is already complete before creating new task
 			if h.isAppHydrationComplete(pendingData) {
-				// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
-				// 	appID, userID, sourceID)
+				log.Printf("DEBUG: App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+					appID, userID, sourceID)
 				return
 			}
 
@@ -489,12 +499,13 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 				version = pendingData.RawData.Version
 			}
 			if h.isAppInLatestQueue(userID, sourceID, appID, version) {
-				// log.Printf("App already exists in latest queue for app: %s (user: %s, source: %s), skipping task creation",
-				// 	appID, userID, sourceID)
+				log.Printf("DEBUG: App already exists in latest queue for app: %s (user: %s, source: %s), skipping task creation",
+					appID, userID, sourceID)
 				return
 			}
 
 			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+				log.Printf("DEBUG: No active task found for app: %s (user: %s, source: %s), proceeding with task creation", appID, userID, sourceID)
 				// Convert ApplicationInfoEntry to map for task creation
 				appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
 
@@ -549,36 +560,41 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 		appName = pendingData.RawData.Name
 	}
 
+	log.Printf("DEBUG: isAppHydrationComplete checking appID=%s, name=%s, RawPackage=%s, RenderedPackage=%s",
+		appID, appName, pendingData.RawPackage, pendingData.RenderedPackage)
+
 	if pendingData.RawPackage == "" {
-		log.Printf("isAppHydrationComplete: RawPackage is empty for appID=%s, name=%s", appID, appName)
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - RawPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.RenderedPackage == "" {
-		log.Printf("isAppHydrationComplete: RenderedPackage is empty for appID=%s, name=%s", appID, appName)
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - RenderedPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.AppInfo == nil {
-		log.Printf("isAppHydrationComplete: AppInfo is nil for appID=%s, name=%s", appID, appName)
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - AppInfo is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	imageAnalysis := pendingData.AppInfo.ImageAnalysis
 	if imageAnalysis == nil {
-		log.Printf("isAppHydrationComplete: ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if imageAnalysis.TotalImages > 0 {
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages > 0 for appID=%s, name=%s, TotalImages: %d", appID, appName, imageAnalysis.TotalImages)
 		return true
 	}
 
 	if imageAnalysis.TotalImages == 0 && imageAnalysis.Images != nil {
+		log.Printf("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages=0 but Images not nil for appID=%s, name=%s, Images: %v", appID, appName, imageAnalysis.Images)
 		return true
 	}
 
-	log.Printf("isAppHydrationComplete: ImageAnalysis incomplete for appID=%s, name=%s, TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
+	log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis incomplete for appID=%s, name=%s, TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
 	return false
 }
 
@@ -782,11 +798,15 @@ func (h *Hydrator) hasActiveTaskForApp(userID, sourceID, appID string) bool {
 	h.taskMutex.RLock()
 	defer h.taskMutex.RUnlock()
 
+	log.Printf("DEBUG: Checking active tasks for app: %s (user: %s, source: %s), total active tasks: %d", appID, userID, sourceID, len(h.activeTasks))
+
 	for _, task := range h.activeTasks {
 		if task.UserID == userID && task.SourceID == sourceID && task.AppID == appID {
+			log.Printf("DEBUG: Found active task for app: %s (user: %s, source: %s), taskID: %s", appID, userID, sourceID, task.ID)
 			return true
 		}
 	}
+	log.Printf("DEBUG: No active task found for app: %s (user: %s, source: %s)", appID, userID, sourceID)
 	return false
 }
 
@@ -1510,6 +1530,8 @@ func (h *Hydrator) cleanupOldTasks() {
 
 // isAppInLatestQueue checks if an app already exists in the AppInfoLatest queue with version comparison
 func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) bool {
+	log.Printf("DEBUG: isAppInLatestQueue checking appID=%s, version=%s for user=%s, source=%s", appID, version, userID, sourceID)
+
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
 		if !h.cacheManager.mutex.TryRLock() {
@@ -1585,6 +1607,7 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) b
 		log.Printf("Warning: CacheManager not available for isAppInLatestQueue")
 	}
 
+	log.Printf("DEBUG: isAppInLatestQueue returning false for appID=%s, version=%s, user=%s, source=%s", appID, version, userID, sourceID)
 	return false
 }
 

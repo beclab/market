@@ -52,6 +52,17 @@ func (d *DetailFetchStep) GetStepName() string {
 
 // Execute performs the detail fetching logic with batch processing
 func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error {
+	marketSource := data.GetMarketSource()
+	if marketSource == nil {
+		return fmt.Errorf("no market source available in sync context")
+	}
+
+	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
+
+	if strings.HasPrefix(detailURL, "file://") {
+		return nil
+	}
+
 	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
