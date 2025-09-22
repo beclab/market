@@ -276,10 +276,43 @@ type VersionInfo struct {
 	UpgradeDescription string     `json:"upgradeDescription" bson:"upgradeDescription"`
 }
 
+// AcceptedCurrency describes one accepted currency option
+type AcceptedCurrency struct {
+	Amount        string `json:"amount" yaml:"amount"`
+	SystemChainID int    `json:"system_chain_id" yaml:"system_chain_id"`
+	ChainID       int    `json:"chain_id" yaml:"chain_id"`
+	Token         string `json:"token" yaml:"token"`
+	Symbol        string `json:"symbol" yaml:"symbol"`
+	Decimals      int    `json:"decimals" yaml:"decimals"`
+}
+
+// PriceProducts groups product types
+type PriceProducts struct {
+	NonConsumable struct {
+		Price struct {
+			AcceptedCurrencies []AcceptedCurrency `json:"accepted_currencies" yaml:"accepted_currencies"`
+		} `json:"price" yaml:"price"`
+	} `json:"non_consumable" yaml:"non_consumable"`
+}
+
+// PriceDeveloper holds developer identity and public key
+type PriceDeveloper struct {
+	DID       string `json:"did" yaml:"did"`
+	RSAPublic string `json:"rsa_public" yaml:"rsa_public"`
+}
+
+// PriceConfig represents price.yaml structure
+type PriceConfig struct {
+	ReceiveAddresses map[string]string `json:"receive_addresses" yaml:"receive_addresses"`
+	Developer        PriceDeveloper    `json:"developer" yaml:"developer"`
+	Products         PriceProducts     `json:"products" yaml:"products"`
+}
+
 // AppInfo represents complete app information including analysis result
 type AppInfo struct {
 	AppEntry      *ApplicationInfoEntry `json:"app_entry"`
 	ImageAnalysis *ImageAnalysisResult  `json:"image_analysis"`
+	Price         *PriceConfig          `json:"price,omitempty"`
 }
 
 // AppsInfoRequest represents the request body for applications/info API
@@ -764,6 +797,17 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 			}
 		}
 
+		// Restore Price
+		if priceMap, ok := appInfoMap["price"].(map[string]interface{}); ok {
+			b, err := json.Marshal(priceMap)
+			if err == nil {
+				var priceConfig PriceConfig
+				if err := json.Unmarshal(b, &priceConfig); err == nil {
+					appInfo.Price = &priceConfig
+				}
+			}
+		}
+
 		latest := &AppInfoLatestData{
 			Type:            AppInfoLatest,
 			Timestamp:       getCurrentTimestamp(),
@@ -936,9 +980,29 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 		}
 	}
 
+	// Try to extract price from data
+	var price *PriceConfig
+	if priceData, ok := data["price"]; ok && priceData != nil {
+		// Try type assertion
+		switch v := priceData.(type) {
+		case *PriceConfig:
+			price = v
+		case map[string]interface{}:
+			// Try to unmarshal
+			b, err := json.Marshal(v)
+			if err == nil {
+				var priceConfig PriceConfig
+				if err := json.Unmarshal(b, &priceConfig); err == nil {
+					price = &priceConfig
+				}
+			}
+		}
+	}
+
 	appInfoLatest.AppInfo = &AppInfo{
 		AppEntry:      rawData,
 		ImageAnalysis: imageAnalysis, // Set ImageAnalysis if present
+		Price:         price,         // Set Price if present
 	}
 
 	log.Printf("[DEBUG] NewAppInfoLatestData: Completed successfully")
@@ -975,7 +1039,7 @@ func NewAppInfoLatestPendingDataComplete(rawData *ApplicationInfoEntry, rawPacka
 		RawData:         rawData,
 		RawPackage:      rawPackage,
 		Values:          values,
-		AppInfo:         appInfo,
+		AppInfo:         appInfo, // AppInfo already contains Price field
 		RenderedPackage: renderedPackage,
 	}
 }
@@ -1018,6 +1082,62 @@ func NewAppInfo(appEntry *ApplicationInfoEntry, imageAnalysis *ImageAnalysisResu
 	return &AppInfo{
 		AppEntry:      appEntry,
 		ImageAnalysis: imageAnalysis,
+		Price:         nil, // Will be set separately if needed
+	}
+}
+
+// NewAppInfoWithPrice creates a new AppInfo structure with price information
+func NewAppInfoWithPrice(appEntry *ApplicationInfoEntry, imageAnalysis *ImageAnalysisResult, price *PriceConfig) *AppInfo {
+	return &AppInfo{
+		AppEntry:      appEntry,
+		ImageAnalysis: imageAnalysis,
+		Price:         price,
+	}
+}
+
+// NewPriceConfig creates a new PriceConfig structure
+func NewPriceConfig(receiveAddresses map[string]string, developer PriceDeveloper, products PriceProducts) *PriceConfig {
+	return &PriceConfig{
+		ReceiveAddresses: receiveAddresses,
+		Developer:        developer,
+		Products:         products,
+	}
+}
+
+// NewPriceDeveloper creates a new PriceDeveloper structure
+func NewPriceDeveloper(did string, rsaPublic string) PriceDeveloper {
+	return PriceDeveloper{
+		DID:       did,
+		RSAPublic: rsaPublic,
+	}
+}
+
+// NewPriceProducts creates a new PriceProducts structure
+func NewPriceProducts(acceptedCurrencies []AcceptedCurrency) PriceProducts {
+	return PriceProducts{
+		NonConsumable: struct {
+			Price struct {
+				AcceptedCurrencies []AcceptedCurrency `json:"accepted_currencies" yaml:"accepted_currencies"`
+			} `json:"price" yaml:"price"`
+		}{
+			Price: struct {
+				AcceptedCurrencies []AcceptedCurrency `json:"accepted_currencies" yaml:"accepted_currencies"`
+			}{
+				AcceptedCurrencies: acceptedCurrencies,
+			},
+		},
+	}
+}
+
+// NewAcceptedCurrency creates a new AcceptedCurrency structure
+func NewAcceptedCurrency(amount string, systemChainID int, chainID int, token string, symbol string, decimals int) AcceptedCurrency {
+	return AcceptedCurrency{
+		Amount:        amount,
+		SystemChainID: systemChainID,
+		ChainID:       chainID,
+		Token:         token,
+		Symbol:        symbol,
+		Decimals:      decimals,
 	}
 }
 
@@ -1145,6 +1265,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 	pendingData.AppInfo = &AppInfo{
 		AppEntry:      rawData,
 		ImageAnalysis: nil, // Will be filled later during hydration
+		Price:         nil, // Will be filled later during hydration
 	}
 
 	return pendingData
@@ -1866,7 +1987,7 @@ func NewAppRenderFailedData(rawData *ApplicationInfoEntry, rawPackage string, va
 		RawData:         rawData,
 		RawPackage:      rawPackage,
 		Values:          values,
-		AppInfo:         appInfo,
+		AppInfo:         appInfo, // AppInfo already contains Price field
 		RenderedPackage: renderedPackage,
 		FailureReason:   failureReason,
 		FailureStep:     failureStep,
