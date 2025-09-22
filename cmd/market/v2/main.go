@@ -84,7 +84,9 @@ func main() {
 	glog.Info("glog initialized for debug logging")
 
 	// Check dependency service availability before proceeding
+	log.Println("About to call WaitForDependencyService...")
 	utils.WaitForDependencyService()
+	log.Println("WaitForDependencyService completed")
 
 	// Upgrade flow: Check and update configurations and cache data (pre-execution)
 	log.Println("=== Pre-execution: Running upgrade flow ===")

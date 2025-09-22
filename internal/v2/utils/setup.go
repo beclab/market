@@ -669,29 +669,52 @@ func checkDependencyService() error {
 		Timeout: 10 * time.Second,
 	}
 
+	// Print request details
+	log.Printf("Making GET request to: %s", apiURL)
+	log.Printf("Request timeout: 10 seconds")
+
 	// Make GET request to the dependency service
 	resp, err := client.Get(apiURL)
 	if err != nil {
+		log.Printf("Request failed with error: %v", err)
 		return fmt.Errorf("failed to connect to dependency service: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Print response details
+	log.Printf("Response status code: %d", resp.StatusCode)
+	log.Printf("Response headers: %v", resp.Header)
+
 	// Check if response is successful
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("Non-OK status code received: %d", resp.StatusCode)
 		return fmt.Errorf("dependency service returned status %d", resp.StatusCode)
 	}
 
+	// Read response body for debugging
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Failed to read response body: %v", err)
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	log.Printf("Raw response body: %s", string(bodyBytes))
+
 	// Parse response body
 	var responseData DependencyServiceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&responseData); err != nil {
+	if err := json.Unmarshal(bodyBytes, &responseData); err != nil {
+		log.Printf("Failed to parse JSON response: %v", err)
+		log.Printf("Response was: %s", string(bodyBytes))
 		return fmt.Errorf("failed to parse dependency service response: %w", err)
 	}
 
+	log.Printf("Parsed response data: %+v", responseData)
 	log.Printf("Dependency service response: version=%s, build_time=%s, git_commit=%s",
 		responseData.Version, responseData.BuildTime, responseData.GitCommit)
 
 	// Check version constraints: >= 0.2.0 and < 0.3.0
 	if err := validateDependencyVersion(responseData.Version); err != nil {
+		log.Printf("Version validation failed: %v", err)
 		return fmt.Errorf("version validation failed: %w", err)
 	}
 
@@ -738,16 +761,21 @@ func validateDependencyVersion(version string) error {
 // WaitForDependencyService waits for dependency service to be available with retry logic
 func WaitForDependencyService() {
 	log.Println("=== Checking dependency service availability ===")
+	log.Println("WaitForDependencyService function called successfully")
 
+	retryCount := 0
 	for {
+		retryCount++
+		log.Printf("Starting dependency service check iteration #%d...", retryCount)
+
 		if err := checkDependencyService(); err != nil {
-			log.Printf("Dependency service check failed: %v", err)
+			log.Printf("Dependency service check failed (attempt #%d): %v", retryCount, err)
 			log.Println("Retrying in 5 seconds...")
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
-		log.Println("Dependency service is available and version is valid")
+		log.Printf("Dependency service is available and version is valid (succeeded on attempt #%d)", retryCount)
 		break
 	}
 	log.Println("=== End dependency service check ===")
