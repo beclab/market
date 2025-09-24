@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"market/internal/v2/appinfo"
+	"market/internal/v2/payment"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -1972,4 +1973,74 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendResponse(w, http.StatusOK, true, "App deleted successfully from upload source", responseData)
+}
+
+// getAppPaymentStatus handles GET /api/v2/apps/{id}/payment-status
+func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+	log.Printf("GET /api/v2/apps/%s/payment-status - Getting app payment status", appID)
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for payment status request: %s", userID)
+
+	// Step 2: Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Printf("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Step 3: Get user data from cache
+	userData := s.cacheManager.GetUserData(userID)
+	if userData == nil {
+		log.Printf("User data not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+		return
+	}
+
+	// Step 4: Find app in all sources
+	foundApp, sourceID := s.findAppInUserData(userData, appID)
+	if foundApp == nil {
+		log.Printf("App not found: %s for user: %s", appID, userID)
+		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
+		return
+	}
+
+	log.Printf("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
+
+	// Step 5: Process payment status using payment module
+	result, err := payment.ProcessAppPaymentStatus(userID, appID, foundApp.AppInfo)
+	if err != nil {
+		log.Printf("Failed to process payment status: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
+		return
+	}
+
+	// Step 6: Prepare response
+	responseData := map[string]interface{}{
+		"app_id":  appID,
+		"is_paid": result.IsPaid,
+		"status":  result.Status,
+		"message": result.Message,
+	}
+
+	if result.PaymentError != "" {
+		responseData["payment_error"] = result.PaymentError
+	}
+
+	log.Printf("App payment status retrieved successfully for app: %s, user: %s, status: %s", appID, userID, result.Status)
+	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
+}
+
+// findAppInUserData finds an app in user data by app ID
+func (s *Server) findAppInUserData(userData *types.UserData, appID string) (*types.AppInfoLatestData, string) {
+	return utils.FindAppInUserData(userData, appID)
 }

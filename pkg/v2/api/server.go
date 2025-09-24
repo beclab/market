@@ -180,6 +180,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/payment/submit-signature", s.submitSignature).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/payment/submit-signature")
 
+	// 24. Check app payment status
+	api.HandleFunc("/apps/{id}/payment-status", s.getAppPaymentStatus).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/payment-status")
+
 	log.Printf("All routes configured successfully")
 }
 

@@ -490,3 +490,122 @@ func NotifyLarePassToSign(dataSender DataSenderInterface, signBody, user string)
 	// Send the notification via DataSender
 	return dataSender.SendSignNotificationUpdate(update)
 }
+
+// CheckIfAppIsPaid checks if an app is a paid app by examining its Price configuration
+func CheckIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
+	if appInfo == nil {
+		return false, errors.New("app info is nil")
+	}
+
+	if appInfo.Price == nil {
+		return false, nil // Not a paid app
+	}
+
+	// Check if there's a NonConsumable product with AcceptedCurrencies
+	if appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies != nil &&
+		len(appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies) > 0 {
+		return true, nil // This is a paid app
+	}
+
+	return false, nil // Not a paid app
+}
+
+// GetPaymentStatus gets the payment status from AppInfo
+func GetPaymentStatus(appInfo *types.AppInfo) (string, error) {
+	if appInfo == nil {
+		return "", errors.New("app info is nil")
+	}
+
+	if appInfo.PurchaseInfo == nil {
+		return "not_buy", nil // No purchase info means not bought
+	}
+
+	return appInfo.PurchaseInfo.Status, nil
+}
+
+// PaymentStatusResult represents the result of payment status check
+type PaymentStatusResult struct {
+	IsPaid       bool   `json:"is_paid"`
+	Status       string `json:"status"`
+	Message      string `json:"message"`
+	PaymentError string `json:"payment_error,omitempty"`
+}
+
+// ProcessAppPaymentStatus handles the complete payment status check and processing
+func ProcessAppPaymentStatus(userID, appID string, appInfo *types.AppInfo) (*PaymentStatusResult, error) {
+	log.Printf("Processing payment status for user: %s, app: %s", userID, appID)
+
+	// Step 1: Check if app is paid app
+	isPaidApp, err := CheckIfAppIsPaid(appInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if app is paid: %w", err)
+	}
+
+	if !isPaidApp {
+		log.Printf("App %s is not a paid app", appID)
+		return &PaymentStatusResult{
+			IsPaid:  false,
+			Status:  "free",
+			Message: "This is a free app",
+		}, nil
+	}
+
+	// Step 2: Get payment status
+	paymentStatus, err := GetPaymentStatus(appInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get payment status: %w", err)
+	}
+
+	// Step 3: Handle different payment statuses
+	result := &PaymentStatusResult{
+		IsPaid: true,
+		Status: paymentStatus,
+	}
+
+	switch paymentStatus {
+	case "purchased":
+		log.Printf("App %s is already purchased by user %s", appID, userID)
+		result.Message = "App is already purchased"
+
+	case "paying":
+		log.Printf("App %s payment is in progress for user %s", appID, userID)
+		result.Message = "Payment is in progress"
+
+	case "not_buy":
+		log.Printf("App %s is not purchased by user %s, starting payment flow", appID, userID)
+		result.Message = "Starting payment flow"
+
+		// Start payment process directly
+		if err := StartPaymentProcess(userID, appID, appInfo); err != nil {
+			log.Printf("Failed to start payment process: %v", err)
+			result.PaymentError = err.Error()
+		}
+
+	case "not_sign":
+		log.Printf("App %s payment signature is missing for user %s, retrying payment flow", appID, userID)
+		result.Message = "Payment signature missing, retrying payment flow"
+
+		// Retry payment process directly
+		if err := RetryPaymentProcess(userID, appID, appInfo); err != nil {
+			log.Printf("Failed to retry payment process: %v", err)
+			result.PaymentError = err.Error()
+		}
+
+	case "not_pay":
+		log.Printf("App %s payment is not completed for user %s, retrying payment flow", appID, userID)
+		result.Message = "Payment not completed, retrying payment flow"
+
+		// Retry payment process directly
+		if err := RetryPaymentProcess(userID, appID, appInfo); err != nil {
+			log.Printf("Failed to retry payment process: %v", err)
+			result.PaymentError = err.Error()
+		}
+
+	default:
+		log.Printf("Unknown payment status %s for app %s and user %s", paymentStatus, appID, userID)
+		result.Message = "Unknown payment status"
+	}
+
+	log.Printf("Payment status processing completed for app: %s, user: %s, status: %s", appID, userID, paymentStatus)
+	return result, nil
+}

@@ -319,7 +319,7 @@ type AppInfo struct {
 // PurchaseInfo represents VC and purchase state stored in Redis
 type PurchaseInfo struct {
 	VC     string `json:"vc"`
-	Status string `json:"status"` // e.g., "purchased" | "pending" | "unknown"
+	Status string `json:"status"` // e.g., "purchased" | "not_buy" | "not_sign" | "not_pay" | "paying"
 }
 
 // AppsInfoRequest represents the request body for applications/info API
