@@ -176,6 +176,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/local-apps/delete", s.deleteLocalApp).Methods("DELETE")
 	log.Printf("Route configured: DELETE /app-store/api/v2/local-apps/delete")
 
+	// 23. Submit signature for payment processing
+	api.HandleFunc("/payment/submit-signature", s.submitSignature).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/payment/submit-signature")
+
 	log.Printf("All routes configured successfully")
 }
 

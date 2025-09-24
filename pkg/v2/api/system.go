@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/payment"
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
@@ -60,6 +61,13 @@ type SystemStatusResponse struct {
 // OpenAppRequest represents the request body for opening an application
 type OpenAppRequest struct {
 	ID string `json:"id"`
+}
+
+// SubmitSignatureRequest represents the request body for submitting signature
+type SubmitSignatureRequest struct {
+	JWS      string `json:"jws"`
+	SignBody string `json:"sign_body"`
+	User     string `json:"user"`
 }
 
 // ListVersionResponse for version history response
@@ -848,4 +856,79 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Market settings updated successfully for user: %s", userID)
 	s.sendResponse(w, http.StatusOK, true, "Market settings updated successfully", settings)
+}
+
+// submitSignature handles POST /api/v2/payment/submit-signature
+func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/payment/submit-signature - Processing signature submission")
+
+	// Parse request body
+	var req SubmitSignatureRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	// Validate required fields
+	if req.JWS == "" {
+		log.Println("JWS is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "JWS cannot be empty", nil)
+		return
+	}
+
+	if req.SignBody == "" {
+		log.Println("SignBody is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "SignBody cannot be empty", nil)
+		return
+	}
+
+	if req.User == "" {
+		log.Println("User is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "User cannot be empty", nil)
+		return
+	}
+
+	// Get bflUser from X-Bfl-User header
+	restfulReq := &restful.Request{Request: r}
+	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
+
+	log.Printf("Received signature submission - JWS: %s, SignBody: %s, User: %s, BflUser: %s", req.JWS, req.SignBody, req.User, bflUser)
+
+	// Validate user matching
+	if bflUser == "" {
+		log.Println("X-Bfl-User header is empty")
+		s.sendResponse(w, http.StatusBadRequest, false, "X-Bfl-User header is required", nil)
+		return
+	}
+
+	if req.User != bflUser {
+		log.Printf("User mismatch - Request User: %s, BflUser: %s", req.User, bflUser)
+		s.sendResponse(w, http.StatusForbidden, false, "User does not match", nil)
+		return
+	}
+
+	// Call payment module for business logic processing
+	err := processSignatureSubmission(req.JWS, req.SignBody, req.User)
+	if err != nil {
+		log.Printf("Failed to process signature submission: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process signature submission", nil)
+		return
+	}
+
+	log.Printf("Signature submission processed successfully for user: %s", req.User)
+	s.sendResponse(w, http.StatusOK, true, "Signature submission processed successfully", map[string]interface{}{
+		"jws":       req.JWS,
+		"sign_body": req.SignBody,
+		"user":      req.User,
+		"status":    "processed",
+	})
+}
+
+// processSignatureSubmission calls payment module for business logic processing
+func processSignatureSubmission(jws, signBody, user string) error {
+	log.Printf("Processing signature submission in payment module - JWS: %s, SignBody: %s, User: %s", jws, signBody, user)
+
+	// Call payment module function for business logic processing
+	return payment.ProcessSignatureSubmission(jws, signBody, user)
 }

@@ -193,6 +193,39 @@ func (ds *DataSender) SendImageInfoUpdate(update types.ImageInfoUpdate) error {
 	return nil
 }
 
+// SendSignNotificationUpdate sends sign notification update to NATS
+func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUpdate) error {
+	if !ds.enabled {
+		log.Println("NATS data sender is disabled, skipping sign notification update message send")
+		return nil
+	}
+
+	if ds.conn == nil {
+		return fmt.Errorf("NATS connection is not initialized")
+	}
+
+	// Convert data to JSON
+	data, err := json.Marshal(update)
+	if err != nil {
+		return fmt.Errorf("failed to marshal sign notification update: %w", err)
+	}
+
+	// Use system subject for sign notification updates
+	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
+
+	// Log before sending
+	log.Printf("Sending sign notification update to NATS subject '%s': %s", subject, string(data))
+
+	// Send message to NATS
+	err = ds.conn.Publish(subject, data)
+	if err != nil {
+		return fmt.Errorf("failed to publish sign notification update message to NATS: %w", err)
+	}
+
+	log.Printf("Successfully sent sign notification update to NATS")
+	return nil
+}
+
 // Close closes the NATS connection
 func (ds *DataSender) Close() {
 	if ds.conn != nil && ds.enabled {

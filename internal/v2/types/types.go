@@ -507,6 +507,19 @@ type ImageInfoUpdate struct {
 	NotifyType string     `json:"notify_type"`
 }
 
+// SignNotificationUpdate represents the data structure for signature notification updates
+type SignNotificationUpdate struct {
+	Sign SignNotificationData `json:"sign"`
+	User string               `json:"user"`
+	Vars map[string]string    `json:"vars"`
+}
+
+// SignNotificationData represents the sign data in the notification
+type SignNotificationData struct {
+	CallbackURL string                 `json:"callback_url"`
+	SignBody    map[string]interface{} `json:"sign_body"`
+}
+
 // NewCacheData creates a new cache data structure
 func NewCacheData() *CacheData {
 	return &CacheData{
