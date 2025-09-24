@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"market/internal/v2/appinfo"
+	"market/internal/v2/payment"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -1972,4 +1973,154 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendResponse(w, http.StatusOK, true, "App deleted successfully from upload source", responseData)
+}
+
+// getAppPaymentStatus handles GET /api/v2/apps/{id}/payment-status
+func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+	log.Printf("GET /api/v2/apps/%s/payment-status - Getting app payment status", appID)
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for payment status request: %s", userID)
+
+	// Step 2: Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Printf("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Step 3: Get user data from cache
+	userData := s.cacheManager.GetUserData(userID)
+	if userData == nil {
+		log.Printf("User data not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+		return
+	}
+
+	// Step 4: Find app in all sources
+	foundApp, sourceID := s.findAppInUserData(userData, appID)
+	if foundApp == nil {
+		log.Printf("App not found: %s for user: %s", appID, userID)
+		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
+		return
+	}
+
+	log.Printf("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
+
+	// Step 5: Process payment status using payment module
+	result, err := payment.ProcessAppPaymentStatus(userID, appID, foundApp.AppInfo)
+	if err != nil {
+		log.Printf("Failed to process payment status: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
+		return
+	}
+
+	// Step 6: Prepare response
+	responseData := map[string]interface{}{
+		"app_id":  appID,
+		"is_paid": result.IsPaid,
+		"status":  result.Status,
+		"message": result.Message,
+	}
+
+	if result.PaymentError != "" {
+		responseData["payment_error"] = result.PaymentError
+	}
+
+	log.Printf("App payment status retrieved successfully for app: %s, user: %s, status: %s", appID, userID, result.Status)
+	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
+}
+
+// findAppInUserData finds an app in user data by app ID
+func (s *Server) findAppInUserData(userData *types.UserData, appID string) (*types.AppInfoLatestData, string) {
+	return utils.FindAppInUserData(userData, appID)
+}
+
+// startPaymentPolling handles POST /api/v2/payment/start-polling
+func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/payment/start-polling - Starting payment polling")
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for payment polling request: %s", userID)
+
+	// Step 2: Parse JSON request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+	defer r.Body.Close()
+
+	var request payment.PaymentPollingRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		log.Printf("Failed to parse JSON request: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
+		return
+	}
+
+	// Step 3: Validate required fields (only user_id and app_id)
+	if request.UserID == "" || request.AppID == "" {
+		log.Printf("Missing required fields in payment polling request")
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: user_id, app_id", nil)
+		return
+	}
+
+	// Step 4: Validate user ID matches request
+	if request.UserID != userID {
+		log.Printf("User ID mismatch: request %s vs authenticated %s", request.UserID, userID)
+		s.sendResponse(w, http.StatusBadRequest, false, "User ID mismatch", nil)
+		return
+	}
+
+	log.Printf("Received payment polling request for user: %s, app: %s",
+		request.UserID, request.AppID)
+
+	// Derive AppInfoLatest from cache
+	var appInfoLatest *types.AppInfoLatestData
+	if s.cacheManager != nil {
+		userData := s.cacheManager.GetUserData(userID)
+		if userData != nil {
+			if app, _ := s.findAppInUserData(userData, request.AppID); app != nil {
+				appInfoLatest = app
+			}
+		}
+	}
+
+	// Step 5: Start payment polling (with app info)
+	if err := payment.StartPaymentPolling(
+		request.UserID,
+		request.AppID,
+		appInfoLatest,
+	); err != nil {
+		log.Printf("Failed to start payment polling: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to start payment polling", nil)
+		return
+	}
+
+	// Step 6: Prepare response
+	response := payment.PaymentPollingResponse{
+		Success: true,
+		Message: "Payment polling started successfully",
+		Status:  "polling",
+	}
+
+	log.Printf("Payment polling started successfully for user: %s, app: %s", request.UserID, request.AppID)
+	s.sendResponse(w, http.StatusOK, true, "Payment polling started successfully", response)
 }

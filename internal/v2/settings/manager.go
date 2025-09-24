@@ -32,6 +32,13 @@ func (sm *SettingsManager) SetCacheManager(cacheManager CacheManager) {
 	log.Println("Cache manager set for settings manager")
 }
 
+// GetRedisClient returns the Redis client for external modules
+func (sm *SettingsManager) GetRedisClient() RedisClient {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.redisClient
+}
+
 // syncMarketSourcesToCache synchronizes market sources to cache if cache manager is available
 func (sm *SettingsManager) syncMarketSourcesToCache() {
 	if sm.cacheManager != nil {

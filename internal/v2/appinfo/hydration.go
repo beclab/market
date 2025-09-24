@@ -81,6 +81,8 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 	// Add default steps
 
 	hydrator.AddStep(hydrationfn.NewTaskForApiStep())
+	// Payment information processing step: call payment logic for validation and status query
+	hydrator.AddStep(hydrationfn.NewTaskForPaymentStep())
 
 	// hydrator.AddStep(hydrationfn.NewSourceChartStep())
 	// hydrator.AddStep(hydrationfn.NewRenderedChartStep())
