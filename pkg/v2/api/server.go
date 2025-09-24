@@ -184,6 +184,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps/{id}/payment-status", s.getAppPaymentStatus).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/payment-status")
 
+	// 25. Start payment polling after frontend payment completion
+	api.HandleFunc("/payment/start-polling", s.startPaymentPolling).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/payment/start-polling")
+
 	log.Printf("All routes configured successfully")
 }
 

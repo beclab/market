@@ -2044,3 +2044,83 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findAppInUserData(userData *types.UserData, appID string) (*types.AppInfoLatestData, string) {
 	return utils.FindAppInUserData(userData, appID)
 }
+
+// startPaymentPolling handles POST /api/v2/payment/start-polling
+func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/payment/start-polling - Starting payment polling")
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for payment polling request: %s", userID)
+
+	// Step 2: Parse JSON request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+	defer r.Body.Close()
+
+	var request payment.PaymentPollingRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		log.Printf("Failed to parse JSON request: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
+		return
+	}
+
+	// Step 3: Validate required fields (only user_id and app_id)
+	if request.UserID == "" || request.AppID == "" {
+		log.Printf("Missing required fields in payment polling request")
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: user_id, app_id", nil)
+		return
+	}
+
+	// Step 4: Validate user ID matches request
+	if request.UserID != userID {
+		log.Printf("User ID mismatch: request %s vs authenticated %s", request.UserID, userID)
+		s.sendResponse(w, http.StatusBadRequest, false, "User ID mismatch", nil)
+		return
+	}
+
+	log.Printf("Received payment polling request for user: %s, app: %s",
+		request.UserID, request.AppID)
+
+	// Derive AppInfoLatest from cache
+	var appInfoLatest *types.AppInfoLatestData
+	if s.cacheManager != nil {
+		userData := s.cacheManager.GetUserData(userID)
+		if userData != nil {
+			if app, _ := s.findAppInUserData(userData, request.AppID); app != nil {
+				appInfoLatest = app
+			}
+		}
+	}
+
+	// Step 5: Start payment polling (with app info)
+	if err := payment.StartPaymentPolling(
+		request.UserID,
+		request.AppID,
+		appInfoLatest,
+	); err != nil {
+		log.Printf("Failed to start payment polling: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to start payment polling", nil)
+		return
+	}
+
+	// Step 6: Prepare response
+	response := payment.PaymentPollingResponse{
+		Success: true,
+		Message: "Payment polling started successfully",
+		Status:  "polling",
+	}
+
+	log.Printf("Payment polling started successfully for user: %s, app: %s", request.UserID, request.AppID)
+	s.sendResponse(w, http.StatusOK, true, "Payment polling started successfully", response)
+}

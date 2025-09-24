@@ -20,6 +20,22 @@ import (
 // DataSenderInterface defines the interface for sending NATS messages
 type DataSenderInterface interface {
 	SendSignNotificationUpdate(update types.SignNotificationUpdate) error
+	SendMarketSystemUpdate(update types.MarketSystemUpdate) error
+}
+
+// DataSenderWrapper wraps DataSenderInterface to provide the interface needed by TaskManager
+type DataSenderWrapper struct {
+	dataSender DataSenderInterface
+}
+
+// SendSignNotificationUpdate implements the interface
+func (w *DataSenderWrapper) SendSignNotificationUpdate(update types.SignNotificationUpdate) error {
+	return w.dataSender.SendSignNotificationUpdate(update)
+}
+
+// SendMarketSystemUpdate implements the interface
+func (w *DataSenderWrapper) SendMarketSystemUpdate(update types.MarketSystemUpdate) error {
+	return w.dataSender.SendMarketSystemUpdate(update)
 }
 
 // DeveloperInfo represents subset of DID search response used by payment
@@ -448,18 +464,59 @@ func getVCFromDeveloper(jws string, developerName string) (string, error) {
 	return response.VerifiableCredential, nil
 }
 
+// Global task manager instance
+var globalTaskManager *TaskManager
+
+// InitTaskManager initializes the global task manager
+func InitTaskManager(dataSender DataSenderInterface, settingsManager *settings.SettingsManager) {
+	// Create a wrapper that implements the required interface
+	wrapper := &DataSenderWrapper{dataSender: dataSender}
+	globalTaskManager = NewTaskManager(wrapper, settingsManager)
+	log.Println("Task manager initialized")
+}
+
+// GetTaskManager returns the global task manager
+func GetTaskManager() *TaskManager {
+	return globalTaskManager
+}
+
+// CreatePaymentTask creates a new payment task or returns existing one
+func CreatePaymentTask(userID, appID, productID, developerName, appName string) (*PaymentTask, error) {
+	if globalTaskManager == nil {
+		return nil, errors.New("task manager not initialized")
+	}
+	return globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName)
+}
+
+// GetPaymentTaskStatus returns the status of a payment task
+func GetPaymentTaskStatus(userID, appID, productID string) (TaskStatus, error) {
+	if globalTaskManager == nil {
+		return "", errors.New("task manager not initialized")
+	}
+	return globalTaskManager.GetTaskStatus(userID, appID, productID)
+}
+
 // ProcessSignatureSubmission handles the business logic for signature submission
-// Currently only prints the input parameters as requested
+// Now integrated with TaskManager workflow
 func ProcessSignatureSubmission(jws, signBody, user string) error {
 	log.Printf("=== Payment Module Processing Signature Submission ===")
 	log.Printf("JWS: %s", jws)
 	log.Printf("SignBody: %s", signBody)
 	log.Printf("User: %s", user)
+
+	if globalTaskManager == nil {
+		log.Printf("Task manager not initialized, falling back to basic processing")
+		log.Printf("=== End of Payment Module Processing ===")
+		return nil
+	}
+
+	// Process signature submission through task manager
+	if err := globalTaskManager.ProcessSignatureSubmission(jws, signBody, user); err != nil {
+		log.Printf("Error processing signature submission: %v", err)
+		return err
+	}
+
 	log.Printf("=== End of Payment Module Processing ===")
-
-	// TODO: Add actual business logic here
-	// For now, just log the parameters as requested
-
 	return nil
 }
 
