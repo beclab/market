@@ -74,9 +74,9 @@ type TopicData struct {
 	IconImg         string `json:"iconimg"`
 	DetailImg       string `json:"detailimg"`
 	RichText        string `json:"richtext"`
-	MobileDetailImg string `json:"mobiledetailimg"`
-	MobileRichText  string `json:"mobilerichtext"`
-	BackgroundColor string `json:"backgroundcolor"`
+	MobileDetailImg string `json:"mobileDetailImg"`
+	MobileRichText  string `json:"mobileRichtext"`
+	BackgroundColor string `json:"backgroundColor"`
 	Apps            string `json:"apps"`
 	IsDelete        bool   `json:"isdelete"`
 }
