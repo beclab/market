@@ -68,14 +68,17 @@ type Page struct {
 
 // TopicData represents topic data for specific language
 type TopicData struct {
-	Group     string `json:"group"`
-	Title     string `json:"title"`
-	Des       string `json:"des"`
-	IconImg   string `json:"iconimg"`
-	DetailImg string `json:"detailimg"`
-	RichText  string `json:"richtext"`
-	Apps      string `json:"apps"`
-	IsDelete  bool   `json:"isdelete"`
+	Group           string `json:"group"`
+	Title           string `json:"title"`
+	Des             string `json:"des"`
+	IconImg         string `json:"iconimg"`
+	DetailImg       string `json:"detailimg"`
+	RichText        string `json:"richtext"`
+	MobileDetailImg string `json:"mobiledetailimg"`
+	MobileRichText  string `json:"mobilerichtext"`
+	BackgroundColor string `json:"backgroundcolor"`
+	Apps            string `json:"apps"`
+	IsDelete        bool   `json:"isdelete"`
 }
 
 // Topic represents topic configuration

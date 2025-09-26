@@ -518,6 +518,15 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 									if richText, ok := topicDataMap["richtext"].(string); ok {
 										topicData.RichText = richText
 									}
+									if mobileDetailImg, ok := topicDataMap["mobiledetailimg"].(string); ok {
+										topicData.MobileDetailImg = mobileDetailImg
+									}
+									if mobileRichText, ok := topicDataMap["mobilerichtext"].(string); ok {
+										topicData.MobileRichText = mobileRichText
+									}
+									if backgroundColor, ok := topicDataMap["backgroundcolor"].(string); ok {
+										topicData.BackgroundColor = backgroundColor
+									}
 									if apps, ok := topicDataMap["apps"].(string); ok {
 										topicData.Apps = apps
 									}
