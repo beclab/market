@@ -287,6 +287,7 @@ type AcceptedCurrency struct {
 	Token         string `json:"token" yaml:"token"`
 	Symbol        string `json:"symbol" yaml:"symbol"`
 	Decimals      int    `json:"decimals" yaml:"decimals"`
+	ProductID     string `json:"product_id" yaml:"product_id"`
 }
 
 // PriceProducts groups product types
@@ -323,6 +324,15 @@ type AppInfo struct {
 type PurchaseInfo struct {
 	VC     string `json:"vc"`
 	Status string `json:"status"` // e.g., "purchased" | "not_buy" | "not_sign" | "not_pay" | "paying"
+}
+
+// FrontendPaymentData represents payment data for frontend payment process
+type FrontendPaymentData struct {
+	From    string `json:"from"` // User's DID
+	To      string `json:"to"`   // Developer's DID
+	Product []struct {
+		ProductID string `json:"product_id"`
+	} `json:"product"` // Product information
 }
 
 // AppsInfoRequest represents the request body for applications/info API

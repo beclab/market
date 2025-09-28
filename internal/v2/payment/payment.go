@@ -178,6 +178,19 @@ func GetMerchantProductLicenseCredentialManifest() string {
 	return merchantProductLicenseCredentialManifestJSON
 }
 
+// CreateFrontendPaymentData creates payment data for frontend payment process
+func CreateFrontendPaymentData(userDID, developerDID, productID string) *types.FrontendPaymentData {
+	return &types.FrontendPaymentData{
+		From: userDID,
+		To:   developerDID,
+		Product: []struct {
+			ProductID string `json:"product_id"`
+		}{
+			{ProductID: productID},
+		},
+	}
+}
+
 // verifyVCAgainstManifest validates VC using the manifest's declared JSONPath fields (no crypto verification).
 // It supports JWT VC (compact) and JSON VC, and dynamically reads required field paths from the manifest.
 func verifyVCAgainstManifest(vc string, manifest string) (bool, error) {
@@ -410,6 +423,15 @@ func base64RawURLDecodeImpl(s string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(s)
 }
 
+// PaymentNotReadyError represents the case when payment information is not found in developer's service
+type PaymentNotReadyError struct {
+	Message string
+}
+
+func (e *PaymentNotReadyError) Error() string {
+	return e.Message
+}
+
 // getVCFromDeveloper calls the developer's AuthService to get verifiable credential
 // baseURL format: https://4c94e3111.{developerName}/
 func getVCFromDeveloper(jws string, developerName string) (string, error) {
@@ -454,6 +476,12 @@ func getVCFromDeveloper(jws string, developerName string) (string, error) {
 	}
 
 	if response.Error != "" {
+		// Check if it's a payment not ready error
+		if strings.Contains(strings.ToLower(response.Error), "payment") &&
+			(strings.Contains(strings.ToLower(response.Error), "not") ||
+				strings.Contains(strings.ToLower(response.Error), "no")) {
+			return "", &PaymentNotReadyError{Message: response.Error}
+		}
 		return "", fmt.Errorf("AuthService returned error: %s", response.Error)
 	}
 
