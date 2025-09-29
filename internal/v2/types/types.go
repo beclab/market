@@ -1027,9 +1027,16 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 				var priceConfig PriceConfig
 				if err := json.Unmarshal(b, &priceConfig); err == nil {
 					price = &priceConfig
+					log.Printf("[DEBUG] NewAppInfoLatestData: Successfully restored price config for app %s", appID)
+				} else {
+					log.Printf("[DEBUG] NewAppInfoLatestData: Failed to unmarshal price config: %v", err)
 				}
+			} else {
+				log.Printf("[DEBUG] NewAppInfoLatestData: Failed to marshal price data: %v", err)
 			}
 		}
+	} else {
+		log.Printf("[DEBUG] NewAppInfoLatestData: No price data found for app %s", appID)
 	}
 
 	appInfoLatest.AppInfo = &AppInfo{
