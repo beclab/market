@@ -210,8 +210,8 @@ func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUp
 		return fmt.Errorf("failed to marshal sign notification update: %w", err)
 	}
 
-	// Use system subject for sign notification updates
-	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
+	// Use notification subject for sign notification updates
+	subject := fmt.Sprintf("os.notification.%s", update.User)
 
 	// Log before sending
 	log.Printf("Sending sign notification update to NATS subject '%s': %s", subject, string(data))
