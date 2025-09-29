@@ -211,7 +211,8 @@ func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUp
 	}
 
 	// Use notification subject for sign notification updates
-	subject := fmt.Sprintf("os.notification.%s", update.User)
+	// subject := fmt.Sprintf("os.notification.%s", update.User)
+	subject := "os.notification"
 
 	// Log before sending
 	log.Printf("Sending sign notification update to NATS subject '%s': %s", subject, string(data))
