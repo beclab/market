@@ -568,8 +568,9 @@ func NotifyLarePassToSign(dataSender DataSenderInterface, signBody, user string)
 				"ProductCredentialManifest": manifestData,
 			},
 		},
-		User: user,
-		Vars: make(map[string]string),
+		User:  user,
+		Vars:  make(map[string]string),
+		Topic: "market_payment",
 	}
 
 	// Send the notification via DataSender

@@ -522,9 +522,10 @@ type ImageInfoUpdate struct {
 
 // SignNotificationUpdate represents the data structure for signature notification updates
 type SignNotificationUpdate struct {
-	Sign SignNotificationData `json:"sign"`
-	User string               `json:"user"`
-	Vars map[string]string    `json:"vars"`
+	Sign  SignNotificationData `json:"sign"`
+	User  string               `json:"user"`
+	Vars  map[string]string    `json:"vars"`
+	Topic string               `json:"topic"`
 }
 
 // SignNotificationData represents the sign data in the notification
