@@ -219,7 +219,7 @@ func (tm *TaskManager) stepGetVC(task *PaymentTask) {
 	vc, err := getVCFromDeveloper(task.JWS, task.DeveloperName)
 	if err != nil {
 		log.Printf("Error getting VC from developer: %v", err)
-		// Step 2.4.1: No VC found, notify frontend for payment
+		// Step 2.4.1: No VC found, notify frontend for payment with payment data
 		tm.stepNotifyPaymentRequired(task)
 		return
 	}
@@ -246,7 +246,15 @@ func (tm *TaskManager) stepNotifyPaymentRequired(task *PaymentTask) {
 	log.Printf("Step 2.4.1: Notifying frontend for payment required for task %s:%s:%s",
 		task.UserID, task.AppID, task.ProductID)
 
-	// Create empty message format notification
+	// Create frontend payment data
+	// Note: In a real implementation, you would need to get user DID and developer DID
+	// For now, we'll use placeholder values
+	userDID := "did:key:z6Mkgk8SGZQqXahNc9RumbX8LvUdCLWZskY7LFNMULdT5Z6r" // This should come from user info
+	developerDID := fmt.Sprintf("did:key:%s", task.DeveloperName)         // This should come from app info
+
+	paymentData := CreateFrontendPaymentData(userDID, developerDID, task.ProductID)
+
+	// Create notification with payment data
 	update := types.MarketSystemUpdate{
 		User:       task.UserID,
 		Timestamp:  time.Now().Unix(),
@@ -254,6 +262,9 @@ func (tm *TaskManager) stepNotifyPaymentRequired(task *PaymentTask) {
 		Extensions: map[string]string{
 			"app_id":   task.AppID,
 			"app_name": task.AppName,
+		},
+		ExtensionsObj: map[string]interface{}{
+			"payment_data": paymentData,
 		},
 	}
 
@@ -557,8 +568,9 @@ func StartPaymentPolling(userID, appID string, appInfoLatest *types.AppInfoLates
 func pollForVC(task *PaymentTask) error {
 	// Check if JWS is empty (e.g., after program restart)
 	if task.JWS == "" {
-		log.Printf("JWS is empty for user %s, app %s - cannot poll for VC, notifying payment required", task.UserID, task.AppID)
-		notifyPaymentRequired(task.UserID, task.AppID, task.ProductID)
+		log.Printf("JWS is empty for user %s, app %s - cannot poll for VC, notifying signature required", task.UserID, task.AppID)
+		// JWS is empty, which means no signature is present. Need to re-trigger the payment process.
+		notifySignatureRequired(task.UserID, task.AppID, task.ProductID, task.DeveloperName)
 		return fmt.Errorf("JWS is empty, cannot poll for VC")
 	}
 
@@ -575,10 +587,10 @@ func pollForVC(task *PaymentTask) error {
 		if err != nil {
 			log.Printf("VC polling attempt %d failed: %v", attempt, err)
 
-			// If this is the last attempt, notify frontend about payment required
+			// If this is the last attempt, notify frontend about timeout error
 			if attempt == maxAttempts {
 				log.Printf("All VC polling attempts failed for user %s, app %s", task.UserID, task.AppID)
-				notifyPaymentRequired(task.UserID, task.AppID, task.ProductID)
+				notifyPollingTimeout(task.UserID, task.AppID, task.ProductID, task.DeveloperName)
 				return fmt.Errorf("failed to get VC after %d attempts: %w", maxAttempts, err)
 			}
 
@@ -635,24 +647,73 @@ func completePurchase(userID, appID, appName, productID, developerName, vc strin
 }
 
 // notifyPaymentRequired notifies frontend that payment is required
-func notifyPaymentRequired(userID, appID, productID string) {
+func notifyPaymentRequired(userID, appID, productID, developerName string) {
 	if globalTaskManager == nil {
 		log.Printf("Task manager not initialized, cannot send payment required notification")
 		return
 	}
 
-	// Create a temporary task for notification
+	// Create a temporary task for notification with provided info
 	task := &PaymentTask{
-		UserID:    userID,
-		AppID:     appID,
-		ProductID: productID,
-		Status:    TaskStatusNotPay,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		UserID:        userID,
+		AppID:         appID,
+		ProductID:     productID,
+		DeveloperName: developerName,
+		Status:        TaskStatusNotPay,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 
 	// Send payment required notification
 	globalTaskManager.stepNotifyPaymentRequired(task)
+}
+
+// notifySignatureRequired notifies frontend that signature is required (no JWS found)
+func notifySignatureRequired(userID, appID, productID, developerName string) {
+	if globalTaskManager == nil {
+		log.Printf("Task manager not initialized, cannot send signature required notification")
+		return
+	}
+
+	// Create a temporary task for notification
+	task := &PaymentTask{
+		UserID:        userID,
+		AppID:         appID,
+		ProductID:     productID,
+		DeveloperName: developerName,
+		Status:        TaskStatusNotSign,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	// Send signature required notification (trigger payment flow again)
+	globalTaskManager.stepNotifySign(task)
+}
+
+// notifyPollingTimeout notifies frontend about polling timeout error
+func notifyPollingTimeout(userID, appID, productID, developerName string) {
+	if globalTaskManager == nil {
+		log.Printf("Task manager not initialized, cannot send polling timeout notification")
+		return
+	}
+
+	// Create timeout error notification
+	update := types.MarketSystemUpdate{
+		User:       userID,
+		Timestamp:  time.Now().Unix(),
+		NotifyType: "payment_error",
+		Extensions: map[string]string{
+			"app_id": appID,
+			"error":  "Sync payment status timeout, please try again",
+		},
+	}
+
+	// Send notification via DataSender
+	if err := globalTaskManager.dataSender.SendMarketSystemUpdate(update); err != nil {
+		log.Printf("Error sending polling timeout notification: %v", err)
+	}
+
+	log.Printf("Polling timeout notification sent for user %s, app %s", userID, appID)
 }
 
 // createTaskFromCache creates a new payment task from cache data

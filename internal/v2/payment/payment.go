@@ -178,6 +178,19 @@ func GetMerchantProductLicenseCredentialManifest() string {
 	return merchantProductLicenseCredentialManifestJSON
 }
 
+// CreateFrontendPaymentData creates payment data for frontend payment process
+func CreateFrontendPaymentData(userDID, developerDID, productID string) *types.FrontendPaymentData {
+	return &types.FrontendPaymentData{
+		From: userDID,
+		To:   developerDID,
+		Product: []struct {
+			ProductID string `json:"product_id"`
+		}{
+			{ProductID: productID},
+		},
+	}
+}
+
 // verifyVCAgainstManifest validates VC using the manifest's declared JSONPath fields (no crypto verification).
 // It supports JWT VC (compact) and JSON VC, and dynamically reads required field paths from the manifest.
 func verifyVCAgainstManifest(vc string, manifest string) (bool, error) {
@@ -410,6 +423,15 @@ func base64RawURLDecodeImpl(s string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(s)
 }
 
+// PaymentNotReadyError represents the case when payment information is not found in developer's service
+type PaymentNotReadyError struct {
+	Message string
+}
+
+func (e *PaymentNotReadyError) Error() string {
+	return e.Message
+}
+
 // getVCFromDeveloper calls the developer's AuthService to get verifiable credential
 // baseURL format: https://4c94e3111.{developerName}/
 func getVCFromDeveloper(jws string, developerName string) (string, error) {
@@ -454,6 +476,12 @@ func getVCFromDeveloper(jws string, developerName string) (string, error) {
 	}
 
 	if response.Error != "" {
+		// Check if it's a payment not ready error
+		if strings.Contains(strings.ToLower(response.Error), "payment") &&
+			(strings.Contains(strings.ToLower(response.Error), "not") ||
+				strings.Contains(strings.ToLower(response.Error), "no")) {
+			return "", &PaymentNotReadyError{Message: response.Error}
+		}
 		return "", fmt.Errorf("AuthService returned error: %s", response.Error)
 	}
 
@@ -540,8 +568,9 @@ func NotifyLarePassToSign(dataSender DataSenderInterface, signBody, user string)
 				"ProductCredentialManifest": manifestData,
 			},
 		},
-		User: user,
-		Vars: make(map[string]string),
+		User:  user,
+		Vars:  make(map[string]string),
+		Topic: "market_payment",
 	}
 
 	// Send the notification via DataSender
@@ -550,20 +579,53 @@ func NotifyLarePassToSign(dataSender DataSenderInterface, signBody, user string)
 
 // CheckIfAppIsPaid checks if an app is a paid app by examining its Price configuration
 func CheckIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
+	log.Printf("CheckIfAppIsPaid: Starting payment check for app")
+
 	if appInfo == nil {
+		log.Printf("CheckIfAppIsPaid: ERROR - app info is nil")
 		return false, errors.New("app info is nil")
 	}
 
+	// Helper function to get app ID safely
+	getAppID := func() string {
+		if appInfo.AppEntry != nil {
+			return appInfo.AppEntry.ID
+		}
+		return "unknown"
+	}
+
+	log.Printf("CheckIfAppIsPaid: App info received, checking price configuration")
+	if appInfo.AppEntry != nil {
+		log.Printf("CheckIfAppIsPaid: App ID: %s, App Name: %s", appInfo.AppEntry.ID, appInfo.AppEntry.Name)
+	} else {
+		log.Printf("CheckIfAppIsPaid: App entry is nil")
+	}
+
 	if appInfo.Price == nil {
+		log.Printf("CheckIfAppIsPaid: App %s is not a paid app - no price configuration", getAppID())
 		return false, nil // Not a paid app
 	}
 
+	log.Printf("CheckIfAppIsPaid: Price configuration found, examining products")
+	log.Printf("CheckIfAppIsPaid: Price structure - Products: %+v", appInfo.Price.Products)
+
 	// Check if there's a NonConsumable product with AcceptedCurrencies
-	if appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies != nil &&
-		len(appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies) > 0 {
-		return true, nil // This is a paid app
+	if appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies != nil {
+		log.Printf("CheckIfAppIsPaid: NonConsumable product found with AcceptedCurrencies")
+		log.Printf("CheckIfAppIsPaid: AcceptedCurrencies count: %d", len(appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies))
+		log.Printf("CheckIfAppIsPaid: AcceptedCurrencies: %+v", appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies)
+
+		if len(appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies) > 0 {
+			log.Printf("CheckIfAppIsPaid: App %s is a PAID app - has valid accepted currencies", getAppID())
+			return true, nil // This is a paid app
+		} else {
+			log.Printf("CheckIfAppIsPaid: App %s is not a paid app - accepted currencies list is empty", getAppID())
+		}
+	} else {
+		log.Printf("CheckIfAppIsPaid: App %s is not a paid app - no accepted currencies configured", getAppID())
 	}
 
+	log.Printf("CheckIfAppIsPaid: App %s is not a paid app - no valid payment configuration", getAppID())
 	return false, nil // Not a paid app
 }
 

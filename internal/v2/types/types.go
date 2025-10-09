@@ -68,14 +68,17 @@ type Page struct {
 
 // TopicData represents topic data for specific language
 type TopicData struct {
-	Group     string `json:"group"`
-	Title     string `json:"title"`
-	Des       string `json:"des"`
-	IconImg   string `json:"iconimg"`
-	DetailImg string `json:"detailimg"`
-	RichText  string `json:"richtext"`
-	Apps      string `json:"apps"`
-	IsDelete  bool   `json:"isdelete"`
+	Group           string `json:"group"`
+	Title           string `json:"title"`
+	Des             string `json:"des"`
+	IconImg         string `json:"iconimg"`
+	DetailImg       string `json:"detailimg"`
+	RichText        string `json:"richtext"`
+	MobileDetailImg string `json:"mobileDetailImg"`
+	MobileRichText  string `json:"mobileRichtext"`
+	BackgroundColor string `json:"backgroundColor"`
+	Apps            string `json:"apps"`
+	IsDelete        bool   `json:"isdelete"`
 }
 
 // Topic represents topic configuration
@@ -284,6 +287,7 @@ type AcceptedCurrency struct {
 	Token         string `json:"token" yaml:"token"`
 	Symbol        string `json:"symbol" yaml:"symbol"`
 	Decimals      int    `json:"decimals" yaml:"decimals"`
+	ProductID     string `json:"product_id" yaml:"product_id"`
 }
 
 // PriceProducts groups product types
@@ -320,6 +324,15 @@ type AppInfo struct {
 type PurchaseInfo struct {
 	VC     string `json:"vc"`
 	Status string `json:"status"` // e.g., "purchased" | "not_buy" | "not_sign" | "not_pay" | "paying"
+}
+
+// FrontendPaymentData represents payment data for frontend payment process
+type FrontendPaymentData struct {
+	From    string `json:"from"` // User's DID
+	To      string `json:"to"`   // Developer's DID
+	Product []struct {
+		ProductID string `json:"product_id"`
+	} `json:"product"` // Product information
 }
 
 // AppsInfoRequest represents the request body for applications/info API
@@ -509,9 +522,10 @@ type ImageInfoUpdate struct {
 
 // SignNotificationUpdate represents the data structure for signature notification updates
 type SignNotificationUpdate struct {
-	Sign SignNotificationData `json:"sign"`
-	User string               `json:"user"`
-	Vars map[string]string    `json:"vars"`
+	Sign  SignNotificationData `json:"sign"`
+	User  string               `json:"user"`
+	Vars  map[string]string    `json:"vars"`
+	Topic string               `json:"topic"`
 }
 
 // SignNotificationData represents the sign data in the notification
@@ -1014,9 +1028,16 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 				var priceConfig PriceConfig
 				if err := json.Unmarshal(b, &priceConfig); err == nil {
 					price = &priceConfig
+					log.Printf("[DEBUG] NewAppInfoLatestData: Successfully restored price config for app %s", appID)
+				} else {
+					log.Printf("[DEBUG] NewAppInfoLatestData: Failed to unmarshal price config: %v", err)
 				}
+			} else {
+				log.Printf("[DEBUG] NewAppInfoLatestData: Failed to marshal price data: %v", err)
 			}
 		}
+	} else {
+		log.Printf("[DEBUG] NewAppInfoLatestData: No price data found for app %s", appID)
 	}
 
 	appInfoLatest.AppInfo = &AppInfo{
