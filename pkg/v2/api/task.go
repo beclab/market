@@ -15,10 +15,11 @@ import (
 
 // InstallAppRequest represents the request body for app installation
 type InstallAppRequest struct {
-	Source  string `json:"source"`
-	AppName string `json:"app_name"`
-	Version string `json:"version"`
-	Sync    bool   `json:"sync"` // Whether this is a synchronous request
+	Source  string           `json:"source"`
+	AppName string           `json:"app_name"`
+	Version string           `json:"version"`
+	Sync    bool             `json:"sync"` // Whether this is a synchronous request
+	Envs    []task.AppEnvVar `json:"envs,omitempty"`
 }
 
 // CancelInstallRequest represents the request body for cancel installation
@@ -138,6 +139,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"token":      utils.GetTokenFromRequest(restfulReq),
 		"cfgType":    cfgType, // Add cfgType to metadata
 		"images":     images,
+		"envs":       request.Envs,
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -602,6 +604,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"token":      utils.GetTokenFromRequest(restfulReq),
 		"cfgType":    cfgType, // Add cfgType to metadata
 		"images":     images,
+		"envs":       request.Envs,
 	}
 
 	// Handle synchronous requests with proper blocking

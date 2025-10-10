@@ -13,15 +13,21 @@ import (
 
 // InstallOptions represents the options for app installation
 type InstallOptions struct {
-	App          string  `json:"appName,omitempty"`
-	Dev          bool    `json:"devMode,omitempty"`
-	RepoUrl      string  `json:"repoUrl,omitempty"`
-	CfgUrl       string  `json:"cfgUrl,omitempty"`
-	Version      string  `json:"version,omitempty"`
-	Source       string  `json:"source,omitempty"`
-	User         string  `json:"x_market_user,omitempty"`
-	MarketSource string  `json:"x_market_source,omitempty"`
-	Images       []Image `json:"images,omitempty"`
+	App          string      `json:"appName,omitempty"`
+	Dev          bool        `json:"devMode,omitempty"`
+	RepoUrl      string      `json:"repoUrl,omitempty"`
+	CfgUrl       string      `json:"cfgUrl,omitempty"`
+	Version      string      `json:"version,omitempty"`
+	Source       string      `json:"source,omitempty"`
+	User         string      `json:"x_market_user,omitempty"`
+	MarketSource string      `json:"x_market_source,omitempty"`
+	Images       []Image     `json:"images,omitempty"`
+	Envs         []AppEnvVar `json:"envs"`
+}
+
+type AppEnvVar struct {
+	EnvName string `json:"envName" yaml:"envName" validate:"required"`
+	Value   string `json:"value,omitempty" yaml:"value,omitempty"`
 }
 
 type Image struct {
@@ -111,12 +117,20 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
 
+	// Get envs from metadata
+	var envs []AppEnvVar
+	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
+		envs, _ = envsData.([]AppEnvVar)
+		log.Printf("Retrieved %d environment variables for task: %s", len(envs), task.ID)
+	}
+
 	installInfo := &InstallOptions{
 		RepoUrl:      getRepoUrl(),
 		Source:       apiSource, // Use converted API source
 		User:         user,
 		MarketSource: appSource,
 		Images:       task.Metadata["images"].([]Image),
+		Envs:         envs,
 	}
 	ms, err := json.Marshal(installInfo)
 	if err != nil {
