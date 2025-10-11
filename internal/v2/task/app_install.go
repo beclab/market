@@ -13,15 +13,21 @@ import (
 
 // InstallOptions represents the options for app installation
 type InstallOptions struct {
-	App          string  `json:"appName,omitempty"`
-	Dev          bool    `json:"devMode,omitempty"`
-	RepoUrl      string  `json:"repoUrl,omitempty"`
-	CfgUrl       string  `json:"cfgUrl,omitempty"`
-	Version      string  `json:"version,omitempty"`
-	Source       string  `json:"source,omitempty"`
-	User         string  `json:"x_market_user,omitempty"`
-	MarketSource string  `json:"x_market_source,omitempty"`
-	Images       []Image `json:"images,omitempty"`
+	App          string      `json:"appName,omitempty"`
+	Dev          bool        `json:"devMode,omitempty"`
+	RepoUrl      string      `json:"repoUrl,omitempty"`
+	CfgUrl       string      `json:"cfgUrl,omitempty"`
+	Version      string      `json:"version,omitempty"`
+	Source       string      `json:"source,omitempty"`
+	User         string      `json:"x_market_user,omitempty"`
+	MarketSource string      `json:"x_market_source,omitempty"`
+	Images       []Image     `json:"images,omitempty"`
+	Envs         []AppEnvVar `json:"envs"`
+}
+
+type AppEnvVar struct {
+	EnvName string `json:"envName" yaml:"envName" validate:"required"`
+	Value   string `json:"value,omitempty" yaml:"value,omitempty"`
 }
 
 type Image struct {
@@ -111,12 +117,20 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
 
+	// Get envs from metadata
+	var envs []AppEnvVar
+	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
+		envs, _ = envsData.([]AppEnvVar)
+		log.Printf("Retrieved %d environment variables for task: %s", len(envs), task.ID)
+	}
+
 	installInfo := &InstallOptions{
 		RepoUrl:      getRepoUrl(),
 		Source:       apiSource, // Use converted API source
 		User:         user,
 		MarketSource: appSource,
 		Images:       task.Metadata["images"].([]Image),
+		Envs:         envs,
 	}
 	ms, err := json.Marshal(installInfo)
 	if err != nil {
@@ -162,16 +176,16 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		log.Printf("Failed to parse response JSON for task %s: %v", task.ID, err)
 		// Create error result for JSON parsing failure
 		errorResult := map[string]interface{}{
-			"operation":  "install",
-			"app_name":   appName,
-			"user":       user,
-			"app_source": appSource,
-			"api_source": apiSource,
-			"cfgType":    cfgType,
-			"url":        urlStr,
-			"response":   response,
-			"error":      fmt.Sprintf("Failed to parse response JSON: %v", err),
-			"status":     "failed",
+			"operation":    "install",
+			"app_name":     appName,
+			"user":         user,
+			"app_source":   appSource,
+			"api_source":   apiSource,
+			"cfgType":      cfgType,
+			"url":          urlStr,
+			"raw_response": response,
+			"error":        fmt.Sprintf("Failed to parse response JSON: %v", err),
+			"status":       "failed",
 		}
 		errorJSON, _ := json.Marshal(errorResult)
 		return string(errorJSON), fmt.Errorf("failed to parse response JSON: %v", err)
@@ -185,71 +199,71 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 				log.Printf("Successfully extracted opID: %s for task: %s", opID, task.ID)
 			} else {
 				log.Printf("opID not found in response data for task: %s", task.ID)
-				// Create error result for missing opID
+				// Return backend response with additional context
 				errorResult := map[string]interface{}{
-					"operation":  "install",
-					"app_name":   appName,
-					"user":       user,
-					"app_source": appSource,
-					"api_source": apiSource,
-					"cfgType":    cfgType,
-					"url":        urlStr,
-					"response":   response,
-					"error":      "opID not found in response data",
-					"status":     "failed",
+					"operation":        "install",
+					"app_name":         appName,
+					"user":             user,
+					"app_source":       appSource,
+					"api_source":       apiSource,
+					"cfgType":          cfgType,
+					"url":              urlStr,
+					"backend_response": responseData,
+					"error":            "opID not found in response data",
+					"status":           "failed",
 				}
 				errorJSON, _ := json.Marshal(errorResult)
 				return string(errorJSON), fmt.Errorf("opID not found in response data")
 			}
 		} else {
 			log.Printf("Data field not found or not a map in response for task: %s", task.ID)
-			// Create error result for missing data field
+			// Return backend response with additional context
 			errorResult := map[string]interface{}{
-				"operation":  "install",
-				"app_name":   appName,
-				"user":       user,
-				"app_source": appSource,
-				"api_source": apiSource,
-				"cfgType":    cfgType,
-				"url":        urlStr,
-				"response":   response,
-				"error":      "Data field not found or not a map in response",
-				"status":     "failed",
+				"operation":        "install",
+				"app_name":         appName,
+				"user":             user,
+				"app_source":       appSource,
+				"api_source":       apiSource,
+				"cfgType":          cfgType,
+				"url":              urlStr,
+				"backend_response": responseData,
+				"error":            "Data field not found or not a map in response",
+				"status":           "failed",
 			}
 			errorJSON, _ := json.Marshal(errorResult)
 			return string(errorJSON), fmt.Errorf("data field not found or not a map in response")
 		}
 	} else {
 		log.Printf("Installation code is not 200 for task: %s, code: %v", task.ID, code)
-		// Create error result for non-200 code
+		// Return backend response with additional context
 		errorResult := map[string]interface{}{
-			"operation":  "install",
-			"app_name":   appName,
-			"user":       user,
-			"app_source": appSource,
-			"api_source": apiSource,
-			"cfgType":    cfgType,
-			"url":        urlStr,
-			"response":   response,
-			"error":      fmt.Sprintf("Installation failed with code: %v", code),
-			"status":     "failed",
+			"operation":        "install",
+			"app_name":         appName,
+			"user":             user,
+			"app_source":       appSource,
+			"api_source":       apiSource,
+			"cfgType":          cfgType,
+			"url":              urlStr,
+			"backend_response": responseData,
+			"error":            fmt.Sprintf("Installation failed with code: %v", code),
+			"status":           "failed",
 		}
 		errorJSON, _ := json.Marshal(errorResult)
 		return string(errorJSON), fmt.Errorf("installation failed with code: %v", code)
 	}
 
-	// Create success result only when everything is successful
+	// Return backend response with additional context on success
 	successResult := map[string]interface{}{
-		"operation":  "install",
-		"app_name":   appName,
-		"user":       user,
-		"app_source": appSource, // Log original app source
-		"api_source": apiSource, // Log converted API source
-		"cfgType":    cfgType,   // Log cfgType
-		"url":        urlStr,
-		"response":   response,
-		"opID":       task.OpID, // Include opID in result
-		"status":     "success",
+		"operation":        "install",
+		"app_name":         appName,
+		"user":             user,
+		"app_source":       appSource,
+		"api_source":       apiSource,
+		"cfgType":          cfgType,
+		"url":              urlStr,
+		"backend_response": responseData,
+		"opID":             task.OpID,
+		"status":           "success",
 	}
 	successJSON, _ := json.Marshal(successResult)
 	log.Printf("App installation completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))

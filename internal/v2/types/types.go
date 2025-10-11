@@ -231,10 +231,11 @@ type ApplicationInfoEntry struct {
 	RequiredCPU        string                   `json:"requiredCPU"`
 	Rating             float32                  `json:"rating"`
 	Target             string                   `json:"target"`
-	Permission         map[string]interface{}   `json:"permission"` // Using interface{} for flexibility
-	Entrances          []map[string]interface{} `json:"entrances"`  // Using interface{} for flexibility
-	Middleware         map[string]interface{}   `json:"middleware"` // Using interface{} for flexibility
-	Options            map[string]interface{}   `json:"options"`    // Using interface{} for flexibility
+	Permission         map[string]interface{}   `json:"permission"`     // Using interface{} for flexibility
+	Entrances          []map[string]interface{} `json:"entrances"`      // Using interface{} for flexibility
+	Middleware         map[string]interface{}   `json:"middleware"`     // Using interface{} for flexibility
+	Options            map[string]interface{}   `json:"options"`        // Using interface{} for flexibility
+	Envs               []map[string]interface{} `json:"envs,omitempty"` // Environment variable configurations
 
 	Submitter     string                   `json:"submitter"`
 	Doc           string                   `json:"doc"`
