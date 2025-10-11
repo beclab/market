@@ -169,17 +169,25 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		// Wait for task completion
 		<-done
 
+		// Parse taskResult to avoid nested JSON strings
+		var resultData map[string]interface{}
+		if taskResult != "" {
+			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
+				// If parsing fails, return raw result
+				log.Printf("Failed to parse task result as JSON: %v", err)
+				resultData = map[string]interface{}{
+					"raw_result": taskResult,
+				}
+			}
+		}
+
 		// Send response based on task result
 		if taskError != nil {
 			log.Printf("Synchronous installation failed for app: %s, error: %v", request.AppName, taskError)
-			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Installation failed: %v", taskError), map[string]interface{}{
-				"result": taskResult,
-			})
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Installation failed: %v", taskError), resultData)
 		} else {
 			log.Printf("Synchronous installation completed successfully for app: %s", request.AppName)
-			s.sendResponse(w, http.StatusOK, true, "App installation completed successfully", map[string]interface{}{
-				"result": taskResult,
-			})
+			s.sendResponse(w, http.StatusOK, true, "App installation completed successfully", resultData)
 		}
 		return
 	}
@@ -310,17 +318,25 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		// Wait for task completion
 		<-done
 
+		// Parse taskResult to avoid nested JSON strings
+		var resultData map[string]interface{}
+		if taskResult != "" {
+			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
+				// If parsing fails, return raw result
+				log.Printf("Failed to parse task result as JSON: %v", err)
+				resultData = map[string]interface{}{
+					"raw_result": taskResult,
+				}
+			}
+		}
+
 		// Send response based on task result
 		if taskError != nil {
 			log.Printf("Synchronous cancel installation failed for app: %s, error: %v", appName, taskError)
-			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Cancel installation failed: %v", taskError), map[string]interface{}{
-				"result": taskResult,
-			})
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Cancel installation failed: %v", taskError), resultData)
 		} else {
 			log.Printf("Synchronous cancel installation completed successfully for app: %s", appName)
-			s.sendResponse(w, http.StatusOK, true, "App installation cancellation completed successfully", map[string]interface{}{
-				"result": taskResult,
-			})
+			s.sendResponse(w, http.StatusOK, true, "App installation cancellation completed successfully", resultData)
 		}
 		return
 	}
@@ -458,17 +474,25 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		// Wait for task completion
 		<-done
 
+		// Parse taskResult to avoid nested JSON strings
+		var resultData map[string]interface{}
+		if taskResult != "" {
+			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
+				// If parsing fails, return raw result
+				log.Printf("Failed to parse task result as JSON: %v", err)
+				resultData = map[string]interface{}{
+					"raw_result": taskResult,
+				}
+			}
+		}
+
 		// Send response based on task result
 		if taskError != nil {
 			log.Printf("Synchronous uninstallation failed for app: %s, error: %v", appName, taskError)
-			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Uninstallation failed: %v", taskError), map[string]interface{}{
-				"result": taskResult,
-			})
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Uninstallation failed: %v", taskError), resultData)
 		} else {
 			log.Printf("Synchronous uninstallation completed successfully for app: %s", appName)
-			s.sendResponse(w, http.StatusOK, true, "App uninstallation completed successfully", map[string]interface{}{
-				"result": taskResult,
-			})
+			s.sendResponse(w, http.StatusOK, true, "App uninstallation completed successfully", resultData)
 		}
 		return
 	}
@@ -640,17 +664,25 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		// Wait for task completion
 		<-done
 
+		// Parse taskResult to avoid nested JSON strings
+		var resultData map[string]interface{}
+		if taskResult != "" {
+			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
+				// If parsing fails, return raw result
+				log.Printf("Failed to parse task result as JSON: %v", err)
+				resultData = map[string]interface{}{
+					"raw_result": taskResult,
+				}
+			}
+		}
+
 		// Send response based on task result
 		if taskError != nil {
 			log.Printf("Synchronous upgrade failed for app: %s, error: %v", request.AppName, taskError)
-			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Upgrade failed: %v", taskError), map[string]interface{}{
-				"result": taskResult,
-			})
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Upgrade failed: %v", taskError), resultData)
 		} else {
 			log.Printf("Synchronous upgrade completed successfully for app: %s", request.AppName)
-			s.sendResponse(w, http.StatusOK, true, "App upgrade completed successfully", map[string]interface{}{
-				"result": taskResult,
-			})
+			s.sendResponse(w, http.StatusOK, true, "App upgrade completed successfully", resultData)
 		}
 		return
 	}
