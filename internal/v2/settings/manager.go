@@ -132,16 +132,40 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 	return nil
 }
 
+// getMarketServiceURL returns the market service URL from environment variables
+// Priority: OLARES_SYSTEM_MARKET_SERVICE > MARKET_PROVIDER > SYNCER_REMOTE
+func getMarketServiceURL() string {
+	// First check OLARES_SYSTEM_MARKET_SERVICE
+	baseURL := os.Getenv("OLARES_SYSTEM_MARKET_SERVICE")
+	if baseURL != "" {
+		log.Printf("Using OLARES_SYSTEM_MARKET_SERVICE from environment: %s", baseURL)
+		return baseURL
+	}
+
+	// Then check MARKET_PROVIDER
+	baseURL = os.Getenv("MARKET_PROVIDER")
+	if baseURL != "" {
+		log.Printf("Using MARKET_PROVIDER from environment: %s", baseURL)
+		return baseURL
+	}
+
+	// Finally check SYNCER_REMOTE
+	baseURL = os.Getenv("SYNCER_REMOTE")
+	if baseURL != "" {
+		log.Printf("Using SYNCER_REMOTE from environment: %s", baseURL)
+		return baseURL
+	}
+
+	log.Printf("No market service URL found in environment variables")
+	return ""
+}
+
 // createDefaultMarketSources creates Official Market Sources from environment
 func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
-	baseURL := os.Getenv("MARKET_PROVIDER")
+	baseURL := getMarketServiceURL()
 
-	if baseURL == "" {
-		baseURL = os.Getenv("SYNCER_REMOTE")
-	}
-
-	log.Printf("Reading SYNCER_REMOTE from environment: %s", baseURL)
+	log.Printf("Market service base URL: %s", baseURL)
 
 	// Add https:// prefix if baseURL doesn't start with http:// or https://
 	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
