@@ -183,12 +183,10 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 	if !remoteSourceExists {
 		log.Println("Step 5: Adding remote source (type=remote, name=market.olares)")
 		// Get base URL from environment variables
-		baseURL := os.Getenv("MARKET_PROVIDER")
+		baseURL := getMarketServiceURL()
 		if baseURL == "" {
-			baseURL = os.Getenv("SYNCER_REMOTE")
-		}
-		if baseURL == "" {
-			baseURL = "https://appstore-server-prod.bttcdn.com"
+			log.Println("No market service base URL found in environment variables for remote market.olares. Please check OLARES_SYSTEM_MARKET_SERVICE, MARKET_PROVIDER, or SYNCER_REMOTE.")
+			return fmt.Errorf("sync market sources: missing remote market base URL in environment")
 		}
 
 		remoteSource := &ChartRepoMarketSource{

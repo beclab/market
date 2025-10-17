@@ -153,6 +153,23 @@ type Chart struct {
 	Version    string `yaml:"version"`
 }
 
+// EnvValueFrom represents the source of an environment variable value
+type EnvValueFrom struct {
+	EnvName string `yaml:"envName,omitempty"` // reference another environment variable
+}
+
+// EnvConfig represents environment variable configuration
+type EnvConfig struct {
+	EnvName       string        `yaml:"envName"`                 // environment variable name
+	Type          string        `yaml:"type,omitempty"`          // type: string, int, bool, url, etc.
+	Default       string        `yaml:"default,omitempty"`       // default value
+	Required      bool          `yaml:"required,omitempty"`      // whether required
+	Editable      bool          `yaml:"editable,omitempty"`      // whether editable
+	ApplyOnChange bool          `yaml:"applyOnChange,omitempty"` // whether to apply on change
+	Description   string        `yaml:"description,omitempty"`   // description
+	ValueFrom     *EnvValueFrom `yaml:"valueFrom,omitempty"`     // value from another source
+}
+
 // AppMetaData represents the metadata section in OlaresManifest.yaml
 type AppMetaData struct {
 	Name        string   `yaml:"name"`
@@ -196,6 +213,7 @@ type AppConfiguration struct {
 	ConfigType    string      `yaml:"olaresManifest.type"`
 	Metadata      AppMetaData `yaml:"metadata"`
 	Spec          Spec        `yaml:"spec"`
+	Envs          []EnvConfig `yaml:"envs,omitempty"` // environment variable configurations
 }
 
 // RenderResponse represents the response from render manifest API

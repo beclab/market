@@ -1373,6 +1373,7 @@ func (s *Server) createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfo
 		"metadata":       s.createSafeMetadataCopy(entry.Metadata),
 		"options":        entry.Options,
 		"entrances":      entry.Entrances,
+		"envs":           entry.Envs,
 		"versionHistory": entry.VersionHistory,
 		"subCharts":      entry.SubCharts,
 	}

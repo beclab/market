@@ -163,6 +163,21 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		}
 	}
 
+	if entry.Envs != nil {
+		safeEnvs := make([]map[string]interface{}, 0, len(entry.Envs))
+		for _, env := range entry.Envs {
+			if safeEnv := deepSafeCopy(env); safeEnv != nil {
+				safeEnvs = append(safeEnvs, safeEnv)
+			}
+		}
+		if len(safeEnvs) > 0 {
+			result["envs"] = safeEnvs
+			if _, err := json.Marshal(result); err != nil {
+				log.Printf("DEBUG: marshal envs: %v", err)
+			}
+		}
+	}
+
 	if entry.License != nil {
 		safeLicenses := make([]map[string]interface{}, 0, len(entry.License))
 		for _, license := range entry.License {

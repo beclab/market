@@ -11,12 +11,13 @@ import (
 
 // UpgradeOptions represents the options for app upgrade.
 type UpgradeOptions struct {
-	RepoUrl      string  `json:"repoUrl,omitempty"`
-	Version      string  `json:"version,omitempty"`
-	User         string  `json:"x_market_user,omitempty"`
-	Source       string  `json:"source,omitempty"`
-	MarketSource string  `json:"x_market_source,omitempty"`
-	Images       []Image `json:"images,omitempty"`
+	RepoUrl      string      `json:"repoUrl,omitempty"`
+	Version      string      `json:"version,omitempty"`
+	User         string      `json:"x_market_user,omitempty"`
+	Source       string      `json:"source,omitempty"`
+	MarketSource string      `json:"x_market_source,omitempty"`
+	Images       []Image     `json:"images,omitempty"`
+	Envs         []AppEnvVar `json:"envs"`
 }
 
 // AppUpgrade upgrades an application using the app service.
@@ -72,6 +73,13 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 
 	log.Printf("App source: %s, API source: %s: %s for task: %s", source, apiSource, task.ID)
 
+	// Get envs from metadata
+	var envs []AppEnvVar
+	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
+		envs, _ = envsData.([]AppEnvVar)
+		log.Printf("Retrieved %d environment variables for task: %s", len(envs), task.ID)
+	}
+
 	upgradeInfo := &UpgradeOptions{
 		RepoUrl:      getRepoUrl(),
 		Version:      version,
@@ -79,6 +87,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		Source:       apiSource,
 		MarketSource: source,
 		Images:       task.Metadata["images"].([]Image),
+		Envs:         envs,
 	}
 	ms, err := json.Marshal(upgradeInfo)
 	if err != nil {
