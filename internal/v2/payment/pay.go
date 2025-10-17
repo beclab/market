@@ -145,10 +145,12 @@ func (tm *TaskManager) executeTaskWorkflow(task *PaymentTask) {
 	log.Printf("Starting payment workflow for task %s:%s:%s", task.UserID, task.AppID, task.ProductID)
 
 	// Step 2.1: Change status to not_sign and send notification
-	if err := tm.stepNotifySign(task); err != nil {
-		log.Printf("Error in step 2.1 (notify sign): %v", err)
-		return
-	}
+	// if err := tm.stepNotifySign(task); err != nil {
+	// 	log.Printf("Error in step 2.1 (notify sign): %v", err)
+	// 	return
+	// }
+
+	globalTaskManager.stepNotifyPaymentRequired(task)
 
 	// Wait for signature submission (this will be handled by ProcessSignatureSubmission)
 	log.Printf("Task workflow started, waiting for signature submission for task %s:%s:%s",
