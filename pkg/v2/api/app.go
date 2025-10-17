@@ -1976,11 +1976,16 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	s.sendResponse(w, http.StatusOK, true, "App deleted successfully from upload source", responseData)
 }
 
-// getAppPaymentStatus handles GET /api/v2/apps/{id}/payment-status
+// getAppPaymentStatus handles GET /api/v2/sources/{source}/apps/{id}/payment-status
+// Path parameters:
+//   - source: specific source name to search app (required)
+//   - id: app ID (required)
 func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["id"]
-	log.Printf("GET /api/v2/apps/%s/payment-status - Getting app payment status", appID)
+	source := vars["source"]
+
+	log.Printf("GET /api/v2/sources/%s/apps/%s/payment-status - Getting app payment status", source, appID)
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
@@ -2007,11 +2012,11 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Find app in all sources
-	foundApp, sourceID := s.findAppInUserData(userData, appID)
+	// Step 4: Find app in specified source
+	foundApp, sourceID := s.findAppInUserDataWithSource(userData, appID, source)
 	if foundApp == nil {
-		log.Printf("App not found: %s for user: %s", appID, userID)
-		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
+		log.Printf("App not found: %s in source: %s for user: %s", appID, source, userID)
+		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("App not found in source '%s'", source), nil)
 		return
 	}
 
@@ -2028,6 +2033,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	// Step 6: Prepare response
 	responseData := map[string]interface{}{
 		"app_id":  appID,
+		"source":  sourceID,
 		"is_paid": result.IsPaid,
 		"status":  result.Status,
 		"message": result.Message,
@@ -2037,13 +2043,87 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 		responseData["payment_error"] = result.PaymentError
 	}
 
-	log.Printf("App payment status retrieved successfully for app: %s, user: %s, status: %s", appID, userID, result.Status)
+	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s", appID, sourceID, userID, result.Status)
 	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
 }
 
-// findAppInUserData finds an app in user data by app ID
+// getAppPaymentStatusLegacy handles GET /api/v2/apps/{id}/payment-status (legacy route)
+// This route is kept for backward compatibility and searches all sources
+func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+
+	log.Printf("GET /api/v2/apps/%s/payment-status - Getting app payment status (legacy, searching all sources)", appID)
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for payment status request: %s", userID)
+
+	// Step 2: Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Printf("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Step 3: Get user data from cache
+	userData := s.cacheManager.GetUserData(userID)
+	if userData == nil {
+		log.Printf("User data not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+		return
+	}
+
+	// Step 4: Find app in all sources (legacy behavior)
+	foundApp, sourceID := s.findAppInUserData(userData, appID)
+	if foundApp == nil {
+		log.Printf("App not found: %s for user: %s", appID, userID)
+		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
+		return
+	}
+
+	log.Printf("Found app: %s in source: %s for user: %s (legacy search)", appID, sourceID, userID)
+
+	// Step 5: Process payment status using payment module
+	result, err := payment.ProcessAppPaymentStatus(userID, appID, foundApp.AppInfo)
+	if err != nil {
+		log.Printf("Failed to process payment status: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
+		return
+	}
+
+	// Step 6: Prepare response
+	responseData := map[string]interface{}{
+		"app_id":  appID,
+		"source":  sourceID,
+		"is_paid": result.IsPaid,
+		"status":  result.Status,
+		"message": result.Message,
+	}
+
+	if result.PaymentError != "" {
+		responseData["payment_error"] = result.PaymentError
+	}
+
+	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s (legacy)", appID, sourceID, userID, result.Status)
+	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
+}
+
+// findAppInUserData finds an app in user data by app ID (searches all sources)
 func (s *Server) findAppInUserData(userData *types.UserData, appID string) (*types.AppInfoLatestData, string) {
 	return utils.FindAppInUserData(userData, appID)
+}
+
+// findAppInUserDataWithSource finds an app in user data by app ID and specific source
+// If source is empty, it searches all sources
+func (s *Server) findAppInUserDataWithSource(userData *types.UserData, appID string, source string) (*types.AppInfoLatestData, string) {
+	return utils.FindAppInUserDataWithSource(userData, appID, source)
 }
 
 // startPaymentPolling handles POST /api/v2/payment/start-polling

@@ -181,8 +181,13 @@ func (s *Server) setupRoutes() {
 	log.Printf("Route configured: POST /app-store/api/v2/payment/submit-signature")
 
 	// 24. Check app payment status
-	api.HandleFunc("/apps/{id}/payment-status", s.getAppPaymentStatus).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/payment-status")
+	// New route with source parameter (recommended)
+	api.HandleFunc("/sources/{source}/apps/{id}/payment-status", s.getAppPaymentStatus).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/sources/{source}/apps/{id}/payment-status")
+
+	// Legacy route for backward compatibility (searches all sources)
+	api.HandleFunc("/apps/{id}/payment-status", s.getAppPaymentStatusLegacy).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/payment-status (legacy)")
 
 	// 25. Start payment polling after frontend payment completion
 	api.HandleFunc("/payment/start-polling", s.startPaymentPolling).Methods("POST")

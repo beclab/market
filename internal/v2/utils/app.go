@@ -84,3 +84,28 @@ func CheckAppExistsInUserData(userData *types.UserData, appID string) bool {
 	app, _ := FindAppInUserData(userData, appID)
 	return app != nil
 }
+
+// FindAppInUserDataWithSource finds an app in user data by app ID and specific source
+// If source is empty, it searches all sources (same behavior as FindAppInUserData)
+func FindAppInUserDataWithSource(userData *types.UserData, appID string, source string) (*types.AppInfoLatestData, string) {
+	if userData == nil {
+		return nil, ""
+	}
+
+	// If source is specified, only search in that source
+	if source != "" {
+		sourceData, exists := userData.Sources[source]
+		if !exists {
+			return nil, ""
+		}
+
+		app := FindAppInSourceData(sourceData, appID)
+		if app != nil {
+			return app, source
+		}
+		return nil, ""
+	}
+
+	// If source is not specified, search all sources (fallback to original behavior)
+	return FindAppInUserData(userData, appID)
+}
