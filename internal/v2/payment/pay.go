@@ -89,7 +89,7 @@ func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, developerName, 
 	log.Printf("Created new payment task for key %s", key)
 
 	// Start the task workflow
-	go tm.executeTaskWorkflow(task)
+	// go tm.executeTaskWorkflow(task)
 
 	return task, nil
 }
@@ -430,6 +430,8 @@ func StartPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
 		log.Printf("Error creating payment task: %v", err)
 		return fmt.Errorf("failed to create payment task: %w", err)
 	}
+
+	go globalTaskManager.executeTaskWorkflow(task)
 
 	log.Printf("Payment task created/retrieved: %s:%s:%s, status: %s",
 		task.UserID, task.AppID, task.ProductID, task.Status)
