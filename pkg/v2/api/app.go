@@ -1533,6 +1533,16 @@ func (s *Server) createSafeAppInfoCopy(appInfo *types.AppInfo) map[string]interf
 		safeCopy["image_analysis"] = imageAnalysisCopy
 	}
 
+	// Include Price information if it exists
+	if appInfo.Price != nil {
+		safeCopy["price"] = appInfo.Price
+	}
+
+	// Include PurchaseInfo if it exists
+	if appInfo.PurchaseInfo != nil {
+		safeCopy["purchase_info"] = appInfo.PurchaseInfo
+	}
+
 	return safeCopy
 }
 
