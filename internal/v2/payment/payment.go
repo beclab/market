@@ -582,7 +582,7 @@ func NotifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 	// Create the sign notification update
 	update := types.SignNotificationUpdate{
 		Sign: types.SignNotificationData{
-			CallbackURL: fmt.Sprintf("https://market.%s/app-store/api/v2/payment/submit-signature", userID),
+			CallbackURL: fmt.Sprintf("https://market.%s.olares.cn/app-store/api/v2/payment/submit-signature", userID),
 			SignBody:    signBody,
 		},
 		User:  userID,
