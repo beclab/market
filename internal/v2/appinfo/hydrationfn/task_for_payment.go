@@ -73,7 +73,9 @@ func (s *TaskForPaymentStep) Execute(ctx context.Context, task *HydrationTask) e
 	if appNameForKey == "" {
 		appNameForKey = task.AppName
 	}
-	key := payment.RedisPurchaseKey(task.UserID, devNameForKey, appNameForKey, "NonConsumable")
+	// Get product ID from app price information
+	productID := payment.GetProductIDFromAppInfo(pending.AppInfo)
+	key := payment.RedisPurchaseKey(task.UserID, devNameForKey, appNameForKey, productID)
 	pi, err := payment.GetPurchaseInfoFromRedis(task.SettingsManager, key)
 	if err != nil {
 		// If there is no purchase record, it is not considered an error, only recorded

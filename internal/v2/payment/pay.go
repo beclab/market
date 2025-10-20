@@ -390,6 +390,33 @@ func (tm *TaskManager) CleanupCompletedTasks(olderThan time.Duration) {
 	}
 }
 
+// GetProductIDFromAppInfo extracts the product ID from app price information
+// Returns the product_id from the first AcceptedCurrency, or empty string if not found
+func GetProductIDFromAppInfo(appInfo *types.AppInfo) string {
+	// Check if price info exists
+	if appInfo == nil || appInfo.Price == nil {
+		log.Printf("GetProductIDFromAppInfo: No price info available, returning empty string")
+		return ""
+	}
+
+	// Check if AcceptedCurrencies exists and is not empty
+	acceptedCurrencies := appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies
+	if len(acceptedCurrencies) == 0 {
+		log.Printf("GetProductIDFromAppInfo: No accepted currencies found, returning empty string")
+		return ""
+	}
+
+	// Get product ID from the first accepted currency
+	productID := acceptedCurrencies[0].ProductID
+	if productID == "" {
+		log.Printf("GetProductIDFromAppInfo: Empty product_id in first accepted currency, returning empty string")
+		return ""
+	}
+
+	log.Printf("GetProductIDFromAppInfo: Found product_id: %s", productID)
+	return productID
+}
+
 // StartPaymentProcess starts the payment process for a new purchase
 func StartPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo) error {
 	log.Printf("=== Pay Module Starting Payment Process ===")
@@ -423,9 +450,8 @@ func StartPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo)
 		appName = appInfo.AppEntry.Name
 	}
 
-	// Use a default product ID if not specified
-	productID := "NonConsumable" // Default product ID
-	// Note: PriceConfig doesn't have ProductID field, using default
+	// Get product ID from app price information
+	productID := GetProductIDFromAppInfo(appInfo)
 
 	// Create or get existing payment task
 	task, err := globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName, sourceID)
@@ -470,9 +496,8 @@ func RetryPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo)
 		return fmt.Errorf("developer name not found in app info")
 	}
 
-	// Use a default product ID if not specified
-	productID := "NonConsumable" // Default product ID
-	// Note: PriceConfig doesn't have ProductID field, using default
+	// Get product ID from app price information
+	productID := GetProductIDFromAppInfo(appInfo)
 
 	// Check if task exists
 	task, exists := globalTaskManager.GetTask(userID, appID, productID)
@@ -753,7 +778,6 @@ func createTaskFromCache(userID, sourceID, appID, txHash string, systemChainID i
 	}
 
 	// Try to derive app basic info using Redis-stored app info if available later (not modifying cache manager)
-	productID := "NonConsumable" // Default product ID
 	appName := appID
 	developerName := ""
 
@@ -781,6 +805,15 @@ func createTaskFromCache(userID, sourceID, appID, txHash string, systemChainID i
 	// No direct cache access here; app info should be provided by caller (API layer)
 	if developerName == "" {
 		developerName = "unknown"
+	}
+
+	// Get product ID from app price information
+	var productID string
+	if appInfoLatest != nil && appInfoLatest.AppInfo != nil {
+		productID = GetProductIDFromAppInfo(appInfoLatest.AppInfo)
+	} else {
+		productID = "" // Empty string if no app info available
+		log.Printf("createTaskFromCache: No app info available, product ID will be empty string")
 	}
 
 	// Create a new task with minimal information
