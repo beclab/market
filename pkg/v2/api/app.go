@@ -2166,38 +2166,35 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Validate required fields (only user_id and app_id)
-	if request.UserID == "" || request.AppID == "" {
+	// Step 3: Validate required fields (source_id, app_id, tx_hash, system_chain_id)
+	if request.SourceID == "" || request.AppID == "" || request.TxHash == "" || request.SystemChainID == 0 {
 		log.Printf("Missing required fields in payment polling request")
-		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: user_id, app_id", nil)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source_id, app_id, tx_hash, system_chain_id", nil)
 		return
 	}
 
-	// Step 4: Validate user ID matches request
-	if request.UserID != userID {
-		log.Printf("User ID mismatch: request %s vs authenticated %s", request.UserID, userID)
-		s.sendResponse(w, http.StatusBadRequest, false, "User ID mismatch", nil)
-		return
-	}
-
-	log.Printf("Received payment polling request for user: %s, app: %s",
-		request.UserID, request.AppID)
+	log.Printf("Received payment polling request for user: %s, source: %s, app: %s, tx_hash: %s, system_chain_id: %d",
+		userID, request.SourceID, request.AppID, request.TxHash, request.SystemChainID)
 
 	// Derive AppInfoLatest from cache
 	var appInfoLatest *types.AppInfoLatestData
 	if s.cacheManager != nil {
 		userData := s.cacheManager.GetUserData(userID)
 		if userData != nil {
-			if app, _ := s.findAppInUserData(userData, request.AppID); app != nil {
+			// Find app in the specified source
+			if app, _ := s.findAppInUserDataWithSource(userData, request.AppID, request.SourceID); app != nil {
 				appInfoLatest = app
 			}
 		}
 	}
 
-	// Step 5: Start payment polling (with app info)
+	// Step 5: Start payment polling (with app info, tx_hash, and system_chain_id)
 	if err := payment.StartPaymentPolling(
-		request.UserID,
+		userID,
+		request.SourceID,
 		request.AppID,
+		request.TxHash,
+		request.SystemChainID,
 		appInfoLatest,
 	); err != nil {
 		log.Printf("Failed to start payment polling: %v", err)
@@ -2212,6 +2209,6 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 		Status:  "polling",
 	}
 
-	log.Printf("Payment polling started successfully for user: %s, app: %s", request.UserID, request.AppID)
+	log.Printf("Payment polling started successfully for user: %s, source: %s, app: %s", userID, request.SourceID, request.AppID)
 	s.sendResponse(w, http.StatusOK, true, "Payment polling started successfully", response)
 }

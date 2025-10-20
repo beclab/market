@@ -549,7 +549,7 @@ func ProcessSignatureSubmission(jws, signBody, user string) error {
 }
 
 // NotifyLarePassToSign sends a sign notification to the client via NATS
-func NotifyLarePassToSign(dataSender DataSenderInterface, signBody, user string) error {
+func NotifyLarePassToSign(dataSender DataSenderInterface, userID, appID, productID, txHash string, systemChainID int) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
 	}
@@ -560,15 +560,32 @@ func NotifyLarePassToSign(dataSender DataSenderInterface, signBody, user string)
 		return fmt.Errorf("failed to parse manifest JSON: %w", err)
 	}
 
+	// Build SignBody - start with ProductCredentialManifest
+	signBody := map[string]interface{}{
+		"ProductCredentialManifest": manifestData,
+	}
+
+	// Only add application_verifiable_credential if all required fields are present
+	if productID != "" && txHash != "" && systemChainID != 0 {
+		appVerifiableCredential := map[string]interface{}{
+			"productId":     productID,
+			"systemChainId": systemChainID,
+			"txHash":        txHash,
+		}
+		signBody["application_verifiable_credential"] = appVerifiableCredential
+		log.Printf("Including application_verifiable_credential in sign notification for user %s, app %s", userID, appID)
+	} else {
+		log.Printf("Skipping application_verifiable_credential for user %s, app %s (productID: %s, txHash: %s, systemChainID: %d)",
+			userID, appID, productID, txHash, systemChainID)
+	}
+
 	// Create the sign notification update
 	update := types.SignNotificationUpdate{
 		Sign: types.SignNotificationData{
-			CallbackURL: fmt.Sprintf("https://market.%s/app-store/api/v2/payment/submit-signature", user),
-			SignBody: map[string]interface{}{
-				"ProductCredentialManifest": manifestData,
-			},
+			CallbackURL: fmt.Sprintf("https://market.%s/app-store/api/v2/payment/submit-signature", userID),
+			SignBody:    signBody,
 		},
-		User:  user,
+		User:  userID,
 		Vars:  make(map[string]string),
 		Topic: "market_payment",
 	}

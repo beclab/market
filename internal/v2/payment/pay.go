@@ -34,6 +34,8 @@ type PaymentTask struct {
 	SignBody      string     `json:"sign_body,omitempty"`
 	DeveloperName string     `json:"developer_name,omitempty"`
 	VC            string     `json:"vc,omitempty"`
+	TxHash        string     `json:"tx_hash,omitempty"`
+	SystemChainID int        `json:"system_chain_id,omitempty"`
 }
 
 // TaskManager manages payment tasks with unique key constraint
@@ -166,11 +168,8 @@ func (tm *TaskManager) stepNotifySign(task *PaymentTask) error {
 		return fmt.Errorf("failed to update task status to not_sign: %w", err)
 	}
 
-	// Call NotifyLarePassToSign
-	signBody := fmt.Sprintf(`{"user_id":"%s","app_id":"%s","product_id":"%s"}`,
-		task.UserID, task.AppID, task.ProductID)
-
-	if err := NotifyLarePassToSign(tm.dataSender, signBody, task.UserID); err != nil {
+	// Call NotifyLarePassToSign with application_verifiable_credential
+	if err := NotifyLarePassToSign(tm.dataSender, task.UserID, task.AppID, task.ProductID, task.TxHash, task.SystemChainID); err != nil {
 		return fmt.Errorf("failed to notify LarePass to sign: %w", err)
 	}
 
@@ -513,8 +512,10 @@ func RetryPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo)
 
 // PaymentPollingRequest represents the request for payment polling
 type PaymentPollingRequest struct {
-	UserID string `json:"user_id"`
-	AppID  string `json:"app_id"`
+	SourceID      string `json:"source_id"`
+	AppID         string `json:"app_id"`
+	TxHash        string `json:"tx_hash"`
+	SystemChainID int    `json:"system_chain_id"`
 }
 
 // PaymentPollingResponse represents the response for payment polling
@@ -526,10 +527,13 @@ type PaymentPollingResponse struct {
 
 // StartPaymentPolling starts polling for VC after payment completion
 // appName and developerName are provided by caller (queried from cache in API layer)
-func StartPaymentPolling(userID, appID string, appInfoLatest *types.AppInfoLatestData) error {
+func StartPaymentPolling(userID, sourceID, appID, txHash string, systemChainID int, appInfoLatest *types.AppInfoLatestData) error {
 	log.Printf("=== Starting Payment Polling ===")
 	log.Printf("User ID: %s", userID)
+	log.Printf("Source ID: %s", sourceID)
 	log.Printf("App ID: %s", appID)
+	log.Printf("TxHash: %s", txHash)
+	log.Printf("SystemChainID: %d", systemChainID)
 	if appInfoLatest != nil && appInfoLatest.RawData != nil {
 		if appInfoLatest.RawData.Name != "" {
 			log.Printf("App Name: %s", appInfoLatest.RawData.Name)
@@ -551,12 +555,19 @@ func StartPaymentPolling(userID, appID string, appInfoLatest *types.AppInfoLates
 		log.Printf("No existing task found for user %s app %s, creating new task from provided appInfoLatest", userID, appID)
 
 		// Try to create a new task using provided app info
-		newTask, err := createTaskFromCache(userID, appID, appInfoLatest)
+		newTask, err := createTaskFromCache(userID, sourceID, appID, txHash, systemChainID, appInfoLatest)
 		if err != nil {
 			log.Printf("Failed to create task from cache: %v", err)
 			return fmt.Errorf("no payment task found and failed to create from cache: %w", err)
 		}
 		task = newTask
+	} else {
+		// Update existing task with sourceID, txHash and systemChainID
+		task.SourceID = sourceID
+		task.TxHash = txHash
+		task.SystemChainID = systemChainID
+		task.UpdatedAt = time.Now()
+		log.Printf("Updated existing task with sourceID, txHash and systemChainID")
 	}
 
 	// Snapshot needed fields to avoid race
@@ -683,6 +694,15 @@ func notifySignatureRequired(userID, appID, productID, developerName string) {
 		return
 	}
 
+	// Try to find existing task to get txHash and systemChainID
+	existingTask := globalTaskManager.findTaskByUserApp(userID, appID)
+	var txHash string
+	var systemChainID int
+	if existingTask != nil {
+		txHash = existingTask.TxHash
+		systemChainID = existingTask.SystemChainID
+	}
+
 	// Create a temporary task for notification
 	task := &PaymentTask{
 		UserID:        userID,
@@ -692,6 +712,8 @@ func notifySignatureRequired(userID, appID, productID, developerName string) {
 		Status:        TaskStatusNotSign,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
+		TxHash:        txHash,
+		SystemChainID: systemChainID,
 	}
 
 	// Send signature required notification (trigger payment flow again)
@@ -725,7 +747,7 @@ func notifyPollingTimeout(userID, appID, productID, developerName string) {
 }
 
 // createTaskFromCache creates a new payment task from cache data
-func createTaskFromCache(userID, appID string, appInfoLatest *types.AppInfoLatestData) (*PaymentTask, error) {
+func createTaskFromCache(userID, sourceID, appID, txHash string, systemChainID int, appInfoLatest *types.AppInfoLatestData) (*PaymentTask, error) {
 	if globalTaskManager == nil {
 		return nil, fmt.Errorf("task manager not initialized")
 	}
@@ -767,12 +789,15 @@ func createTaskFromCache(userID, appID string, appInfoLatest *types.AppInfoLates
 		UserID:        userID,
 		AppID:         appID,
 		AppName:       appName,
+		SourceID:      sourceID,
 		ProductID:     productID,
 		Status:        TaskStatusNotPay, // Assume payment was completed, waiting for VC
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 		DeveloperName: developerName,
 		JWS:           "", // Will try to load from Redis below
+		TxHash:        txHash,
+		SystemChainID: systemChainID,
 	}
 
 	// Try loading JWS from Redis if available
