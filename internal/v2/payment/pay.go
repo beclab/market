@@ -719,30 +719,55 @@ func notifySignatureRequired(userID, appID, productID, developerName string) {
 		return
 	}
 
-	// Try to find existing task to get txHash and systemChainID
+	// Try to find existing task first
 	existingTask := globalTaskManager.findTaskByUserApp(userID, appID)
-	var txHash string
-	var systemChainID int
+
+	var task *PaymentTask
 	if existingTask != nil {
-		txHash = existingTask.TxHash
-		systemChainID = existingTask.SystemChainID
+		// Use existing task (it already has txHash and systemChainID from StartPaymentPolling)
+		task = existingTask
+		log.Printf("Found existing task for user %s, app %s", userID, appID)
+	} else {
+		// Create new task and add to map
+		if !globalTaskManager.mu.TryLock() {
+			log.Printf("Failed to acquire lock to create task for signature notification")
+			return
+		}
+
+		// Double-check after acquiring lock
+		key := globalTaskManager.generateKey(userID, appID, productID)
+		if existingTaskInMap, exists := globalTaskManager.tasks[key]; exists {
+			task = existingTaskInMap
+			globalTaskManager.mu.Unlock()
+			log.Printf("Task already exists in map for key %s", key)
+		} else {
+			// Create new task
+			task = &PaymentTask{
+				UserID:        userID,
+				AppID:         appID,
+				ProductID:     productID,
+				DeveloperName: developerName,
+				Status:        TaskStatusNotSign,
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+			}
+
+			// Add to map
+			globalTaskManager.tasks[key] = task
+			globalTaskManager.mu.Unlock()
+			log.Printf("Created new task in map for key %s", key)
+		}
 	}
 
-	// Create a temporary task for notification
-	task := &PaymentTask{
-		UserID:        userID,
-		AppID:         appID,
-		ProductID:     productID,
-		DeveloperName: developerName,
-		Status:        TaskStatusNotSign,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
-		TxHash:        txHash,
-		SystemChainID: systemChainID,
+	log.Printf("Notifying signature required for user %s, app %s, product %s", userID, appID, productID)
+
+	// Send signature required notification using stepNotifySign
+	if err := globalTaskManager.stepNotifySign(task); err != nil {
+		log.Printf("Error in stepNotifySign for user %s, app %s: %v", userID, appID, err)
+		return
 	}
 
-	// Send signature required notification (trigger payment flow again)
-	globalTaskManager.stepNotifySign(task)
+	log.Printf("Signature required notification sent successfully for user %s, app %s", userID, appID)
 }
 
 // notifyPollingTimeout notifies frontend about polling timeout error
