@@ -2033,7 +2033,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := payment.ProcessAppPaymentStatus(userID, appID, foundApp.AppInfo)
+	result, err := payment.ProcessAppPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
@@ -2101,7 +2101,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	log.Printf("Found app: %s in source: %s for user: %s (legacy search)", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := payment.ProcessAppPaymentStatus(userID, appID, foundApp.AppInfo)
+	result, err := payment.ProcessAppPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)

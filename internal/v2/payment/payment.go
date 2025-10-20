@@ -509,11 +509,11 @@ func GetTaskManager() *TaskManager {
 }
 
 // CreatePaymentTask creates a new payment task or returns existing one
-func CreatePaymentTask(userID, appID, productID, developerName, appName string) (*PaymentTask, error) {
+func CreatePaymentTask(userID, appID, productID, developerName, appName, sourceID string) (*PaymentTask, error) {
 	if globalTaskManager == nil {
 		return nil, errors.New("task manager not initialized")
 	}
-	return globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName)
+	return globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName, sourceID)
 }
 
 // GetPaymentTaskStatus returns the status of a payment task
@@ -651,8 +651,8 @@ type PaymentStatusResult struct {
 }
 
 // ProcessAppPaymentStatus handles the complete payment status check and processing
-func ProcessAppPaymentStatus(userID, appID string, appInfo *types.AppInfo) (*PaymentStatusResult, error) {
-	log.Printf("Processing payment status for user: %s, app: %s", userID, appID)
+func ProcessAppPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*PaymentStatusResult, error) {
+	log.Printf("Processing payment status for user: %s, app: %s, source: %s", userID, appID, sourceID)
 
 	// Step 1: Check if app is paid app
 	isPaidApp, err := CheckIfAppIsPaid(appInfo)
@@ -695,7 +695,7 @@ func ProcessAppPaymentStatus(userID, appID string, appInfo *types.AppInfo) (*Pay
 		result.Message = "Starting payment flow"
 
 		// Start payment process directly
-		if err := StartPaymentProcess(userID, appID, appInfo); err != nil {
+		if err := StartPaymentProcess(userID, appID, sourceID, appInfo); err != nil {
 			log.Printf("Failed to start payment process: %v", err)
 			result.PaymentError = err.Error()
 		}
@@ -705,7 +705,7 @@ func ProcessAppPaymentStatus(userID, appID string, appInfo *types.AppInfo) (*Pay
 		result.Message = "Payment signature missing, retrying payment flow"
 
 		// Retry payment process directly
-		if err := RetryPaymentProcess(userID, appID, appInfo); err != nil {
+		if err := RetryPaymentProcess(userID, appID, sourceID, appInfo); err != nil {
 			log.Printf("Failed to retry payment process: %v", err)
 			result.PaymentError = err.Error()
 		}
@@ -715,7 +715,7 @@ func ProcessAppPaymentStatus(userID, appID string, appInfo *types.AppInfo) (*Pay
 		result.Message = "Payment not completed, retrying payment flow"
 
 		// Retry payment process directly
-		if err := RetryPaymentProcess(userID, appID, appInfo); err != nil {
+		if err := RetryPaymentProcess(userID, appID, sourceID, appInfo); err != nil {
 			log.Printf("Failed to retry payment process: %v", err)
 			result.PaymentError = err.Error()
 		}

@@ -25,6 +25,7 @@ type PaymentTask struct {
 	UserID        string     `json:"user_id"`
 	AppID         string     `json:"app_id"`
 	AppName       string     `json:"app_name,omitempty"`
+	SourceID      string     `json:"source_id,omitempty"` // Add source_id field
 	ProductID     string     `json:"product_id"`
 	Status        TaskStatus `json:"status"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -58,7 +59,7 @@ func (tm *TaskManager) generateKey(userID, appID, productID string) string {
 }
 
 // CreateOrGetTask creates a new task or returns existing one
-func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, developerName, appName string) (*PaymentTask, error) {
+func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, developerName, appName, sourceID string) (*PaymentTask, error) {
 	// Try to acquire lock with timeout
 	if !tm.mu.TryLock() {
 		return nil, fmt.Errorf("failed to acquire lock, task manager is busy")
@@ -78,6 +79,7 @@ func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, developerName, 
 		UserID:        userID,
 		AppID:         appID,
 		AppName:       appName,
+		SourceID:      sourceID, // Add source_id
 		ProductID:     productID,
 		Status:        TaskStatusNotSign,
 		CreatedAt:     time.Now(),
@@ -262,8 +264,9 @@ func (tm *TaskManager) stepNotifyPaymentRequired(task *PaymentTask) {
 		Timestamp:  time.Now().Unix(),
 		NotifyType: "payment_required",
 		Extensions: map[string]string{
-			"app_id":   task.AppID,
-			"app_name": task.AppName,
+			"app_id":    task.AppID,
+			"app_name":  task.AppName,
+			"source_id": task.SourceID, // Add source_id to notification
 		},
 		ExtensionsObj: map[string]interface{}{
 			"payment_data": paymentData,
@@ -290,8 +293,9 @@ func (tm *TaskManager) stepNotifyPurchased(task *PaymentTask) {
 		Timestamp:  time.Now().Unix(),
 		NotifyType: "purchase_completed",
 		Extensions: map[string]string{
-			"app_id":   task.AppID,
-			"app_name": task.AppName,
+			"app_id":    task.AppID,
+			"app_name":  task.AppName,
+			"source_id": task.SourceID, // Add source_id to notification
 		},
 	}
 
@@ -388,7 +392,7 @@ func (tm *TaskManager) CleanupCompletedTasks(olderThan time.Duration) {
 }
 
 // StartPaymentProcess starts the payment process for a new purchase
-func StartPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
+func StartPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo) error {
 	log.Printf("=== Pay Module Starting Payment Process ===")
 	log.Printf("User ID: %s", userID)
 	log.Printf("App ID: %s", appID)
@@ -425,7 +429,7 @@ func StartPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
 	// Note: PriceConfig doesn't have ProductID field, using default
 
 	// Create or get existing payment task
-	task, err := globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName)
+	task, err := globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName, sourceID)
 	if err != nil {
 		log.Printf("Error creating payment task: %v", err)
 		return fmt.Errorf("failed to create payment task: %w", err)
@@ -441,7 +445,7 @@ func StartPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
 }
 
 // RetryPaymentProcess retries the payment process for existing purchase attempts
-func RetryPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
+func RetryPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo) error {
 	log.Printf("=== Pay Module Retrying Payment Process ===")
 	log.Printf("User ID: %s", userID)
 	log.Printf("App ID: %s", appID)
@@ -476,7 +480,7 @@ func RetryPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
 	if !exists {
 		log.Printf("No existing task found for retry, creating new task")
 		// Create new task if none exists
-		return StartPaymentProcess(userID, appID, appInfo)
+		return StartPaymentProcess(userID, appID, sourceID, appInfo)
 	}
 
 	// Check task status and decide retry strategy
