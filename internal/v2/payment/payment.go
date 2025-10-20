@@ -562,7 +562,7 @@ func NotifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 
 	// Build SignBody - start with ProductCredentialManifest
 	signBody := map[string]interface{}{
-		"ProductCredentialManifest": manifestData,
+		"product_credential_manifest": manifestData,
 	}
 
 	// Only add application_verifiable_credential if all required fields are present
