@@ -305,6 +305,10 @@ func GetUserZone(username string) (string, error) {
 		return "", fmt.Errorf("failed to create users list request: %w", err)
 	}
 
+	// Add X-Bfl-User header
+	req.Header.Set("X-Bfl-User", username)
+	glog.Infof("Requesting users list with X-Bfl-User header: %s", username)
+
 	// Execute request
 	resp, err := client.Do(req)
 	if err != nil {
