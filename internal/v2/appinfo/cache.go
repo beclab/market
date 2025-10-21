@@ -250,16 +250,25 @@ func (cm *CacheManager) Start() error {
 		cm.mutex.Lock()
 		glog.Infof("[LOCK] cm.mutex.Lock() @102 Success (wait=%v)", time.Since(lockStart))
 		_wd := cm.startLockWatchdog("@102:initUsers")
+		newUsers := make([]string, 0)
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.Infof("Creating data structure for new user: %s", userID)
 				cm.cache.Users[userID] = NewUserData()
+				newUsers = append(newUsers, userID)
 			}
 		}
 		cm.mutex.Unlock()
 		_wd()
 
 		glog.Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
+
+		// Update zone for newly created users
+		for _, userID := range newUsers {
+			if userData, exists := cm.cache.Users[userID]; exists {
+				cm.updateUserZone(userID, userData)
+			}
+		}
 	}
 
 	glog.Infof("[LOCK] cm.mutex.Lock() @114 Start")
@@ -516,6 +525,10 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	}
 	pendingNotifications := make([]pendingNotify, 0, 8)
 
+	// Track if a new user was created
+	var newUserCreated bool
+	var newUserData *types.UserData
+
 	defer func() {
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
@@ -526,6 +539,11 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			case <-watchdogFired:
 			default:
 			}
+		}
+
+		// Update zone for newly created user
+		if newUserCreated && newUserData != nil {
+			cm.updateUserZone(userID, newUserData)
 		}
 
 		// Send notifications after the global lock is released to avoid deadlocks
@@ -567,7 +585,9 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 	// Ensure user exists
 	if _, exists := cm.cache.Users[userID]; !exists {
-		cm.cache.Users[userID] = NewUserData()
+		newUserData = NewUserData()
+		cm.cache.Users[userID] = newUserData
+		newUserCreated = true
 	}
 
 	// Check source limit for user
@@ -878,11 +898,21 @@ func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataTyp
 	cm.updateLockStats("lock")
 	glog.Infof("[LOCK] cm.mutex.TryLock() @SetLocalAppData Success")
 	_wd := cm.startLockWatchdog("@SetLocalAppData")
+
+	// Track if a new user was created
+	var newUserCreated bool
+	var newUserData *types.UserData
+
 	defer func() {
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
 		glog.Infof("[LOCK] cm.mutex.Unlock() @SetLocalAppData End")
 		_wd()
+
+		// Update zone for newly created user
+		if newUserCreated && newUserData != nil {
+			cm.updateUserZone(userID, newUserData)
+		}
 	}()
 
 	if !cm.isRunning {
@@ -893,7 +923,9 @@ func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataTyp
 	}
 
 	if _, exists := cm.cache.Users[userID]; !exists {
-		cm.cache.Users[userID] = NewUserData()
+		newUserData = NewUserData()
+		cm.cache.Users[userID] = newUserData
+		newUserCreated = true
 	}
 	userData := cm.cache.Users[userID]
 	if _, exists := userData.Sources[sourceID]; !exists {
@@ -1050,6 +1082,9 @@ func (cm *CacheManager) addUserInternal(userID string) error {
 
 	cm.cache.Users[userID] = userData
 	glog.Infof("User %s added to cache with %d sources", userID, len(userData.Sources))
+
+	// Update zone for the newly created user
+	cm.updateUserZone(userID, userData)
 
 	if cm.isRunning {
 		cm.requestSync(SyncRequest{
@@ -1284,7 +1319,11 @@ func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) erro
 		for _, userID := range newUserConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.Infof("Creating data structure for newly configured user: %s", userID)
-				cm.cache.Users[userID] = NewUserData()
+				userData := NewUserData()
+				cm.cache.Users[userID] = userData
+
+				// Update zone for the newly created user
+				cm.updateUserZone(userID, userData)
 
 				// Trigger sync to Redis for the new user
 				if cm.isRunning {
@@ -1352,11 +1391,14 @@ func (cm *CacheManager) syncUserListToCacheInternal() error {
 	glog.Infof("Syncing user list to cache")
 
 	newUsersCount := 0
+	newUsersList := make([]string, 0)
 	for _, userID := range cm.userConfig.UserList {
 		if _, exists := cm.cache.Users[userID]; !exists {
 			glog.Infof("Adding missing user to cache: %s", userID)
-			cm.cache.Users[userID] = NewUserData()
+			userData := NewUserData()
+			cm.cache.Users[userID] = userData
 			newUsersCount++
+			newUsersList = append(newUsersList, userID)
 
 			// Trigger sync to Redis for the new user
 			if cm.isRunning {
@@ -1369,6 +1411,14 @@ func (cm *CacheManager) syncUserListToCacheInternal() error {
 	}
 
 	glog.Infof("User list sync completed, added %d new users", newUsersCount)
+
+	// Update zone for newly created users
+	for _, userID := range newUsersList {
+		if userData, exists := cm.cache.Users[userID]; exists {
+			cm.updateUserZone(userID, userData)
+		}
+	}
+
 	return nil
 }
 
@@ -2056,4 +2106,41 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	} else {
 		log.Printf("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
 	}
+}
+
+// updateUserZone updates the zone information for a specific user's UserData
+// This function should be called after creating a new UserData
+func (cm *CacheManager) updateUserZone(userID string, userData *types.UserData) {
+	// Fetch zone from app-service API in a goroutine to avoid blocking
+	go func() {
+		zone, err := utils.GetUserZone(userID)
+		if err != nil {
+			glog.Warningf("Failed to get zone for user %s: %v", userID, err)
+			return
+		}
+
+		// Update the zone in UserData
+		glog.Infof("[LOCK] cm.mutex.Lock() @updateUserZone Start")
+		lockStart := time.Now()
+		cm.mutex.Lock()
+		glog.Infof("[LOCK] cm.mutex.Lock() @updateUserZone Success (wait=%v)", time.Since(lockStart))
+		_wd := cm.startLockWatchdog("@updateUserZone")
+		defer func() { cm.mutex.Unlock(); _wd() }()
+
+		// Verify the user still exists in cache
+		if currentUserData, exists := cm.cache.Users[userID]; exists {
+			currentUserData.Zone = zone
+			glog.Infof("Updated zone for user %s: %s", userID, zone)
+
+			// Trigger sync to Redis to persist the zone information
+			if cm.isRunning {
+				cm.requestSync(SyncRequest{
+					UserID: userID,
+					Type:   SyncUser,
+				})
+			}
+		} else {
+			glog.Warningf("User %s no longer exists in cache when trying to update zone", userID)
+		}
+	}()
 }

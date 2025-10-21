@@ -9,6 +9,7 @@ import (
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
+	"market/internal/v2/utils"
 )
 
 // TaskStatus represents the status of a payment task
@@ -168,8 +169,15 @@ func (tm *TaskManager) stepNotifySign(task *PaymentTask) error {
 		return fmt.Errorf("failed to update task status to not_sign: %w", err)
 	}
 
-	// Call NotifyLarePassToSign with application_verifiable_credential
-	if err := NotifyLarePassToSign(tm.dataSender, task.UserID, task.AppID, task.ProductID, task.TxHash, task.SystemChainID); err != nil {
+	// Get user zone for callback URL (required)
+	zone, err := utils.GetUserZone(task.UserID)
+	if err != nil {
+		log.Printf("ERROR: Failed to get zone for user %s: %v", task.UserID, err)
+		zone = "" // Empty zone will cause NotifyLarePassToSign to fail
+	}
+
+	// Call NotifyLarePassToSign with application_verifiable_credential and zone
+	if err := NotifyLarePassToSign(tm.dataSender, task.UserID, task.AppID, task.ProductID, task.TxHash, zone, task.SystemChainID); err != nil {
 		return fmt.Errorf("failed to notify LarePass to sign: %w", err)
 	}
 

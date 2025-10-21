@@ -414,6 +414,7 @@ type SourceData struct {
 type UserData struct {
 	Sources map[string]*SourceData `json:"sources"`
 	Hash    string                 `json:"hash"`
+	Zone    string                 `json:"zone"` // User's zone information
 	// Remove Mutex, all lock operations will be managed by CacheData
 }
 

@@ -249,3 +249,97 @@ func GetAdminUsername(token string) (string, error) {
 
 	return response.Data.Username, nil
 }
+
+// UserInfoFromAPI represents user information returned from app-service API
+type UserInfoFromAPI struct {
+	UID               string   `json:"uid"`
+	Name              string   `json:"name"`
+	DisplayName       string   `json:"display_name"`
+	Description       string   `json:"description"`
+	Email             string   `json:"email"`
+	State             string   `json:"state"`
+	LastLoginTime     *int64   `json:"last_login_time"`
+	CreationTimestamp int64    `json:"creation_timestamp"`
+	Avatar            string   `json:"avatar"`
+	Zone              string   `json:"zone"`
+	TerminusName      string   `json:"terminusName"`
+	WizardComplete    bool     `json:"wizard_complete"`
+	Roles             []string `json:"roles"`
+	MemoryLimit       string   `json:"memory_limit"`
+	CPULimit          string   `json:"cpu_limit"`
+}
+
+// UsersListResponse represents the response structure for users list API
+type UsersListResponse struct {
+	Code   int                `json:"code"`
+	Data   []*UserInfoFromAPI `json:"data"`
+	Totals int                `json:"totals"`
+}
+
+// GetUserZone retrieves the zone for a specific user from app-service
+// It fetches the user list and returns the zone for users in "Created" state
+func GetUserZone(username string) (string, error) {
+	// Check if running in development environment
+	if IsDevelopmentEnvironment() {
+		glog.Infof("Running in development environment, returning empty zone for user: %s", username)
+		return "", nil
+	}
+
+	// Get app service host and port from environment
+	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
+	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
+
+	if appServiceHost == "" || appServicePort == "" {
+		return "", fmt.Errorf("app service host or port not configured")
+	}
+
+	// Build users list endpoint URL
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/users", appServiceHost, appServicePort)
+
+	// Create HTTP client with timeout
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Create HTTP request
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create users list request: %w", err)
+	}
+
+	// Execute request
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch users list from service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("users list service returned status %d", resp.StatusCode)
+	}
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read users list response: %w", err)
+	}
+
+	glog.Infof("Users list response for user %s: %s", username, string(body))
+
+	// Parse response JSON
+	var response UsersListResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		glog.Warningf("Failed to unmarshal users list response: %s, error: %v", string(body), err)
+		return "", fmt.Errorf("failed to parse users list response: %w", err)
+	}
+
+	// Find user with matching name and state "Created"
+	for _, user := range response.Data {
+		if user.Name == username && user.State == "Created" {
+			glog.Infof("Found zone for user %s: %s", username, user.Zone)
+			return user.Zone, nil
+		}
+	}
+
+	glog.Warningf("User %s not found or not in Created state", username)
+	return "", fmt.Errorf("user %s not found or not in Created state", username)
+}
