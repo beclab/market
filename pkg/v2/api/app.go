@@ -2140,9 +2140,15 @@ func (s *Server) findAppInUserDataWithSource(userData *types.UserData, appID str
 func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 	log.Println("POST /api/v2/payment/start-polling - Starting payment polling")
 
-	// Log X-Forwarded-Host header value
+	// Get X-Forwarded-Host header value (required for callback URL)
 	xForwardedHost := r.Header.Get("X-Forwarded-Host")
 	log.Printf("X-Forwarded-Host header value: %s", xForwardedHost)
+
+	if xForwardedHost == "" {
+		log.Printf("ERROR: X-Forwarded-Host header is missing in request")
+		s.sendResponse(w, http.StatusBadRequest, false, "X-Forwarded-Host header is required", nil)
+		return
+	}
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
@@ -2192,12 +2198,13 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 5: Start payment polling (with app info, tx_hash, and system_chain_id)
+	// Step 5: Start payment polling (with app info, tx_hash, system_chain_id, and X-Forwarded-Host)
 	if err := payment.StartPaymentPolling(
 		userID,
 		request.SourceID,
 		request.AppID,
 		request.TxHash,
+		xForwardedHost,
 		request.SystemChainID,
 		appInfoLatest,
 	); err != nil {

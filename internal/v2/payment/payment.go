@@ -549,7 +549,7 @@ func ProcessSignatureSubmission(jws, signBody, user string) error {
 }
 
 // NotifyLarePassToSign sends a sign notification to the client via NATS
-func NotifyLarePassToSign(dataSender DataSenderInterface, userID, appID, productID, txHash, zone string, systemChainID int) error {
+func NotifyLarePassToSign(dataSender DataSenderInterface, userID, appID, productID, txHash, xForwardedHost string, systemChainID int) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
 	}
@@ -579,14 +579,14 @@ func NotifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 			userID, appID, productID, txHash, systemChainID)
 	}
 
-	// Build callback URL using zone - zone is required
-	if zone == "" {
-		log.Printf("ERROR: Zone is empty for user %s, cannot build callback URL", userID)
-		return errors.New("zone is required but not available")
+	// Build callback URL using X-Forwarded-Host from request
+	if xForwardedHost == "" {
+		log.Printf("ERROR: X-Forwarded-Host is empty for user %s, cannot build callback URL", userID)
+		return errors.New("X-Forwarded-Host is required but not available")
 	}
 
-	callbackURL := fmt.Sprintf("https://market.%s/app-store/api/v2/payment/submit-signature", zone)
-	log.Printf("Using zone-based callback URL for user %s: %s", userID, callbackURL)
+	callbackURL := fmt.Sprintf("https://%s/app-store/api/v2/payment/submit-signature", xForwardedHost)
+	log.Printf("Using X-Forwarded-Host based callback URL for user %s: %s", userID, callbackURL)
 
 	// Create the sign notification update
 	update := types.SignNotificationUpdate{

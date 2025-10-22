@@ -9,7 +9,6 @@ import (
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
-	"market/internal/v2/utils"
 )
 
 // TaskStatus represents the status of a payment task
@@ -23,20 +22,21 @@ const (
 
 // PaymentTask represents a payment task with unique key
 type PaymentTask struct {
-	UserID        string     `json:"user_id"`
-	AppID         string     `json:"app_id"`
-	AppName       string     `json:"app_name,omitempty"`
-	SourceID      string     `json:"source_id,omitempty"` // Add source_id field
-	ProductID     string     `json:"product_id"`
-	Status        TaskStatus `json:"status"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	JWS           string     `json:"jws,omitempty"`
-	SignBody      string     `json:"sign_body,omitempty"`
-	DeveloperName string     `json:"developer_name,omitempty"`
-	VC            string     `json:"vc,omitempty"`
-	TxHash        string     `json:"tx_hash,omitempty"`
-	SystemChainID int        `json:"system_chain_id,omitempty"`
+	UserID         string     `json:"user_id"`
+	AppID          string     `json:"app_id"`
+	AppName        string     `json:"app_name,omitempty"`
+	SourceID       string     `json:"source_id,omitempty"` // Add source_id field
+	ProductID      string     `json:"product_id"`
+	Status         TaskStatus `json:"status"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	JWS            string     `json:"jws,omitempty"`
+	SignBody       string     `json:"sign_body,omitempty"`
+	DeveloperName  string     `json:"developer_name,omitempty"`
+	VC             string     `json:"vc,omitempty"`
+	TxHash         string     `json:"tx_hash,omitempty"`
+	SystemChainID  int        `json:"system_chain_id,omitempty"`
+	XForwardedHost string     `json:"x_forwarded_host,omitempty"` // X-Forwarded-Host header from request
 }
 
 // TaskManager manages payment tasks with unique key constraint
@@ -169,15 +169,15 @@ func (tm *TaskManager) stepNotifySign(task *PaymentTask) error {
 		return fmt.Errorf("failed to update task status to not_sign: %w", err)
 	}
 
-	// Get user zone for callback URL (required)
-	zone, err := utils.GetUserZone(task.UserID)
-	if err != nil {
-		log.Printf("ERROR: Failed to get zone for user %s: %v", task.UserID, err)
-		zone = "" // Empty zone will cause NotifyLarePassToSign to fail
+	// Use X-Forwarded-Host from task for callback URL (required)
+	xForwardedHost := task.XForwardedHost
+	if xForwardedHost == "" {
+		log.Printf("ERROR: X-Forwarded-Host is empty for user %s, cannot build callback URL", task.UserID)
+		return fmt.Errorf("X-Forwarded-Host is required but not available in task")
 	}
 
-	// Call NotifyLarePassToSign with application_verifiable_credential and zone
-	if err := NotifyLarePassToSign(tm.dataSender, task.UserID, task.AppID, task.ProductID, task.TxHash, zone, task.SystemChainID); err != nil {
+	// Call NotifyLarePassToSign with application_verifiable_credential and X-Forwarded-Host
+	if err := NotifyLarePassToSign(tm.dataSender, task.UserID, task.AppID, task.ProductID, task.TxHash, xForwardedHost, task.SystemChainID); err != nil {
 		return fmt.Errorf("failed to notify LarePass to sign: %w", err)
 	}
 
@@ -560,13 +560,14 @@ type PaymentPollingResponse struct {
 
 // StartPaymentPolling starts polling for VC after payment completion
 // appName and developerName are provided by caller (queried from cache in API layer)
-func StartPaymentPolling(userID, sourceID, appID, txHash string, systemChainID int, appInfoLatest *types.AppInfoLatestData) error {
+func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string, systemChainID int, appInfoLatest *types.AppInfoLatestData) error {
 	log.Printf("=== Starting Payment Polling ===")
 	log.Printf("User ID: %s", userID)
 	log.Printf("Source ID: %s", sourceID)
 	log.Printf("App ID: %s", appID)
 	log.Printf("TxHash: %s", txHash)
 	log.Printf("SystemChainID: %d", systemChainID)
+	log.Printf("X-Forwarded-Host: %s", xForwardedHost)
 	if appInfoLatest != nil && appInfoLatest.RawData != nil {
 		if appInfoLatest.RawData.Name != "" {
 			log.Printf("App Name: %s", appInfoLatest.RawData.Name)
@@ -588,19 +589,20 @@ func StartPaymentPolling(userID, sourceID, appID, txHash string, systemChainID i
 		log.Printf("No existing task found for user %s app %s, creating new task from provided appInfoLatest", userID, appID)
 
 		// Try to create a new task using provided app info
-		newTask, err := createTaskFromCache(userID, sourceID, appID, txHash, systemChainID, appInfoLatest)
+		newTask, err := createTaskFromCache(userID, sourceID, appID, txHash, xForwardedHost, systemChainID, appInfoLatest)
 		if err != nil {
 			log.Printf("Failed to create task from cache: %v", err)
 			return fmt.Errorf("no payment task found and failed to create from cache: %w", err)
 		}
 		task = newTask
 	} else {
-		// Update existing task with sourceID, txHash and systemChainID
+		// Update existing task with sourceID, txHash, systemChainID and xForwardedHost
 		task.SourceID = sourceID
 		task.TxHash = txHash
 		task.SystemChainID = systemChainID
+		task.XForwardedHost = xForwardedHost
 		task.UpdatedAt = time.Now()
-		log.Printf("Updated existing task with sourceID, txHash and systemChainID")
+		log.Printf("Updated existing task with sourceID, txHash, systemChainID and xForwardedHost")
 	}
 
 	// Snapshot needed fields to avoid race
@@ -805,7 +807,7 @@ func notifyPollingTimeout(userID, appID, productID, developerName string) {
 }
 
 // createTaskFromCache creates a new payment task from cache data
-func createTaskFromCache(userID, sourceID, appID, txHash string, systemChainID int, appInfoLatest *types.AppInfoLatestData) (*PaymentTask, error) {
+func createTaskFromCache(userID, sourceID, appID, txHash, xForwardedHost string, systemChainID int, appInfoLatest *types.AppInfoLatestData) (*PaymentTask, error) {
 	if globalTaskManager == nil {
 		return nil, fmt.Errorf("task manager not initialized")
 	}
@@ -852,18 +854,19 @@ func createTaskFromCache(userID, sourceID, appID, txHash string, systemChainID i
 	// Create a new task with minimal information
 	// The task will be in not_pay status since we're assuming payment was completed
 	task := &PaymentTask{
-		UserID:        userID,
-		AppID:         appID,
-		AppName:       appName,
-		SourceID:      sourceID,
-		ProductID:     productID,
-		Status:        TaskStatusNotPay, // Assume payment was completed, waiting for VC
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
-		DeveloperName: developerName,
-		JWS:           "", // Will try to load from Redis below
-		TxHash:        txHash,
-		SystemChainID: systemChainID,
+		UserID:         userID,
+		AppID:          appID,
+		AppName:        appName,
+		SourceID:       sourceID,
+		ProductID:      productID,
+		Status:         TaskStatusNotPay, // Assume payment was completed, waiting for VC
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		DeveloperName:  developerName,
+		JWS:            "", // Will try to load from Redis below
+		TxHash:         txHash,
+		SystemChainID:  systemChainID,
+		XForwardedHost: xForwardedHost,
 	}
 
 	// Try loading JWS from Redis if available
