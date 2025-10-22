@@ -594,6 +594,16 @@ func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string,
 			log.Printf("Failed to create task from cache: %v", err)
 			return fmt.Errorf("no payment task found and failed to create from cache: %w", err)
 		}
+
+		// Add the new task to the task manager's map
+		if !globalTaskManager.mu.TryLock() {
+			return fmt.Errorf("failed to acquire lock to add new task")
+		}
+		key := globalTaskManager.generateKey(userID, appID, newTask.ProductID)
+		globalTaskManager.tasks[key] = newTask
+		globalTaskManager.mu.Unlock()
+		log.Printf("Added new task to manager with key: %s", key)
+
 		task = newTask
 	} else {
 		// Update existing task with sourceID, txHash, systemChainID and xForwardedHost
