@@ -2140,6 +2140,10 @@ func (s *Server) findAppInUserDataWithSource(userData *types.UserData, appID str
 func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 	log.Println("POST /api/v2/payment/start-polling - Starting payment polling")
 
+	// Log X-Forwarded-Host header value
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
+	log.Printf("X-Forwarded-Host header value: %s", xForwardedHost)
+
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
