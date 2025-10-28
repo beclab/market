@@ -433,7 +433,7 @@ func (e *PaymentNotReadyError) Error() string {
 }
 
 // getVCFromDeveloper calls the developer's AuthService to get verifiable credential
-// baseURL format: https://4c94e3111.{developerName}/
+// endpoint format: https://4c94e3111.{developerName}/api/grpc/AuthService/ActivateAndGrant
 func getVCFromDeveloper(jws string, developerName string) (string, error) {
 	if jws == "" {
 		return "", errors.New("jws parameter is empty")
@@ -443,8 +443,20 @@ func getVCFromDeveloper(jws string, developerName string) (string, error) {
 	}
 
 	// Build base URL: https://4c94e3111.{developerName}/
-	baseURL := fmt.Sprintf("https://4c94e3111.%s/", developerName)
+	// Convert developerName to lowercase for DNS compatibility
+	developerName = strings.ToLower(developerName)
+
+	// baseURL := fmt.Sprintf("https://4c94e3111.%s", developerName)
+	// test code
+	baseURL := fmt.Sprintf("https://4c94e3111.%s", "magiccow.olares.com")
+
 	endpoint := fmt.Sprintf("%s/api/grpc/AuthService/ActivateAndGrant", baseURL)
+
+	// Log the endpoint being called
+	log.Printf("=== getVCFromDeveloper Request ===")
+	log.Printf("Developer Name: %s", developerName)
+	log.Printf("Request Endpoint: %s", endpoint)
+	log.Printf("===================================")
 
 	// Create HTTP client with timeout
 	httpClient := resty.New()
@@ -518,11 +530,11 @@ func GetTaskManager() *TaskManager {
 }
 
 // CreatePaymentTask creates a new payment task or returns existing one
-func CreatePaymentTask(userID, appID, productID, developerName, appName, sourceID string) (*PaymentTask, error) {
+func CreatePaymentTask(userID, appID, productID, appName, sourceID string, appInfo *types.AppInfo) (*PaymentTask, error) {
 	if globalTaskManager == nil {
 		return nil, errors.New("task manager not initialized")
 	}
-	return globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName, sourceID)
+	return globalTaskManager.CreateOrGetTask(userID, appID, productID, appName, sourceID, appInfo)
 }
 
 // GetPaymentTaskStatus returns the status of a payment task

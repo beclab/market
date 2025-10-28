@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,7 +63,7 @@ func (tm *TaskManager) generateKey(userID, appID, productID string) string {
 }
 
 // CreateOrGetTask creates a new task or returns existing one
-func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, developerName, appName, sourceID string) (*PaymentTask, error) {
+func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, appName, sourceID string, appInfo *types.AppInfo) (*PaymentTask, error) {
 	// Try to acquire lock with timeout
 	if !tm.mu.TryLock() {
 		return nil, fmt.Errorf("failed to acquire lock, task manager is busy")
@@ -77,21 +78,42 @@ func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, developerName, 
 		return task, nil
 	}
 
+	// Get developer DID from app price info and extract identifier
+	developerDID := ""
+	developerIdentifier := ""
+	if appInfo != nil && appInfo.Price != nil {
+		developerDID = appInfo.Price.Developer.DID
+		log.Printf("Extracted developer DID from price info: %s", developerDID)
+
+		// Extract identifier from DID format (e.g., "did:key:z6Mkt...")
+		// For did:key: format, extract the part after "did:key:"
+		if strings.HasPrefix(developerDID, "did:key:") {
+			developerIdentifier = strings.TrimPrefix(developerDID, "did:key:")
+			log.Printf("Extracted developer identifier: %s", developerIdentifier)
+		} else {
+			developerIdentifier = developerDID
+			log.Printf("Warning: DID format not recognized, using full DID as identifier: %s", developerDID)
+		}
+	}
+	if developerDID == "" {
+		log.Printf("Warning: developer DID not found in price info for app %s", appID)
+	}
+
 	// Create new task
 	task := &PaymentTask{
 		UserID:        userID,
 		AppID:         appID,
 		AppName:       appName,
-		SourceID:      sourceID, // Add source_id
+		SourceID:      sourceID,
 		ProductID:     productID,
 		Status:        TaskStatusNotSign,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
-		DeveloperName: developerName,
+		DeveloperName: developerIdentifier, // Store the identifier, not the full DID
 	}
 
 	tm.tasks[key] = task
-	log.Printf("Created new payment task for key %s", key)
+	log.Printf("Created new payment task for key %s with developer DID: %s, identifier: %s", key, developerDID, developerIdentifier)
 
 	// Start the task workflow
 	// go tm.executeTaskWorkflow(task)
@@ -261,7 +283,12 @@ func (tm *TaskManager) stepNotifyPaymentRequired(task *PaymentTask) {
 	// Note: In a real implementation, you would need to get user DID and developer DID
 	// For now, we'll use placeholder values
 	userDID := "did:key:z6Mkgk8SGZQqXahNc9RumbX8LvUdCLWZskY7LFNMULdT5Z6r" // This should come from user info
-	developerDID := fmt.Sprintf("did:key:%s", task.DeveloperName)         // This should come from app info
+	// DeveloperName now contains the identifier extracted from price info
+	// Reconstruct full DID if it doesn't already have the prefix
+	developerDID := task.DeveloperName
+	if !strings.HasPrefix(developerDID, "did:") {
+		developerDID = fmt.Sprintf("did:key:%s", task.DeveloperName)
+	}
 
 	paymentData := CreateFrontendPaymentData(userDID, developerDID, task.ProductID)
 
@@ -443,15 +470,6 @@ func StartPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo)
 		return fmt.Errorf("app info is nil")
 	}
 
-	// Get developer name from app info
-	developerName := ""
-	if appInfo.AppEntry != nil {
-		developerName = appInfo.AppEntry.Developer
-	}
-	if developerName == "" {
-		return fmt.Errorf("developer name not found in app info")
-	}
-
 	// Get app name from app info
 	appName := ""
 	if appInfo.AppEntry != nil {
@@ -462,7 +480,7 @@ func StartPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo)
 	productID := GetProductIDFromAppInfo(appInfo)
 
 	// Create or get existing payment task
-	task, err := globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName, sourceID)
+	task, err := globalTaskManager.CreateOrGetTask(userID, appID, productID, appName, sourceID, appInfo)
 	if err != nil {
 		log.Printf("Error creating payment task: %v", err)
 		return fmt.Errorf("failed to create payment task: %w", err)
