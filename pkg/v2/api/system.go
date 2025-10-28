@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -862,13 +863,40 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 	log.Println("POST /api/v2/payment/submit-signature - Processing signature submission")
 
-	// Parse request body
+	// Log all HTTP headers for debugging
+	log.Println("=== REQUEST HEADERS ===")
+	for key, values := range r.Header {
+		for _, value := range values {
+			log.Printf("Header: %s = %s", key, value)
+		}
+	}
+
+	// Read request body for logging
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+
+	// Log raw request body
+	log.Println("=== RAW REQUEST BODY ===")
+	log.Printf("Body length: %d bytes", len(bodyBytes))
+	log.Printf("Body content: %s", string(bodyBytes))
+
+	// Parse request body from the read bytes
 	var req SubmitSignatureRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		log.Printf("Failed to decode request body: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
 		return
 	}
+
+	// Debug: Log parsed request fields
+	log.Println("=== PARSED REQUEST PARAMETERS ===")
+	log.Printf("req.JWS: present=%v, length=%d, value=%s", req.JWS != "", len(req.JWS), req.JWS)
+	log.Printf("req.SignBody: present=%v, length=%d, value=%s", req.SignBody != "", len(req.SignBody), req.SignBody)
+	log.Printf("req.User: present=%v, length=%d, value=%s", req.User != "", len(req.User), req.User)
 
 	// Validate required fields
 	if req.JWS == "" {
@@ -877,6 +905,7 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle SignBody - it might be a string or a JSON object
 	if req.SignBody == "" {
 		log.Println("SignBody is empty")
 		s.sendResponse(w, http.StatusBadRequest, false, "SignBody cannot be empty", nil)
@@ -893,7 +922,11 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 	restfulReq := &restful.Request{Request: r}
 	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
 
-	log.Printf("Received signature submission - JWS: %s, SignBody: %s, User: %s, BflUser: %s", req.JWS, req.SignBody, req.User, bflUser)
+	log.Println("=== REQUEST VALIDATION ===")
+	log.Printf("JWS length: %d", len(req.JWS))
+	log.Printf("SignBody length: %d", len(req.SignBody))
+	log.Printf("User: %s", req.User)
+	log.Printf("X-Bfl-User header: %s", bflUser)
 
 	// Validate user matching
 	if bflUser == "" {
@@ -909,9 +942,9 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call payment module for business logic processing
-	err := processSignatureSubmission(req.JWS, req.SignBody, req.User)
-	if err != nil {
-		log.Printf("Failed to process signature submission: %v", err)
+	processErr := processSignatureSubmission(req.JWS, req.SignBody, req.User)
+	if processErr != nil {
+		log.Printf("Failed to process signature submission: %v", processErr)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process signature submission", nil)
 		return
 	}
