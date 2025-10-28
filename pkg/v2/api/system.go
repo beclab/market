@@ -64,11 +64,18 @@ type OpenAppRequest struct {
 	ID string `json:"id"`
 }
 
+// ApplicationVerifiableCredential represents the application verifiable credential structure
+type ApplicationVerifiableCredential struct {
+	ProductID     string `json:"productId"`
+	SystemChainID int    `json:"systemChainId"`
+	TxHash        string `json:"txHash"`
+}
+
 // SubmitSignatureRequest represents the request body for submitting signature
 type SubmitSignatureRequest struct {
-	JWS      string `json:"jws"`
-	SignBody string `json:"sign_body"`
-	User     string `json:"user"`
+	JWS                             string                           `json:"jws"`
+	ApplicationVerifiableCredential *ApplicationVerifiableCredential `json:"application_verifiable_credential"`
+	ProductCredentialManifest       json.RawMessage                  `json:"product_credential_manifest"`
 }
 
 // ListVersionResponse for version history response
@@ -894,9 +901,14 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 
 	// Debug: Log parsed request fields
 	log.Println("=== PARSED REQUEST PARAMETERS ===")
-	log.Printf("req.JWS: present=%v, length=%d, value=%s", req.JWS != "", len(req.JWS), req.JWS)
-	log.Printf("req.SignBody: present=%v, length=%d, value=%s", req.SignBody != "", len(req.SignBody), req.SignBody)
-	log.Printf("req.User: present=%v, length=%d, value=%s", req.User != "", len(req.User), req.User)
+	log.Printf("req.JWS: present=%v, length=%d", req.JWS != "", len(req.JWS))
+	log.Printf("req.ApplicationVerifiableCredential: present=%v", req.ApplicationVerifiableCredential != nil)
+	if req.ApplicationVerifiableCredential != nil {
+		log.Printf("  - productId: %s", req.ApplicationVerifiableCredential.ProductID)
+		log.Printf("  - systemChainId: %d", req.ApplicationVerifiableCredential.SystemChainID)
+		log.Printf("  - txHash: %s", req.ApplicationVerifiableCredential.TxHash)
+	}
+	log.Printf("req.ProductCredentialManifest: present=%v, length=%d", len(req.ProductCredentialManifest) > 0, len(req.ProductCredentialManifest))
 
 	// Validate required fields
 	if req.JWS == "" {
@@ -905,18 +917,35 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle SignBody - it might be a string or a JSON object
-	if req.SignBody == "" {
-		log.Println("SignBody is empty")
-		s.sendResponse(w, http.StatusBadRequest, false, "SignBody cannot be empty", nil)
-		return
+	// Reconstruct SignBody from the components
+	signBody := make(map[string]interface{})
+
+	// Parse product_credential_manifest from json.RawMessage
+	var productCredentialManifest interface{}
+	if len(req.ProductCredentialManifest) > 0 {
+		if err := json.Unmarshal(req.ProductCredentialManifest, &productCredentialManifest); err != nil {
+			log.Printf("Failed to parse product_credential_manifest: %v", err)
+			s.sendResponse(w, http.StatusBadRequest, false, "Invalid product_credential_manifest format", nil)
+			return
+		}
+		signBody["product_credential_manifest"] = productCredentialManifest
 	}
 
-	if req.User == "" {
-		log.Println("User is empty")
-		s.sendResponse(w, http.StatusBadRequest, false, "User cannot be empty", nil)
+	// Add application_verifiable_credential if present
+	if req.ApplicationVerifiableCredential != nil {
+		signBody["application_verifiable_credential"] = req.ApplicationVerifiableCredential
+	}
+
+	// Serialize signBody to JSON string
+	signBodyJSON, err := json.Marshal(signBody)
+	if err != nil {
+		log.Printf("Failed to marshal signBody: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid sign body format", nil)
 		return
 	}
+	signBodyStr := string(signBodyJSON)
+
+	log.Printf("Constructed SignBody length: %d", len(signBodyStr))
 
 	// Get bflUser from X-Bfl-User header
 	restfulReq := &restful.Request{Request: r}
@@ -924,36 +953,29 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("=== REQUEST VALIDATION ===")
 	log.Printf("JWS length: %d", len(req.JWS))
-	log.Printf("SignBody length: %d", len(req.SignBody))
-	log.Printf("User: %s", req.User)
+	log.Printf("SignBody length: %d", len(signBodyStr))
 	log.Printf("X-Bfl-User header: %s", bflUser)
 
-	// Validate user matching
+	// Validate user from header
 	if bflUser == "" {
 		log.Println("X-Bfl-User header is empty")
 		s.sendResponse(w, http.StatusBadRequest, false, "X-Bfl-User header is required", nil)
 		return
 	}
 
-	if req.User != bflUser {
-		log.Printf("User mismatch - Request User: %s, BflUser: %s", req.User, bflUser)
-		s.sendResponse(w, http.StatusForbidden, false, "User does not match", nil)
-		return
-	}
-
 	// Call payment module for business logic processing
-	processErr := processSignatureSubmission(req.JWS, req.SignBody, req.User)
+	processErr := processSignatureSubmission(req.JWS, signBodyStr, bflUser)
 	if processErr != nil {
 		log.Printf("Failed to process signature submission: %v", processErr)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process signature submission", nil)
 		return
 	}
 
-	log.Printf("Signature submission processed successfully for user: %s", req.User)
+	log.Printf("Signature submission processed successfully for user: %s", bflUser)
 	s.sendResponse(w, http.StatusOK, true, "Signature submission processed successfully", map[string]interface{}{
 		"jws":       req.JWS,
-		"sign_body": req.SignBody,
-		"user":      req.User,
+		"sign_body": signBodyStr,
+		"user":      bflUser,
 		"status":    "processed",
 	})
 }

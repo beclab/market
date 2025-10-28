@@ -460,6 +460,15 @@ func getVCFromDeveloper(jws string, developerName string) (string, error) {
 		return "", fmt.Errorf("failed to call AuthService: %w", err)
 	}
 
+	// Log complete response for debugging
+	log.Printf("=== getVCFromDeveloper Response ===")
+	log.Printf("Status Code: %d", resp.StatusCode())
+	log.Printf("Status: %s", resp.Status())
+	log.Printf("Response Headers: %+v", resp.Header())
+	log.Printf("Response Body: %s", string(resp.Body()))
+	log.Printf("Response Time: %v", resp.Time())
+	log.Printf("===================================")
+
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 		return "", fmt.Errorf("AuthService returned non-2xx status: %d, body: %s", resp.StatusCode(), string(resp.Body()))
 	}
