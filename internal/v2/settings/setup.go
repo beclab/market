@@ -54,7 +54,7 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 		}
 	}
 
-	// 0. Start systemenv watcher in background (best-effort)
+	// 0. Start systemenv watcher in background (best-effort). Already started in main; keep here as no-op if already running.
 	ctx := context.Background()
 	StartSystemEnvWatcher(ctx)
 

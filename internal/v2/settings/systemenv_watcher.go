@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -118,3 +119,26 @@ func handleSystemEnv(obj interface{}) {
 }
 
 var _ = yaml.DefaultMetaFactory // keep yaml imported for future kubeconfig parsing if needed
+
+// WaitForSystemRemoteService blocks until cachedSystemRemoteService is set by the watcher, or timeout occurs
+func WaitForSystemRemoteService(ctx context.Context, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+
+	for {
+		if v := getCachedSystemRemoteService(); v != "" {
+			log.Printf("SystemEnv watcher: OlaresRemoteService ready: %s", v)
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("timeout waiting for OlaresRemoteService from systemenv CRD")
+		case <-ticker.C:
+			// keep waiting
+		}
+	}
+}

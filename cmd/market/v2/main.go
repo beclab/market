@@ -89,6 +89,16 @@ func main() {
 	utils.WaitForDependencyService()
 	log.Println("WaitForDependencyService completed")
 
+	// Start systemenv watcher early and wait for remote service if available
+	{
+		ctx := context.Background()
+		settings.StartSystemEnvWatcher(ctx)
+		// Wait up to 20s for OlaresRemoteService from CRD; continue on timeout
+		if err := settings.WaitForSystemRemoteService(ctx, 20*time.Second); err != nil {
+			log.Printf("SystemEnv watcher: %v; continuing startup with fallbacks", err)
+		}
+	}
+
 	// Upgrade flow: Check and update configurations and cache data (pre-execution)
 	log.Println("=== Pre-execution: Running upgrade flow ===")
 	if err := utils.UpgradeFlow(); err != nil {
