@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"market/internal/v2/appinfo"
-	"market/internal/v2/payment"
+	"market/internal/v2/paymentnew"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -28,6 +28,21 @@ type AppsInfoRequest struct {
 type AppQueryInfo struct {
 	AppID          string `json:"appid"`
 	SourceDataName string `json:"sourceDataName"`
+}
+
+// paymentPollingRequest is a local request model for starting payment polling
+type paymentPollingRequest struct {
+	SourceID      string `json:"source_id"`
+	AppID         string `json:"app_id"`
+	TxHash        string `json:"tx_hash"`
+	SystemChainID int    `json:"system_chain_id"`
+}
+
+// paymentPollingResponse is a local response model for starting payment polling
+type paymentPollingResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Status  string `json:"status"`
 }
 
 // AppInfoLatestDataResponse represents AppInfoLatestData for API response without raw_data
@@ -2033,7 +2048,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := payment.ProcessAppPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
+	result, err := paymentnew.ProcessAppPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
@@ -2101,7 +2116,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	log.Printf("Found app: %s in source: %s for user: %s (legacy search)", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := payment.ProcessAppPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
+	result, err := paymentnew.ProcessAppPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
@@ -2169,7 +2184,7 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	var request payment.PaymentPollingRequest
+	var request paymentPollingRequest
 	if err := json.Unmarshal(body, &request); err != nil {
 		log.Printf("Failed to parse JSON request: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
@@ -2199,7 +2214,7 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: Start payment polling (with app info, tx_hash, system_chain_id, and X-Forwarded-Host)
-	if err := payment.StartPaymentPolling(
+	if err := paymentnew.StartPaymentPolling(
 		userID,
 		request.SourceID,
 		request.AppID,
@@ -2214,7 +2229,7 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 6: Prepare response
-	response := payment.PaymentPollingResponse{
+	response := paymentPollingResponse{
 		Success: true,
 		Message: "Payment polling started successfully",
 		Status:  "polling",

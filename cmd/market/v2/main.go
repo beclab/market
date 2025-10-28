@@ -13,7 +13,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/history"
-	"market/internal/v2/payment"
+	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
 	"market/internal/v2/types"
@@ -255,7 +255,7 @@ func main() {
 
 		// 4. Initialize Payment Module Task Manager
 		if dataSender != nil {
-			payment.InitTaskManager(dataSender, settingsManager)
+			paymentnew.InitStateMachine(dataSender, settingsManager)
 			log.Println("Payment task manager initialized successfully")
 		} else {
 			log.Println("Warning: Data sender not available, payment task manager not initialized")

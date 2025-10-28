@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"market/internal/v2/payment"
+	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
@@ -985,5 +985,5 @@ func processSignatureSubmission(jws, signBody, user string) error {
 	log.Printf("Processing signature submission in payment module - JWS: %s, SignBody: %s, User: %s", jws, signBody, user)
 
 	// Call payment module function for business logic processing
-	return payment.ProcessSignatureSubmission(jws, signBody, user)
+	return paymentnew.ProcessSignatureSubmission(jws, signBody, user)
 }
