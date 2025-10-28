@@ -448,7 +448,7 @@ func getVCFromDeveloper(jws string, developerName string) (string, error) {
 
 	// baseURL := fmt.Sprintf("https://4c94e3111.%s", developerName)
 	// test code
-	baseURL := fmt.Sprintf("https://4c94e3111.%s", "magiccow.olares.com")
+	baseURL := fmt.Sprintf("https://4c94e3111.%s", "tw7613781.olares.com")
 
 	endpoint := fmt.Sprintf("%s/api/grpc/AuthService/ActivateAndGrant", baseURL)
 
