@@ -2,6 +2,7 @@ package settings
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,6 +53,10 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 			return fmt.Errorf("failed to clear settings Redis: %w", err)
 		}
 	}
+
+	// 0. Start systemenv watcher in background (best-effort)
+	ctx := context.Background()
+	StartSystemEnvWatcher(ctx)
 
 	// 1. Get chart repository service host from environment variable
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
@@ -185,7 +190,7 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 		// Get base URL from environment variables
 		baseURL := getMarketServiceURL()
 		if baseURL == "" {
-			log.Println("No market service base URL found in environment variables for remote market.olares. Please check OLARES_SYSTEM_MARKET_SERVICE, MARKET_PROVIDER, or SYNCER_REMOTE.")
+			log.Println("No market service base URL found in environment variables for remote market.olares. Please check OLARES_SYSTEM_REMOTE_SERVICE, MARKET_PROVIDER, or SYNCER_REMOTE.")
 			return fmt.Errorf("sync market sources: missing remote market base URL in environment")
 		}
 
