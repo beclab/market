@@ -133,17 +133,18 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 }
 
 // getMarketServiceURL returns the market service URL from environment variables
-// Priority: OLARES_SYSTEM_MARKET_SERVICE > MARKET_PROVIDER > SYNCER_REMOTE
+// Priority: OLARES_SYSTEM_REMOTE_SERVICE > MARKET_PROVIDER > SYNCER_REMOTE
 func getMarketServiceURL() string {
-	// First check OLARES_SYSTEM_MARKET_SERVICE
-	baseURL := os.Getenv("OLARES_SYSTEM_MARKET_SERVICE")
-	if baseURL != "" {
-		log.Printf("Using OLARES_SYSTEM_MARKET_SERVICE from environment: %s", baseURL)
+	// First get from k8s CRD watcher cached value and derive {OlaresRemoteService}/market
+	if remote := getCachedSystemRemoteService(); remote != "" {
+		remote = strings.TrimSuffix(remote, "/")
+		baseURL := remote + "/market"
+		log.Printf("Using OLARES_SYSTEM_REMOTE_SERVICE from systemenv watcher: %s -> %s", remote, baseURL)
 		return baseURL
 	}
 
 	// Then check MARKET_PROVIDER
-	baseURL = os.Getenv("MARKET_PROVIDER")
+	baseURL := os.Getenv("MARKET_PROVIDER")
 	if baseURL != "" {
 		log.Printf("Using MARKET_PROVIDER from environment: %s", baseURL)
 		return baseURL
