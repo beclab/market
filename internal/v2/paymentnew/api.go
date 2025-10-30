@@ -233,7 +233,19 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 		return fmt.Errorf("failed to update signature status: %w", err)
 	}
 
-	// Step 4: 发送通知让前端进行支付
+	// Step 3.1: 读取最新状态，若已处于更晚阶段则避免重复通知（幂等与守卫）
+	latest, _ := globalStateMachine.getState(state.UserID, state.AppID, state.ProductID)
+	if latest != nil {
+		if latest.PaymentStatus == PaymentNotificationSent ||
+			latest.PaymentStatus == PaymentFrontendCompleted ||
+			latest.PaymentStatus == PaymentDeveloperConfirmed {
+			log.Printf("Skip notifying payment_required: current status=%s", latest.PaymentStatus)
+			log.Printf("=== End of Payment State Machine Processing ===")
+			return nil
+		}
+	}
+
+	// Step 4: 发送通知让前端进行支付（仅在未通知过/早期态时）
 	if globalStateMachine.dataSender != nil {
 		if err := notifyFrontendPaymentRequired(
 			globalStateMachine.dataSender,
@@ -248,6 +260,15 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 			log.Printf("Failed to notify frontend payment required: %v", err)
 			return fmt.Errorf("failed to notify frontend payment required: %w", err)
 		}
+
+		// Step 4.1: 通知成功后推进状态为 notification_sent（幂等且不回退）
+		_ = globalStateMachine.updateState(state.GetKey(), func(s *PaymentState) error {
+			switch s.PaymentStatus {
+			case PaymentNotEvaluated, PaymentNotNotified:
+				s.PaymentStatus = PaymentNotificationSent
+			}
+			return nil
+		})
 	}
 
 	log.Printf("=== End of Payment State Machine Processing ===")
