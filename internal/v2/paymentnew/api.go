@@ -394,9 +394,12 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		appName = appInfo.AppEntry.Name
 	}
 
-	// Step 2: 通过 productID 获取 PaymentStates（内存/Redis）
+	// Step 2: 通过 productID 获取 PaymentStates（优先状态机，未命中则为空）
+	if globalStateMachine == nil {
+		return nil, fmt.Errorf("state machine not initialized")
+	}
 	var state *PaymentState
-	if s, err := getPaymentStateFromStore(userID, appID, productID, settingsManager); err == nil {
+	if s, err := globalStateMachine.LoadState(userID, appID, productID); err == nil {
 		state = s
 	}
 
@@ -427,10 +430,8 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 				CreatedAt:       time.Now(),
 				UpdatedAt:       time.Now(),
 			}
-			_ = savePaymentStateToStore(failedState, settingsManager)
-			// 放入状态机内存
-			if globalStateMachine != nil {
-				globalStateMachine.setState(failedState)
+			if err := globalStateMachine.SaveState(failedState); err != nil {
+				return nil, fmt.Errorf("save payment state failed: %w", err)
 			}
 			return nil, fmt.Errorf("developer name missing in price")
 		}
@@ -455,9 +456,8 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 				CreatedAt:       time.Now(),
 				UpdatedAt:       time.Now(),
 			}
-			_ = savePaymentStateToStore(failedState, settingsManager)
-			if globalStateMachine != nil {
-				globalStateMachine.setState(failedState)
+			if err := globalStateMachine.SaveState(failedState); err != nil {
+				return nil, fmt.Errorf("save payment state failed: %w", err)
 			}
 			return nil, fmt.Errorf("fetch developer info failed: %w", err)
 		}
@@ -480,12 +480,10 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 			UpdatedAt:       time.Now(),
 		}
 
-		if err := savePaymentStateToStore(newState, settingsManager); err != nil {
+		if err := globalStateMachine.SaveState(newState); err != nil {
 			return nil, fmt.Errorf("save payment state failed: %w", err)
 		}
-		if globalStateMachine != nil {
-			globalStateMachine.setState(newState)
-		}
+		globalStateMachine.setState(newState)
 		state = newState
 	}
 

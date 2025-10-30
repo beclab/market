@@ -85,6 +85,14 @@
 - 凭据：`payment:receipt:{userID}:{developerName}:{appID}:{productID}`（JSON: `PurchaseInfo{VC,Status}`）。
 - 内存缓存：`PaymentStateMachine.states` 与 `paymentStateStore.states`（后续可合并统一）。
 
+## 访问与规范
+
+- 统一访问入口：仅通过 `PaymentStateMachine` 的封装进行状态读写。
+  - 读取：`LoadState(userID, appID, productID)`（内存未命中则回源 Redis 并写回内存）
+  - 写入：`SaveState(state)`（写 Redis 并同步内存）
+  - 删除：`DeleteState(userID, appID, productID)`（删 Redis 并同步内存）
+- 禁止直接读写 Redis 或绕过状态机操作状态；避免出现并发条件下的不一致与通知缺失。
+
 ## 并发与可重入
 
 - 状态更新采用拷贝-更新-覆盖并加锁；异步落 Redis，避免阻塞。
@@ -144,29 +152,42 @@
 - 开发者 VC 获取失败：查看 `queryVCFromDeveloper` 日志与开发者服务返回 `code`。
 - 轮询不生效：确认未被判定为“已在进行中”，以及状态 `PaymentFrontendCompleted` 是否已写入。
 
-## 时序图（概览）
+## 状态机图（核心）
 
 ```mermaid
-sequenceDiagram
-    participant FE as Frontend
-    participant MS as Market Server
-    participant LP as LarePass
-    participant DID as DID Gate
-    participant DEV as Developer Service
+stateDiagram-v2
+    [*] --> Init
+    Init --> NotRequired: 无价格/无 productId
+    Init --> ErrorMissingDev: 缺少开发者
+    Init --> ErrorDevFetch: DID 查询失败
+    Init --> Required: productId & developer 就绪
 
-    FE->>MS: 打开详情页
-    MS->>DID: 查询开发者 DID/RSAPubKey
-    MS-->>FE: Preprocess 完成（异步触发 fetch-signature）
-    MS->>LP: 通知拉取签名（callback: fetch-signature-callback）
-    LP-->>MS: 回调（jws, signBody, code）
-    MS->>DEV: (jws) 请求 VC（一次查询或轮询）
-    DEV-->>MS: 返回 code/VC
-    MS->>FE: 通知支付/购买完成（根据状态）
-    FE->>MS: 支付完成（TxHash/SystemChainID）
-    MS->>DEV: 轮询 VC（直到成功或耗尽）
-    DEV-->>MS: VC 成功
-    MS->>FE: 购买完成通知
+    Required --> SigRequired: 触发 fetch-signature
+    SigRequired --> SigRequired: 同步进行中/重试
+    SigRequired --> SigSigned: submit/fetch 回调 code==0
+    SigRequired --> SigErrorNoRecord: VC 查询 code==1
+    SigRequired --> SigErrorNeedReSign: VC 查询 code==2
+
+    SigSigned --> PaymentRequired: 通知前端支付
+    PaymentRequired --> FrontendCompleted: payment_completed(txHash, chainId)
+
+    FrontendCompleted --> DevSyncInProgress: 开始轮询 VC
+    DevSyncInProgress --> DevConfirmed: VC code==0
+    DevSyncInProgress --> DevSyncFailed: 轮询耗尽/网络错误
+
+    DevConfirmed --> [*]
+    NotRequired --> [*]
+
+    note right of Required
+      维度示意：
+      - LarePassSync: not_started/in_progress/completed
+      - SignatureStatus: required/required_and_signed/错误
+      - PaymentStatus: notification_sent/frontend_completed/developer_confirmed
+      - DeveloperSync: in_progress/completed/failed
+    end note
 ```
+
+上述图更贴近状态机表达；如需端到端交互顺序，可在附录中补充时序图。
 
 ## 状态转移表（简化）
 

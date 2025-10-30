@@ -48,12 +48,12 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 	newState.UpdatedAt = time.Now()
 	psm.states[key] = &newState
 
-	// 同步到 Redis（异步执行，避免阻塞状态更新）
-	go func() {
-		if err := savePaymentStateToStore(&newState, psm.settingsManager); err != nil {
+	// 同步到持久层（异步执行，避免阻塞）
+	go func(st *PaymentState) {
+		if err := psm.SaveState(st); err != nil {
 			log.Printf("Failed to save updated state to store for key %s: %v", key, err)
 		}
-	}()
+	}(&newState)
 
 	return nil
 }
@@ -387,6 +387,78 @@ func (psm *PaymentStateMachine) cleanupCompletedStates(olderThan time.Duration) 
 			log.Printf("Cleaned up completed state: %s", key)
 		}
 	}
+}
+
+// LoadState 统一入口：先内存，后 Redis 回源并写回内存
+func (psm *PaymentStateMachine) LoadState(userID, appID, productID string) (*PaymentState, error) {
+	if psm == nil {
+		return nil, fmt.Errorf("state machine is nil")
+	}
+	if st, err := psm.getState(userID, appID, productID); err == nil && st != nil {
+		return st, nil
+	}
+	// 回源 Redis
+	if psm.settingsManager == nil {
+		return nil, fmt.Errorf("settings manager is nil")
+	}
+	rc := psm.settingsManager.GetRedisClient()
+	if rc == nil {
+		return nil, fmt.Errorf("redis client is nil")
+	}
+	redisKey := getRedisStateKey(userID, appID, productID)
+	val, err := rc.Get(redisKey)
+	if err != nil || val == "" {
+		return nil, fmt.Errorf("state not found in redis: %w", err)
+	}
+	var st PaymentState
+	if err := json.Unmarshal([]byte(val), &st); err != nil {
+		return nil, fmt.Errorf("failed to parse state from redis: %w")
+	}
+	psm.setState(&st)
+	return &st, nil
+}
+
+// SaveState 统一入口：写 Redis 并写内存
+func (psm *PaymentStateMachine) SaveState(state *PaymentState) error {
+	if psm == nil || state == nil {
+		return fmt.Errorf("nil state machine or state")
+	}
+	if psm.settingsManager == nil {
+		return fmt.Errorf("settings manager is nil")
+	}
+	rc := psm.settingsManager.GetRedisClient()
+	if rc == nil {
+		return fmt.Errorf("redis client is nil")
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("failed to marshal state: %w", err)
+	}
+	redisKey := getRedisStateKey(state.UserID, state.AppID, state.ProductID)
+	if err := rc.Set(redisKey, string(data), 0); err != nil {
+		return fmt.Errorf("failed to save state to redis: %w", err)
+	}
+	psm.setState(state)
+	return nil
+}
+
+// DeleteState 统一入口：删 Redis 并删内存
+func (psm *PaymentStateMachine) DeleteState(userID, appID, productID string) error {
+	if psm == nil {
+		return fmt.Errorf("state machine is nil")
+	}
+	if psm.settingsManager != nil {
+		if rc := psm.settingsManager.GetRedisClient(); rc != nil {
+			if err := rc.Del(getRedisStateKey(userID, appID, productID)); err != nil {
+				return fmt.Errorf("failed to delete state from redis: %w", err)
+			}
+		}
+	}
+	key := fmt.Sprintf("%s:%s:%s", userID, appID, productID)
+	psm.mu.Lock()
+	delete(psm.states, key)
+	psm.mu.Unlock()
+	return nil
 }
 
 // triggerPaymentStateSync 触发 PaymentStates 的状态同步流程（占位实现）

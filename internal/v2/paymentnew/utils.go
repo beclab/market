@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -41,15 +40,7 @@ type didGateData struct {
 // merchantProductLicenseCredentialManifestJSON is the hardcoded schema for Merchant Product License Credential Manifest
 var merchantProductLicenseCredentialManifestJSON = `{"id":"c544214b-be43-6ba8-1618-c80de084aa62","spec_version":"https://identity.foundation/credential-manifest/spec/v1.0.0/","name":"Merchant Product License Credential Manifest","description":"Credential manifest for issuing merchant product license based on payment proof","issuer":{"id":"did:key:z6MktdEpjYpYocHibuZqMsjXmaVusyUHckMnkzM3xUCxpfa4#z6MktdEpjYpYocHibuZqMsjXmaVusyUHckMnkzM3xUCxpfa4","name":"default-merchant"},"output_descriptors":[{"id":"ff9561a9-607f-5e7b-cad7-01be4e3ae457","schema":"c333229e-f82b-d66c-2e16-b7ff701378cf","name":"Merchant Product License Credential","description":"Product license credential with complete payment and product information","display":{"title":{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},"properties":[{"label":"Product ID","path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},{"label":"systemChainId","path":["$.credentialSubject.systemChainId","$.vc.credentialSubject.systemChainId"],"schema":{"type":"string"}},{"label":"txHash","path":["$.credentialSubject.txHash","$.vc.credentialSubject.txHash"],"schema":{"type":"string"}}]},"styles":{"background":{"color":"#1e40af"},"text":{"color":"#ffffff"}}}],"format":{"jwt_vc":{"alg":["EdDSA"]}},"presentation_definition":{"id":"de434d03-052c-027a-d4cc-887be81aa941","name":"Merchant Product License Application Presentation Manifest","purpose":"Request presentation of application credentials for merchant product license","input_descriptors":[{"id":"productId","name":"Product ID","purpose":"Provide your product ID to activate from payment transaction","format":{"jwt_vc":{"alg":["EdDSA"]}},"constraints":{"fields":[{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"]}],"subject_is_issuer":"preferred"}}]}}`
 
-// paymentStateStore 全局的 PaymentState 存储（内存缓存）
-var (
-	paymentStateStore = struct {
-		mu     sync.RWMutex
-		states map[string]*PaymentState
-	}{
-		states: make(map[string]*PaymentState),
-	}
-)
+// 已移除本地内存缓存（paymentStateStore），统一通过状态机内存和 Redis 访问
 
 // getStateKey 生成状态的唯一键
 func getStateKey(userID, appID, productID string) string {
@@ -414,139 +405,7 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 	return string(state.PaymentStatus)
 }
 
-// getPaymentStateFromStore 获取 PaymentState（内部函数）
-// 先从内存中查找，如果找不到则从 Redis 读取，如果都没有则返回错误
-func getPaymentStateFromStore(userID, appID, productID string, settingsManager *settings.SettingsManager) (*PaymentState, error) {
-	key := getStateKey(userID, appID, productID)
-
-	// Step 1: Try to get from memory cache
-	paymentStateStore.mu.RLock()
-	cachedState, exists := paymentStateStore.states[key]
-	paymentStateStore.mu.RUnlock()
-
-	if exists && cachedState != nil {
-		log.Printf("PaymentState found in memory cache for key: %s", key)
-		return cachedState, nil
-	}
-
-	// Step 2: Try to get from Redis
-	if settingsManager == nil {
-		return nil, fmt.Errorf("settings manager is nil")
-	}
-
-	rc := settingsManager.GetRedisClient()
-	if rc == nil {
-		return nil, fmt.Errorf("redis client is nil")
-	}
-
-	redisKey := getRedisStateKey(userID, appID, productID)
-	val, err := rc.Get(redisKey)
-	if err != nil {
-		log.Printf("Failed to get PaymentState from Redis: %v", err)
-		return nil, fmt.Errorf("payment state not found in memory or Redis: %w", err)
-	}
-
-	if val == "" {
-		return nil, fmt.Errorf("payment state not found in memory or Redis")
-	}
-
-	// Parse PaymentState from JSON
-	var state PaymentState
-	if err := json.Unmarshal([]byte(val), &state); err != nil {
-		log.Printf("Failed to unmarshal PaymentState from Redis: %v", err)
-		return nil, fmt.Errorf("failed to parse payment state from Redis: %w", err)
-	}
-
-	// Store in memory cache for next time
-	paymentStateStore.mu.Lock()
-	paymentStateStore.states[key] = &state
-	paymentStateStore.mu.Unlock()
-
-	log.Printf("PaymentState loaded from Redis and cached in memory for key: %s", key)
-	return &state, nil
-}
-
-// savePaymentStateToStore 保存 PaymentState 到内存和 Redis（内部函数）
-func savePaymentStateToStore(state *PaymentState, settingsManager *settings.SettingsManager) error {
-	if state == nil {
-		return fmt.Errorf("payment state is nil")
-	}
-
-	key := getStateKey(state.UserID, state.AppID, state.ProductID)
-	redisKey := getRedisStateKey(state.UserID, state.AppID, state.ProductID)
-
-	// Step 1: Save to memory cache
-	paymentStateStore.mu.Lock()
-	paymentStateStore.states[key] = state
-	paymentStateStore.mu.Unlock()
-	log.Printf("PaymentState saved to memory cache for key: %s", key)
-
-	// Step 2: Save to Redis
-	if settingsManager == nil {
-		log.Printf("Warning: settings manager is nil, cannot save to Redis")
-		return nil // Don't fail if settings manager is nil
-	}
-
-	rc := settingsManager.GetRedisClient()
-	if rc == nil {
-		log.Printf("Warning: redis client is nil, cannot save to Redis")
-		return nil // Don't fail if redis client is nil
-	}
-
-	// Convert PaymentState to JSON
-	data, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("failed to marshal payment state: %w", err)
-	}
-
-	// Save to Redis with no expiration (0 means no expiration)
-	if err := rc.Set(redisKey, string(data), 0); err != nil {
-		log.Printf("Failed to save PaymentState to Redis: %v", err)
-		return fmt.Errorf("failed to save payment state to Redis: %w", err)
-	}
-
-	log.Printf("PaymentState saved to Redis with key: %s", redisKey)
-	return nil
-}
-
-// deletePaymentStateFromStore 从内存和 Redis 删除 PaymentState（内部函数）
-func deletePaymentStateFromStore(userID, appID, productID string, settingsManager *settings.SettingsManager) error {
-	key := getStateKey(userID, appID, productID)
-	redisKey := getRedisStateKey(userID, appID, productID)
-
-	// Delete from memory cache
-	paymentStateStore.mu.Lock()
-	delete(paymentStateStore.states, key)
-	paymentStateStore.mu.Unlock()
-	log.Printf("PaymentState deleted from memory cache for key: %s", key)
-
-	// Delete from Redis
-	if settingsManager != nil {
-		rc := settingsManager.GetRedisClient()
-		if rc != nil {
-			if err := rc.Del(redisKey); err != nil {
-				log.Printf("Failed to delete PaymentState from Redis: %v", err)
-				return fmt.Errorf("failed to delete payment state from Redis: %w", err)
-			}
-			log.Printf("PaymentState deleted from Redis with key: %s", redisKey)
-		}
-	}
-
-	return nil
-}
-
-// getAllPaymentStates 获取所有内存中的 PaymentState（用于调试，内部方法）
-func getAllPaymentStates() map[string]*PaymentState {
-	paymentStateStore.mu.RLock()
-	defer paymentStateStore.mu.RUnlock()
-
-	// Return a copy to avoid race conditions
-	result := make(map[string]*PaymentState)
-	for key, state := range paymentStateStore.states {
-		result[key] = state
-	}
-	return result
-}
+// Deprecated: 旧版本地存取方法已移除；请使用状态机的 LoadState/SaveState/DeleteState
 
 // getSystemRemoteServiceBase returns the SystemRemoteService base URL
 func getSystemRemoteServiceBase() string {
