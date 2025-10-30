@@ -1,230 +1,206 @@
-# PaymentNew 模块 - 基于状态机的支付流程重构
+## 概览
 
-## 设计目标
+**目标**: 以“支付状态机”统一管理应用购买流程的全生命周期（开发者信息准备 → LarePass 签名 → 前端支付 → 开发者确认 VC → 凭据持久化 → 前端通知）。
 
-重新设计支付流程，从流程式改为状态机式，更好地反映业务的抽象本质。
+**状态来源与存储**:
+- **内存**: `PaymentStateMachine.states`（运行期状态）、`paymentStateStore`（工具层缓存）。
+- **Redis**: 状态 `payment:state:{userID}:{appID}:{productID}`，购买凭据 `payment:receipt:{userID}:{developerName}:{appID}:{productID}`。
 
-## 核心概念
+**外部系统**:
+- DID Gate（查询开发者 `DID/RSAPubKey`）。
+- LarePass（签名发起与签名拉取回调）。
+- 开发者服务 `AuthService/ActivateAndGrant`（基于 JWS 返回 VC）。
+- 前端系统（系统级通知：支付所需数据、购买完成）。
 
-### 五维状态设计
 
-支付流程由五个独立的维度组成，每个维度都有不同的状态值：
+## 状态与数据结构
 
-#### 维度一：是否需要支付 (`PaymentNeed`)
-- `PaymentNeedNotRequired`: 不需要支付（免费应用）
-- `PaymentNeedRequired`: 需要支付
+### 五维状态
+- **PaymentNeed**: `not_required` | `required` | `error_missing_developer` | `error_developer_fetch_failed`
+- **DeveloperSync**: `not_started` | `in_progress` | `completed` | `failed`
+- **LarePassSync**: `not_started` | `in_progress` | `completed` | `failed`
+- **SignatureStatus**: `not_evaluated` | `not_required` | `required` | `required_and_signed` | `required_but_pending` | `error_no_record` | `error_need_resign`
+- **PaymentStatus**: `not_evaluated` | `not_notified` | `notification_sent` | `frontend_completed` | `developer_confirmed`
 
-#### 维度二：是否已跟开发者同步过VC信息 (`DeveloperSync`)
-- `DeveloperSyncNotStarted`: 未开始
-- `DeveloperSyncInProgress`: 进行中
-- `DeveloperSyncCompleted`: 已完成
-- `DeveloperSyncFailed`: 失败
+### PaymentState（运行期主状态）
+- 基础标识: `UserID`、`AppID`、`AppName`、`SourceID`、`ProductID`、`DeveloperName`
+- 开发者信息: `Developer{Name,DID,RSAPubKey}`
+- 五维状态: `PaymentNeed`、`DeveloperSync`、`LarePassSync`、`SignatureStatus`、`PaymentStatus`
+- 关联数据: `JWS`、`SignBody`、`VC`、`TxHash`、`SystemChainID`、`XForwardedHost`
+- 元数据: `CreatedAt`、`UpdatedAt`
+- 方法: `GetKey()`（唯一键：`user:app:product`）、`IsFinalState()`（是否终态）
 
-#### 维度三：是否跟larepass同步过签名信息 (`LarePassSync`)
-- `LarePassSyncNotStarted`: 未开始
-- `LarePassSyncInProgress`: 进行中
-- `LarePassSyncCompleted`: 已完成
-- `LarePassSyncFailed`: 失败
+### PaymentStateMachine（状态机）
+- 内存表: `states map[string]*PaymentState` + `RWMutex`
+- 依赖: `dataSender`（对外通知）、`settingsManager`（Redis 与系统配置）
+- 关键方法（内部）:
+  - 读写: `getState`、`setState`、`updateState`
+  - 事件: `processEvent`（分发给各 `handle*`）
+  - 同步: `processFetchSignatureCallback`、`triggerVCSync`、`requestVCFromDeveloper`、`pollForVCFromDeveloper`
+  - 维护: `findStateByUserAndProduct`、`cleanupCompletedStates`、`storePurchaseInfo`
 
-#### 维度四：签名状态 (`SignatureStatus`)
-- `SignatureNotRequired`: 不需要签名
-- `SignatureRequired`: 需要签名
-- `SignatureRequiredAndSigned`: 需要签名并且已经有签名
-- `SignatureRequiredButPending`: 需要签名但还在等待中
+## 事件与流程
 
-#### 维度五：支付状态 (`PaymentStatus`)
-- `PaymentNotNotified`: 尚未通知前端
-- `PaymentNotificationSent`: 已经通知前端进行支付
-- `PaymentFrontendCompleted`: 前端已经支付完成
-- `PaymentDeveloperConfirmed`: 开发者已经确认
+- `start_payment`: 设为需要支付（占位，后续可按业务自动判断是否需签名与通知）。
+- `request_signature`: 置 `SignatureRequired`，若具备 `XForwardedHost` 则通知 LarePass 发起签名。
+- `signature_submitted`: 写入 `JWS/SignBody`，置 `LarePassSyncCompleted`、`SignatureRequiredAndSigned`，异步向开发者请求 VC。
+- `payment_completed`: 写入 `TxHash/SystemChainID`，置 `PaymentFrontendCompleted`，开始轮询开发者 VC。
+- `vc_received`: 写入 `VC`，置 `DeveloperSyncCompleted`、`PaymentDeveloperConfirmed`，持久化购买凭据并通知前端购买完成。
 
-### 状态机架构
+辅助推进：
+- `triggerPaymentStateSync(state)`: 基于 `LarePassSync` 推进（首次/进行中催发 fetch-signature；完成则 `triggerVCSync`）。
+- `processFetchSignatureCallback(jws, signBody, user, code)`: 解析 `productId` 定位状态；`code==0` 写入 `JWS` 并推进 `triggerVCSync`。
 
-```
-PaymentStateMachine
-├── states: map[string]*PaymentState  // 状态存储 (key: userid:appid:productid)
-├── dataSender: DataSenderInterface    // 数据发送接口
-└── settingsManager: SettingsManager   // Redis 等设置管理
-```
+典型时序：预处理 → 拉取签名 → 提交签名 → 前端支付 → 开发者确认 VC → 落库通知。
 
-### 主要事件
+## 外部交互与回调
 
-1. **start_payment**: 开始支付流程
-2. **signature_submitted**: 签名已提交
-3. **payment_completed**: 前端支付完成
-4. **vc_received**: 收到开发者返回的VC
-5. **request_signature**: 请求LarePass签名
+- DID Gate：`GET {SystemRemoteService}/did/domain/faster_search/{did}` → `Name/DID/RSAPubKey`。
+- 开发者服务：`POST https://4c94e3111.{developerName}/api/grpc/AuthService/ActivateAndGrant`，Body: `{jws}` → 返回 `code/VC`。
+- LarePass 通知：
+  - 发起签名（含可选 `application_verifiable_credential`）：Topic `market_payment`；回调 `submit-signature`。
+  - 拉取签名（无 `txHash`）：Topic `fetch_payment_signature`；回调 `fetch-signature-callback`。
+- 回调地址：
+  - `https://{X-Forwarded-Host}/app-store/api/v2/payment/submit-signature`
+  - `https://{X-Forwarded-Host}/app-store/api/v2/payment/fetch-signature-callback`
 
-## 文件结构
+## API 用法（对外）
 
-```
-paymentnew/
-├── types.go           # 状态定义和数据结构
-├── utils.go           # 业务功能方法
-├── state_machine.go   # 状态机实现
-├── api.go             # 对外接口（兼容旧版API）
-└── README.md          # 本文档
-```
+- 初始化：`InitStateMachine(dataSender, settingsManager)`
+- 预处理：`PreprocessAppPaymentData(ctx, appInfo, userID, sourceID, settingsManager, client)`
+- 查询：`GetPaymentStatus(userID, appID, sourceID, appInfo)`
+- 推进购买：`PurchaseApp(userID, appID, sourceID, xForwardedHost, appInfo)`
+- 支付完成轮询：`StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost, systemChainID, appInfoLatest)`
+- 签名回调：
+  - 提交签名：`ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)`
+  - 拉取签名：`HandleFetchSignatureCallback(jws, signBody, user, code)`
+- 调试：`ListPaymentStates()`
 
-## 关键组件
+返回语义（示例）：
+- `PurchaseApp` 可能返回：`signature_required` / `payment_required` / `waiting_developer_confirmation` / `purchased` / `syncing`。
 
-### types.go
-- 定义五个维度的状态类型
-- 定义 `PaymentState` 结构
-- 定义 `PaymentStateMachine` 结构
-- 提供状态判断和转换的基础方法
+## 存储与键规范
 
-### utils.go
-提供核心业务功能的内部实现：
-- `QueryVCFromDeveloper()`: 从开发者服务查询VC
-- `NotifyLarePassToSign()`: 通知LarePass客户端签名
-- `NotifyFrontendPaymentRequired()`: 通知前端需要支付
-- `NotifyFrontendPurchaseCompleted()`: 通知前端购买完成
-- `CreateFrontendPaymentData()`: 创建前端支付数据
-- `checkIfAppIsPaid()`: 检查应用是否需要支付（内部实现）
-- `getPaymentStatus()`: 获取支付状态（内部实现）
-- `getProductIDFromAppInfo()`: 从应用信息提取产品ID（内部实现）
-- `getPaymentStateFromStore()`: 从内存或Redis获取PaymentState（内部实现）
-- `savePaymentStateToStore()`: 保存PaymentState到内存和Redis（内部实现）
-- `deletePaymentStateFromStore()`: 删除PaymentState（内部实现）
-- `GetAllPaymentStates()`: 获取所有内存中的PaymentState（调试用）
+- 状态：`payment:state:{userID}:{appID}:{productID}`（JSON: `PaymentState`）。
+- 凭据：`payment:receipt:{userID}:{developerName}:{appID}:{productID}`（JSON: `PurchaseInfo{VC,Status}`）。
+- 内存缓存：`PaymentStateMachine.states` 与 `paymentStateStore.states`（后续可合并统一）。
 
-**存储设计**：
-- 内存缓存：使用 `paymentStateStore`（线程安全的 map）缓存 PaymentState
-- Redis 持久化：使用 `payment:state:userid:appid:productid` 作为 Redis key
-- 唯一性：使用 `userid:appid:productid` 作为唯一标识
-- 获取策略：先查内存，再查 Redis，都没有则返回错误
+## 并发与可重入
 
-注：内部实现方法（小写开头）在 `utils.go` 中，公共接口（大写开头）在 `api.go` 中
+- 状态更新采用拷贝-更新-覆盖并加锁；异步落 Redis，避免阻塞。
+- 轮询含防重入检查：`DeveloperSyncInProgress` 时跳过重复启动。
+- `triggerPaymentStateSync`/回调处理均可重入，网络波动不会卡死流程。
 
-### state_machine.go
-状态机核心实现（内部方法）：
-- `getOrCreateState()`: 获取或创建状态（内部方法）
-- `getState()`: 获取状态（内部方法）
-- `updateState()`: 更新状态（内部方法）
-- `processEvent()`: 处理事件并触发状态转换（内部方法）
-- `handleStartPayment()`: 处理开始支付
-- `handleSignatureSubmitted()`: 处理签名提交
-- `handlePaymentCompleted()`: 处理支付完成
-- `handleVCReceived()`: 处理VC接收
-- `handleRequestSignature()`: 处理签名请求
-- `requestVCFromDeveloper()`: 从开发者请求VC
-- `pollForVCFromDeveloper()`: 轮询获取VC
-- `storePurchaseInfo()`: 存储购买信息到Redis
+## 错误与边界
 
-### api.go
-对外公共接口（兼容旧版API）：
-- `InitStateMachine()`: 初始化状态机
-- `GetStateMachine()`: 获取状态机实例
-- `ProcessAppPaymentStatus()`: 处理应用支付状态（主入口）
-- `StartPaymentProcess()`: 开始支付流程
-- `RetryPaymentProcess()`: 重试支付流程
-- `ProcessSignatureSubmission()`: 处理签名提交
-- `StartPaymentPolling()`: 开始支付轮询
-- `ListPaymentStates()`: 列出所有状态（调试用）
-- `PreprocessAppPaymentData()`: 预处理应用支付数据（验证开发者 RSA 密钥，加载购买信息）
+- 缺 `productID`：视为免费或跳过处理；部分接口要求“预处理已运行”。
+- 缺开发者 DID 或 DID 查询失败：构造失败态（`error_missing_developer`/`error_developer_fetch_failed`）并持久化。
+- 缺 `X-Forwarded-Host`：拒绝发起签名通知（无法构造回调 URL）。
+- 开发者服务非 2xx/网络错误：在轮询内重试，最终落 `DeveloperSyncFailed`。
+- `getUserDID` 要求 `X-Forwarded-Host` 至少三段域名。
 
-注：`GetPaymentState` 和 `SavePaymentState` 为包内部功能，不暴露在公共 API 中。状态机的所有方法都是内部方法，只能通过 `api.go` 中的公共接口访问。
+## 可改进建议
 
-**设计模式**：
-- `api.go`: 提供公共接口（大写开头），供外部调用
-- `utils.go`: 提供内部实现（小写开头），供 `api.go` 调用
-- `state_machine.go`: 状态机内部实现（小写开头），仅供包内部使用
-- 这样设计便于接口管理和实现细节分离
+- 完成 `handleStartPayment` 业务分支与 `CanTransition` 守卫规则。
+- 完善 `buildPaymentStatusFromState` 的用户态映射与错误态文案。
+- 合并双层内存缓存，统一经由状态机读写以消除不一致。
+- 补全 `verifyVCAgainstManifest` 的 JSONPath 校验逻辑与签名有效性验证。
+- 增加退避重试、阶段超时与清理策略的配置化支持。
 
-## 使用示例
+## 前端可见状态映射（建议）
 
-### 初始化状态机
+- `developer_confirmed` → 已购买（可安装）
+- `frontend_completed` → 已支付，等待开发者确认
+- `notification_sent` → 已通知前端进行支付
+- `not_notified` / `not_evaluated` → 未开始/未评估（可触发 `PurchaseApp` 推进）
+- 错误类（`error_*`）→ 引导用户重试或联系支持
 
-```go
-// 创建状态机实例
-sm := NewPaymentStateMachine(dataSender, settingsManager)
+## 回调载荷与参数要点
 
-// 获取或创建状态
-state, err := sm.GetOrCreateState(
-    userID,
-    appID,
-    productID,
-    appName,
-    sourceID,
-    developerName,
-)
+- submit-signature 回调：`ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)`
+  - `signBody` 需包含 `application_verifiable_credential.productId` 或 `vc.credentialSubject.productId`
+  - 从 `signBody` 解析 `productId` 定位状态
+
+- fetch-signature 回调：`HandleFetchSignatureCallback(jws, signBody, user, code)`
+  - `code==0` 代表签名成功，将写入 `JWS` 并推进 VC 同步
+
+## 前端支付数据（示例）
+
+返回字段 `payment_data`（`notifyFrontendPaymentRequired`）：
+
+```json
+{
+  "from": "did:user",
+  "to": "did:developer",
+  "product": [{ "product_id": "xxx" }]
+}
 ```
 
-### 处理事件
+## 故障排查 Checklist
 
-```go
-// 开始支付
-err := sm.ProcessEvent(ctx, userID, appID, productID, "start_payment", nil)
+- 没有状态或提示“ensure preprocessing ran”：确保调用了 `PreprocessAppPaymentData`。
+- 无法发起签名：检查 `X-Forwarded-Host` 是否传入且为至少三段域名。
+- DID 查询失败：检查 SystemRemoteService 配置与网络联通。
+- 开发者 VC 获取失败：查看 `queryVCFromDeveloper` 日志与开发者服务返回 `code`。
+- 轮询不生效：确认未被判定为“已在进行中”，以及状态 `PaymentFrontendCompleted` 是否已写入。
 
-// 签名提交
-err := sm.ProcessEvent(ctx, userID, appID, productID, "signature_submitted", SignaturePayload{
-    JWS:      jws,
-    SignBody: signBody,
-})
+## 时序图（概览）
 
-// 支付完成
-err := sm.ProcessEvent(ctx, userID, appID, productID, "payment_completed", PaymentPayload{
-    TxHash:        txHash,
-    SystemChainID: systemChainID,
-})
+```mermaid
+sequenceDiagram
+    participant FE as Frontend
+    participant MS as Market Server
+    participant LP as LarePass
+    participant DID as DID Gate
+    participant DEV as Developer Service
+
+    FE->>MS: 打开详情页
+    MS->>DID: 查询开发者 DID/RSAPubKey
+    MS-->>FE: Preprocess 完成（异步触发 fetch-signature）
+    MS->>LP: 通知拉取签名（callback: fetch-signature-callback）
+    LP-->>MS: 回调（jws, signBody, code）
+    MS->>DEV: (jws) 请求 VC（一次查询或轮询）
+    DEV-->>MS: 返回 code/VC
+    MS->>FE: 通知支付/购买完成（根据状态）
+    FE->>MS: 支付完成（TxHash/SystemChainID）
+    MS->>DEV: 轮询 VC（直到成功或耗尽）
+    DEV-->>MS: VC 成功
+    MS->>FE: 购买完成通知
 ```
 
-## 状态转换逻辑
+## 状态转移表（简化）
 
-### 典型流程
+- `SignatureRequired` + submit-signature → `SignatureRequiredAndSigned`
+- `SignatureRequiredAndSigned` + vc(code=0) → `SignatureNotRequired` + `DeveloperSyncCompleted`
+- `PaymentFrontendCompleted` + vc(code=0) → `PaymentDeveloperConfirmed`
+- vc(code=1) → `SignatureErrorNoRecord`（可提示重试）
+- vc(code=2) → `SignatureErrorNeedReSign`（提示重新签名）
+- 轮询失败/网络错误 → `DeveloperSyncFailed`
 
-1. **初始状态**: `start_payment` 事件
-   - 判断是否需要支付
-   - 判断是否需要签名
-   - 更新相关维度状态
+## 配置与依赖
 
-2. **需要签名**: 触发 `request_signature` 事件
-   - 通知LarePass进行签名
-   - 更新签名状态
+- SystemRemoteService：提供 DID Gate 访问的基础 URL（由 `settings` 组件缓存）。
+- Redis：读写 `payment:state:*`、`payment:receipt:*` 键。
+- X-Forwarded-Host：必需，用于构造回调 URL 和解析用户 DID（需至少三段域名）。
 
-3. **签名完成**: `signature_submitted` 事件
-   - 保存JWS和SignBody
-   - 更新LarePassSync状态
-   - 主动请求VC或等待支付
+## 日志与监控
 
-4. **支付完成**: `payment_completed` 事件
-   - 保存TxHash和SystemChainID
-   - 开始轮询VC
+- 关键日志点：
+  - `queryVCFromDeveloper` 请求与响应码
+  - 各事件处理 `processEvent/handle*` 的“Before/After 状态”
+  - 轮询起止、尝试次数与最终结果
+  - Redis 读写失败与降级分支
+- 建议埋点：
+  - 事件吞吐与失败率（按 code 分类）
+  - 平均等待 VC 的时长（支付完成→开发者确认）
 
-5. **收到VC**: `vc_received` 事件
-   - 保存VC
-   - 存储到Redis
-   - 通知前端购买完成
+## FAQ / 最佳实践
 
-## 与旧版本的主要区别
+- Q: 为什么有时 `GetPaymentStatus` 返回 `not_evaluated`？
+  - A: 尚未运行预处理或首次同步未完成；先调用 `PreprocessAppPaymentData`。
+- Q: 提交签名后没有收到支付提示？
+  - A: 检查 `ProcessSignatureSubmission` 是否被正确回调；并确认 `notifyFrontendPaymentRequired` 通道畅通。
+- Q: 轮询耗时过长？
+  - A: 调整轮询次数/间隔（当前 20 次/30s），或在开发者侧提供推送回调能力。
 
-### 旧版本 (payment/pay.go)
-- **流程式设计**: 按照步骤顺序执行
-- **单一状态**: 只有 `not_sign`, `not_pay`, `purchased` 三个状态
-- **耦合度高**: 状态和流程耦合在一起
-
-### 新版本 (paymentnew/)
-- **状态机式设计**: 基于多个维度独立管理状态
-- **五维状态**: 每个维度独立管理，更加灵活
-- **解耦设计**: 状态和业务逻辑分离
-- **事件驱动**: 通过事件触发状态转换
-
-## 待补充的业务逻辑
-
-当前框架已搭建完成，但以下具体业务逻辑需要后续补充：
-
-1. **状态转换规则**: `PaymentState.CanTransition()` 方法需要实现具体的状态转换规则
-2. **业务判断逻辑**: `handleStartPayment()` 等方法中的 TODO 部分
-3. **错误处理**: 各个事件处理函数的错误处理策略
-4. **重试机制**: 轮询失败后的重试策略
-5. **超时处理**: 各阶段超时的处理逻辑
-
-## 下一步工作
-
-1. 实现具体的状态转换规则
-2. 完善各个事件处理函数的业务逻辑
-3. 添加完善的错误处理和重试机制
-4. 编写单元测试
-5. 集成到现有系统中
 

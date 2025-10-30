@@ -32,6 +32,11 @@ func getCachedSystemRemoteService() string {
 	return cachedSystemRemoteService
 }
 
+// GetCachedSystemRemoteService returns the cached SystemRemoteService base URL
+func GetCachedSystemRemoteService() string {
+	return cachedSystemRemoteService
+}
+
 func setCachedSystemRemoteService(v string) {
 	cachedSystemRemoteService = v
 }

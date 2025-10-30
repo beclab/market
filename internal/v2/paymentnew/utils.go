@@ -63,21 +63,22 @@ func getRedisStateKey(userID, appID, productID string) string {
 
 // queryVCFromDeveloper 通过开发者接口查询VC（内部方法）
 // 对应原来的 getVCFromDeveloper
-func queryVCFromDeveloper(jws string, developerName string) (string, error) {
+// 返回 VCQueryResult，其中 Code: 0=成功, 1=没有记录, 2=签名失效
+func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, error) {
 	if jws == "" {
-		return "", errors.New("jws parameter is empty")
+		return nil, errors.New("jws parameter is empty")
 	}
 	if developerName == "" {
-		return "", errors.New("developer name is empty")
+		return nil, errors.New("developer name is empty")
 	}
 
 	// Build base URL: https://4c94e3111.{developerName}/
 	// Convert developerName to lowercase for DNS compatibility
 	developerName = strings.ToLower(developerName)
 
-	// baseURL := fmt.Sprintf("https://4c94e3111.%s", developerName)
+	baseURL := fmt.Sprintf("https://4c94e3111.%s", developerName)
 	// test code
-	baseURL := fmt.Sprintf("https://4c94e3111.%s", "tw7613781.olares.com")
+	// baseURL := fmt.Sprintf("https://4c94e3111.%s", "tw7613781.olares.com")
 
 	endpoint := fmt.Sprintf("%s/api/grpc/AuthService/ActivateAndGrant", baseURL)
 
@@ -98,7 +99,7 @@ func queryVCFromDeveloper(jws string, developerName string) (string, error) {
 		Post(endpoint)
 
 	if err != nil {
-		return "", fmt.Errorf("failed to call AuthService: %w", err)
+		return nil, fmt.Errorf("failed to call AuthService: %w", err)
 	}
 
 	// Log complete response for debugging
@@ -111,7 +112,7 @@ func queryVCFromDeveloper(jws string, developerName string) (string, error) {
 	log.Printf("===================================")
 
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-		return "", fmt.Errorf("AuthService returned non-2xx status: %d, body: %s", resp.StatusCode(), string(resp.Body()))
+		return nil, fmt.Errorf("AuthService returned non-2xx status: %d, body: %s", resp.StatusCode(), string(resp.Body()))
 	}
 
 	// Parse response to extract verifiableCredential
@@ -119,27 +120,48 @@ func queryVCFromDeveloper(jws string, developerName string) (string, error) {
 		VerifiableCredential string `json:"verifiableCredential"`
 		Error                string `json:"error,omitempty"`
 		Message              string `json:"message,omitempty"`
+		Code                 int    `json:"code,omitempty"`
 	}
 
 	if err := json.Unmarshal(resp.Body(), &response); err != nil {
-		return "", fmt.Errorf("failed to parse AuthService response: %w", err)
+		return nil, fmt.Errorf("failed to parse AuthService response: %w", err)
 	}
 
+	result := &VCQueryResult{}
+
+	// 优先使用返回的 code 字段
+	if response.Code > 0 {
+		result.Code = response.Code
+		return result, nil
+	}
+
+	// 如果 code 不存在，根据 error 和 verifiableCredential 推断
 	if response.Error != "" {
-		// Check if it's a payment not ready error
-		if strings.Contains(strings.ToLower(response.Error), "payment") &&
-			(strings.Contains(strings.ToLower(response.Error), "not") ||
-				strings.Contains(strings.ToLower(response.Error), "no")) {
-			return "", &PaymentNotReadyError{Message: response.Error}
+		errorLower := strings.ToLower(response.Error)
+		if strings.Contains(errorLower, "no record") || strings.Contains(errorLower, "not found") ||
+			strings.Contains(errorLower, "no data") {
+			result.Code = 1 // 没有记录
+			return result, nil
 		}
-		return "", fmt.Errorf("AuthService returned error: %s", response.Error)
+		if strings.Contains(errorLower, "invalid") || strings.Contains(errorLower, "expired") ||
+			(strings.Contains(errorLower, "signature") && (strings.Contains(errorLower, "fail") || strings.Contains(errorLower, "invalid"))) {
+			result.Code = 2 // 签名失效
+			return result, nil
+		}
+		// 其他错误也视为没有记录
+		result.Code = 1
+		return result, nil
 	}
 
 	if response.VerifiableCredential == "" {
-		return "", errors.New("AuthService returned empty verifiableCredential")
+		result.Code = 1 // 没有记录
+		return result, nil
 	}
 
-	return response.VerifiableCredential, nil
+	// 成功
+	result.VC = response.VerifiableCredential
+	result.Code = 0
+	return result, nil
 }
 
 // PaymentNotReadyError represents the case when payment information is not found in developer's service
@@ -149,6 +171,12 @@ type PaymentNotReadyError struct {
 
 func (e *PaymentNotReadyError) Error() string {
 	return e.Message
+}
+
+// VCQueryResult 表示查询VC的结果
+type VCQueryResult struct {
+	VC   string // VerifiableCredential
+	Code int    // 0=成功, 1=没有记录, 2=签名失效
 }
 
 // notifyLarePassToSign 通知 larepass 客户端进行签名（内部方法）
@@ -206,17 +234,67 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 	return dataSender.SendSignNotificationUpdate(update)
 }
 
-// notifyFrontendPaymentRequired 通知 market 前端需要进行支付（内部方法）
-func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID, appName, sourceID, productID string) error {
+// notifyLarePassToFetchSignature 通知 larepass 客户端拉取签名（与 NotifyLarePassToSign 相同负载，Topic 不同，且不包含 txHash）
+func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, productID, xForwardedHost string, systemChainID int) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
 	}
 
-	// Create frontend payment data
-	// Note: In a real implementation, you would need to get user DID and developer DID
-	// For now, we'll use placeholder values
-	userDID := "did:key:z6Mkgk8SGZQqXahNc9RumbX8LvUdCLWZskY7LFNMULdT5Z6r" // This should come from user info
-	developerDID := fmt.Sprintf("did:key:%s", productID)                  // This should come from app price info
+	var manifestData map[string]interface{}
+	if err := json.Unmarshal([]byte(merchantProductLicenseCredentialManifestJSON), &manifestData); err != nil {
+		return fmt.Errorf("failed to parse manifest JSON: %w", err)
+	}
+
+	// Build SignBody - start with ProductCredentialManifest
+	signBody := map[string]interface{}{
+		"product_credential_manifest": manifestData,
+	}
+
+	// Only add application_verifiable_credential if required fields present (omit txHash by design)
+	if productID != "" && systemChainID != 0 {
+		appVerifiableCredential := map[string]interface{}{
+			"productId":     productID,
+			"systemChainId": systemChainID,
+		}
+		signBody["application_verifiable_credential"] = appVerifiableCredential
+		log.Printf("Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s", userID, appID)
+	} else {
+		log.Printf("Skipping application_verifiable_credential for fetch-signature (productID: %s, systemChainID: %d)", productID, systemChainID)
+	}
+
+	if xForwardedHost == "" {
+		log.Printf("ERROR: X-Forwarded-Host is empty for user %s, cannot build callback URL (fetch-signature)", userID)
+		return errors.New("X-Forwarded-Host is required but not available")
+	}
+
+	// New callback endpoint for fetch-signature
+	callbackURL := fmt.Sprintf("https://%s/app-store/api/v2/payment/fetch-signature-callback", xForwardedHost)
+	log.Printf("Using X-Forwarded-Host based callback URL (fetch-signature) for user %s: %s", userID, callbackURL)
+
+	update := types.SignNotificationUpdate{
+		Sign: types.SignNotificationData{
+			CallbackURL: callbackURL,
+			SignBody:    signBody,
+		},
+		User:  userID,
+		Vars:  make(map[string]string),
+		Topic: "fetch_payment_signature",
+	}
+
+	return dataSender.SendSignNotificationUpdate(update)
+}
+
+// notifyFrontendPaymentRequired 通知 market 前端需要进行支付（内部方法）
+func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID, appName, sourceID, productID, developerDID, xForwardedHost string) error {
+	if dataSender == nil {
+		return errors.New("data sender is nil")
+	}
+
+	// Get user DID
+	userDID, err := getUserDID(userID, xForwardedHost)
+	if err != nil {
+		return fmt.Errorf("failed to get user DID: %w", err)
+	}
 
 	paymentData := createFrontendPaymentData(userDID, developerDID, productID)
 
@@ -327,18 +405,13 @@ func checkIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
 	return false, nil // Not a paid app
 }
 
-// getPaymentStatus gets the payment status from AppInfo
-// This is an internal function, use GetPaymentStatus from api.go instead
-func getPaymentStatus(appInfo *types.AppInfo) (string, error) {
-	if appInfo == nil {
-		return "", errors.New("app info is nil")
+// buildPaymentStatusFromState constructs a user-facing payment status string from PaymentState
+// TODO: buildPaymentStatusFromState 需要补全映射关系与边界条件处理
+func buildPaymentStatusFromState(state *PaymentState) string {
+	if state == nil {
+		return "not_evaluated"
 	}
-
-	if appInfo.PurchaseInfo == nil {
-		return "not_buy", nil // No purchase info means not bought
-	}
-
-	return appInfo.PurchaseInfo.Status, nil
+	return string(state.PaymentStatus)
 }
 
 // getPaymentStateFromStore 获取 PaymentState（内部函数）
@@ -475,22 +548,39 @@ func getAllPaymentStates() map[string]*PaymentState {
 	return result
 }
 
+// getSystemRemoteServiceBase returns the SystemRemoteService base URL
+func getSystemRemoteServiceBase() string {
+	// Try to get from cached SystemRemoteService first
+	if base := settings.GetCachedSystemRemoteService(); base != "" {
+		return base
+	}
+
+	log.Printf("Warning: SystemRemoteService base URL not available from systemenv watcher")
+	return ""
+}
+
 // ===== 从旧版 payment 包迁移的函数 =====
 
-// fetchDeveloperInfo fetches developer information from DID gate (internal function)
-func fetchDeveloperInfo(ctx context.Context, httpClient *resty.Client, base string, developerName string) (*DeveloperInfo, error) {
-	if developerName == "" {
-		return nil, errors.New("developer name is empty")
+// fetchDeveloperInfo fetches developer information from DID service (internal function)
+func fetchDidInfo(ctx context.Context, httpClient *resty.Client, didName string) (*DeveloperInfo, error) {
+	if didName == "" {
+		return nil, errors.New("did name is empty")
 	}
 	if httpClient == nil {
 		httpClient = resty.New()
 	}
 	httpClient.SetTimeout(3 * time.Second)
 
-	// build URL: base + /domain/faster_search/{did}
-	base = strings.TrimRight(base, "/")
-	escaped := url.PathEscape(developerName)
-	endpoint := fmt.Sprintf("%s/domain/faster_search/%s", base, escaped)
+	// Get SystemRemoteService base URL and append /did
+	baseURL := getSystemRemoteServiceBase()
+	if baseURL == "" {
+		return nil, errors.New("system remote service base URL not available")
+	}
+
+	// build URL: {SystemRemoteService}/did/domain/faster_search/{did}
+	baseURL = strings.TrimRight(baseURL, "/")
+	escaped := url.PathEscape(didName)
+	endpoint := fmt.Sprintf("%s/did/domain/faster_search/%s", baseURL, escaped)
 
 	resp, err := httpClient.R().
 		SetContext(ctx).
@@ -541,27 +631,75 @@ func redisPurchaseKey(userID, developerName, appName, priceProductID string) str
 }
 
 // getPurchaseInfoFromRedis loads purchase info JSON from Redis (internal function)
-func getPurchaseInfoFromRedis(sm *settings.SettingsManager, key string) (*types.PurchaseInfo, error) {
-	if sm == nil {
-		return nil, errors.New("settings manager is nil")
+// buildPurchaseInfoFromState constructs PurchaseInfo from PaymentState
+func buildPurchaseInfoFromState(state *PaymentState) *types.PurchaseInfo {
+	if state == nil {
+		return nil
 	}
-	rc := sm.GetRedisClient()
-	if rc == nil {
-		return nil, errors.New("redis client is nil")
+	return &types.PurchaseInfo{
+		VC:     state.VC,
+		Status: string(state.PaymentStatus),
 	}
-	val, err := rc.Get(key)
+}
+
+// getUserDID 通过 X-Forwarded-Host 获取用户 DID
+// X-Forwarded-Host 格式为 a.b.c.d，需要截取后三段 b.c.d，然后查询 DID
+func getUserDID(userID, xForwardedHost string) (string, error) {
+	if xForwardedHost == "" {
+		return "", errors.New("X-Forwarded-Host is empty")
+	}
+
+	// 截取后三段域名
+	parts := strings.Split(xForwardedHost, ".")
+	if len(parts) < 3 {
+		return "", fmt.Errorf("invalid X-Forwarded-Host format: %s, need at least 3 parts", xForwardedHost)
+	}
+
+	// 取后三段
+	domain := strings.Join(parts[len(parts)-3:], ".")
+
+	// 创建 HTTP 客户端并查询 DID
+	httpClient := resty.New()
+	httpClient.SetTimeout(3 * time.Second)
+
+	didInfo, err := fetchDidInfo(context.Background(), httpClient, domain)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("failed to fetch DID for domain %s: %w", domain, err)
 	}
-	if val == "" {
-		return nil, errors.New("empty purchase info")
+
+	return didInfo.DID, nil
+}
+
+// parseProductIDFromSignBody 从 signBody JSON 中解析 productId
+// 兼容两种位置：
+// 1) application_verifiable_credential.productId
+// 2) vc.credentialSubject.productId （如存在）
+func parseProductIDFromSignBody(signBody string) (string, error) {
+	if strings.TrimSpace(signBody) == "" {
+		return "", errors.New("empty sign body")
 	}
-	var pi types.PurchaseInfo
-	if err := json.Unmarshal([]byte(val), &pi); err != nil {
-		// if not JSON, assume raw VC string stored
-		pi = types.PurchaseInfo{VC: val, Status: "unknown"}
+	var body map[string]interface{}
+	if err := json.Unmarshal([]byte(signBody), &body); err != nil {
+		return "", fmt.Errorf("invalid sign body json: %w", err)
 	}
-	return &pi, nil
+
+	// Try application_verifiable_credential.productId
+	if avc, ok := body["application_verifiable_credential"].(map[string]interface{}); ok {
+		if pid, ok := avc["productId"].(string); ok && pid != "" {
+			return pid, nil
+		}
+	}
+
+	// Try nested vc.credentialSubject.productId
+	if vc, ok := body["vc"].(map[string]interface{}); ok {
+		if cs, ok := vc["credentialSubject"].(map[string]interface{}); ok {
+			if pid, ok := cs["productId"].(string); ok && pid != "" {
+				return pid, nil
+			}
+		}
+	}
+
+	return "", errors.New("productId not found in sign body")
 }
 
 // verifyPurchaseInfo verifies purchase info against manifest (internal function)
@@ -601,6 +739,21 @@ func getProductIDFromAppInfo(appInfo *types.AppInfo) string {
 
 	log.Printf("GetProductIDFromAppInfo: Found product ID: %s", firstCurrency.ProductID)
 	return firstCurrency.ProductID
+}
+
+// getDeveloperNameFromPrice extracts developer identifier from app price info
+// Preference: use DID from price.developer.did; return empty if unavailable
+func getDeveloperNameFromPrice(appInfo *types.AppInfo) string {
+	if appInfo == nil || appInfo.Price == nil {
+		return ""
+	}
+	did := strings.TrimSpace(appInfo.Price.Developer.DID)
+	if did != "" {
+		log.Printf("GetDeveloperNameFromPrice: Found developer DID: %s", did)
+		return did
+	}
+	log.Printf("GetDeveloperNameFromPrice: Developer DID not found in price info")
+	return ""
 }
 
 // verifyVCAgainstManifest verifies VC against manifest using JSONPath

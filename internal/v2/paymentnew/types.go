@@ -9,12 +9,14 @@ import (
 	"market/internal/v2/types"
 )
 
-// PaymentNeed 维度一：是否需要支付
-type PaymentNeed bool
+// PaymentNeed 维度一：是否需要支付/错误状态
+type PaymentNeed string
 
 const (
-	PaymentNeedNotRequired PaymentNeed = false
-	PaymentNeedRequired    PaymentNeed = true
+	PaymentNeedNotRequired               PaymentNeed = "not_required"                 // 不需要支付（免费应用）
+	PaymentNeedRequired                  PaymentNeed = "required"                     // 需要支付
+	PaymentNeedErrorMissingDeveloper     PaymentNeed = "error_missing_developer"      // 价格信息缺少开发者
+	PaymentNeedErrorDeveloperFetchFailed PaymentNeed = "error_developer_fetch_failed" // DID查询开发者失败
 )
 
 // DeveloperSyncStatus 维度二：是否已跟开发者同步过vc信息
@@ -41,16 +43,20 @@ const (
 type SignatureStatus string
 
 const (
+	SignatureNotEvaluated       SignatureStatus = "not_evaluated"
 	SignatureNotRequired        SignatureStatus = "not_required"
 	SignatureRequired           SignatureStatus = "required"
 	SignatureRequiredAndSigned  SignatureStatus = "required_and_signed"
 	SignatureRequiredButPending SignatureStatus = "required_but_pending"
+	SignatureErrorNoRecord      SignatureStatus = "error_no_record"
+	SignatureErrorNeedReSign    SignatureStatus = "error_need_resign"
 )
 
 // PaymentStatus 维度五：支付状态
 type PaymentStatus string
 
 const (
+	PaymentNotEvaluated       PaymentStatus = "not_evaluated"
 	PaymentNotNotified        PaymentStatus = "not_notified"
 	PaymentNotificationSent   PaymentStatus = "notification_sent"
 	PaymentFrontendCompleted  PaymentStatus = "frontend_completed"
@@ -66,6 +72,8 @@ type PaymentState struct {
 	SourceID      string
 	ProductID     string
 	DeveloperName string
+	// 完整的开发者信息
+	Developer DeveloperInfo `json:"developer"`
 
 	// 状态机五个维度
 	PaymentNeed     PaymentNeed         `json:"payment_need"`

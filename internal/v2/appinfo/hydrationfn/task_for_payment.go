@@ -35,28 +35,12 @@ func (s *TaskForPaymentStep) Execute(ctx context.Context, task *HydrationTask) e
 		return fmt.Errorf("no pending app info for payment step")
 	}
 
-	// Get developer name for key
-	devNameForKey := ""
-	if pending.AppInfo.AppEntry != nil {
-		devNameForKey = pending.AppInfo.AppEntry.Developer
-	}
-	if devNameForKey == "" {
-		devNameForKey = task.AppName // Fallback to app name if developer name is not available
-	}
-
-	// Get app name for key
-	appNameForKey := pending.AppInfo.AppEntry.Name
-	if appNameForKey == "" {
-		appNameForKey = task.AppName
-	}
-
 	// Call PreprocessAppPaymentData from paymentnew API
 	pi, err := paymentnew.PreprocessAppPaymentData(
 		ctx,
 		pending.AppInfo,
 		task.UserID,
-		devNameForKey,
-		appNameForKey,
+		task.SourceID,
 		task.SettingsManager,
 		s.client,
 	)

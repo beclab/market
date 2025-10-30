@@ -2048,7 +2048,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := paymentnew.ProcessAppPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
+	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
@@ -2070,6 +2070,63 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s", appID, sourceID, userID, result.Status)
 	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
+}
+
+// purchaseApp handles POST /api/v2/sources/{source}/apps/{id}/purchase
+// Path parameters:
+//   - source: specific source name to search app (required)
+//   - id: app ID (required)
+func (s *Server) purchaseApp(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+	source := vars["source"]
+
+	log.Printf("POST /api/v2/sources/%s/apps/%s/purchase - Purchase app", source, appID)
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for purchase request: %s", userID)
+
+	// Read X-Forwarded-Host (needed for user DID resolution)
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
+
+	// Derive AppInfoLatest from cache to supply AppInfo
+	var appInfoLatest *types.AppInfoLatestData
+	if s.cacheManager != nil {
+		userData := s.cacheManager.GetUserData(userID)
+		if userData != nil {
+			if app, _ := s.findAppInUserDataWithSource(userData, appID, source); app != nil {
+				appInfoLatest = app
+			}
+		}
+	}
+	if appInfoLatest == nil || appInfoLatest.AppInfo == nil {
+		s.sendResponse(w, http.StatusNotFound, false, "App info not found in cache", nil)
+		return
+	}
+
+	// Step 2: Call payment module purchase API
+	result, err := paymentnew.PurchaseApp(userID, appID, source, xForwardedHost, appInfoLatest.AppInfo)
+	if err != nil {
+		log.Printf("Failed to start purchase: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to start purchase", nil)
+		return
+	}
+
+	// Step 3: Respond
+	if result == nil {
+		result = map[string]interface{}{}
+	}
+	result["app_id"] = appID
+	result["source"] = source
+	result["user"] = userID
+	s.sendResponse(w, http.StatusOK, true, "OK", result)
 }
 
 // getAppPaymentStatusLegacy handles GET /api/v2/apps/{id}/payment-status (legacy route)
@@ -2116,7 +2173,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	log.Printf("Found app: %s in source: %s for user: %s (legacy search)", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := paymentnew.ProcessAppPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
+	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)

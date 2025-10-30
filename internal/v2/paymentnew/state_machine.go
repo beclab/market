@@ -11,41 +11,8 @@ import (
 	"market/internal/v2/types"
 )
 
-// getOrCreateState 获取或创建状态（内部方法）
-func (psm *PaymentStateMachine) getOrCreateState(userID, appID, productID, appName, sourceID, developerName string) (*PaymentState, error) {
-	key := fmt.Sprintf("%s:%s:%s", userID, appID, productID)
-
-	psm.mu.Lock()
-	defer psm.mu.Unlock()
-
-	// Check if state already exists
-	if state, exists := psm.states[key]; exists {
-		log.Printf("State already exists for key %s", key)
-		return state, nil
-	}
-
-	// Create new state
-	state := &PaymentState{
-		UserID:          userID,
-		AppID:           appID,
-		AppName:         appName,
-		SourceID:        sourceID,
-		ProductID:       productID,
-		DeveloperName:   developerName,
-		PaymentNeed:     PaymentNeedRequired,
-		DeveloperSync:   DeveloperSyncNotStarted,
-		LarePassSync:    LarePassSyncNotStarted,
-		SignatureStatus: SignatureNotRequired,
-		PaymentStatus:   PaymentNotNotified,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
-	}
-
-	psm.states[key] = state
-	log.Printf("Created new state for key %s", key)
-
-	return state, nil
-}
+// getOrCreateState 仅获取已存在的状态；不再在此处创建
+// 已废弃：原 getOrCreateState 已移除，避免多处创建状态
 
 // getState 获取状态（内部方法）
 func (psm *PaymentStateMachine) getState(userID, appID, productID string) (*PaymentState, error) {
@@ -81,7 +48,24 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 	newState.UpdatedAt = time.Now()
 	psm.states[key] = &newState
 
+	// 同步到 Redis（异步执行，避免阻塞状态更新）
+	go func() {
+		if err := savePaymentStateToStore(&newState, psm.settingsManager); err != nil {
+			log.Printf("Failed to save updated state to store for key %s: %v", key, err)
+		}
+	}()
+
 	return nil
+}
+
+// setState 将给定状态写入状态机（创建或覆盖）
+func (psm *PaymentStateMachine) setState(state *PaymentState) {
+	if state == nil {
+		return
+	}
+	psm.mu.Lock()
+	psm.states[state.GetKey()] = state
+	psm.mu.Unlock()
 }
 
 // processEvent 处理事件并触发状态转换（内部方法）
@@ -265,16 +249,18 @@ func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
 		return
 	}
 
-	vc, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
+	result, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
 	if err != nil {
 		log.Printf("Failed to get VC from developer: %v", err)
 		// 如果获取失败，可能需要通知前端重新支付或其他处理
 		return
 	}
 
-	// 触发 VC 接收事件
-	if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", vc); err != nil {
-		log.Printf("Failed to process vc_received event: %v", err)
+	// 只有 code=0 时才触发 VC 接收事件
+	if result.Code == 0 && result.VC != "" {
+		if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
+			log.Printf("Failed to process vc_received event: %v", err)
+		}
 	}
 }
 
@@ -282,30 +268,69 @@ func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
 func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 	log.Printf("Starting VC polling for user %s, app %s", state.UserID, state.AppID)
 
+	// 防重入：如果已在进行中则直接返回；否则标记为进行中
+	if err := psm.updateState(state.GetKey(), func(s *PaymentState) error {
+		if s.DeveloperSync == DeveloperSyncInProgress {
+			return fmt.Errorf("poll already in progress")
+		}
+		// 仅在未开始或失败时置为进行中
+		if s.DeveloperSync == DeveloperSyncNotStarted || s.DeveloperSync == DeveloperSyncFailed {
+			s.DeveloperSync = DeveloperSyncInProgress
+		}
+		return nil
+	}); err != nil {
+		// 已在进行中或更新失败，直接返回
+		log.Printf("Skip starting VC polling: %v", err)
+		return
+	}
+
 	maxAttempts := 20
 	interval := 30 * time.Second
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		log.Printf("VC polling attempt %d/%d for user %s, app %s", attempt, maxAttempts, state.UserID, state.AppID)
 
-		vc, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
+		result, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
 		if err != nil {
 			log.Printf("VC polling attempt %d failed: %v", attempt, err)
 			if attempt == maxAttempts {
 				log.Printf("All VC polling attempts failed")
-				// TODO: 通知前端超时或错误
+				// 将状态标记为失败
+				if uerr := psm.updateState(state.GetKey(), func(s *PaymentState) error {
+					s.DeveloperSync = DeveloperSyncFailed
+					return nil
+				}); uerr != nil {
+					log.Printf("Failed to update DeveloperSync to failed: %v", uerr)
+				}
 				return
 			}
 			time.Sleep(interval)
 			continue
 		}
 
-		// VC obtained successfully
-		log.Printf("VC obtained successfully on attempt %d", attempt)
-		if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", vc); err != nil {
-			log.Printf("Failed to process vc_received event: %v", err)
+		// 只有 code=0 且 VC 不为空时才认为成功
+		if result.Code == 0 && result.VC != "" {
+			log.Printf("VC obtained successfully on attempt %d", attempt)
+			if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
+				log.Printf("Failed to process vc_received event: %v", err)
+			}
+			return
 		}
-		return
+
+		// code != 0 时继续轮询或结束
+		log.Printf("VC query returned code=%d, continuing poll...", result.Code)
+		if attempt == maxAttempts {
+			log.Printf("All VC polling attempts completed without success (code=%d)", result.Code)
+			// 将状态标记为失败
+			if uerr := psm.updateState(state.GetKey(), func(s *PaymentState) error {
+				s.DeveloperSync = DeveloperSyncFailed
+				return nil
+			}); uerr != nil {
+				log.Printf("Failed to update DeveloperSync to failed: %v", uerr)
+			}
+			return
+		}
+		time.Sleep(interval)
 	}
 }
 
@@ -362,4 +387,152 @@ func (psm *PaymentStateMachine) cleanupCompletedStates(olderThan time.Duration) 
 			log.Printf("Cleaned up completed state: %s", key)
 		}
 	}
+}
+
+// triggerPaymentStateSync 触发 PaymentStates 的状态同步流程（占位实现）
+func triggerPaymentStateSync(state *PaymentState) error {
+	if state == nil {
+		return nil
+	}
+
+	// LarePassSync 调度逻辑（可重入）
+	switch state.LarePassSync {
+	case LarePassSyncNotStarted:
+		// 标记为进行中并触发一次
+		if globalStateMachine != nil {
+			_ = globalStateMachine.updateState(state.GetKey(), func(s *PaymentState) error {
+				s.LarePassSync = LarePassSyncInProgress
+				return nil
+			})
+			if globalStateMachine.dataSender != nil {
+				_ = notifyLarePassToFetchSignature(
+					globalStateMachine.dataSender,
+					state.UserID,
+					state.AppID,
+					state.ProductID,
+					state.XForwardedHost,
+					state.SystemChainID,
+				)
+			}
+		}
+	case LarePassSyncInProgress:
+		// 再次触发，避免网络异常导致流程卡死
+		if globalStateMachine != nil && globalStateMachine.dataSender != nil {
+			_ = notifyLarePassToFetchSignature(
+				globalStateMachine.dataSender,
+				state.UserID,
+				state.AppID,
+				state.ProductID,
+				state.XForwardedHost,
+				state.SystemChainID,
+			)
+		}
+	case LarePassSyncCompleted:
+		// 下一项检查：同步 VC 信息与状态
+		if globalStateMachine != nil {
+			globalStateMachine.triggerVCSync(state)
+		}
+		return nil
+	case LarePassSyncFailed:
+		// 失败直接结束
+		return nil
+	default:
+		return nil
+	}
+
+	return nil
+}
+
+// 处理 fetch-signature 回调（占位实现）
+func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, user string, code int) error {
+	// 已由上层解析出 code，这里不再从 signBody 读取
+
+	// 从 signBody 解析 productId，然后通过 user+productId 精确定位状态
+	productID, err := parseProductIDFromSignBody(signBody)
+	if err != nil {
+		return fmt.Errorf("failed to parse productId: %w", err)
+	}
+	state := psm.findStateByUserAndProduct(user, productID)
+	if state == nil {
+		return fmt.Errorf("no payment state found for user %s and product %s", user, productID)
+	}
+
+	// 更新 LarePassSync 与签名状态
+	if err := psm.updateState(state.GetKey(), func(s *PaymentState) error {
+		s.LarePassSync = LarePassSyncCompleted
+		if code == 0 {
+			s.SignatureStatus = SignatureRequiredAndSigned
+			s.JWS = jws
+		} else if code == 1 {
+			s.SignatureStatus = SignatureRequired
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// code==0 时，触发下一项同步检查（与 LarePassSyncCompleted 时相同）
+	if code == 0 {
+		updatedState, _ := psm.getState(state.UserID, state.AppID, state.ProductID)
+		if updatedState != nil {
+			psm.triggerVCSync(updatedState)
+		}
+	}
+
+	return nil
+}
+
+// findStateByUserAndProduct 通过 userId + productId 精确匹配状态
+func (psm *PaymentStateMachine) findStateByUserAndProduct(userID, productID string) *PaymentState {
+	psm.mu.RLock()
+	defer psm.mu.RUnlock()
+	for _, st := range psm.states {
+		if st != nil && st.UserID == userID && st.ProductID == productID {
+			return st
+		}
+	}
+	return nil
+}
+
+// triggerVCSync 同步 VC 信息与状态：若已有 JWS，则向开发者服务请求 VC
+func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
+	if state == nil {
+		return
+	}
+	if state.JWS == "" {
+		log.Printf("triggerVCSync: JWS empty, skip for %s", state.GetKey())
+		return
+	}
+
+	// 异步查询 VC
+	go func() {
+		result, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
+		if err != nil {
+			// 网络请求失败，仅设置 DeveloperSync 为 failed，不修改 Signature 状态
+			log.Printf("triggerVCSync: failed to query VC from developer (network error): %v", err)
+			_ = psm.updateState(state.GetKey(), func(s *PaymentState) error {
+				s.DeveloperSync = DeveloperSyncFailed
+				return nil
+			})
+			return
+		}
+
+		// 根据 code 设置状态
+		_ = psm.updateState(state.GetKey(), func(s *PaymentState) error {
+			s.DeveloperSync = DeveloperSyncCompleted
+			switch result.Code {
+			case 0:
+				// 成功
+				s.SignatureStatus = SignatureNotRequired
+				s.VC = result.VC
+			case 1:
+				// 没有记录
+				s.SignatureStatus = SignatureErrorNoRecord
+			case 2:
+				// 签名失效
+				s.SignatureStatus = SignatureErrorNeedReSign
+			}
+			return nil
+		})
+	}()
 }

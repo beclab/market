@@ -78,6 +78,14 @@ type SubmitSignatureRequest struct {
 	ProductCredentialManifest       json.RawMessage                  `json:"product_credential_manifest"`
 }
 
+// FetchSignatureCallbackRequest represents the request from fetch-signature callback
+type FetchSignatureCallbackRequest struct {
+	Code                            int                              `json:"code"`
+	JWS                             string                           `json:"jws"`
+	ApplicationVerifiableCredential *ApplicationVerifiableCredential `json:"application_verifiable_credential,omitempty"`
+	ProductCredentialManifest       json.RawMessage                  `json:"product_credential_manifest"`
+}
+
 // ListVersionResponse for version history response
 // VersionInfo struct definition
 
@@ -947,14 +955,16 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Constructed SignBody length: %d", len(signBodyStr))
 
-	// Get bflUser from X-Bfl-User header
+	// Get bflUser and X-Forwarded-Host from headers
 	restfulReq := &restful.Request{Request: r}
 	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
 
 	log.Println("=== REQUEST VALIDATION ===")
 	log.Printf("JWS length: %d", len(req.JWS))
 	log.Printf("SignBody length: %d", len(signBodyStr))
 	log.Printf("X-Bfl-User header: %s", bflUser)
+	log.Printf("X-Forwarded-Host: %s", xForwardedHost)
 
 	// Validate user from header
 	if bflUser == "" {
@@ -964,7 +974,7 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call payment module for business logic processing
-	processErr := processSignatureSubmission(req.JWS, signBodyStr, bflUser)
+	processErr := processSignatureSubmission(req.JWS, signBodyStr, bflUser, xForwardedHost)
 	if processErr != nil {
 		log.Printf("Failed to process signature submission: %v", processErr)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process signature submission", nil)
@@ -980,10 +990,70 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// fetchSignatureCallback handles POST /api/v2/payment/fetch-signature-callback
+func (s *Server) fetchSignatureCallback(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/payment/fetch-signature-callback - Processing fetch signature callback")
+
+	// Log headers
+	for key, values := range r.Header {
+		for _, value := range values {
+			log.Printf("Header: %s = %s", key, value)
+		}
+	}
+
+	// Read raw body
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+	log.Printf("RAW BODY len=%d content=%s", len(bodyBytes), string(bodyBytes))
+
+	// Parse JSON
+	var req FetchSignatureCallbackRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request body", nil)
+		return
+	}
+
+	if req.JWS == "" {
+		log.Println("JWS is empty in fetch-signature callback")
+		s.sendResponse(w, http.StatusBadRequest, false, "JWS cannot be empty", nil)
+		return
+	}
+
+	// Prepare signBody as raw JSON string passthrough
+	signBodyStr := string(bodyBytes)
+
+	// Get user from header
+	restfulReq := &restful.Request{Request: r}
+	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
+	if bflUser == "" {
+		log.Println("X-Bfl-User header is empty for fetch-signature callback")
+		s.sendResponse(w, http.StatusBadRequest, false, "X-Bfl-User header is required", nil)
+		return
+	}
+
+	// Delegate to payment module
+	if err := paymentnew.HandleFetchSignatureCallback(req.JWS, signBodyStr, bflUser, req.Code); err != nil {
+		log.Printf("Failed to process fetch-signature callback: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process fetch-signature callback", nil)
+		return
+	}
+
+	s.sendResponse(w, http.StatusOK, true, "Fetch signature callback processed", map[string]interface{}{
+		"status":      "processed",
+		"user":        bflUser,
+		"jws_present": req.JWS != "",
+	})
+}
+
 // processSignatureSubmission calls payment module for business logic processing
-func processSignatureSubmission(jws, signBody, user string) error {
-	log.Printf("Processing signature submission in payment module - JWS: %s, SignBody: %s, User: %s", jws, signBody, user)
+func processSignatureSubmission(jws, signBody, user, xForwardedHost string) error {
+	log.Printf("Processing signature submission in payment module - JWS: %s, SignBody: %s, User: %s, X-Forwarded-Host: %s", jws, signBody, user, xForwardedHost)
 
 	// Call payment module function for business logic processing
-	return paymentnew.ProcessSignatureSubmission(jws, signBody, user)
+	return paymentnew.ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)
 }
