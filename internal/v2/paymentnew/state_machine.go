@@ -589,19 +589,21 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 			return
 		}
 
-		// 根据 code 设置状态
+		// code==0 直接走统一路径：触发 vc_received 事件，完成设置终态/落库/通知
+		if result.Code == 0 && result.VC != "" {
+			if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
+				log.Printf("triggerVCSync: failed to process vc_received event: %v", err)
+			}
+			return
+		}
+
+		// 非成功场景：仅更新同步与签名状态
 		_ = psm.updateState(state.GetKey(), func(s *PaymentState) error {
 			s.DeveloperSync = DeveloperSyncCompleted
 			switch result.Code {
-			case 0:
-				// 成功
-				s.SignatureStatus = SignatureNotRequired
-				s.VC = result.VC
 			case 1:
-				// 没有记录
 				s.SignatureStatus = SignatureErrorNoRecord
 			case 2:
-				// 签名失效
 				s.SignatureStatus = SignatureErrorNeedReSign
 			}
 			return nil
