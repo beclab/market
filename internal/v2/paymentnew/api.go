@@ -61,87 +61,31 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 		return nil, fmt.Errorf("payment state not found; ensure preprocessing ran")
 	}
 
-	// 1.1 No signature yet -> notify LarePass to sign
-	if target.SignatureStatus == SignatureRequired || target.SignatureStatus == SignatureRequiredButPending {
-		if globalStateMachine == nil || globalStateMachine.dataSender == nil {
-			return nil, fmt.Errorf("state machine or data sender not initialized")
-		}
-
-		// Ensure X-Forwarded-Host is present in state for callback
-		effectiveHost := target.XForwardedHost
-		if effectiveHost == "" {
-			effectiveHost = xForwardedHost
-			if effectiveHost != "" {
-				_ = globalStateMachine.updateState(target.GetKey(), func(s *PaymentState) error {
-					s.XForwardedHost = effectiveHost
-					return nil
-				})
-			}
-		}
-
-		// Notify LarePass to sign (txHash may be empty at this point)
-		if err := notifyLarePassToSign(
-			globalStateMachine.dataSender,
-			target.UserID,
-			target.AppID,
-			target.ProductID,
-			target.TxHash,
-			effectiveHost,
-			target.SystemChainID,
-		); err != nil {
-			return nil, fmt.Errorf("failed to notify larepass to sign: %w", err)
-		}
-
-		// Optionally mark in-progress
-		_ = globalStateMachine.updateState(target.GetKey(), func(s *PaymentState) error {
-			if s.LarePassSync == LarePassSyncNotStarted || s.LarePassSync == LarePassSyncFailed {
-				s.LarePassSync = LarePassSyncInProgress
-			}
-			return nil
-		})
-
-		return map[string]interface{}{
-			"status": "signature_required",
-		}, nil
+	// Trigger start_payment event with payload (state machine will advance appropriately)
+	if globalStateMachine == nil {
+		return nil, fmt.Errorf("state machine not initialized")
+	}
+	if err := globalStateMachine.processEvent(
+		context.Background(),
+		userID,
+		appID,
+		productID,
+		"start_payment",
+		map[string]interface{}{
+			"x_forwarded_host": xForwardedHost,
+		},
+	); err != nil {
+		return nil, fmt.Errorf("failed to process start_payment event: %w", err)
 	}
 
-	// 1.2 Signed -> return payment transfer info (same as notifyFrontendPaymentRequired)
-	if target.SignatureStatus == SignatureRequiredAndSigned {
-		developerDID := target.Developer.DID
-		userDID, err := getUserDID(userID, xForwardedHost)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get user DID: %w", err)
-		}
-		paymentData := createFrontendPaymentData(userDID, developerDID, target.ProductID)
-		return map[string]interface{}{
-			"status":       "payment_required",
-			"payment_data": paymentData,
-		}, nil
+	// Read latest state to decide response
+	latest, _ := globalStateMachine.getState(userID, appID, productID)
+	if latest == nil {
+		latest = target
 	}
 
-	// 1.3 Signed and transferred -> trigger polling and return waiting status
-	if target.PaymentStatus == PaymentFrontendCompleted {
-		if globalStateMachine != nil {
-			go globalStateMachine.pollForVCFromDeveloper(target)
-		}
-		return map[string]interface{}{
-			"status":  "waiting_developer_confirmation",
-			"message": "payment completed, waiting for developer confirmation",
-		}, nil
-	}
-
-	// 1.4 VC synced with data -> already purchased
-	if target.DeveloperSync == DeveloperSyncCompleted && target.VC != "" {
-		return map[string]interface{}{
-			"status":  "purchased",
-			"message": "already purchased, ready to install",
-		}, nil
-	}
-
-	return map[string]interface{}{
-		"status":  "syncing",
-		"message": "synchronizing payment state",
-	}, nil
+	// Delegate response building to state machine for consistency
+	return globalStateMachine.buildPurchaseResponse(userID, xForwardedHost, latest)
 }
 
 // GetPaymentStatus returns payment status inferred from PaymentState directly

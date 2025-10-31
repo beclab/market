@@ -129,12 +129,97 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	newState := *state
 	newState.PaymentNeed = PaymentNeedRequired
 
-	// Decide next steps based on current state
-	// TODO: Implement business logic
-	// 1. Check whether signature is required
-	// 2. If required, update LarePassSync and SignatureStatus
-	// 3. If not required, notify frontend to pay
+	// Extract optional fields from payload
+	var xForwardedHost string
+	switch v := payload.(type) {
+	case map[string]interface{}:
+		if hostRaw, ok := v["x_forwarded_host"]; ok {
+			if hostStr, ok := hostRaw.(string); ok {
+				xForwardedHost = hostStr
+			}
+		}
+	}
 
+	// Prefer state value; fallback to payload
+	effectiveHost := newState.XForwardedHost
+	if effectiveHost == "" && xForwardedHost != "" {
+		effectiveHost = xForwardedHost
+	}
+
+	// Branch by current signature/payment status to advance flow
+	// 1) Need to initiate signature
+	if newState.SignatureStatus == SignatureRequired || newState.SignatureStatus == SignatureRequiredButPending {
+		if psm != nil && psm.dataSender != nil && effectiveHost != "" {
+			// write host before notifying to ensure callback URL is valid
+			_ = psm.updateState(newState.GetKey(), func(s *PaymentState) error {
+				if s.XForwardedHost == "" {
+					s.XForwardedHost = effectiveHost
+				}
+				if s.LarePassSync == LarePassSyncNotStarted || s.LarePassSync == LarePassSyncFailed {
+					s.LarePassSync = LarePassSyncInProgress
+				}
+				return nil
+			})
+
+			_ = notifyLarePassToSign(
+				psm.dataSender,
+				newState.UserID,
+				newState.AppID,
+				newState.ProductID,
+				newState.TxHash,
+				effectiveHost,
+				newState.SystemChainID,
+			)
+		}
+		return &newState, nil
+	}
+
+	// 2) Already signed -> notify frontend to pay (idempotent)
+	if newState.SignatureStatus == SignatureRequiredAndSigned {
+		if psm != nil && psm.dataSender != nil {
+			// Guard: skip duplicate notifications when already advanced
+			latest := &newState
+			if st, err := psm.getState(newState.UserID, newState.AppID, newState.ProductID); err == nil && st != nil {
+				latest = st
+			}
+			if !(latest.PaymentStatus == PaymentNotificationSent || latest.PaymentStatus == PaymentFrontendCompleted || latest.PaymentStatus == PaymentDeveloperConfirmed) {
+				_ = notifyFrontendPaymentRequired(
+					psm.dataSender,
+					newState.UserID,
+					newState.AppID,
+					newState.AppName,
+					newState.SourceID,
+					newState.ProductID,
+					newState.Developer.DID,
+					effectiveHost,
+				)
+
+				_ = psm.updateState(newState.GetKey(), func(s *PaymentState) error {
+					switch s.PaymentStatus {
+					case PaymentNotEvaluated, PaymentNotNotified:
+						s.PaymentStatus = PaymentNotificationSent
+					}
+					return nil
+				})
+			}
+		}
+		return &newState, nil
+	}
+
+	// 3) Frontend payment completed -> start polling developer for VC
+	if newState.PaymentStatus == PaymentFrontendCompleted {
+		if psm != nil {
+			go psm.pollForVCFromDeveloper(&newState)
+		}
+		return &newState, nil
+	}
+
+	// 4) VC already synced -> nothing to do
+	if newState.DeveloperSync == DeveloperSyncCompleted && newState.VC != "" {
+		return &newState, nil
+	}
+
+	// Default: no-op after marking payment need
 	return &newState, nil
 }
 
@@ -628,4 +713,55 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 			return nil
 		})
 	}()
+}
+
+// BuildPurchaseResponse builds API-facing response content based on current state
+// Only constructs response payload; it does not introduce new side effects.
+func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost string, state *PaymentState) (map[string]interface{}, error) {
+	if state == nil {
+		return nil, fmt.Errorf("state is nil")
+	}
+
+	// 1) Need signature
+	if state.SignatureStatus == SignatureRequired || state.SignatureStatus == SignatureRequiredButPending {
+		return map[string]interface{}{
+			"status": "signature_required",
+		}, nil
+	}
+
+	// 2) Signed -> return payment data for frontend transfer
+	if state.SignatureStatus == SignatureRequiredAndSigned {
+		developerDID := state.Developer.DID
+		userDID, err := getUserDID(userID, xForwardedHost)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user DID: %w", err)
+		}
+		paymentData := createFrontendPaymentData(userDID, developerDID, state.ProductID)
+		return map[string]interface{}{
+			"status":       "payment_required",
+			"payment_data": paymentData,
+		}, nil
+	}
+
+	// 3) Frontend has completed payment
+	if state.PaymentStatus == PaymentFrontendCompleted {
+		return map[string]interface{}{
+			"status":  "waiting_developer_confirmation",
+			"message": "payment completed, waiting for developer confirmation",
+		}, nil
+	}
+
+	// 4) VC present -> purchased
+	if state.DeveloperSync == DeveloperSyncCompleted && state.VC != "" {
+		return map[string]interface{}{
+			"status":  "purchased",
+			"message": "already purchased, ready to install",
+		}, nil
+	}
+
+	// Default syncing
+	return map[string]interface{}{
+		"status":  "syncing",
+		"message": "synchronizing payment state",
+	}, nil
 }
