@@ -63,6 +63,7 @@
 - 回调地址：
   - `https://{X-Forwarded-Host}/app-store/api/v2/payment/submit-signature`
   - `https://{X-Forwarded-Host}/app-store/api/v2/payment/fetch-signature-callback`
+  - 强依赖说明（当前版本）：上述回调 URL 构建依赖 `X-Forwarded-Host`，若缺失/无效将导致流程失败
 
 ## API 用法（对外）
 
@@ -103,7 +104,7 @@
 
 - 缺 `productID`：视为免费或跳过处理；部分接口要求“预处理已运行”。
 - 缺开发者 DID 或 DID 查询失败：构造失败态（`error_missing_developer`/`error_developer_fetch_failed`）并持久化。
-- 缺 `X-Forwarded-Host`：拒绝发起签名通知（无法构造回调 URL）。
+- 缺 `X-Forwarded-Host`：拒绝发起签名通知（无法构造回调 URL）。当前版本对此为硬依赖。
 - 开发者服务非 2xx/网络错误：在轮询内重试，最终落 `DeveloperSyncFailed`。
 - `getUserDID` 要求 `X-Forwarded-Host` 至少三段域名。
 

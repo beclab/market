@@ -18,6 +18,9 @@
 
 - Add timeout, backoff, and observability (metrics/logs) to polling and network calls.
 - Log return codes and duration for external calls (DID gate / developer service).
-- Validate `X-Forwarded-Host` or provide configuration-based fallback for nonstandard domains.
+- Current version requirement: `X-Forwarded-Host` is mandatory for payment flows
+  - Used to construct callback URLs for LarePass (submit/fetch signature)
+  - Used to derive user DID in `notifyFrontendPaymentRequired`
+  - If missing or invalid, flows will fail fast by design in this version
 
 
