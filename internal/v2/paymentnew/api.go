@@ -29,10 +29,10 @@ func GetStateMachine() *PaymentStateMachine {
 
 // PaymentStatusResult represents the result of payment status check
 type PaymentStatusResult struct {
-	IsPaid       bool   `json:"is_paid"`
-	Status       string `json:"status"`
-	Message      string `json:"message"`
-	PaymentError string `json:"payment_error,omitempty"`
+	RequiresPurchase bool   `json:"requires_purchase"`
+	Status           string `json:"status"`
+	Message          string `json:"message"`
+	PaymentError     string `json:"payment_error,omitempty"`
 }
 
 // PurchaseApp starts a purchase flow for a given user/app/source (placeholder)
@@ -153,9 +153,9 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 
 	// Extract productID from app info
 	productID := getProductIDFromAppInfo(appInfo)
-	if productID == "" {
-		// No payment configured
-		return &PaymentStatusResult{IsPaid: false, Status: "free", Message: "This is a free app"}, nil
+	requiresPurchase := productID != "" // 是否为付费应用
+	if !requiresPurchase {
+		return &PaymentStatusResult{RequiresPurchase: false, Status: "not_evaluated", Message: "No payment required"}, nil
 	}
 
 	// Find state
@@ -168,7 +168,7 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 	}
 
 	if state == nil {
-		return &PaymentStatusResult{IsPaid: true, Status: "not_evaluated", Message: "Payment state not found"}, nil
+		return &PaymentStatusResult{RequiresPurchase: true, Status: "not_evaluated", Message: "Payment state not found"}, nil
 	}
 
 	// 若未完成 DeveloperSync 或 LarePassSync，则触发一次同步（可重入）
@@ -177,16 +177,16 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 	}
 
 	status := buildPaymentStatusFromState(state)
-	result := &PaymentStatusResult{IsPaid: true, Status: status}
+	result := &PaymentStatusResult{RequiresPurchase: true, Status: status}
 
 	switch status {
-	case string(PaymentDeveloperConfirmed):
+	case "purchased":
 		result.Message = "App is already purchased"
 	case string(PaymentFrontendCompleted):
 		result.Message = "Payment completed on frontend, waiting for developer confirmation"
 	case string(PaymentNotificationSent):
 		result.Message = "Payment notification sent"
-	case string(PaymentNotNotified), "not_buy":
+	case string(PaymentNotNotified):
 		result.Message = "Payment not started"
 	default:
 		result.Message = "Payment status updated"

@@ -2057,11 +2057,11 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Step 6: Prepare response
 	responseData := map[string]interface{}{
-		"app_id":  appID,
-		"source":  sourceID,
-		"is_paid": result.IsPaid,
-		"status":  result.Status,
-		"message": result.Message,
+		"app_id":            appID,
+		"source":            sourceID,
+		"requires_purchase": result.RequiresPurchase,
+		"status":            result.Status,
+		"message":           result.Message,
 	}
 
 	if result.PaymentError != "" {
@@ -2182,11 +2182,11 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 
 	// Step 6: Prepare response
 	responseData := map[string]interface{}{
-		"app_id":  appID,
-		"source":  sourceID,
-		"is_paid": result.IsPaid,
-		"status":  result.Status,
-		"message": result.Message,
+		"app_id":            appID,
+		"source":            sourceID,
+		"requires_purchase": result.RequiresPurchase,
+		"status":            result.Status,
+		"message":           result.Message,
 	}
 
 	if result.PaymentError != "" {

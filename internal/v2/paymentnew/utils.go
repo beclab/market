@@ -402,7 +402,31 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 	if state == nil {
 		return "not_evaluated"
 	}
-	return string(state.PaymentStatus)
+	// 1) 已拥有许可（与 PaymentNeed 无关）：VC 存在且开发者同步完成
+	if state.VC != "" && state.DeveloperSync == DeveloperSyncCompleted {
+		return "purchased"
+	}
+	// 2) 前端已支付，等待开发者确认
+	if state.PaymentStatus == PaymentFrontendCompleted {
+		return "waiting_developer_confirmation"
+	}
+	// 3) 已签名，需支付
+	if state.SignatureStatus == SignatureRequiredAndSigned {
+		return "payment_required"
+	}
+	// 4) 需要签名
+	if state.SignatureStatus == SignatureRequired || state.SignatureStatus == SignatureRequiredButPending {
+		return "signature_required"
+	}
+	// 5) 错误态
+	if state.SignatureStatus == SignatureErrorNoRecord {
+		return "signature_no_record"
+	}
+	if state.SignatureStatus == SignatureErrorNeedReSign {
+		return "signature_need_resign"
+	}
+	// 6) 其他视为同步中/未评估
+	return "not_evaluated"
 }
 
 // Deprecated: 旧版本地存取方法已移除；请使用状态机的 LoadState/SaveState/DeleteState
