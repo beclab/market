@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
 	"market/internal/v2/types"
@@ -268,69 +269,87 @@ func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
 func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 	log.Printf("Starting VC polling for user %s, app %s", state.UserID, state.AppID)
 
+	key := state.GetKey()
+
 	// 防重入：如果已在进行中则直接返回；否则标记为进行中
-	if err := psm.updateState(state.GetKey(), func(s *PaymentState) error {
+	if err := psm.updateState(key, func(s *PaymentState) error {
 		if s.DeveloperSync == DeveloperSyncInProgress {
 			return fmt.Errorf("poll already in progress")
 		}
-		// 仅在未开始或失败时置为进行中
 		if s.DeveloperSync == DeveloperSyncNotStarted || s.DeveloperSync == DeveloperSyncFailed {
 			s.DeveloperSync = DeveloperSyncInProgress
 		}
 		return nil
 	}); err != nil {
-		// 已在进行中或更新失败，直接返回
 		log.Printf("Skip starting VC polling: %v", err)
 		return
 	}
 
+	// Polling controls
 	maxAttempts := 20
-	interval := 30 * time.Second
+	maxDuration := 10 * time.Minute
+	baseBackoff := 5 * time.Second
+	maxBackoff := 60 * time.Second
+
+	ctx, cancel := context.WithTimeout(context.Background(), maxDuration)
+	defer cancel()
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		log.Printf("VC polling attempt %d/%d for user %s, app %s", attempt, maxAttempts, state.UserID, state.AppID)
-
-		result, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
-		if err != nil {
-			log.Printf("VC polling attempt %d failed: %v", attempt, err)
-			if attempt == maxAttempts {
-				log.Printf("All VC polling attempts failed")
-				// 将状态标记为失败
-				if uerr := psm.updateState(state.GetKey(), func(s *PaymentState) error {
+		select {
+		case <-ctx.Done():
+			log.Printf("VC polling timed out after %v for user %s, app %s", maxDuration, state.UserID, state.AppID)
+			_ = psm.updateState(key, func(s *PaymentState) error {
+				if s.DeveloperSync != DeveloperSyncCompleted {
 					s.DeveloperSync = DeveloperSyncFailed
-					return nil
-				}); uerr != nil {
-					log.Printf("Failed to update DeveloperSync to failed: %v", uerr)
 				}
-				return
-			}
-			time.Sleep(interval)
-			continue
+				return nil
+			})
+			return
+		default:
 		}
 
-		// 只有 code=0 且 VC 不为空时才认为成功
-		if result.Code == 0 && result.VC != "" {
+		// 拉取最新状态，避免闭包副本过期
+		latest, err := psm.getState(state.UserID, state.AppID, state.ProductID)
+		if err == nil && latest != nil {
+			if (latest.VC != "" && latest.DeveloperSync == DeveloperSyncCompleted) || latest.PaymentStatus == PaymentDeveloperConfirmed {
+				log.Printf("VC already confirmed; stop polling for user %s, app %s", state.UserID, state.AppID)
+				return
+			}
+		}
+
+		log.Printf("VC polling attempt %d/%d for user %s, app %s", attempt, maxAttempts, state.UserID, state.AppID)
+
+		result, qerr := queryVCFromDeveloper(state.JWS, state.DeveloperName)
+		if qerr != nil {
+			log.Printf("VC polling attempt %d failed: %v", attempt, qerr)
+		} else if result.Code == 0 && result.VC != "" {
 			log.Printf("VC obtained successfully on attempt %d", attempt)
 			if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
 				log.Printf("Failed to process vc_received event: %v", err)
 			}
 			return
+		} else {
+			log.Printf("VC query returned code=%d, continuing poll...", result.Code)
 		}
 
-		// code != 0 时继续轮询或结束
-		log.Printf("VC query returned code=%d, continuing poll...", result.Code)
 		if attempt == maxAttempts {
-			log.Printf("All VC polling attempts completed without success (code=%d)", result.Code)
-			// 将状态标记为失败
-			if uerr := psm.updateState(state.GetKey(), func(s *PaymentState) error {
-				s.DeveloperSync = DeveloperSyncFailed
+			log.Printf("All VC polling attempts completed without success")
+			_ = psm.updateState(key, func(s *PaymentState) error {
+				if s.DeveloperSync != DeveloperSyncCompleted {
+					s.DeveloperSync = DeveloperSyncFailed
+				}
 				return nil
-			}); uerr != nil {
-				log.Printf("Failed to update DeveloperSync to failed: %v", uerr)
-			}
+			})
 			return
 		}
-		time.Sleep(interval)
+
+		// 指数退避 + 抖动
+		sleep := baseBackoff * time.Duration(1<<uint(attempt-1))
+		if sleep > maxBackoff {
+			sleep = maxBackoff
+		}
+		jitter := time.Duration(rand.Intn(250)) * time.Millisecond
+		time.Sleep(sleep + jitter)
 	}
 }
 
