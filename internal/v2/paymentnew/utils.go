@@ -425,7 +425,10 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 	if state.SignatureStatus == SignatureErrorNeedReSign {
 		return "signature_need_resign"
 	}
-	// 6) 其他视为同步中/未评估
+	// 6) 其他：若存在 ProductID（需要购买）但尚未进入签名/支付流程，则标记为 not_buy；否则 not_evaluated
+	if strings.TrimSpace(state.ProductID) != "" {
+		return "not_buy"
+	}
 	return "not_evaluated"
 }
 

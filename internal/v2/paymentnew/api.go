@@ -168,7 +168,8 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 	}
 
 	if state == nil {
-		return &PaymentStatusResult{RequiresPurchase: true, Status: "not_evaluated", Message: "Payment state not found"}, nil
+		// 需要购买但尚未开始任何流程，标记为 not_buy
+		return &PaymentStatusResult{RequiresPurchase: true, Status: "not_buy", Message: "Payment not started"}, nil
 	}
 
 	// 若未完成 DeveloperSync 或 LarePassSync，则触发一次同步（可重入）
@@ -187,6 +188,9 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 	case string(PaymentNotificationSent):
 		result.Message = "Payment notification sent"
 	case string(PaymentNotNotified):
+		result.Message = "Payment not started"
+	// Reserved/compatibility: not produced by current flows, kept for forward/backward compatibility
+	case "not_buy":
 		result.Message = "Payment not started"
 	default:
 		result.Message = "Payment status updated"

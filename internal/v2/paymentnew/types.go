@@ -63,6 +63,10 @@ const (
 	PaymentDeveloperConfirmed PaymentStatus = "developer_confirmed"
 )
 
+// Note: Additional external-facing status strings (e.g., "not_buy") may appear in
+// API response mappings for forward/backward compatibility. They are not produced
+// by the state machine and are considered reserved/placeholder semantics for now.
+
 // PaymentState 支付状态机的完整状态
 type PaymentState struct {
 	// 基础信息
