@@ -9,17 +9,17 @@ import (
 	"market/internal/v2/types"
 )
 
-// PaymentNeed 维度一：是否需要支付/错误状态
+// PaymentNeed (dimension 1): whether payment is required / error states
 type PaymentNeed string
 
 const (
-	PaymentNeedNotRequired               PaymentNeed = "not_required"                 // 不需要支付（免费应用）
-	PaymentNeedRequired                  PaymentNeed = "required"                     // 需要支付
-	PaymentNeedErrorMissingDeveloper     PaymentNeed = "error_missing_developer"      // 价格信息缺少开发者
-	PaymentNeedErrorDeveloperFetchFailed PaymentNeed = "error_developer_fetch_failed" // DID查询开发者失败
+	PaymentNeedNotRequired               PaymentNeed = "not_required"                 // no payment required (free app)
+	PaymentNeedRequired                  PaymentNeed = "required"                     // payment required
+	PaymentNeedErrorMissingDeveloper     PaymentNeed = "error_missing_developer"      // developer missing in price info
+	PaymentNeedErrorDeveloperFetchFailed PaymentNeed = "error_developer_fetch_failed" // DID lookup for developer failed
 )
 
-// DeveloperSyncStatus 维度二：是否已跟开发者同步过vc信息
+// DeveloperSyncStatus (dimension 2): whether VC info has been synced with developer
 type DeveloperSyncStatus string
 
 const (
@@ -29,7 +29,7 @@ const (
 	DeveloperSyncFailed     DeveloperSyncStatus = "failed"
 )
 
-// LarePassSyncStatus 维度三：是否跟larepass同步过签名信息
+// LarePassSyncStatus (dimension 3): whether signature info has been synced with larepass
 type LarePassSyncStatus string
 
 const (
@@ -39,7 +39,7 @@ const (
 	LarePassSyncFailed     LarePassSyncStatus = "failed"
 )
 
-// SignatureStatus 维度四：签名状态
+// SignatureStatus (dimension 4): signature status
 type SignatureStatus string
 
 const (
@@ -52,7 +52,7 @@ const (
 	SignatureErrorNeedReSign    SignatureStatus = "error_need_resign"
 )
 
-// PaymentStatus 维度五：支付状态
+// PaymentStatus (dimension 5): payment status
 type PaymentStatus string
 
 const (
@@ -67,26 +67,26 @@ const (
 // API response mappings for forward/backward compatibility. They are not produced
 // by the state machine and are considered reserved/placeholder semantics for now.
 
-// PaymentState 支付状态机的完整状态
+// PaymentState is the full state of the payment state machine
 type PaymentState struct {
-	// 基础信息
+	// Basic information
 	UserID        string
 	AppID         string
 	AppName       string
 	SourceID      string
 	ProductID     string
 	DeveloperName string
-	// 完整的开发者信息
+	// Complete developer information
 	Developer DeveloperInfo `json:"developer"`
 
-	// 状态机五个维度
+	// Five state-machine dimensions
 	PaymentNeed     PaymentNeed         `json:"payment_need"`
 	DeveloperSync   DeveloperSyncStatus `json:"developer_sync"`
 	LarePassSync    LarePassSyncStatus  `json:"larepass_sync"`
 	SignatureStatus SignatureStatus     `json:"signature_status"`
 	PaymentStatus   PaymentStatus       `json:"payment_status"`
 
-	// 关联数据
+	// Associated data
 	JWS            string `json:"jws,omitempty"`
 	SignBody       string `json:"sign_body,omitempty"`
 	VC             string `json:"vc,omitempty"`
@@ -94,12 +94,12 @@ type PaymentState struct {
 	SystemChainID  int    `json:"system_chain_id,omitempty"`
 	XForwardedHost string `json:"x_forwarded_host,omitempty"`
 
-	// 元数据
+	// Metadata
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// PaymentStateMachine 状态机管理
+// PaymentStateMachine manages states
 type PaymentStateMachine struct {
 	states map[string]*PaymentState
 	mu     sync.RWMutex
@@ -108,7 +108,7 @@ type PaymentStateMachine struct {
 	settingsManager *settings.SettingsManager
 }
 
-// NewPaymentStateMachine 创建新的状态机实例
+// NewPaymentStateMachine creates a new state machine instance
 func NewPaymentStateMachine(dataSender DataSenderInterface, settingsManager *settings.SettingsManager) *PaymentStateMachine {
 	return &PaymentStateMachine{
 		states:          make(map[string]*PaymentState),
@@ -117,7 +117,7 @@ func NewPaymentStateMachine(dataSender DataSenderInterface, settingsManager *set
 	}
 }
 
-// StateTransition 状态转换
+// StateTransition represents a state transition
 type StateTransition struct {
 	From   *PaymentState
 	To     *PaymentState
@@ -126,23 +126,23 @@ type StateTransition struct {
 	Error  error
 }
 
-// StateTransitionHandler 状态转换处理器
+// StateTransitionHandler handles a state transition
 type StateTransitionHandler func(state *PaymentState, event string) (*PaymentState, error)
 
-// DataSenderInterface 定义发送数据的接口
+// DataSenderInterface defines methods to send data
 type DataSenderInterface interface {
 	SendSignNotificationUpdate(update types.SignNotificationUpdate) error
 	SendMarketSystemUpdate(update types.MarketSystemUpdate) error
 }
 
-// GetKey 获取状态机的唯一键
+// GetKey returns the unique key for this state
 func (ps *PaymentState) GetKey() string {
 	return fmt.Sprintf("%s:%s:%s", ps.UserID, ps.AppID, ps.ProductID)
 }
 
-// IsFinalState 判断是否为终态
+// IsFinalState returns whether this is a final state
 func (ps *PaymentState) IsFinalState() bool {
-	// 终态：支付不需要，或者需要支付且已获得开发者确认
+	// Final state: either no payment required, or payment required and developer has confirmed
 	if ps.PaymentNeed == PaymentNeedNotRequired {
 		return true
 	}
@@ -153,13 +153,13 @@ func (ps *PaymentState) IsFinalState() bool {
 	return false
 }
 
-// CanTransition 判断是否可以转换到目标状态
+// CanTransition returns whether this state can transition to target
 func (ps *PaymentState) CanTransition(target *PaymentState) bool {
-	// TODO: 实现状态转换规则检查
+	// TODO: Implement transition rule checks
 	return true
 }
 
-// UpdateTimestamp 更新时间戳
+// UpdateTimestamp updates the timestamp
 func (ps *PaymentState) UpdateTimestamp() {
 	ps.UpdatedAt = time.Now()
 }

@@ -40,7 +40,7 @@ type PaymentStatusResult struct {
 func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.AppInfo) (map[string]interface{}, error) {
 	log.Printf("[PurchaseApp] user=%s app=%s source=%s", userID, appID, sourceID)
 
-	// 从应用信息提取 productID
+	// Extract productID from app info
 	if appInfo == nil {
 		return nil, fmt.Errorf("app info is nil")
 	}
@@ -49,7 +49,7 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 		return nil, fmt.Errorf("product id not found from app info")
 	}
 
-	// 通过 state_machine 精确定位状态
+	// Locate state precisely via state_machine
 	var target *PaymentState
 	if globalStateMachine != nil {
 		if st, err := globalStateMachine.getState(userID, appID, productID); err == nil {
@@ -172,7 +172,7 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 		return &PaymentStatusResult{RequiresPurchase: true, Status: "not_buy", Message: "Payment not started"}, nil
 	}
 
-	// 若未完成 DeveloperSync 或 LarePassSync，则触发一次同步（可重入）
+	// If DeveloperSync or LarePassSync not completed, trigger a sync once (reentrant)
 	if !(state.DeveloperSync == DeveloperSyncCompleted && state.LarePassSync == LarePassSyncCompleted) {
 		_ = triggerPaymentStateSync(state)
 	}
@@ -213,21 +213,21 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 		return nil
 	}
 
-	// Step 1: 从 signBody 解析 productID
+	// Step 1: Parse productID from signBody
 	productID, err := parseProductIDFromSignBody(signBody)
 	if err != nil {
 		log.Printf("Failed to parse productID from signBody: %v", err)
 		return fmt.Errorf("failed to parse productID from signBody: %w", err)
 	}
 
-	// Step 2: 通过 user + productID 找到 PaymentState
+	// Step 2: Find PaymentState via user + productID
 	state := globalStateMachine.findStateByUserAndProduct(user, productID)
 	if state == nil {
 		log.Printf("PaymentState not found for user %s and productID %s", user, productID)
 		return fmt.Errorf("payment state not found for user %s and productID %s", user, productID)
 	}
 
-	// Step 3: 更新状态为 SignatureRequiredAndSigned
+	// Step 3: Update status to SignatureRequiredAndSigned
 	if err := globalStateMachine.updateState(state.GetKey(), func(s *PaymentState) error {
 		s.SignatureStatus = SignatureRequiredAndSigned
 		s.JWS = jws
@@ -237,7 +237,7 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 		return fmt.Errorf("failed to update signature status: %w", err)
 	}
 
-	// Step 3.1: 读取最新状态，若已处于更晚阶段则避免重复通知（幂等与守卫）
+	// Step 3.1: Read latest state; if already at a later stage, skip duplicate notification (idempotent guard)
 	latest, _ := globalStateMachine.getState(state.UserID, state.AppID, state.ProductID)
 	if latest != nil {
 		if latest.PaymentStatus == PaymentNotificationSent ||
@@ -249,7 +249,7 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 		}
 	}
 
-	// Step 4: 发送通知让前端进行支付（仅在未通知过/早期态时）
+	// Step 4: Notify frontend to pay (only when not notified/early stage)
 	if globalStateMachine.dataSender != nil {
 		if err := notifyFrontendPaymentRequired(
 			globalStateMachine.dataSender,
@@ -265,7 +265,7 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 			return fmt.Errorf("failed to notify frontend payment required: %w", err)
 		}
 
-		// Step 4.1: 通知成功后推进状态为 notification_sent（幂等且不回退）
+		// Step 4.1: After notification success, advance status to notification_sent (idempotent, no rollback)
 		_ = globalStateMachine.updateState(state.GetKey(), func(s *PaymentState) error {
 			switch s.PaymentStatus {
 			case PaymentNotEvaluated, PaymentNotNotified:
@@ -279,7 +279,7 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 	return nil
 }
 
-// HandleFetchSignatureCallback 处理拉取签名回调（供新接口调用）
+// HandleFetchSignatureCallback handles fetch-signature callback (for new endpoint)
 func HandleFetchSignatureCallback(jws, signBody, user string, code int) error {
 	log.Printf("=== Payment State Machine Processing Fetch Signature Callback ===")
 	log.Printf("JWS: %s", jws)
@@ -291,7 +291,7 @@ func HandleFetchSignatureCallback(jws, signBody, user string, code int) error {
 		return nil
 	}
 
-	// 委托 state_machine 处理（占位实现）
+	// Delegate to state_machine (placeholder implementation)
 	if err := globalStateMachine.processFetchSignatureCallback(jws, signBody, user, code); err != nil {
 		log.Printf("Failed to process fetch signature callback: %v", err)
 		return err
@@ -397,21 +397,21 @@ func ListPaymentStates() map[string]*PaymentState {
 
 // PreprocessAppPaymentData preprocesses app payment data with state bootstrap and optional receipt load
 func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userID, sourceID string, settingsManager *settings.SettingsManager, client *resty.Client) (*types.PurchaseInfo, error) {
-	// Step 0: 基础校验与快速跳过
+	// Step 0: Basic validation and quick exit
 	if appInfo == nil || appInfo.Price == nil {
 		log.Printf("INFO: no payment section, skip")
 		return nil, nil
 	}
 
-	// Step 1: 获取 productID
+	// Step 1: Get productID
 	productID := getProductIDFromAppInfo(appInfo)
 	if productID == "" {
-		// 没有有效的 productID 直接返回，不做后续处理
+		// No valid productID -> return directly, no further processing
 		log.Printf("INFO: productID not found, skip state init")
 		return nil, nil
 	}
 
-	// 提取 app 基本信息
+	// Extract basic app information
 	appID := ""
 	appName := ""
 	if appInfo.AppEntry != nil {
@@ -419,7 +419,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		appName = appInfo.AppEntry.Name
 	}
 
-	// Step 2: 通过 productID 获取 PaymentStates（优先状态机，未命中则为空）
+	// Step 2: Obtain PaymentStates via productID (prefer state machine; empty if miss)
 	if globalStateMachine == nil {
 		return nil, fmt.Errorf("state machine not initialized")
 	}
@@ -428,7 +428,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		state = s
 	}
 
-	// Step 3: 如果不存在则 查询开发者信息, 然后创建新的 PaymentStates
+	// Step 3: If not exists, query developer info and create new PaymentStates
 	if state == nil {
 		developerName := getDeveloperNameFromPrice(appInfo)
 
@@ -437,7 +437,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		}
 		client.SetTimeout(3 * time.Second)
 
-		// 如果无法从 price 获取 developerName，则创建失败状态并返回错误
+		// If developerName cannot be obtained from price, create a failure state and return error
 		if developerName == "" {
 			failedState := &PaymentState{
 				UserID:          userID,
@@ -464,7 +464,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		// 查询开发者信息（仅为校验与状态初始化所需字段）
 		dev, err := fetchDidInfo(ctx, client, developerName)
 		if err != nil {
-			// DID 查询失败时，同样标记 DeveloperSync 失败
+			// When DID lookup fails, also mark DeveloperSync as failed
 			failedState := &PaymentState{
 				UserID:          userID,
 				AppID:           appID,
@@ -487,7 +487,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 			return nil, fmt.Errorf("fetch developer info failed: %w", err)
 		}
 
-		// 初始化并保存新的 PaymentState（SourceID 由外部传入）
+		// Initialize and save a new PaymentState (SourceID provided externally)
 		newState := &PaymentState{
 			UserID:          userID,
 			AppID:           appID,
@@ -512,11 +512,11 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		state = newState
 	}
 
-	// Step 4: 触发 PaymentStates 的状态同步流程（该方法需可重入）
-	// 说明：无论状态是新建还是已存在，都应触发一次同步流程；实现需保证幂等/可重入
+	// Step 4: Trigger sync flow for PaymentStates (must be reentrant)
+	// Note: Regardless of new or existing state, always trigger a sync; implementation must be idempotent/reentrant
 	_ = triggerPaymentStateSync(state)
 
-	// 由 PaymentState 构建 PurchaseInfo（若状态不存在则返回 nil）
+	// Build PurchaseInfo from PaymentState (return nil if state does not exist)
 	pi := buildPurchaseInfoFromState(state)
 	if pi != nil && strings.EqualFold(pi.Status, "purchased") {
 		ok := verifyPurchaseInfo(pi)

@@ -12,10 +12,10 @@ import (
 	"market/internal/v2/types"
 )
 
-// getOrCreateState 仅获取已存在的状态；不再在此处创建
-// 已废弃：原 getOrCreateState 已移除，避免多处创建状态
+// getOrCreateState only retrieves existing state; creation is no longer done here
+// Deprecated: original getOrCreateState removed to avoid multiple creation points
 
-// getState 获取状态（内部方法）
+// getState retrieves a state (internal method)
 func (psm *PaymentStateMachine) getState(userID, appID, productID string) (*PaymentState, error) {
 	key := fmt.Sprintf("%s:%s:%s", userID, appID, productID)
 
@@ -30,7 +30,7 @@ func (psm *PaymentStateMachine) getState(userID, appID, productID string) (*Paym
 	return state, nil
 }
 
-// updateState 更新状态（内部方法）
+// updateState updates a state (internal method)
 func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentState) error) error {
 	psm.mu.Lock()
 	defer psm.mu.Unlock()
@@ -49,7 +49,7 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 	newState.UpdatedAt = time.Now()
 	psm.states[key] = &newState
 
-	// 同步到持久层（异步执行，避免阻塞）
+	// Sync to persistent store asynchronously to avoid blocking
 	go func(st *PaymentState) {
 		if err := psm.SaveState(st); err != nil {
 			log.Printf("Failed to save updated state to store for key %s: %v", key, err)
@@ -59,7 +59,7 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 	return nil
 }
 
-// setState 将给定状态写入状态机（创建或覆盖）
+// setState writes the given state into the state machine (create or overwrite)
 func (psm *PaymentStateMachine) setState(state *PaymentState) {
 	if state == nil {
 		return
@@ -69,7 +69,7 @@ func (psm *PaymentStateMachine) setState(state *PaymentState) {
 	psm.mu.Unlock()
 }
 
-// processEvent 处理事件并触发状态转换（内部方法）
+// processEvent handles events and triggers state transitions (internal method)
 func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID, productID, event string, payload interface{}) error {
 	key := fmt.Sprintf("%s:%s:%s", userID, appID, productID)
 
@@ -85,7 +85,7 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 	log.Printf("Current state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
 		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus)
 
-	// 根据事件类型处理状态转换
+	// Handle state transition by event type
 	var nextState *PaymentState
 	var err error
 
@@ -122,27 +122,27 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 	return nil
 }
 
-// handleStartPayment 处理开始支付事件
+// handleStartPayment handles start_payment event
 func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
 	log.Printf("Handling start_payment event")
 
 	newState := *state
 	newState.PaymentNeed = PaymentNeedRequired
 
-	// 根据当前状态决定下一步
-	// TODO: 实现具体业务逻辑
-	// 1. 检查是否需要签名
-	// 2. 如果需要，更新 LarePassSync 和 SignatureStatus
-	// 3. 如果不需要签名，直接通知前端支付
+	// Decide next steps based on current state
+	// TODO: Implement business logic
+	// 1. Check whether signature is required
+	// 2. If required, update LarePassSync and SignatureStatus
+	// 3. If not required, notify frontend to pay
 
 	return &newState, nil
 }
 
-// handleSignatureSubmitted 处理签名提交事件
+// handleSignatureSubmitted handles signature_submitted event
 func (psm *PaymentStateMachine) handleSignatureSubmitted(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
 	log.Printf("Handling signature_submitted event")
 
-	// 从 payload 中提取 JWS 和 SignBody
+	// Extract JWS and SignBody from payload
 	type SignaturePayload struct {
 		JWS      string
 		SignBody string
@@ -159,17 +159,17 @@ func (psm *PaymentStateMachine) handleSignatureSubmitted(ctx context.Context, st
 	newState.LarePassSync = LarePassSyncCompleted
 	newState.SignatureStatus = SignatureRequiredAndSigned
 
-	// 后续处理：尝试从开发者获取 VC
+	// Follow-up: try to request VC from developer
 	go psm.requestVCFromDeveloper(&newState)
 
 	return &newState, nil
 }
 
-// handlePaymentCompleted 处理支付完成事件
+// handlePaymentCompleted handles payment_completed event
 func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
 	log.Printf("Handling payment_completed event")
 
-	// 从 payload 中提取 txHash 和 systemChainID
+	// Extract txHash and systemChainID from payload
 	type PaymentPayload struct {
 		TxHash        string
 		SystemChainID int
@@ -185,17 +185,17 @@ func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, stat
 	newState.SystemChainID = payloadData.SystemChainID
 	newState.PaymentStatus = PaymentFrontendCompleted
 
-	// 后续处理：轮询开发者服务获取 VC
+	// Follow-up: poll developer service for VC
 	go psm.pollForVCFromDeveloper(&newState)
 
 	return &newState, nil
 }
 
-// handleVCReceived 处理VC接收事件
+// handleVCReceived handles vc_received event
 func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
 	log.Printf("Handling vc_received event")
 
-	// 从 payload 中提取 VC
+	// Extract VC from payload
 	payloadData, ok := payload.(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid payload for vc_received event")
@@ -206,10 +206,10 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 	newState.DeveloperSync = DeveloperSyncCompleted
 	newState.PaymentStatus = PaymentDeveloperConfirmed
 
-	// 存储购买信息到 Redis
+	// Store purchase info to Redis
 	go psm.storePurchaseInfo(&newState)
 
-	// 通知前端购买完成
+	// Notify frontend of purchase completion
 	if psm.dataSender != nil {
 		notifyFrontendPurchaseCompleted(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID)
 	}
@@ -217,7 +217,7 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 	return &newState, nil
 }
 
-// handleRequestSignature 处理请求签名事件
+// handleRequestSignature handles request_signature event
 func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
 	log.Printf("Handling request_signature event")
 
@@ -241,7 +241,7 @@ func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, stat
 	return &newState, nil
 }
 
-// requestVCFromDeveloper 从开发者请求 VC
+// requestVCFromDeveloper requests VC from developer
 func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
 	log.Printf("Requesting VC from developer for user %s, app %s", state.UserID, state.AppID)
 
@@ -253,11 +253,11 @@ func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
 	result, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
 	if err != nil {
 		log.Printf("Failed to get VC from developer: %v", err)
-		// 如果获取失败，可能需要通知前端重新支付或其他处理
+		// If failed to obtain, may need to notify frontend to repay or other handling
 		return
 	}
 
-	// 只有 code=0 时才触发 VC 接收事件
+	// Only when code==0 we trigger vc_received event
 	if result.Code == 0 && result.VC != "" {
 		if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
 			log.Printf("Failed to process vc_received event: %v", err)
@@ -265,13 +265,13 @@ func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
 	}
 }
 
-// pollForVCFromDeveloper 轮询开发者获取 VC
+// pollForVCFromDeveloper polls developer for VC
 func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 	log.Printf("Starting VC polling for user %s, app %s", state.UserID, state.AppID)
 
 	key := state.GetKey()
 
-	// 防重入：如果已在进行中则直接返回；否则标记为进行中
+	// Reentrancy guard: return if already in progress; otherwise mark in progress
 	if err := psm.updateState(key, func(s *PaymentState) error {
 		if s.DeveloperSync == DeveloperSyncInProgress {
 			return fmt.Errorf("poll already in progress")
@@ -308,7 +308,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 		default:
 		}
 
-		// 拉取最新状态，避免闭包副本过期
+		// Fetch latest state to avoid stale closure copy
 		latest, err := psm.getState(state.UserID, state.AppID, state.ProductID)
 		if err == nil && latest != nil {
 			if (latest.VC != "" && latest.DeveloperSync == DeveloperSyncCompleted) || latest.PaymentStatus == PaymentDeveloperConfirmed {
@@ -343,7 +343,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 			return
 		}
 
-		// 指数退避 + 抖动
+		// Exponential backoff + jitter
 		sleep := baseBackoff * time.Duration(1<<uint(attempt-1))
 		if sleep > maxBackoff {
 			sleep = maxBackoff
@@ -353,7 +353,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 	}
 }
 
-// storePurchaseInfo 存储购买信息到 Redis
+// storePurchaseInfo stores purchase info into Redis
 func (psm *PaymentStateMachine) storePurchaseInfo(state *PaymentState) error {
 	if psm.settingsManager == nil {
 		return errors.New("settings manager is nil")
@@ -388,13 +388,13 @@ func (psm *PaymentStateMachine) storePurchaseInfo(state *PaymentState) error {
 	return nil
 }
 
-// getStateTransitionHistory 获取状态转换历史（可选，用于调试，内部方法）
+// getStateTransitionHistory retrieves state transition history (optional, for debugging; internal)
 func (psm *PaymentStateMachine) getStateTransitionHistory(userID, appID, productID string) []StateTransition {
-	// TODO: 实现状态转换历史记录
+	// TODO: Implement state transition history
 	return nil
 }
 
-// cleanupCompletedStates 清理已完成的状态（内部方法）
+// cleanupCompletedStates cleans up completed states (internal method)
 func (psm *PaymentStateMachine) cleanupCompletedStates(olderThan time.Duration) {
 	psm.mu.Lock()
 	defer psm.mu.Unlock()
@@ -408,7 +408,7 @@ func (psm *PaymentStateMachine) cleanupCompletedStates(olderThan time.Duration) 
 	}
 }
 
-// LoadState 统一入口：先内存，后 Redis 回源并写回内存
+// LoadState unified entry: try memory first, then fallback to Redis and write back to memory
 func (psm *PaymentStateMachine) LoadState(userID, appID, productID string) (*PaymentState, error) {
 	if psm == nil {
 		return nil, fmt.Errorf("state machine is nil")
@@ -416,7 +416,7 @@ func (psm *PaymentStateMachine) LoadState(userID, appID, productID string) (*Pay
 	if st, err := psm.getState(userID, appID, productID); err == nil && st != nil {
 		return st, nil
 	}
-	// 回源 Redis
+	// Fallback to Redis
 	if psm.settingsManager == nil {
 		return nil, fmt.Errorf("settings manager is nil")
 	}
@@ -437,7 +437,7 @@ func (psm *PaymentStateMachine) LoadState(userID, appID, productID string) (*Pay
 	return &st, nil
 }
 
-// SaveState 统一入口：写 Redis 并写内存
+// SaveState unified entry: write to Redis and memory
 func (psm *PaymentStateMachine) SaveState(state *PaymentState) error {
 	if psm == nil || state == nil {
 		return fmt.Errorf("nil state machine or state")
@@ -461,7 +461,7 @@ func (psm *PaymentStateMachine) SaveState(state *PaymentState) error {
 	return nil
 }
 
-// DeleteState 统一入口：删 Redis 并删内存
+// DeleteState unified entry: delete from Redis and memory
 func (psm *PaymentStateMachine) DeleteState(userID, appID, productID string) error {
 	if psm == nil {
 		return fmt.Errorf("state machine is nil")
@@ -480,16 +480,16 @@ func (psm *PaymentStateMachine) DeleteState(userID, appID, productID string) err
 	return nil
 }
 
-// triggerPaymentStateSync 触发 PaymentStates 的状态同步流程（占位实现）
+// triggerPaymentStateSync triggers sync flow for PaymentStates (placeholder implementation)
 func triggerPaymentStateSync(state *PaymentState) error {
 	if state == nil {
 		return nil
 	}
 
-	// LarePassSync 调度逻辑（可重入）
+	// LarePassSync scheduling logic (reentrant)
 	switch state.LarePassSync {
 	case LarePassSyncNotStarted:
-		// 标记为进行中并触发一次
+		// Mark as in-progress and trigger once
 		if globalStateMachine != nil {
 			_ = globalStateMachine.updateState(state.GetKey(), func(s *PaymentState) error {
 				s.LarePassSync = LarePassSyncInProgress
@@ -507,7 +507,7 @@ func triggerPaymentStateSync(state *PaymentState) error {
 			}
 		}
 	case LarePassSyncInProgress:
-		// 再次触发，避免网络异常导致流程卡死
+		// Trigger again to avoid flow stuck due to network issues
 		if globalStateMachine != nil && globalStateMachine.dataSender != nil {
 			_ = notifyLarePassToFetchSignature(
 				globalStateMachine.dataSender,
@@ -519,13 +519,13 @@ func triggerPaymentStateSync(state *PaymentState) error {
 			)
 		}
 	case LarePassSyncCompleted:
-		// 下一项检查：同步 VC 信息与状态
+		// Next check: sync VC data and status
 		if globalStateMachine != nil {
 			globalStateMachine.triggerVCSync(state)
 		}
 		return nil
 	case LarePassSyncFailed:
-		// 失败直接结束
+		// End on failure
 		return nil
 	default:
 		return nil
@@ -534,11 +534,11 @@ func triggerPaymentStateSync(state *PaymentState) error {
 	return nil
 }
 
-// 处理 fetch-signature 回调（占位实现）
+// Handle fetch-signature callback (placeholder implementation)
 func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, user string, code int) error {
-	// 已由上层解析出 code，这里不再从 signBody 读取
+	// Code is parsed by upper layer; no need to read from signBody here
 
-	// 从 signBody 解析 productId，然后通过 user+productId 精确定位状态
+	// Parse productId from signBody, then locate state via user+productId
 	productID, err := parseProductIDFromSignBody(signBody)
 	if err != nil {
 		return fmt.Errorf("failed to parse productId: %w", err)
@@ -548,7 +548,7 @@ func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, use
 		return fmt.Errorf("no payment state found for user %s and product %s", user, productID)
 	}
 
-	// 更新 LarePassSync 与签名状态
+	// Update LarePassSync and signature status
 	if err := psm.updateState(state.GetKey(), func(s *PaymentState) error {
 		s.LarePassSync = LarePassSyncCompleted
 		if code == 0 {
@@ -562,7 +562,7 @@ func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, use
 		return err
 	}
 
-	// code==0 时，触发下一项同步检查（与 LarePassSyncCompleted 时相同）
+	// When code==0, trigger the next sync step (same as LarePassSyncCompleted)
 	if code == 0 {
 		updatedState, _ := psm.getState(state.UserID, state.AppID, state.ProductID)
 		if updatedState != nil {
@@ -573,7 +573,7 @@ func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, use
 	return nil
 }
 
-// findStateByUserAndProduct 通过 userId + productId 精确匹配状态
+// findStateByUserAndProduct matches state via userId + productId
 func (psm *PaymentStateMachine) findStateByUserAndProduct(userID, productID string) *PaymentState {
 	psm.mu.RLock()
 	defer psm.mu.RUnlock()
@@ -585,7 +585,7 @@ func (psm *PaymentStateMachine) findStateByUserAndProduct(userID, productID stri
 	return nil
 }
 
-// triggerVCSync 同步 VC 信息与状态：若已有 JWS，则向开发者服务请求 VC
+// triggerVCSync syncs VC data and status: if JWS exists, request VC from developer service
 func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 	if state == nil {
 		return
@@ -595,11 +595,11 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 		return
 	}
 
-	// 异步查询 VC
+	// Query VC asynchronously
 	go func() {
 		result, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
 		if err != nil {
-			// 网络请求失败，仅设置 DeveloperSync 为 failed，不修改 Signature 状态
+			// On network failure: only set DeveloperSync to failed; do not change Signature status
 			log.Printf("triggerVCSync: failed to query VC from developer (network error): %v", err)
 			_ = psm.updateState(state.GetKey(), func(s *PaymentState) error {
 				s.DeveloperSync = DeveloperSyncFailed
@@ -608,7 +608,7 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 			return
 		}
 
-		// code==0 直接走统一路径：触发 vc_received 事件，完成设置终态/落库/通知
+		// For code==0: go unified path → trigger vc_received to finalize state/persistence/notification
 		if result.Code == 0 && result.VC != "" {
 			if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
 				log.Printf("triggerVCSync: failed to process vc_received event: %v", err)
@@ -616,7 +616,7 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 			return
 		}
 
-		// 非成功场景：仅更新同步与签名状态
+		// Non-success path: only update sync and signature status
 		_ = psm.updateState(state.GetKey(), func(s *PaymentState) error {
 			s.DeveloperSync = DeveloperSyncCompleted
 			switch result.Code {

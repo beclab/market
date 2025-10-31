@@ -40,21 +40,21 @@ type didGateData struct {
 // merchantProductLicenseCredentialManifestJSON is the hardcoded schema for Merchant Product License Credential Manifest
 var merchantProductLicenseCredentialManifestJSON = `{"id":"c544214b-be43-6ba8-1618-c80de084aa62","spec_version":"https://identity.foundation/credential-manifest/spec/v1.0.0/","name":"Merchant Product License Credential Manifest","description":"Credential manifest for issuing merchant product license based on payment proof","issuer":{"id":"did:key:z6MktdEpjYpYocHibuZqMsjXmaVusyUHckMnkzM3xUCxpfa4#z6MktdEpjYpYocHibuZqMsjXmaVusyUHckMnkzM3xUCxpfa4","name":"default-merchant"},"output_descriptors":[{"id":"ff9561a9-607f-5e7b-cad7-01be4e3ae457","schema":"c333229e-f82b-d66c-2e16-b7ff701378cf","name":"Merchant Product License Credential","description":"Product license credential with complete payment and product information","display":{"title":{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},"properties":[{"label":"Product ID","path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},{"label":"systemChainId","path":["$.credentialSubject.systemChainId","$.vc.credentialSubject.systemChainId"],"schema":{"type":"string"}},{"label":"txHash","path":["$.credentialSubject.txHash","$.vc.credentialSubject.txHash"],"schema":{"type":"string"}}]},"styles":{"background":{"color":"#1e40af"},"text":{"color":"#ffffff"}}}],"format":{"jwt_vc":{"alg":["EdDSA"]}},"presentation_definition":{"id":"de434d03-052c-027a-d4cc-887be81aa941","name":"Merchant Product License Application Presentation Manifest","purpose":"Request presentation of application credentials for merchant product license","input_descriptors":[{"id":"productId","name":"Product ID","purpose":"Provide your product ID to activate from payment transaction","format":{"jwt_vc":{"alg":["EdDSA"]}},"constraints":{"fields":[{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"]}],"subject_is_issuer":"preferred"}}]}}`
 
-// 已移除本地内存缓存（paymentStateStore），统一通过状态机内存和 Redis 访问
+// Local in-memory cache (paymentStateStore) removed; use state machine memory and Redis uniformly
 
-// getStateKey 生成状态的唯一键
+// getStateKey generates the unique key for a state
 func getStateKey(userID, appID, productID string) string {
 	return fmt.Sprintf("%s:%s:%s", userID, appID, productID)
 }
 
-// getRedisStateKey 生成 Redis key
+// getRedisStateKey generates the Redis key
 func getRedisStateKey(userID, appID, productID string) string {
 	return fmt.Sprintf("payment:state:%s:%s:%s", userID, appID, productID)
 }
 
-// queryVCFromDeveloper 通过开发者接口查询VC（内部方法）
-// 对应原来的 getVCFromDeveloper
-// 返回 VCQueryResult，其中 Code: 0=成功, 1=没有记录, 2=签名失效
+// queryVCFromDeveloper queries VC via developer endpoint (internal)
+// Equivalent to the original getVCFromDeveloper
+// Returns VCQueryResult, where Code: 0=success, 1=no record, 2=signature invalid
 func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, error) {
 	if jws == "" {
 		return nil, errors.New("jws parameter is empty")
@@ -120,36 +120,36 @@ func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, err
 
 	result := &VCQueryResult{}
 
-	// 优先使用返回的 code 字段
+	// Prefer using returned code field when available
 	if response.Code > 0 {
 		result.Code = response.Code
 		return result, nil
 	}
 
-	// 如果 code 不存在，根据 error 和 verifiableCredential 推断
+	// If code is absent, infer from error and verifiableCredential
 	if response.Error != "" {
 		errorLower := strings.ToLower(response.Error)
 		if strings.Contains(errorLower, "no record") || strings.Contains(errorLower, "not found") ||
 			strings.Contains(errorLower, "no data") {
-			result.Code = 1 // 没有记录
+			result.Code = 1 // no record
 			return result, nil
 		}
 		if strings.Contains(errorLower, "invalid") || strings.Contains(errorLower, "expired") ||
 			(strings.Contains(errorLower, "signature") && (strings.Contains(errorLower, "fail") || strings.Contains(errorLower, "invalid"))) {
-			result.Code = 2 // 签名失效
+			result.Code = 2 // signature invalid
 			return result, nil
 		}
-		// 其他错误也视为没有记录
+		// Other errors are also treated as no record
 		result.Code = 1
 		return result, nil
 	}
 
 	if response.VerifiableCredential == "" {
-		result.Code = 1 // 没有记录
+		result.Code = 1 // no record
 		return result, nil
 	}
 
-	// 成功
+	// Success
 	result.VC = response.VerifiableCredential
 	result.Code = 0
 	return result, nil
@@ -164,14 +164,14 @@ func (e *PaymentNotReadyError) Error() string {
 	return e.Message
 }
 
-// VCQueryResult 表示查询VC的结果
+// VCQueryResult represents the result of querying VC
 type VCQueryResult struct {
 	VC   string // VerifiableCredential
 	Code int    // 0=成功, 1=没有记录, 2=签名失效
 }
 
-// notifyLarePassToSign 通知 larepass 客户端进行签名（内部方法）
-// 对应原来的 NotifyLarePassToSign
+// notifyLarePassToSign notifies larepass client to sign (internal)
+// Equivalent to the original NotifyLarePassToSign
 func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, productID, txHash, xForwardedHost string, systemChainID int) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
@@ -225,7 +225,7 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 	return dataSender.SendSignNotificationUpdate(update)
 }
 
-// notifyLarePassToFetchSignature 通知 larepass 客户端拉取签名（与 NotifyLarePassToSign 相同负载，Topic 不同，且不包含 txHash）
+// notifyLarePassToFetchSignature notifies larepass client to fetch signature (same payload as NotifyLarePassToSign, different topic, omits txHash)
 func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, productID, xForwardedHost string, systemChainID int) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
@@ -275,7 +275,7 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 	return dataSender.SendSignNotificationUpdate(update)
 }
 
-// notifyFrontendPaymentRequired 通知 market 前端需要进行支付（内部方法）
+// notifyFrontendPaymentRequired notifies market frontend that payment is required (internal)
 func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID, appName, sourceID, productID, developerDID, xForwardedHost string) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
@@ -308,7 +308,7 @@ func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID
 	return dataSender.SendMarketSystemUpdate(update)
 }
 
-// notifyFrontendPurchaseCompleted 通知前端购买完成（内部方法）
+// notifyFrontendPurchaseCompleted notifies frontend that purchase is completed (internal)
 func notifyFrontendPurchaseCompleted(dataSender DataSenderInterface, userID, appID, appName, sourceID string) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
@@ -330,7 +330,7 @@ func notifyFrontendPurchaseCompleted(dataSender DataSenderInterface, userID, app
 	return dataSender.SendMarketSystemUpdate(update)
 }
 
-// createFrontendPaymentData 创建前端支付数据（内部方法）
+// createFrontendPaymentData creates frontend payment data (internal)
 func createFrontendPaymentData(userDID, developerDID, productID string) *types.FrontendPaymentData {
 	return &types.FrontendPaymentData{
 		From: userDID,
@@ -397,42 +397,42 @@ func checkIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
 }
 
 // buildPaymentStatusFromState constructs a user-facing payment status string from PaymentState
-// TODO: buildPaymentStatusFromState 需要补全映射关系与边界条件处理
+// TODO: Complete mappings and edge-case handling
 func buildPaymentStatusFromState(state *PaymentState) string {
 	if state == nil {
 		return "not_evaluated"
 	}
-	// 1) 已拥有许可（与 PaymentNeed 无关）：VC 存在且开发者同步完成
+	// 1) Already licensed (independent of PaymentNeed): VC exists and developer sync completed
 	if state.VC != "" && state.DeveloperSync == DeveloperSyncCompleted {
 		return "purchased"
 	}
-	// 2) 前端已支付，等待开发者确认
+	// 2) Frontend paid, waiting for developer confirmation
 	if state.PaymentStatus == PaymentFrontendCompleted {
 		return "waiting_developer_confirmation"
 	}
-	// 3) 已签名，需支付
+	// 3) Signed, payment required
 	if state.SignatureStatus == SignatureRequiredAndSigned {
 		return "payment_required"
 	}
-	// 4) 需要签名
+	// 4) Signature required
 	if state.SignatureStatus == SignatureRequired || state.SignatureStatus == SignatureRequiredButPending {
 		return "signature_required"
 	}
-	// 5) 错误态
+	// 5) Error states
 	if state.SignatureStatus == SignatureErrorNoRecord {
 		return "signature_no_record"
 	}
 	if state.SignatureStatus == SignatureErrorNeedReSign {
 		return "signature_need_resign"
 	}
-	// 6) 其他：若存在 ProductID（需要购买）但尚未进入签名/支付流程，则标记为 not_buy；否则 not_evaluated
+	// 6) Others: if ProductID exists (requires purchase) but not in signature/payment flow yet, mark as not_buy; otherwise not_evaluated
 	if strings.TrimSpace(state.ProductID) != "" {
 		return "not_buy"
 	}
 	return "not_evaluated"
 }
 
-// Deprecated: 旧版本地存取方法已移除；请使用状态机的 LoadState/SaveState/DeleteState
+// Deprecated: old local storage methods removed; use state machine LoadState/SaveState/DeleteState
 
 // getSystemRemoteServiceBase returns the SystemRemoteService base URL
 func getSystemRemoteServiceBase() string {
@@ -445,9 +445,9 @@ func getSystemRemoteServiceBase() string {
 	return ""
 }
 
-// ===== 从旧版 payment 包迁移的函数 =====
+// ===== Functions migrated from legacy payment package =====
 
-// fetchDeveloperInfo fetches developer information from DID service (internal function)
+// fetchDidInfo fetches developer information from DID service (internal function)
 func fetchDidInfo(ctx context.Context, httpClient *resty.Client, didName string) (*DeveloperInfo, error) {
 	if didName == "" {
 		return nil, errors.New("did name is empty")
@@ -528,23 +528,23 @@ func buildPurchaseInfoFromState(state *PaymentState) *types.PurchaseInfo {
 	}
 }
 
-// getUserDID 通过 X-Forwarded-Host 获取用户 DID
-// X-Forwarded-Host 格式为 a.b.c.d，需要截取后三段 b.c.d，然后查询 DID
+// getUserDID obtains user's DID via X-Forwarded-Host
+// X-Forwarded-Host format is a.b.c.d; take the last three segments b.c.d, then query DID
 func getUserDID(userID, xForwardedHost string) (string, error) {
 	if xForwardedHost == "" {
 		return "", errors.New("X-Forwarded-Host is empty")
 	}
 
-	// 截取后三段域名
+	// Take the last three domain segments
 	parts := strings.Split(xForwardedHost, ".")
 	if len(parts) < 3 {
 		return "", fmt.Errorf("invalid X-Forwarded-Host format: %s, need at least 3 parts", xForwardedHost)
 	}
 
-	// 取后三段
+	// Join the last three parts
 	domain := strings.Join(parts[len(parts)-3:], ".")
 
-	// 创建 HTTP 客户端并查询 DID
+	// Create HTTP client and query DID
 	httpClient := resty.New()
 	httpClient.SetTimeout(3 * time.Second)
 
@@ -556,10 +556,10 @@ func getUserDID(userID, xForwardedHost string) (string, error) {
 	return didInfo.DID, nil
 }
 
-// parseProductIDFromSignBody 从 signBody JSON 中解析 productId
-// 兼容两种位置：
+// parseProductIDFromSignBody parses productId from signBody JSON
+// Compatible with two locations:
 // 1) application_verifiable_credential.productId
-// 2) vc.credentialSubject.productId （如存在）
+// 2) vc.credentialSubject.productId (if present)
 func parseProductIDFromSignBody(signBody string) (string, error) {
 	if strings.TrimSpace(signBody) == "" {
 		return "", errors.New("empty sign body")
