@@ -78,20 +78,21 @@ func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, appName, source
 		return task, nil
 	}
 
-	// Get developer DID from app price info and extract identifier
+	// Get developer identifier from app price info
 	developerDID := ""
 	developerIdentifier := ""
 	if appInfo != nil && appInfo.Price != nil {
-		developerDID = appInfo.Price.Developer.DID
-		log.Printf("Extracted developer DID from price info: %s", developerDID)
+		// In new format, developer is a string (email/identifier)
+		developerIdentifier = strings.TrimSpace(appInfo.Price.Developer)
+		log.Printf("Extracted developer identifier from price info: %s", developerIdentifier)
 
-		// Extract identifier from DID format (e.g., "did:key:z6Mkt...")
-		// For did:key: format, extract the part after "did:key:"
-		if strings.HasPrefix(developerDID, "did:key:") {
-			developerIdentifier = strings.TrimPrefix(developerDID, "did:key:")
-			log.Printf("Extracted developer identifier: %s", developerIdentifier)
+		// If it's in DID format, extract DID part
+		if strings.HasPrefix(developerIdentifier, "did:key:") {
+			developerDID = developerIdentifier
+			developerIdentifier = strings.TrimPrefix(developerIdentifier, "did:key:")
+			log.Printf("Extracted developer identifier from DID: %s", developerIdentifier)
 		} else {
-			developerIdentifier = developerDID
+			developerDID = developerIdentifier
 			log.Printf("Warning: DID format not recognized, using full DID as identifier: %s", developerDID)
 		}
 	}
@@ -426,7 +427,7 @@ func (tm *TaskManager) CleanupCompletedTasks(olderThan time.Duration) {
 }
 
 // GetProductIDFromAppInfo extracts the product ID from app price information
-// Returns the product_id from the first AcceptedCurrency, or empty string if not found
+// Returns the product_id from the first product, or empty string if not found
 func GetProductIDFromAppInfo(appInfo *types.AppInfo) string {
 	// Check if price info exists
 	if appInfo == nil || appInfo.Price == nil {
@@ -434,22 +435,18 @@ func GetProductIDFromAppInfo(appInfo *types.AppInfo) string {
 		return ""
 	}
 
-	// Check if AcceptedCurrencies exists and is not empty
-	acceptedCurrencies := appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies
-	if len(acceptedCurrencies) == 0 {
-		log.Printf("GetProductIDFromAppInfo: No accepted currencies found, returning empty string")
-		return ""
+	// Get product ID from first product in products array
+	if len(appInfo.Price.Products) > 0 {
+		productID := appInfo.Price.Products[0].ProductID
+		if productID != "" {
+			log.Printf("GetProductIDFromAppInfo: Found product ID: %s", productID)
+			return productID
+		}
+		log.Printf("GetProductIDFromAppInfo: First product has empty product_id")
 	}
 
-	// Get product ID from the first accepted currency
-	productID := acceptedCurrencies[0].ProductID
-	if productID == "" {
-		log.Printf("GetProductIDFromAppInfo: Empty product_id in first accepted currency, returning empty string")
-		return ""
-	}
-
-	log.Printf("GetProductIDFromAppInfo: Found product_id: %s", productID)
-	return productID
+	log.Printf("GetProductIDFromAppInfo: No products found, returning empty string")
+	return ""
 }
 
 // StartPaymentProcess starts the payment process for a new purchase

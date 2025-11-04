@@ -725,18 +725,13 @@ func (r *RedisClient) createSafeAppInfoCopy(appInfo *types.AppInfo) map[string]i
 	// Include Price field - this was missing and causing price info to be lost on restart
 	if appInfo.Price != nil {
 		priceCopy := map[string]interface{}{
-			"receive_addresses": appInfo.Price.ReceiveAddresses,
-			"developer": map[string]interface{}{
-				"did":        appInfo.Price.Developer.DID,
-				"rsa_public": appInfo.Price.Developer.RSAPublic,
-			},
-			"products": map[string]interface{}{
-				"non_consumable": map[string]interface{}{
-					"price": map[string]interface{}{
-						"accepted_currencies": appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies,
-					},
-				},
-			},
+			"developer": appInfo.Price.Developer,
+		}
+		if appInfo.Price.Paid != nil {
+			priceCopy["paid"] = appInfo.Price.Paid
+		}
+		if len(appInfo.Price.Products) > 0 {
+			priceCopy["products"] = appInfo.Price.Products
 		}
 		safeCopy["price"] = priceCopy
 		glog.V(2).Infof("Saved price config to Redis for app %s", appInfo.AppEntry.ID)

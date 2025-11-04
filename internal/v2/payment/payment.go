@@ -110,21 +110,31 @@ func FetchDeveloperInfo(ctx context.Context, httpClient *resty.Client, base stri
 	return dev, nil
 }
 
-// VerifyPaymentConsistency checks payment section and compares RSA key
+// VerifyPaymentConsistency checks payment section and compares developer identifier
+// Note: With new price.yaml format, RSA public key is no longer stored in price config.
+// This function now only checks developer identifier consistency.
 func VerifyPaymentConsistency(appInfo *types.AppInfo, dev *DeveloperInfo) (bool, error) {
 	if appInfo == nil || appInfo.Price == nil {
 		return false, errors.New("no payment info in app")
 	}
-	rsaInApp := strings.TrimSpace(appInfo.Price.Developer.RSAPublic)
-	if rsaInApp == "" {
-		return false, errors.New("no rsa public in app price.developer")
+	// In new format, developer is a string (email/identifier)
+	developerInApp := strings.TrimSpace(appInfo.Price.Developer)
+	if developerInApp == "" {
+		return false, errors.New("no developer in app price.developer")
 	}
-	if dev == nil || dev.RSAPubKey == "" {
-		return false, errors.New("no rsa public from developer info")
+	if dev == nil || dev.Name == "" {
+		return false, errors.New("no developer name from developer info")
 	}
-	// normalize surrounding quotes from DID gate value
-	rsaFromDid := strings.TrimSpace(dev.RSAPubKey)
-	return rsaInApp == rsaFromDid, nil
+	// Compare developer identifiers (normalize by converting to lowercase)
+	devInApp := strings.ToLower(strings.TrimSpace(developerInApp))
+	devFromDid := strings.ToLower(strings.TrimSpace(dev.Name))
+	// For email format, compare the part before @
+	devInAppParts := strings.Split(devInApp, "@")
+	devFromDidParts := strings.Split(devFromDid, "@")
+	if len(devInAppParts) > 0 && len(devFromDidParts) > 0 {
+		return devInAppParts[0] == devFromDidParts[0], nil
+	}
+	return devInApp == devFromDid, nil
 }
 
 // RedisPurchaseKey builds redis key for purchase receipt
@@ -653,23 +663,19 @@ func CheckIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
 		return false, nil // Not a paid app
 	}
 
-	log.Printf("CheckIfAppIsPaid: Price configuration found, examining products")
-	log.Printf("CheckIfAppIsPaid: Price structure - Products: %+v", appInfo.Price.Products)
-
-	// Check if there's a NonConsumable product with AcceptedCurrencies
-	if appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies != nil {
-		log.Printf("CheckIfAppIsPaid: NonConsumable product found with AcceptedCurrencies")
-		log.Printf("CheckIfAppIsPaid: AcceptedCurrencies count: %d", len(appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies))
-		log.Printf("CheckIfAppIsPaid: AcceptedCurrencies: %+v", appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies)
-
-		if len(appInfo.Price.Products.NonConsumable.Price.AcceptedCurrencies) > 0 {
-			log.Printf("CheckIfAppIsPaid: App %s is a PAID app - has valid accepted currencies", getAppID())
-			return true, nil // This is a paid app
-		} else {
-			log.Printf("CheckIfAppIsPaid: App %s is not a paid app - accepted currencies list is empty", getAppID())
+	log.Printf("CheckIfAppIsPaid: Price configuration found, examining paid section and products")
+	// Priority: Paid buyout (main feature). Products are for in-app items (reserved), not a paid app flag.
+	if appInfo.Price.Paid != nil {
+		if len(appInfo.Price.Paid.Price) > 0 {
+			log.Printf("CheckIfAppIsPaid: Paid section with price entries found -> PAID app")
+			return true, nil
 		}
-	} else {
-		log.Printf("CheckIfAppIsPaid: App %s is not a paid app - no accepted currencies configured", getAppID())
+		log.Printf("CheckIfAppIsPaid: Paid section present but no price entries")
+	}
+
+	// Products alone do NOT make the app a paid app in this phase
+	if len(appInfo.Price.Products) > 0 {
+		log.Printf("CheckIfAppIsPaid: Products exist but treated as in-app purchases (reserved); not a paid app in this phase")
 	}
 
 	log.Printf("CheckIfAppIsPaid: App %s is not a paid app - no valid payment configuration", getAppID())

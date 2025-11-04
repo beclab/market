@@ -280,7 +280,44 @@ type VersionInfo struct {
 	UpgradeDescription string     `json:"upgradeDescription" bson:"upgradeDescription"`
 }
 
-// AcceptedCurrency describes one accepted currency option
+// PriceEntry represents a price option
+type PriceEntry struct {
+	Chain         string `json:"chain" yaml:"chain"`               // optimism | eth
+	TokenSymbol   string `json:"token_symbol" yaml:"token_symbol"` // USDC | USDT
+	ReceiveWallet string `json:"receive_wallet" yaml:"receive_wallet"`
+	ProductPrize  int    `json:"product_prize" yaml:"product_prize"`
+}
+
+// PriceDescription represents internationalized description
+type PriceDescription struct {
+	Lang        string `json:"lang" yaml:"lang"`
+	Title       string `json:"title" yaml:"title,omitempty"`
+	Description string `json:"description" yaml:"description,omitempty"`
+	Icon        string `json:"icon" yaml:"icon,omitempty"`
+}
+
+// PaidInfo represents paid app information
+type PaidInfo struct {
+	Price       []PriceEntry       `json:"price,omitempty" yaml:"price,omitempty"`
+	Description []PriceDescription `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// Product represents a product in the price configuration
+type Product struct {
+	ProductID   string             `json:"product_id" yaml:"product_id"`
+	Type        string             `json:"type" yaml:"type"` // consumable | subscribe
+	Price       []PriceEntry       `json:"price" yaml:"price"`
+	Description []PriceDescription `json:"description" yaml:"description"`
+}
+
+// PriceConfig represents price.yaml structure
+type PriceConfig struct {
+	Developer string    `json:"developer" yaml:"developer"`           // Developer email/identifier
+	Paid      *PaidInfo `json:"paid,omitempty" yaml:"paid,omitempty"` // Optional paid app information
+	Products  []Product `json:"products" yaml:"products"`             // Products array
+}
+
+// Deprecated: AcceptedCurrency is deprecated, use PriceEntry instead
 type AcceptedCurrency struct {
 	Amount        string `json:"amount" yaml:"amount"`
 	SystemChainID int    `json:"system_chain_id" yaml:"system_chain_id"`
@@ -291,7 +328,7 @@ type AcceptedCurrency struct {
 	ProductID     string `json:"product_id" yaml:"product_id"`
 }
 
-// PriceProducts groups product types
+// Deprecated: PriceProducts is deprecated, use []Product instead
 type PriceProducts struct {
 	NonConsumable struct {
 		Price struct {
@@ -300,17 +337,10 @@ type PriceProducts struct {
 	} `json:"non_consumable" yaml:"non_consumable"`
 }
 
-// PriceDeveloper holds developer identity and public key
+// Deprecated: PriceDeveloper is deprecated, use string (developer email) instead
 type PriceDeveloper struct {
 	DID       string `json:"did" yaml:"did"`
 	RSAPublic string `json:"rsa_public" yaml:"rsa_public"`
-}
-
-// PriceConfig represents price.yaml structure
-type PriceConfig struct {
-	ReceiveAddresses map[string]string `json:"receive_addresses" yaml:"receive_addresses"`
-	Developer        PriceDeveloper    `json:"developer" yaml:"developer"`
-	Products         PriceProducts     `json:"products" yaml:"products"`
 }
 
 // AppInfo represents complete app information including analysis result
@@ -1138,15 +1168,53 @@ func NewAppInfoWithPrice(appEntry *ApplicationInfoEntry, imageAnalysis *ImageAna
 }
 
 // NewPriceConfig creates a new PriceConfig structure
-func NewPriceConfig(receiveAddresses map[string]string, developer PriceDeveloper, products PriceProducts) *PriceConfig {
+func NewPriceConfig(developer string, paid *PaidInfo, products []Product) *PriceConfig {
 	return &PriceConfig{
-		ReceiveAddresses: receiveAddresses,
-		Developer:        developer,
-		Products:         products,
+		Developer: developer,
+		Paid:      paid,
+		Products:  products,
 	}
 }
 
-// NewPriceDeveloper creates a new PriceDeveloper structure
+// NewPriceEntry creates a new PriceEntry structure
+func NewPriceEntry(chain, tokenSymbol, receiveWallet string, productPrize int) PriceEntry {
+	return PriceEntry{
+		Chain:         chain,
+		TokenSymbol:   tokenSymbol,
+		ReceiveWallet: receiveWallet,
+		ProductPrize:  productPrize,
+	}
+}
+
+// NewPriceDescription creates a new PriceDescription structure
+func NewPriceDescription(lang, title, description, icon string) PriceDescription {
+	return PriceDescription{
+		Lang:        lang,
+		Title:       title,
+		Description: description,
+		Icon:        icon,
+	}
+}
+
+// NewPaidInfo creates a new PaidInfo structure
+func NewPaidInfo(price []PriceEntry, description []PriceDescription) *PaidInfo {
+	return &PaidInfo{
+		Price:       price,
+		Description: description,
+	}
+}
+
+// NewProduct creates a new Product structure
+func NewProduct(productID, productType string, price []PriceEntry, description []PriceDescription) Product {
+	return Product{
+		ProductID:   productID,
+		Type:        productType,
+		Price:       price,
+		Description: description,
+	}
+}
+
+// Deprecated: NewPriceDeveloper is deprecated, use string directly for developer field
 func NewPriceDeveloper(did string, rsaPublic string) PriceDeveloper {
 	return PriceDeveloper{
 		DID:       did,
@@ -1154,7 +1222,7 @@ func NewPriceDeveloper(did string, rsaPublic string) PriceDeveloper {
 	}
 }
 
-// NewPriceProducts creates a new PriceProducts structure
+// Deprecated: NewPriceProducts is deprecated, use []Product instead
 func NewPriceProducts(acceptedCurrencies []AcceptedCurrency) PriceProducts {
 	return PriceProducts{
 		NonConsumable: struct {
@@ -1171,7 +1239,7 @@ func NewPriceProducts(acceptedCurrencies []AcceptedCurrency) PriceProducts {
 	}
 }
 
-// NewAcceptedCurrency creates a new AcceptedCurrency structure
+// Deprecated: NewAcceptedCurrency is deprecated, use NewPriceEntry instead
 func NewAcceptedCurrency(amount string, systemChainID int, chainID int, token string, symbol string, decimals int) AcceptedCurrency {
 	return AcceptedCurrency{
 		Amount:        amount,
