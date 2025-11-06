@@ -44,6 +44,14 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	if appInfo == nil {
 		return nil, fmt.Errorf("app info is nil")
 	}
+
+	// Use real app ID from AppEntry, not the URL parameter (which might be name)
+	realAppID := appID
+	if appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
+		realAppID = appInfo.AppEntry.ID
+		log.Printf("PurchaseApp: Using real app ID from AppEntry: %s (URL param was: %s)", realAppID, appID)
+	}
+
 	var productID string
 	if appInfo.Price != nil && appInfo.Price.Paid != nil {
 		if appInfo.Price.Paid.ProductID != "" {
@@ -59,23 +67,23 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	}
 	if productID == "" {
 		// Final fallback: for paid apps without explicit product_id
-		productID = appID
-		log.Printf("PurchaseApp: productID not found in price, using appID as fallback: %s", productID)
+		productID = realAppID
+		log.Printf("PurchaseApp: productID not found in price, using real appID as fallback: %s", productID)
 	}
 
-	// Locate state precisely via state_machine
+	// Locate state precisely via state_machine (use realAppID, not URL param)
 	var target *PaymentState
 	if globalStateMachine != nil {
 		// Try getState first (memory only, same as GetPaymentStatus)
-		if st, err := globalStateMachine.getState(userID, appID, productID); err == nil {
+		if st, err := globalStateMachine.getState(userID, realAppID, productID); err == nil {
 			target = st
-			log.Printf("PurchaseApp: Found state in memory for user=%s app=%s productID=%s", userID, appID, productID)
+			log.Printf("PurchaseApp: Found state in memory for user=%s app=%s productID=%s", userID, realAppID, productID)
 		} else {
 			// Try LoadState (will check Redis and load to memory)
 			log.Printf("PurchaseApp: State not in memory, trying LoadState from Redis. Error: %v", err)
-			if st, err := globalStateMachine.LoadState(userID, appID, productID); err == nil {
+			if st, err := globalStateMachine.LoadState(userID, realAppID, productID); err == nil {
 				target = st
-				log.Printf("PurchaseApp: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, appID, productID)
+				log.Printf("PurchaseApp: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, realAppID, productID)
 			} else {
 				log.Printf("PurchaseApp: State not found in Redis either. Error: %v", err)
 			}
@@ -85,7 +93,7 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	if target == nil {
 		// State not found - this should have been created during preprocessing
 		// For now, return a helpful error message
-		log.Printf("PurchaseApp: Payment state not found for user=%s app=%s productID=%s. State may need to be created via preprocessing.", userID, appID, productID)
+		log.Printf("PurchaseApp: Payment state not found for user=%s app=%s productID=%s. State may need to be created via preprocessing.", userID, realAppID, productID)
 		return nil, fmt.Errorf("payment state not found for product '%s'; ensure preprocessing ran or app data is properly loaded", productID)
 	}
 
@@ -96,7 +104,7 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	if err := globalStateMachine.processEvent(
 		context.Background(),
 		userID,
-		appID,
+		realAppID,
 		productID,
 		"start_payment",
 		map[string]interface{}{
@@ -107,7 +115,7 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	}
 
 	// Read latest state to decide response
-	latest, _ := globalStateMachine.getState(userID, appID, productID)
+	latest, _ := globalStateMachine.getState(userID, realAppID, productID)
 	if latest == nil {
 		latest = target
 	}
