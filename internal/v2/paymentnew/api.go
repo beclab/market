@@ -91,10 +91,42 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	}
 
 	if target == nil {
-		// State not found - this should have been created during preprocessing
-		// For now, return a helpful error message
-		log.Printf("PurchaseApp: Payment state not found for user=%s app=%s productID=%s. State may need to be created via preprocessing.", userID, realAppID, productID)
-		return nil, fmt.Errorf("payment state not found for product '%s'; ensure preprocessing ran or app data is properly loaded", productID)
+		// State not found - likely because:
+		// 1. Program restarted and state was not loaded from Redis
+		// 2. Preprocessing ran before the productID fix, using wrong key
+		// 3. Preprocessing hasn't run yet
+		// Try to create state via preprocessing now
+		log.Printf("PurchaseApp: Payment state not found for user=%s app=%s productID=%s. Attempting to create state via preprocessing.", userID, realAppID, productID)
+
+		// Get settingsManager from state machine
+		if globalStateMachine == nil || globalStateMachine.settingsManager == nil {
+			return nil, fmt.Errorf("state machine or settings manager not initialized; cannot create payment state")
+		}
+
+		// Trigger preprocessing to create the state
+		client := resty.New()
+		client.SetTimeout(3 * time.Second)
+		_, err := PreprocessAppPaymentData(
+			context.Background(),
+			appInfo,
+			userID,
+			sourceID,
+			globalStateMachine.settingsManager,
+			client,
+		)
+		if err != nil {
+			log.Printf("PurchaseApp: Failed to preprocess payment data: %v", err)
+			return nil, fmt.Errorf("failed to create payment state: %w", err)
+		}
+
+		// Try to load the state again after preprocessing
+		if st, err := globalStateMachine.LoadState(userID, realAppID, productID); err == nil {
+			target = st
+			log.Printf("PurchaseApp: Successfully created and loaded state after preprocessing")
+		} else {
+			log.Printf("PurchaseApp: State still not found after preprocessing. Error: %v", err)
+			return nil, fmt.Errorf("payment state not found after preprocessing for product '%s'", productID)
+		}
 	}
 
 	// Trigger start_payment event with payload (state machine will advance appropriately)
