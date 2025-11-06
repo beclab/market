@@ -95,14 +95,50 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 		return nil, fmt.Errorf("app info is nil")
 	}
 
-	// Extract productID from app info
-	productID := getProductIDFromAppInfo(appInfo)
-	requiresPurchase := productID != "" // 是否为付费应用
-	if !requiresPurchase {
-		return &PaymentStatusResult{RequiresPurchase: false, Status: "not_evaluated", Message: "No payment required"}, nil
+	// Step 1: Check if app is a paid app using correct logic (check Price.Paid.Price, not Products)
+	isPaidApp, err := checkIfAppIsPaid(appInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if app is paid: %w", err)
 	}
 
-	// Find state
+	if !isPaidApp {
+		// Free app - no payment required
+		return &PaymentStatusResult{RequiresPurchase: false, Status: "free", Message: "This is a free app"}, nil
+	}
+
+	// Step 2: Determine productID for state machine lookup
+	// Priority order:
+	// 1. For paid apps with Price.Paid.ProductID (buyout), use Price.Paid.ProductID
+	// 2. For apps with Products (in-app purchases), use productID from Products
+	// 3. Fallback to appID if neither exists
+	var productID string
+	if appInfo.Price != nil && appInfo.Price.Paid != nil {
+		if appInfo.Price.Paid.ProductID != "" {
+			// Paid buyout app with product_id - use it
+			productID = appInfo.Price.Paid.ProductID
+			log.Printf("GetPaymentStatus: Paid buyout app, using productID from Price.Paid: %s", productID)
+		} else if len(appInfo.Price.Paid.Price) > 0 {
+			// Paid buyout app without product_id - use appID as fallback
+			productID = appID
+			log.Printf("GetPaymentStatus: Paid buyout app without product_id, using appID as fallback: %s", productID)
+		}
+	}
+
+	// If not found from Paid section, try Products (for in-app purchases)
+	if productID == "" {
+		productID = getProductIDFromAppInfo(appInfo)
+		if productID != "" {
+			log.Printf("GetPaymentStatus: Using productID from Products: %s", productID)
+		}
+	}
+
+	// Final fallback: use appID
+	if productID == "" {
+		productID = appID
+		log.Printf("GetPaymentStatus: No productID found, using appID as final fallback: %s", productID)
+	}
+
+	// Step 3: Find state
 	var state *PaymentState
 	if globalStateMachine != nil {
 		s, err := globalStateMachine.getState(userID, appID, productID)

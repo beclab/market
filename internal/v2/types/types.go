@@ -285,7 +285,7 @@ type PriceEntry struct {
 	Chain         string `json:"chain" yaml:"chain"`               // optimism | eth
 	TokenSymbol   string `json:"token_symbol" yaml:"token_symbol"` // USDC | USDT
 	ReceiveWallet string `json:"receive_wallet" yaml:"receive_wallet"`
-	ProductPrize  int    `json:"product_prize" yaml:"product_prize"`
+	ProductPrice  int    `json:"product_price" yaml:"product_price"`
 }
 
 // PriceDescription represents internationalized description
@@ -298,6 +298,7 @@ type PriceDescription struct {
 
 // PaidInfo represents paid app information
 type PaidInfo struct {
+	ProductID   string             `json:"product_id,omitempty" yaml:"product_id,omitempty"`
 	Price       []PriceEntry       `json:"price,omitempty" yaml:"price,omitempty"`
 	Description []PriceDescription `json:"description,omitempty" yaml:"description,omitempty"`
 }
@@ -1177,12 +1178,12 @@ func NewPriceConfig(developer string, paid *PaidInfo, products []Product) *Price
 }
 
 // NewPriceEntry creates a new PriceEntry structure
-func NewPriceEntry(chain, tokenSymbol, receiveWallet string, productPrize int) PriceEntry {
+func NewPriceEntry(chain, tokenSymbol, receiveWallet string, productPrice int) PriceEntry {
 	return PriceEntry{
 		Chain:         chain,
 		TokenSymbol:   tokenSymbol,
 		ReceiveWallet: receiveWallet,
-		ProductPrize:  productPrize,
+		ProductPrice:  productPrice,
 	}
 }
 
