@@ -227,12 +227,16 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 
 // notifyLarePassToFetchSignature notifies larepass client to fetch signature (same payload as NotifyLarePassToSign, different topic, omits txHash)
 func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, productID, xForwardedHost string, systemChainID int) error {
+	log.Printf("notifyLarePassToFetchSignature: Starting notification for user=%s app=%s productID=%s", userID, appID, productID)
+
 	if dataSender == nil {
+		log.Printf("notifyLarePassToFetchSignature: ERROR - data sender is nil")
 		return errors.New("data sender is nil")
 	}
 
 	var manifestData map[string]interface{}
 	if err := json.Unmarshal([]byte(merchantProductLicenseCredentialManifestJSON), &manifestData); err != nil {
+		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to parse manifest JSON: %v", err)
 		return fmt.Errorf("failed to parse manifest JSON: %w", err)
 	}
 
@@ -248,19 +252,19 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 			"systemChainId": systemChainID,
 		}
 		signBody["application_verifiable_credential"] = appVerifiableCredential
-		log.Printf("Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s", userID, appID)
+		log.Printf("notifyLarePassToFetchSignature: Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s", userID, appID)
 	} else {
-		log.Printf("Skipping application_verifiable_credential for fetch-signature (productID: %s, systemChainID: %d)", productID, systemChainID)
+		log.Printf("notifyLarePassToFetchSignature: Skipping application_verifiable_credential for fetch-signature (productID: %s, systemChainID: %d)", productID, systemChainID)
 	}
 
 	if xForwardedHost == "" {
-		log.Printf("ERROR: X-Forwarded-Host is empty for user %s, cannot build callback URL (fetch-signature)", userID)
+		log.Printf("notifyLarePassToFetchSignature: ERROR - X-Forwarded-Host is empty for user %s, cannot build callback URL (fetch-signature)", userID)
 		return errors.New("X-Forwarded-Host is required but not available")
 	}
 
 	// New callback endpoint for fetch-signature
 	callbackURL := fmt.Sprintf("https://%s/app-store/api/v2/payment/fetch-signature-callback", xForwardedHost)
-	log.Printf("Using X-Forwarded-Host based callback URL (fetch-signature) for user %s: %s", userID, callbackURL)
+	log.Printf("notifyLarePassToFetchSignature: Using X-Forwarded-Host based callback URL (fetch-signature) for user %s: %s", userID, callbackURL)
 
 	update := types.SignNotificationUpdate{
 		Sign: types.SignNotificationData{
@@ -272,7 +276,14 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 		Topic: "fetch_payment_signature",
 	}
 
-	return dataSender.SendSignNotificationUpdate(update)
+	log.Printf("notifyLarePassToFetchSignature: Sending notification to LarePass for user=%s app=%s productID=%s topic=fetch_payment_signature", userID, appID, productID)
+	err := dataSender.SendSignNotificationUpdate(update)
+	if err != nil {
+		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to send notification: %v", err)
+		return err
+	}
+	log.Printf("notifyLarePassToFetchSignature: Successfully sent notification to LarePass for user=%s app=%s productID=%s", userID, appID, productID)
+	return nil
 }
 
 // notifyFrontendPaymentRequired notifies market frontend that payment is required (internal)
