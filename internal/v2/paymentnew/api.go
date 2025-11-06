@@ -40,13 +40,27 @@ type PaymentStatusResult struct {
 func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.AppInfo) (map[string]interface{}, error) {
 	log.Printf("[PurchaseApp] user=%s app=%s source=%s", userID, appID, sourceID)
 
-	// Extract productID from app info
+	// Extract productID from app info with correct priority
 	if appInfo == nil {
 		return nil, fmt.Errorf("app info is nil")
 	}
-	productID := getProductIDFromAppInfo(appInfo)
+	var productID string
+	if appInfo.Price != nil && appInfo.Price.Paid != nil {
+		if appInfo.Price.Paid.ProductID != "" {
+			productID = appInfo.Price.Paid.ProductID
+			log.Printf("PurchaseApp: Using productID from Price.Paid: %s", productID)
+		}
+	}
 	if productID == "" {
-		return nil, fmt.Errorf("product id not found from app info")
+		productID = getProductIDFromAppInfo(appInfo)
+		if productID != "" {
+			log.Printf("PurchaseApp: Using productID from Products: %s", productID)
+		}
+	}
+	if productID == "" {
+		// Final fallback: for paid apps without explicit product_id
+		productID = appID
+		log.Printf("PurchaseApp: productID not found in price, using appID as fallback: %s", productID)
 	}
 
 	// Locate state precisely via state_machine
