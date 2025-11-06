@@ -66,13 +66,22 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	// Locate state precisely via state_machine
 	var target *PaymentState
 	if globalStateMachine != nil {
-		if st, err := globalStateMachine.getState(userID, appID, productID); err == nil {
+		// Try LoadState first (it will check Redis if not in memory)
+		if st, err := globalStateMachine.LoadState(userID, appID, productID); err == nil {
 			target = st
+		} else {
+			// Try getState (memory only)
+			if st, err := globalStateMachine.getState(userID, appID, productID); err == nil {
+				target = st
+			}
 		}
 	}
 
 	if target == nil {
-		return nil, fmt.Errorf("payment state not found; ensure preprocessing ran")
+		// State not found - this should have been created during preprocessing
+		// For now, return a helpful error message
+		log.Printf("PurchaseApp: Payment state not found for user=%s app=%s productID=%s. State may need to be created via preprocessing.", userID, appID, productID)
+		return nil, fmt.Errorf("payment state not found for product '%s'; ensure preprocessing ran or app data is properly loaded", productID)
 	}
 
 	// Trigger start_payment event with payload (state machine will advance appropriately)
@@ -397,12 +406,30 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		return nil, nil
 	}
 
-	// Step 1: Get productID
-	productID := getProductIDFromAppInfo(appInfo)
+	// Step 1: Get productID with correct priority (Price.Paid.ProductID > Products > appID)
+	var productID string
+	if appInfo.Price != nil && appInfo.Price.Paid != nil {
+		if appInfo.Price.Paid.ProductID != "" {
+			productID = appInfo.Price.Paid.ProductID
+			log.Printf("PreprocessAppPaymentData: Using productID from Price.Paid: %s", productID)
+		}
+	}
 	if productID == "" {
-		// No valid productID -> return directly, no further processing
-		log.Printf("INFO: productID not found, skip state init")
-		return nil, nil
+		productID = getProductIDFromAppInfo(appInfo)
+		if productID != "" {
+			log.Printf("PreprocessAppPaymentData: Using productID from Products: %s", productID)
+		}
+	}
+	if productID == "" {
+		// For paid apps, we can use appID as productID if no explicit product_id
+		if appInfo.AppEntry != nil {
+			productID = appInfo.AppEntry.ID
+			log.Printf("PreprocessAppPaymentData: Using appID as productID fallback: %s", productID)
+		} else {
+			// No valid productID -> return directly, no further processing
+			log.Printf("INFO: productID not found and no appID available, skip state init")
+			return nil, nil
+		}
 	}
 
 	// Extract basic app information
