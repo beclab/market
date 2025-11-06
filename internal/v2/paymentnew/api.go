@@ -66,13 +66,18 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	// Locate state precisely via state_machine
 	var target *PaymentState
 	if globalStateMachine != nil {
-		// Try LoadState first (it will check Redis if not in memory)
-		if st, err := globalStateMachine.LoadState(userID, appID, productID); err == nil {
+		// Try getState first (memory only, same as GetPaymentStatus)
+		if st, err := globalStateMachine.getState(userID, appID, productID); err == nil {
 			target = st
+			log.Printf("PurchaseApp: Found state in memory for user=%s app=%s productID=%s", userID, appID, productID)
 		} else {
-			// Try getState (memory only)
-			if st, err := globalStateMachine.getState(userID, appID, productID); err == nil {
+			// Try LoadState (will check Redis and load to memory)
+			log.Printf("PurchaseApp: State not in memory, trying LoadState from Redis. Error: %v", err)
+			if st, err := globalStateMachine.LoadState(userID, appID, productID); err == nil {
 				target = st
+				log.Printf("PurchaseApp: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, appID, productID)
+			} else {
+				log.Printf("PurchaseApp: State not found in Redis either. Error: %v", err)
 			}
 		}
 	}
