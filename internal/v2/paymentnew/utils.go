@@ -245,17 +245,22 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 		"product_credential_manifest": manifestData,
 	}
 
-	// Only add application_verifiable_credential if required fields present (omit txHash by design)
-	if productID != "" && systemChainID != 0 {
-		appVerifiableCredential := map[string]interface{}{
-			"productId":     productID,
-			"systemChainId": systemChainID,
-		}
-		signBody["application_verifiable_credential"] = appVerifiableCredential
-		log.Printf("notifyLarePassToFetchSignature: Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s", userID, appID)
-	} else {
-		log.Printf("notifyLarePassToFetchSignature: Skipping application_verifiable_credential for fetch-signature (productID: %s, systemChainID: %d)", productID, systemChainID)
+	// productID is required for application_verifiable_credential (omit txHash by design)
+	// Note: systemChainID may be 0 at fetch-signature stage (before payment), so we only require productID
+	if productID == "" {
+		log.Printf("notifyLarePassToFetchSignature: ERROR - productID is empty for user %s, app %s, cannot build application_verifiable_credential", userID, appID)
+		return errors.New("productID is required but not available")
 	}
+
+	appVerifiableCredential := map[string]interface{}{
+		"productId": productID,
+	}
+	// Only include systemChainId if it's non-zero (payment may not have completed yet)
+	if systemChainID != 0 {
+		appVerifiableCredential["systemChainId"] = systemChainID
+	}
+	signBody["application_verifiable_credential"] = appVerifiableCredential
+	log.Printf("notifyLarePassToFetchSignature: Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s, productID: %s, systemChainID: %d", userID, appID, productID, systemChainID)
 
 	if xForwardedHost == "" {
 		log.Printf("notifyLarePassToFetchSignature: ERROR - X-Forwarded-Host is empty for user %s, cannot build callback URL (fetch-signature)", userID)
