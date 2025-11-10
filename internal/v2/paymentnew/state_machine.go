@@ -12,6 +12,11 @@ import (
 	"market/internal/v2/types"
 )
 
+// FrontendPaymentStartedPayload carries frontend-provided metadata when payment is about to start on-chain
+type FrontendPaymentStartedPayload struct {
+	Data map[string]interface{}
+}
+
 // getOrCreateState only retrieves existing state; creation is no longer done here
 // Deprecated: original getOrCreateState removed to avoid multiple creation points
 
@@ -92,6 +97,8 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 	switch event {
 	case "start_payment":
 		nextState, err = psm.handleStartPayment(ctx, state, payload)
+	case "frontend_payment_started":
+		nextState, err = psm.handleFrontendPaymentStarted(ctx, state, payload)
 	case "signature_submitted":
 		nextState, err = psm.handleSignatureSubmitted(ctx, state, payload)
 	case "payment_completed":
@@ -182,7 +189,10 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 			if st, err := psm.getState(newState.UserID, newState.AppID, newState.ProductID); err == nil && st != nil {
 				latest = st
 			}
-			if !(latest.PaymentStatus == PaymentNotificationSent || latest.PaymentStatus == PaymentFrontendCompleted || latest.PaymentStatus == PaymentDeveloperConfirmed) {
+			if !(latest.PaymentStatus == PaymentNotificationSent ||
+				latest.PaymentStatus == PaymentFrontendStarted ||
+				latest.PaymentStatus == PaymentFrontendCompleted ||
+				latest.PaymentStatus == PaymentDeveloperConfirmed) {
 				_ = notifyFrontendPaymentRequired(
 					psm.dataSender,
 					newState.UserID,
@@ -214,12 +224,60 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 		return &newState, nil
 	}
 
+	// 3.5) Frontend payment started -> wait for completion
+	if newState.PaymentStatus == PaymentFrontendStarted {
+		return &newState, nil
+	}
+
 	// 4) VC already synced -> nothing to do
 	if newState.DeveloperSync == DeveloperSyncCompleted && newState.VC != "" {
 		return &newState, nil
 	}
 
 	// Default: no-op after marking payment need
+	return &newState, nil
+}
+
+// handleFrontendPaymentStarted handles frontend_payment_started event
+func (psm *PaymentStateMachine) handleFrontendPaymentStarted(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
+	log.Printf("Handling frontend_payment_started event")
+
+	var data map[string]interface{}
+
+	switch v := payload.(type) {
+	case FrontendPaymentStartedPayload:
+		data = v.Data
+	case *FrontendPaymentStartedPayload:
+		if v != nil {
+			data = v.Data
+		}
+	case map[string]interface{}:
+		data = v
+	case map[string]string:
+		if len(v) > 0 {
+			data = make(map[string]interface{}, len(v))
+			for k, val := range v {
+				data[k] = val
+			}
+		}
+	default:
+		if payload != nil {
+			return nil, fmt.Errorf("invalid payload for frontend_payment_started event: %T", payload)
+		}
+	}
+
+	newState := *state
+	if len(data) > 0 {
+		copyData := make(map[string]interface{}, len(data))
+		for k, val := range data {
+			copyData[k] = val
+		}
+		newState.FrontendData = copyData
+	} else {
+		newState.FrontendData = nil
+	}
+	newState.PaymentStatus = PaymentFrontendStarted
+
 	return &newState, nil
 }
 
@@ -269,6 +327,7 @@ func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, stat
 	newState.TxHash = payloadData.TxHash
 	newState.SystemChainID = payloadData.SystemChainID
 	newState.PaymentStatus = PaymentFrontendCompleted
+	newState.FrontendData = nil
 
 	// Follow-up: poll developer service for VC
 	go psm.pollForVCFromDeveloper(&newState)
@@ -290,6 +349,7 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 	newState.VC = payloadData
 	newState.DeveloperSync = DeveloperSyncCompleted
 	newState.PaymentStatus = PaymentDeveloperConfirmed
+	newState.FrontendData = nil
 
 	// Store purchase info to Redis
 	go psm.storePurchaseInfo(&newState)
@@ -747,6 +807,16 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 	}
 
 	// 3) Frontend has completed payment
+	if state.PaymentStatus == PaymentFrontendStarted {
+		response := map[string]interface{}{
+			"status": "payment_frontend_started",
+		}
+		if len(state.FrontendData) > 0 {
+			response["frontend_data"] = state.FrontendData
+		}
+		return response, nil
+	}
+
 	if state.PaymentStatus == PaymentFrontendCompleted {
 		return map[string]interface{}{
 			"status":  "waiting_developer_confirmation",

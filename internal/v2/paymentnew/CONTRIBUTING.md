@@ -9,6 +9,7 @@
 - Do NOT read/write Redis directly or introduce side caches for payment state.
 - For state transitions, prefer `processEvent(...)` + `updateState(...)` to ensure atomic updates, timestamps, and persistence.
 - After sending “payment required” notification, update `PaymentStatus=notification_sent` accordingly.
+- When frontend signals readiness before on-chain transfer, update `PaymentStatus=frontend_started` and persist provided payload via `StartFrontendPayment`.
 - When developer VC returns with `code==0`, you must:
   - Set `PaymentStatus=developer_confirmed`
   - Persist purchase receipt via `storePurchaseInfo`

@@ -422,6 +422,10 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 	if state.PaymentStatus == PaymentFrontendCompleted {
 		return "waiting_developer_confirmation"
 	}
+	// 2.5) Frontend started payment preparation
+	if state.PaymentStatus == PaymentFrontendStarted {
+		return "payment_frontend_started"
+	}
 	// 3) Signed, payment required
 	if state.SignatureStatus == SignatureRequiredAndSigned {
 		return "payment_required"

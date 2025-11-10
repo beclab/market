@@ -20,7 +20,7 @@
 - **DeveloperSync**: `not_started` | `in_progress` | `completed` | `failed`
 - **LarePassSync**: `not_started` | `in_progress` | `completed` | `failed`
 - **SignatureStatus**: `not_evaluated` | `not_required` | `required` | `required_and_signed` | `required_but_pending` | `error_no_record` | `error_need_resign`
-- **PaymentStatus**: `not_evaluated` | `not_notified` | `notification_sent` | `frontend_completed` | `developer_confirmed`
+- **PaymentStatus**: `not_evaluated` | `not_notified` | `notification_sent` | `frontend_started` | `frontend_completed` | `developer_confirmed`
 
 ### PaymentState (runtime primary state)
 - Identifiers: `UserID`, `AppID`, `AppName`, `SourceID`, `ProductID`, `DeveloperName`
@@ -44,6 +44,7 @@
 - `start_payment`: mark as payment required (placeholder; business logic may auto-decide signature and notification later).
 - `request_signature`: set `SignatureRequired`; if `XForwardedHost` is present, notify LarePass to initiate signing.
 - `signature_submitted`: write `JWS/SignBody`, set `LarePassSyncCompleted` and `SignatureRequiredAndSigned`, asynchronously request VC from developer.
+- `frontend_payment_started`: cache frontend payload, set `PaymentFrontendStarted` while waiting for on-chain transfer.
 - `payment_completed`: write `TxHash/SystemChainID`, set `PaymentFrontendCompleted`, start polling developer for VC.
 - `vc_received`: write `VC`, set `DeveloperSyncCompleted` and `PaymentDeveloperConfirmed`, persist purchase receipt and notify frontend of completion.
 
@@ -71,6 +72,7 @@ Typical sequence: preprocessing → fetch signature → submit signature → fro
 - Preprocess: `PreprocessAppPaymentData(ctx, appInfo, userID, sourceID, settingsManager, client)`
 - Query: `GetPaymentStatus(userID, appID, sourceID, appInfo)`
 - Advance purchase: `PurchaseApp(userID, appID, sourceID, xForwardedHost, appInfo)`
+- Mark frontend ready: `StartFrontendPayment(userID, appID, sourceID, xForwardedHost, appInfo, frontendData)`
 - Poll after payment completion: `StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost, systemChainID, appInfoLatest)`
 - Signature callbacks:
   - Submit signature: `ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)`
@@ -120,6 +122,7 @@ Typical sequence: preprocessing → fetch signature → submit signature → fro
 
 - `developer_confirmed` → Purchased (installable)
 - `frontend_completed` → Paid, waiting for developer confirmation
+- `frontend_started` → Frontend preparing on-chain payment
 - `notification_sent` → Frontend has been notified to pay
 - `not_notified` / `not_evaluated` → Not started/Not evaluated (can trigger `PurchaseApp`)
 - Error class (`error_*`) → Guide user to retry or contact support
@@ -170,7 +173,8 @@ stateDiagram-v2
     SigRequired --> SigErrorNeedReSign: VC query code==2
 
     SigSigned --> PaymentRequired: notify frontend to pay
-    PaymentRequired --> FrontendCompleted: payment_completed(txHash, chainId)
+    PaymentRequired --> FrontendStarted: frontend indicates ready
+    FrontendStarted --> FrontendCompleted: payment_completed(txHash, chainId)
 
     FrontendCompleted --> DevSyncInProgress: start polling VC
     DevSyncInProgress --> DevConfirmed: VC code==0

@@ -59,6 +59,7 @@ const (
 	PaymentNotEvaluated       PaymentStatus = "not_evaluated"
 	PaymentNotNotified        PaymentStatus = "not_notified"
 	PaymentNotificationSent   PaymentStatus = "notification_sent"
+	PaymentFrontendStarted    PaymentStatus = "frontend_started"
 	PaymentFrontendCompleted  PaymentStatus = "frontend_completed"
 	PaymentDeveloperConfirmed PaymentStatus = "developer_confirmed"
 )
@@ -87,12 +88,13 @@ type PaymentState struct {
 	PaymentStatus   PaymentStatus       `json:"payment_status"`
 
 	// Associated data
-	JWS            string `json:"jws,omitempty"`
-	SignBody       string `json:"sign_body,omitempty"`
-	VC             string `json:"vc,omitempty"`
-	TxHash         string `json:"tx_hash,omitempty"`
-	SystemChainID  int    `json:"system_chain_id,omitempty"`
-	XForwardedHost string `json:"x_forwarded_host,omitempty"`
+	JWS            string                 `json:"jws,omitempty"`
+	SignBody       string                 `json:"sign_body,omitempty"`
+	VC             string                 `json:"vc,omitempty"`
+	TxHash         string                 `json:"tx_hash,omitempty"`
+	SystemChainID  int                    `json:"system_chain_id,omitempty"`
+	XForwardedHost string                 `json:"x_forwarded_host,omitempty"`
+	FrontendData   map[string]interface{} `json:"frontend_data,omitempty"`
 
 	// Metadata
 	CreatedAt time.Time `json:"created_at"`

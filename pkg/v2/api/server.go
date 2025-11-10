@@ -197,7 +197,11 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/payment/start-polling", s.startPaymentPolling).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/payment/start-polling")
 
-	// 26. Fetch signature callback (from LarePass)
+	// 26. Frontend signals payment readiness
+	api.HandleFunc("/payment/frontend-start", s.startFrontendPayment).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/payment/frontend-start")
+
+	// 27. Fetch signature callback (from LarePass)
 	api.HandleFunc("/payment/fetch-signature-callback", s.fetchSignatureCallback).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/payment/fetch-signature-callback")
 

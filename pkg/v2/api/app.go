@@ -38,6 +38,13 @@ type paymentPollingRequest struct {
 	SystemChainID int    `json:"system_chain_id"`
 }
 
+// frontendPaymentStartRequest is a local request model for frontend payment start event
+type frontendPaymentStartRequest struct {
+	SourceID     string                 `json:"source_id"`
+	AppID        string                 `json:"app_id"`
+	FrontendData map[string]interface{} `json:"frontend_data"`
+}
+
 // paymentPollingResponse is a local response model for starting payment polling
 type paymentPollingResponse struct {
 	Success bool   `json:"success"`
@@ -2294,4 +2301,93 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Payment polling started successfully for user: %s, source: %s, app: %s", userID, request.SourceID, request.AppID)
 	s.sendResponse(w, http.StatusOK, true, "Payment polling started successfully", response)
+}
+
+// startFrontendPayment handles POST /api/v2/payment/frontend-start
+func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/payment/frontend-start - Frontend signals payment readiness")
+
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
+	if xForwardedHost == "" {
+		log.Printf("ERROR: X-Forwarded-Host header is missing in frontend payment start request")
+		s.sendResponse(w, http.StatusBadRequest, false, "X-Forwarded-Host header is required", nil)
+		return
+	}
+
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for frontend payment start request: %s", userID)
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+	defer r.Body.Close()
+
+	var request frontendPaymentStartRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		log.Printf("Failed to parse JSON request: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
+		return
+	}
+
+	if strings.TrimSpace(request.SourceID) == "" || strings.TrimSpace(request.AppID) == "" {
+		log.Printf("Missing required fields in frontend payment start request: source_id=%s app_id=%s", request.SourceID, request.AppID)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source_id, app_id", nil)
+		return
+	}
+
+	if s.cacheManager == nil {
+		log.Printf("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	userData := s.cacheManager.GetUserData(userID)
+	if userData == nil {
+		log.Printf("User data not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+		return
+	}
+
+	appInfoLatest, _ := s.findAppInUserDataWithSource(userData, request.AppID, request.SourceID)
+	if appInfoLatest == nil || appInfoLatest.AppInfo == nil {
+		log.Printf("App info not found for user: %s, app: %s, source: %s", userID, request.AppID, request.SourceID)
+		s.sendResponse(w, http.StatusNotFound, false, "App info not found in cache", nil)
+		return
+	}
+
+	var frontendData map[string]interface{}
+	if len(request.FrontendData) > 0 {
+		frontendData = make(map[string]interface{}, len(request.FrontendData))
+		for k, v := range request.FrontendData {
+			frontendData[k] = v
+		}
+	}
+
+	result, err := paymentnew.StartFrontendPayment(userID, request.AppID, request.SourceID, xForwardedHost, appInfoLatest.AppInfo, frontendData)
+	if err != nil {
+		log.Printf("Failed to start frontend payment: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to update payment state", nil)
+		return
+	}
+
+	if result == nil {
+		result = map[string]interface{}{}
+	}
+	result["app_id"] = request.AppID
+	result["source"] = request.SourceID
+	result["user"] = userID
+	if _, exists := result["frontend_data"]; !exists && len(frontendData) > 0 {
+		result["frontend_data"] = frontendData
+	}
+
+	s.sendResponse(w, http.StatusOK, true, "Frontend payment state updated", result)
 }

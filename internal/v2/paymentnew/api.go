@@ -29,10 +29,11 @@ func GetStateMachine() *PaymentStateMachine {
 
 // PaymentStatusResult represents the result of payment status check
 type PaymentStatusResult struct {
-	RequiresPurchase bool   `json:"requires_purchase"`
-	Status           string `json:"status"`
-	Message          string `json:"message"`
-	PaymentError     string `json:"payment_error,omitempty"`
+	RequiresPurchase bool                   `json:"requires_purchase"`
+	Status           string                 `json:"status"`
+	Message          string                 `json:"message"`
+	PaymentError     string                 `json:"payment_error,omitempty"`
+	FrontendData     map[string]interface{} `json:"frontend_data,omitempty"`
 }
 
 // PurchaseApp starts a purchase flow for a given user/app/source (placeholder)
@@ -252,6 +253,11 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 		result.Message = "App is already purchased"
 	case string(PaymentFrontendCompleted):
 		result.Message = "Payment completed on frontend, waiting for developer confirmation"
+	case string(PaymentFrontendStarted):
+		result.Message = "Frontend preparing on-chain payment"
+		if state != nil && len(state.FrontendData) > 0 {
+			result.FrontendData = state.FrontendData
+		}
 	case string(PaymentNotificationSent):
 		result.Message = "Payment notification sent"
 	case string(PaymentNotNotified):
@@ -308,6 +314,7 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 	latest, _ := globalStateMachine.getState(state.UserID, state.AppID, state.ProductID)
 	if latest != nil {
 		if latest.PaymentStatus == PaymentNotificationSent ||
+			latest.PaymentStatus == PaymentFrontendStarted ||
 			latest.PaymentStatus == PaymentFrontendCompleted ||
 			latest.PaymentStatus == PaymentDeveloperConfirmed {
 			log.Printf("Skip notifying payment_required: current status=%s", latest.PaymentStatus)
@@ -367,6 +374,99 @@ func HandleFetchSignatureCallback(jws, signBody, user string, signed bool) error
 
 	log.Printf("=== End of Fetch Signature Callback Processing ===")
 	return nil
+}
+
+// StartFrontendPayment marks payment state as frontend started and caches frontend provided data
+func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInfo *types.AppInfo, frontendData map[string]interface{}) (map[string]interface{}, error) {
+	log.Printf("=== StartFrontendPayment ===")
+	log.Printf("User ID: %s", userID)
+	log.Printf("Source ID: %s", sourceID)
+	log.Printf("App ID: %s", appID)
+	log.Printf("X-Forwarded-Host: %s", xForwardedHost)
+
+	if appInfo == nil {
+		return nil, fmt.Errorf("app info is nil")
+	}
+
+	if globalStateMachine == nil {
+		return nil, fmt.Errorf("state machine not initialized")
+	}
+
+	realAppID := appID
+	if appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
+		realAppID = appInfo.AppEntry.ID
+		log.Printf("StartFrontendPayment: Using real app ID from AppEntry: %s (URL param was: %s)", realAppID, appID)
+	}
+
+	var productID string
+	if appInfo.Price != nil && appInfo.Price.Paid != nil {
+		if appInfo.Price.Paid.ProductID != "" {
+			productID = appInfo.Price.Paid.ProductID
+			log.Printf("StartFrontendPayment: Using productID from Price.Paid: %s", productID)
+		} else if len(appInfo.Price.Paid.Price) > 0 {
+			productID = realAppID
+			log.Printf("StartFrontendPayment: Paid app without product_id, using app ID fallback: %s", productID)
+		}
+	}
+	if productID == "" {
+		productID = getProductIDFromAppInfo(appInfo)
+		if productID != "" {
+			log.Printf("StartFrontendPayment: Using productID from Products: %s", productID)
+		}
+	}
+	if productID == "" {
+		productID = realAppID
+		log.Printf("StartFrontendPayment: No productID found, using real app ID as fallback: %s", productID)
+	}
+
+	state, err := globalStateMachine.getState(userID, realAppID, productID)
+	if err != nil || state == nil {
+		log.Printf("StartFrontendPayment: State not found in memory, attempting to load from Redis. Err: %v", err)
+		state, err = globalStateMachine.LoadState(userID, realAppID, productID)
+		if err != nil || state == nil {
+			return nil, fmt.Errorf("payment state not found for frontend payment start: %w", err)
+		}
+	}
+
+	if xForwardedHost != "" {
+		_ = globalStateMachine.updateState(state.GetKey(), func(s *PaymentState) error {
+			if s.XForwardedHost == "" {
+				s.XForwardedHost = xForwardedHost
+			}
+			return nil
+		})
+	}
+
+	payload := FrontendPaymentStartedPayload{Data: frontendData}
+	if err := globalStateMachine.processEvent(
+		context.Background(),
+		userID,
+		realAppID,
+		productID,
+		"frontend_payment_started",
+		payload,
+	); err != nil {
+		return nil, fmt.Errorf("failed to process frontend_payment_started event: %w", err)
+	}
+
+	latest, _ := globalStateMachine.getState(userID, realAppID, productID)
+	if latest == nil {
+		latest = state
+	}
+
+	if xForwardedHost != "" && latest != nil && latest.XForwardedHost == "" {
+		_ = globalStateMachine.updateState(latest.GetKey(), func(s *PaymentState) error {
+			if s.XForwardedHost == "" {
+				s.XForwardedHost = xForwardedHost
+			}
+			return nil
+		})
+		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			latest = updated
+		}
+	}
+
+	return globalStateMachine.buildPurchaseResponse(userID, xForwardedHost, latest)
 }
 
 // StartPaymentPolling starts polling for VC after payment completion
