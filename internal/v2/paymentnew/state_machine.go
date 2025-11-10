@@ -620,7 +620,7 @@ func triggerPaymentStateSync(state *PaymentState) error {
 }
 
 // Handle fetch-signature callback (placeholder implementation)
-func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, user string, code int) error {
+func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, user string, signed bool) error {
 	// Code is parsed by upper layer; no need to read from signBody here
 
 	// Parse productId from signBody, then locate state via user+productId
@@ -636,11 +636,14 @@ func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, use
 	// Update LarePassSync and signature status
 	if err := psm.updateState(state.GetKey(), func(s *PaymentState) error {
 		s.LarePassSync = LarePassSyncCompleted
-		if code == 0 {
+		if signed {
 			s.SignatureStatus = SignatureRequiredAndSigned
 			s.JWS = jws
-		} else if code == 1 {
+		} else {
 			s.SignatureStatus = SignatureRequired
+			if jws == "" {
+				s.JWS = ""
+			}
 		}
 		return nil
 	}); err != nil {
@@ -648,7 +651,7 @@ func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, use
 	}
 
 	// When code==0, trigger the next sync step (same as LarePassSyncCompleted)
-	if code == 0 {
+	if signed {
 		updatedState, _ := psm.getState(state.UserID, state.AppID, state.ProductID)
 		if updatedState != nil {
 			psm.triggerVCSync(updatedState)

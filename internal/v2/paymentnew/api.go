@@ -347,11 +347,12 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 }
 
 // HandleFetchSignatureCallback handles fetch-signature callback (for new endpoint)
-func HandleFetchSignatureCallback(jws, signBody, user string, code int) error {
+func HandleFetchSignatureCallback(jws, signBody, user string, signed bool) error {
 	log.Printf("=== Payment State Machine Processing Fetch Signature Callback ===")
 	log.Printf("JWS: %s", jws)
 	log.Printf("SignBody: %s", signBody)
 	log.Printf("User: %s", user)
+	log.Printf("Signed: %v", signed)
 
 	if globalStateMachine == nil {
 		log.Printf("State machine not initialized, skipping fetch signature callback")
@@ -359,7 +360,7 @@ func HandleFetchSignatureCallback(jws, signBody, user string, code int) error {
 	}
 
 	// Delegate to state_machine (placeholder implementation)
-	if err := globalStateMachine.processFetchSignatureCallback(jws, signBody, user, code); err != nil {
+	if err := globalStateMachine.processFetchSignatureCallback(jws, signBody, user, signed); err != nil {
 		log.Printf("Failed to process fetch signature callback: %v", err)
 		return err
 	}

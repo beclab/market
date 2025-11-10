@@ -49,7 +49,7 @@
 
 Auxiliary progression:
 - `triggerPaymentStateSync(state)`: progress based on `LarePassSync` (kick off fetch-signature on first/in-progress; on completed, call `triggerVCSync`).
-- `processFetchSignatureCallback(jws, signBody, user, code)`: parse `productId` to locate state; when `code==0`, write `JWS` and proceed with `triggerVCSync`.
+- `processFetchSignatureCallback(jws, signBody, user, signed)`: parse `productId` to locate state; when `signed=true`, write `JWS` and proceed with `triggerVCSync`.
 
 Typical sequence: preprocessing → fetch signature → submit signature → frontend payment → developer VC confirmation → persist and notify.
 
@@ -74,7 +74,7 @@ Typical sequence: preprocessing → fetch signature → submit signature → fro
 - Poll after payment completion: `StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost, systemChainID, appInfoLatest)`
 - Signature callbacks:
   - Submit signature: `ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)`
-  - Fetch signature: `HandleFetchSignatureCallback(jws, signBody, user, code)`
+  - Fetch signature: `HandleFetchSignatureCallback(jws, signBody, user, signed)`
 - Debugging: `ListPaymentStates()`
 
 返回语义（示例）：
@@ -130,7 +130,7 @@ Typical sequence: preprocessing → fetch signature → submit signature → fro
   - `signBody` must include `application_verifiable_credential.productId` or `vc.credentialSubject.productId`
   - Parse `productId` from `signBody` to locate state
 
-- fetch-signature callback: `HandleFetchSignatureCallback(jws, signBody, user, code)`
+- fetch-signature callback: `HandleFetchSignatureCallback(jws, signBody, user, signed)`
   - `code==0` means signature succeeded; will write `JWS` and proceed with VC sync
 
 ## Frontend payment data (example)

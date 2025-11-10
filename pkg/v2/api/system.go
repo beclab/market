@@ -80,7 +80,7 @@ type SubmitSignatureRequest struct {
 
 // FetchSignatureCallbackRequest represents the request from fetch-signature callback
 type FetchSignatureCallbackRequest struct {
-	Code                            int                              `json:"code"`
+	Signed                          bool                             `json:"signed"`
 	JWS                             string                           `json:"jws"`
 	ApplicationVerifiableCredential *ApplicationVerifiableCredential `json:"application_verifiable_credential,omitempty"`
 	ProductCredentialManifest       json.RawMessage                  `json:"product_credential_manifest"`
@@ -1018,9 +1018,9 @@ func (s *Server) fetchSignatureCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if req.JWS == "" {
-		log.Println("JWS is empty in fetch-signature callback")
-		s.sendResponse(w, http.StatusBadRequest, false, "JWS cannot be empty", nil)
+	if req.Signed && req.JWS == "" {
+		log.Println("Signed flag is true but JWS is empty in fetch-signature callback")
+		s.sendResponse(w, http.StatusBadRequest, false, "JWS cannot be empty when signed is true", nil)
 		return
 	}
 
@@ -1037,7 +1037,7 @@ func (s *Server) fetchSignatureCallback(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Delegate to payment module
-	if err := paymentnew.HandleFetchSignatureCallback(req.JWS, signBodyStr, bflUser, req.Code); err != nil {
+	if err := paymentnew.HandleFetchSignatureCallback(req.JWS, signBodyStr, bflUser, req.Signed); err != nil {
 		log.Printf("Failed to process fetch-signature callback: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process fetch-signature callback", nil)
 		return
