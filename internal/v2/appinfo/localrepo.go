@@ -96,9 +96,10 @@ type Dependency struct {
 
 // Options represents app options and dependencies
 type Options struct {
-	Dependencies []Dependency      `yaml:"dependencies,omitempty"`
-	Conflicts    []Dependency      `yaml:"conflicts,omitempty"`
-	Settings     map[string]string `yaml:"settings,omitempty"`
+	Dependencies         []Dependency      `yaml:"dependencies,omitempty"`
+	Conflicts            []Dependency      `yaml:"conflicts,omitempty"`
+	Settings             map[string]string `yaml:"settings,omitempty"`
+	AllowMultipleInstall bool              `yaml:"allowMultipleInstall,omitempty"`
 }
 
 // Entrance represents an app entrance point

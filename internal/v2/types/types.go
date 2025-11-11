@@ -2148,3 +2148,21 @@ func ValidateAndFixSupportClient(sourceData map[string]interface{}, entry *Appli
 	// Validate the data after fixing
 	ValidateSupportClientData(entry)
 }
+
+// GetAllowMultipleInstall returns the allowMultipleInstall value from Options
+// Returns false if the field is not set or cannot be converted to bool
+func (entry *ApplicationInfoEntry) GetAllowMultipleInstall() bool {
+	if entry == nil || entry.Options == nil {
+		return false
+	}
+	if val, ok := entry.Options["allowMultipleInstall"]; ok {
+		if boolVal, ok := val.(bool); ok {
+			return boolVal
+		}
+		// Handle case where value might be stored as string (from YAML parsing)
+		if strVal, ok := val.(string); ok {
+			return strVal == "true" || strVal == "True" || strVal == "TRUE"
+		}
+	}
+	return false
+}
