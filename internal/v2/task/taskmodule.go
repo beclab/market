@@ -24,6 +24,8 @@ const (
 	CancelAppInstall
 	// UpgradeApp represents application upgrade task
 	UpgradeApp
+	// CloneApp represents application clone task
+	CloneApp
 )
 
 // TaskStatus defines the status of task
@@ -149,6 +151,8 @@ func getHistoryType(taskType TaskType) history.HistoryType {
 		return history.TypeActionCancel
 	case UpgradeApp:
 		return history.TypeActionUpgrade
+	case CloneApp:
+		return history.TypeActionInstall // Clone is similar to install for history
 	default:
 		return history.TypeAction
 	}
@@ -165,6 +169,8 @@ func getTaskTypeString(taskType TaskType) string {
 		return "cancel"
 	case UpgradeApp:
 		return "upgrade"
+	case CloneApp:
+		return "clone"
 	default:
 		return fmt.Sprintf("unknown(%d)", taskType)
 	}
@@ -425,6 +431,37 @@ func (tm *TaskModule) executeTask(task *Task) {
 			return
 		}
 		log.Printf("App upgrade completed successfully for task: %s, app: %s", task.ID, task.AppName)
+
+	case CloneApp:
+		// Execute app clone
+		log.Printf("Executing app clone for task: %s, app: %s", task.ID, task.AppName)
+		result, err = tm.AppClone(task)
+		if err != nil {
+			log.Printf("App clone failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
+			task.Status = Failed
+			task.ErrorMsg = fmt.Sprintf("Clone failed: %v", err)
+			now := time.Now()
+			task.CompletedAt = &now
+
+			// Call callback if exists (for synchronous requests)
+			if task.Callback != nil {
+				log.Printf("Calling callback for failed task: %s", task.ID)
+				task.Callback(result, err)
+			}
+
+			// Remove failed task from running tasks
+			tm.mu.Lock()
+			delete(tm.runningTasks, task.ID)
+			tm.mu.Unlock()
+			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+
+			// Send task finished system update
+			tm.sendTaskFinishedUpdate(task, "failed")
+
+			tm.recordTaskResult(task, result, err)
+			return
+		}
+		log.Printf("App clone completed successfully for task: %s, app: %s", task.ID, task.AppName)
 	}
 
 	// Task completed successfully
