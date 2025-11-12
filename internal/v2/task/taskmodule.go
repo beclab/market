@@ -980,9 +980,9 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 
 	var latestTask *Task
 
-	// Only search for InstallApp tasks
+	// Search for InstallApp and CloneApp tasks
 	for _, t := range tm.runningTasks {
-		if t.AppName == appName && t.User == user && t.Type == InstallApp {
+		if t.AppName == appName && t.User == user && (t.Type == InstallApp || t.Type == CloneApp) {
 			if latestTask == nil || t.CreatedAt.After(latestTask.CreatedAt) {
 				latestTask = t
 			}
@@ -990,7 +990,7 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 	}
 
 	for _, t := range tm.pendingTasks {
-		if t.AppName == appName && t.User == user && t.Type == InstallApp {
+		if t.AppName == appName && t.User == user && (t.Type == InstallApp || t.Type == CloneApp) {
 			if latestTask == nil || t.CreatedAt.After(latestTask.CreatedAt) {
 				latestTask = t
 			}

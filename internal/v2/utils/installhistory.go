@@ -72,6 +72,12 @@ var (
 	taskStoreErr  error
 )
 
+// GetTaskStoreForQuery returns a singleton database connection for querying task records
+// This is exported so other packages can query task database
+func GetTaskStoreForQuery() (*sqlx.DB, error) {
+	return getTaskStore()
+}
+
 // getTaskStore returns a singleton database connection for querying task records
 func getTaskStore() (*sqlx.DB, error) {
 	taskStoreOnce.Do(func() {

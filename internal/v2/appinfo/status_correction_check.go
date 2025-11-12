@@ -945,7 +945,6 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 	}
 
 	// Try to get rawAppName from cache if available
-	// This preserves rawAppName from previous state data (e.g., from NATS messages)
 	rawAppName := ""
 	if scc.cacheManager != nil && userID != "" && app.Spec.Name != "" {
 		userData := scc.cacheManager.GetUserData(userID)
@@ -953,7 +952,6 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			for _, sourceData := range userData.Sources {
 				for _, cachedAppState := range sourceData.AppStateLatest {
 					if cachedAppState != nil && cachedAppState.Status.Name == app.Spec.Name {
-						// Get rawAppName from cached state
 						rawAppName = cachedAppState.Status.RawAppName
 						if rawAppName != "" {
 							break

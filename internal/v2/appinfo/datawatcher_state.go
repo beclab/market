@@ -448,6 +448,37 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		}
 	}
 
+	// If still not found, try to query from task store database (for completed tasks)
+	if sourceID == "" {
+		db, err := utils.GetTaskStoreForQuery()
+		if err == nil && db != nil {
+			// Query for latest completed task (InstallApp or CloneApp)
+			query := `
+			SELECT metadata, type
+			FROM task_records
+			WHERE app_name = $1
+				AND user_account = $2
+				AND status = $3
+				AND type IN ($4, $5)
+			ORDER BY completed_at DESC NULLS LAST, created_at DESC
+			LIMIT 1
+			`
+			// Task status: Completed = 3, Task types: InstallApp = 1, CloneApp = 5
+			var metadataStr string
+			var taskType int
+			err = db.QueryRow(query, msg.Name, userID, 3, 1, 5).Scan(&metadataStr, &taskType)
+			if err == nil && metadataStr != "" {
+				var metadataMap map[string]interface{}
+				if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
+					if s, ok := metadataMap["source"].(string); ok && s != "" {
+						sourceID = s
+						log.Printf("Found source=%s from completed task database for app=%s, user=%s", sourceID, msg.Name, userID)
+					}
+				}
+			}
+		}
+	}
+
 	if sourceID == "" {
 		log.Printf("[ERROR] Cannot determine sourceID for app state: user=%s, app=%s, state=%s. Ignore this message.", userID, msg.Name, msg.State)
 		return
