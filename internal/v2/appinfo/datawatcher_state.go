@@ -82,6 +82,18 @@ func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule
 	return dw
 }
 
+// SetTaskModule updates the task module reference without restarting subscriptions.
+func (dw *DataWatcherState) SetTaskModule(taskModule *task.TaskModule) {
+	dw.taskModule = taskModule
+	log.Println("DataWatcherState task module updated")
+}
+
+// SetHistoryModule updates the history module reference without restarting subscriptions.
+func (dw *DataWatcherState) SetHistoryModule(historyModule *history.HistoryModule) {
+	dw.historyModule = historyModule
+	log.Println("DataWatcherState history module updated")
+}
+
 // Start starts the data watcher
 func (dw *DataWatcherState) Start() error {
 
