@@ -435,6 +435,12 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 	found := false
 	for i, existingAppState := range sourceData.AppStateLatest {
 		if existingAppState != nil && existingAppState.Status.Name == newAppState.Status.Name {
+			// Preserve rawAppName from existing state if new state doesn't have it
+			if newAppState.Status.RawAppName == "" && existingAppState.Status.RawAppName != "" {
+				glog.Infof("New app state for %s has empty RawAppName, preserving old RawAppName: %s", newAppState.Status.Name, existingAppState.Status.RawAppName)
+				newAppState.Status.RawAppName = existingAppState.Status.RawAppName
+			}
+
 			// If new app state has empty EntranceStatuses, preserve the old ones
 			if len(newAppState.Status.EntranceStatuses) == 0 && len(existingAppState.Status.EntranceStatuses) > 0 {
 				glog.Infof("New app state for %s has empty EntranceStatuses, preserving old entrance statuses", newAppState.Status.Name)
