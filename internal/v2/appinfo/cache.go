@@ -666,7 +666,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			// Check if entrance URLs are missing and fetch them if needed
 			enhancedData := cm.enhanceAppStateDataWithUrls(data, userID)
 
-			appData, sourceIDFromRecord := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppInfoFromDownloadRecord)
+			appData, sourceIDFromRecord := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppInfoLastInstalled)
 
 			// Validate that the created app state has a name field
 			if appData == nil {

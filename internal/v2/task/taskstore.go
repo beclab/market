@@ -291,6 +291,57 @@ func (ts *TaskStore) TrimCompletedTasks(limit int) error {
 	return nil
 }
 
+// GetLatestCompletedTaskByAppNameAndUser gets the latest completed task for a specific app and user
+// Returns version and source from task metadata if found
+func (ts *TaskStore) GetLatestCompletedTaskByAppNameAndUser(appName, user string) (version, source string, found bool, err error) {
+	if ts == nil || ts.db == nil {
+		return "", "", false, fmt.Errorf("task store is not initialized")
+	}
+
+	query := `
+	SELECT metadata
+	FROM task_records
+	WHERE app_name = $1 
+		AND user_account = $2 
+		AND status = $3
+		AND type IN ($4, $5, $6)
+	ORDER BY completed_at DESC NULLS LAST, created_at DESC
+	LIMIT 1
+	`
+
+	var metadataStr string
+	err = ts.db.QueryRow(query, appName, user, int(Completed), int(InstallApp), int(UpgradeApp), int(CloneApp)).Scan(&metadataStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", false, nil
+		}
+		return "", "", false, fmt.Errorf("failed to query task: %w", err)
+	}
+
+	// Parse metadata JSON
+	var metadataMap map[string]interface{}
+	if metadataStr != "" {
+		if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err != nil {
+			return "", "", false, fmt.Errorf("failed to unmarshal task metadata: %w", err)
+		}
+	}
+
+	// Extract version and source from metadata
+	if v, ok := metadataMap["version"].(string); ok && v != "" {
+		version = v
+	}
+	if s, ok := metadataMap["source"].(string); ok && s != "" {
+		source = s
+	}
+
+	// Return found=true only if we have at least version or source
+	if version != "" || source != "" {
+		return version, source, true, nil
+	}
+
+	return "", "", false, nil
+}
+
 // Close releases the underlying database connection
 func (ts *TaskStore) Close() error {
 	if ts == nil || ts.db == nil {

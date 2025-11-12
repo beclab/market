@@ -938,7 +938,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 	version := ""
 	source := ""
 	if userID != "" && app.Spec.Name != "" {
-		if versionFromRecord, sourceFromRecord, err := utils.GetAppInfoFromDownloadRecord(userID, app.Spec.Name); err == nil && versionFromRecord != "" {
+		if versionFromRecord, sourceFromRecord, err := utils.GetAppInfoLastInstalled(userID, app.Spec.Name); err == nil && versionFromRecord != "" {
 			version = versionFromRecord
 			source = sourceFromRecord
 		}
