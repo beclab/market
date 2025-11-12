@@ -169,9 +169,9 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task
-		task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create installation task for app: %s", request.AppName)
+		task, err := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create installation task for app: %s, error: %v", request.AppName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create installation task", nil)
 			return
 		}
@@ -214,9 +214,9 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create installation task for app: %s", request.AppName)
+	task, err := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create installation task for app: %s, error: %v", request.AppName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create installation task", nil)
 		return
 	}
@@ -368,9 +368,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task with CloneApp type, using newAppName (rawAppName+Title) as appName
-		task := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create clone installation task for app: %s", newAppName)
+		task, err := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create clone installation task for app: %s, error: %v", newAppName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create clone installation task", nil)
 			return
 		}
@@ -413,9 +413,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create clone installation task for app: %s", newAppName)
+	task, err := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create clone installation task for app: %s, error: %v", newAppName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create clone installation task", nil)
 		return
 	}
@@ -517,9 +517,9 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task
-		task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create cancel installation task for app: %s", appName)
+		task, err := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create cancel installation task for app: %s, error: %v", appName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create cancel installation task", nil)
 			return
 		}
@@ -562,9 +562,9 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create cancel installation task for app: %s", appName)
+	task, err := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create cancel installation task for app: %s, error: %v", appName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create cancel installation task", nil)
 		return
 	}
@@ -673,9 +673,9 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task
-		task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create uninstallation task for app: %s", appName)
+		task, err := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create uninstallation task for app: %s, error: %v", appName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create uninstallation task", nil)
 			return
 		}
@@ -718,9 +718,9 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create uninstallation task for app: %s", appName)
+	task, err := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create uninstallation task for app: %s, error: %v", appName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create uninstallation task", nil)
 		return
 	}
@@ -863,9 +863,9 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task
-		task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create upgrade task for app: %s", request.AppName)
+		task, err := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create upgrade task for app: %s, error: %v", request.AppName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create upgrade task", nil)
 			return
 		}
@@ -908,9 +908,9 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create upgrade task for app: %s", request.AppName)
+	task, err := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create upgrade task for app: %s, error: %v", request.AppName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create upgrade task", nil)
 		return
 	}

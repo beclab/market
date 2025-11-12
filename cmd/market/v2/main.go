@@ -240,7 +240,10 @@ func main() {
 		log.Println("History module started successfully")
 
 		// 3. Initialize Task Module
-		taskModule = task.NewTaskModule()
+		taskModule, err = task.NewTaskModule()
+		if err != nil {
+			log.Fatalf("Failed to create Task module: %v", err)
+		}
 		// Set history module reference for task recording
 		taskModule.SetHistoryModule(historyModule)
 

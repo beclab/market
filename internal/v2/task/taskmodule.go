@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -44,6 +45,8 @@ const (
 	Canceled
 )
 
+const completedTaskLimit = 100
+
 // TaskCallback defines the callback function type for task completion
 type TaskCallback func(result string, err error)
 
@@ -58,6 +61,7 @@ type Task struct {
 	CreatedAt   time.Time              `json:"created_at"`
 	StartedAt   *time.Time             `json:"started_at,omitempty"`
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	Result      string                 `json:"result,omitempty"`
 	ErrorMsg    string                 `json:"error_msg,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 	Callback    TaskCallback           `json:"-"` // Callback function for synchronous requests
@@ -74,6 +78,7 @@ type TaskModule struct {
 	mu             sync.RWMutex
 	pendingTasks   []*Task          // queue for pending tasks
 	runningTasks   map[string]*Task // map for running tasks
+	taskStore      *TaskStore       // persistent task store
 	executorTicker *time.Ticker     // ticker for task execution (every 2 seconds)
 	statusTicker   *time.Ticker     // ticker for status update (every 10 seconds)
 	ctx            context.Context
@@ -83,21 +88,33 @@ type TaskModule struct {
 }
 
 // NewTaskModule creates a new task module instance
-func NewTaskModule() *TaskModule {
+func NewTaskModule() (*TaskModule, error) {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	taskStore, err := NewTaskStore()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to initialize task store: %w", err)
+	}
 
 	tm := &TaskModule{
 		instanceID:   fmt.Sprintf("tm-%d", time.Now().UnixNano()),
 		pendingTasks: make([]*Task, 0),
 		runningTasks: make(map[string]*Task),
+		taskStore:    taskStore,
 		ctx:          ctx,
 		cancel:       cancel,
+	}
+
+	if err := tm.restoreTasksFromStore(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to restore tasks from store: %w", err)
 	}
 
 	// Start background goroutines
 	tm.start()
 
-	return tm
+	return tm, nil
 }
 
 // SetHistoryModule sets the history module for recording task events
@@ -115,9 +132,13 @@ func (tm *TaskModule) SetDataSender(dataSender DataSenderInterface) {
 }
 
 // AddTask adds a new task to the pending queue
-func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, metadata map[string]interface{}, callback TaskCallback) *Task {
+func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, metadata map[string]interface{}, callback TaskCallback) (*Task, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
 
 	task := &Task{
 		ID:        generateTaskID(),
@@ -130,6 +151,11 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, me
 		Callback:  callback,
 	}
 
+	if err := tm.persistTask(task); err != nil {
+		log.Printf("[%s] Failed to persist task %s: %v", tm.instanceID, task.ID, err)
+		return nil, err
+	}
+
 	tm.pendingTasks = append(tm.pendingTasks, task)
 
 	log.Printf("[%s] Task added: ID=%s, Type=%d, AppName=%s, User=%s, HasCallback=%v", tm.instanceID, task.ID, task.Type, task.AppName, user, callback != nil)
@@ -137,7 +163,7 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, me
 	// Record task addition in history
 	tm.recordTaskHistory(task, user)
 
-	return task
+	return task, nil
 }
 
 // getHistoryType converts TaskType to appropriate HistoryType
@@ -222,6 +248,82 @@ func (tm *TaskModule) GetPendingTasks() []*Task {
 	return tasks
 }
 
+// restoreTasksFromStore loads existing tasks from persistent storage
+func (tm *TaskModule) restoreTasksFromStore() error {
+	if tm.taskStore == nil {
+		log.Printf("[%s] Task store not configured, skipping task restoration", tm.instanceID)
+		return nil
+	}
+
+	activeTasks, err := tm.taskStore.LoadActiveTasks()
+	if err != nil {
+		return err
+	}
+
+	if len(activeTasks) == 0 {
+		log.Printf("[%s] No active tasks to restore from store", tm.instanceID)
+		return nil
+	}
+
+	for _, task := range activeTasks {
+		if task.Metadata == nil {
+			task.Metadata = make(map[string]interface{})
+		}
+
+		// Tasks that were running when the service stopped are moved back to pending queue
+		if task.Status == Running {
+			log.Printf("[%s] Restoring running task as pending for re-execution: ID=%s, AppName=%s, User=%s",
+				tm.instanceID, task.ID, task.AppName, task.User)
+
+			task.Status = Pending
+			task.StartedAt = nil
+			task.CompletedAt = nil
+			task.ErrorMsg = ""
+			task.Result = ""
+
+			if err := tm.taskStore.UpsertTask(task); err != nil {
+				return fmt.Errorf("failed to reset running task state for %s: %w", task.ID, err)
+			}
+		} else {
+			log.Printf("[%s] Restoring pending task: ID=%s, AppName=%s, User=%s",
+				tm.instanceID, task.ID, task.AppName, task.User)
+		}
+
+		tm.pendingTasks = append(tm.pendingTasks, task)
+	}
+
+	sort.SliceStable(tm.pendingTasks, func(i, j int) bool {
+		return tm.pendingTasks[i].CreatedAt.Before(tm.pendingTasks[j].CreatedAt)
+	})
+
+	log.Printf("[%s] Restored %d tasks from store", tm.instanceID, len(tm.pendingTasks))
+	return nil
+}
+
+func (tm *TaskModule) persistTask(task *Task) error {
+	if tm.taskStore == nil {
+		return nil
+	}
+
+	return tm.taskStore.UpsertTask(task)
+}
+
+func (tm *TaskModule) finalizeTaskPersistence(task *Task) {
+	if err := tm.persistTask(task); err != nil {
+		log.Printf("[%s] Failed to persist finalized task %s: %v", tm.instanceID, task.ID, err)
+	}
+
+	if tm.taskStore == nil {
+		return
+	}
+
+	if task.Status == Completed || task.Status == Failed || task.Status == Canceled {
+		if err := tm.taskStore.TrimCompletedTasks(completedTaskLimit); err != nil {
+			log.Printf("[%s] Failed to trim completed tasks: %v", tm.instanceID, err)
+		}
+	}
+}
+
 // GetRunningTasks returns all running tasks
 func (tm *TaskModule) GetRunningTasks() []*Task {
 	tm.mu.RLock()
@@ -259,10 +361,12 @@ func (tm *TaskModule) taskExecutor() {
 
 // executeNextTask gets the earliest pending task and executes it
 func (tm *TaskModule) executeNextTask() {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return
+	}
+	defer tm.mu.Unlock()
 
 	if len(tm.pendingTasks) == 0 {
-		tm.mu.Unlock()
 		return
 	}
 
@@ -276,7 +380,9 @@ func (tm *TaskModule) executeNextTask() {
 	task.StartedAt = &now
 	tm.runningTasks[task.ID] = task
 
-	tm.mu.Unlock()
+	if err := tm.persistTask(task); err != nil {
+		log.Printf("[%s] Failed to persist running task state for %s: %v", tm.instanceID, task.ID, err)
+	}
 
 	log.Printf("[%s] Executing task: ID=%s, Type=%d, AppName=%s", tm.instanceID, task.ID, task.Type, task.AppName)
 
@@ -300,6 +406,7 @@ func (tm *TaskModule) executeTask(task *Task) {
 		// Execute app installation
 		log.Printf("Executing app installation for task: %s, app: %s", task.ID, task.AppName)
 		result, err = tm.AppInstall(task)
+		task.Result = result
 		if err != nil {
 			log.Printf("App installation failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
@@ -314,10 +421,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			}
 
 			// Remove failed task from running tasks
-			tm.mu.Lock()
-			delete(tm.runningTasks, task.ID)
-			tm.mu.Unlock()
-			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			if tm.mu.TryLock() {
+				delete(tm.runningTasks, task.ID)
+				tm.mu.Unlock()
+				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			} else {
+				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
+				// Retry in a goroutine
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					tm.mu.Lock()
+					delete(tm.runningTasks, task.ID)
+					tm.mu.Unlock()
+					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
+				}()
+			}
+
+			tm.finalizeTaskPersistence(task)
 
 			// Send task finished system update
 			tm.sendTaskFinishedUpdate(task, "failed")
@@ -331,6 +451,7 @@ func (tm *TaskModule) executeTask(task *Task) {
 		// Execute app uninstallation
 		log.Printf("Executing app uninstallation for task: %s, app: %s", task.ID, task.AppName)
 		result, err = tm.AppUninstall(task)
+		task.Result = result
 		if err != nil {
 			log.Printf("App uninstallation failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
@@ -345,10 +466,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			}
 
 			// Remove failed task from running tasks
-			tm.mu.Lock()
-			delete(tm.runningTasks, task.ID)
-			tm.mu.Unlock()
-			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			if tm.mu.TryLock() {
+				delete(tm.runningTasks, task.ID)
+				tm.mu.Unlock()
+				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			} else {
+				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
+				// Retry in a goroutine
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					tm.mu.Lock()
+					delete(tm.runningTasks, task.ID)
+					tm.mu.Unlock()
+					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
+				}()
+			}
+
+			tm.finalizeTaskPersistence(task)
 
 			// Send task finished system update
 			tm.sendTaskFinishedUpdate(task, "failed")
@@ -364,6 +498,7 @@ func (tm *TaskModule) executeTask(task *Task) {
 
 		// First, call AppCancel to send cancel request to app service
 		result, err = tm.AppCancel(task)
+		task.Result = result
 		if err != nil {
 			log.Printf("App cancel failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
@@ -378,10 +513,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			}
 
 			// Remove failed task from running tasks
-			tm.mu.Lock()
-			delete(tm.runningTasks, task.ID)
-			tm.mu.Unlock()
-			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			if tm.mu.TryLock() {
+				delete(tm.runningTasks, task.ID)
+				tm.mu.Unlock()
+				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			} else {
+				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
+				// Retry in a goroutine
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					tm.mu.Lock()
+					delete(tm.runningTasks, task.ID)
+					tm.mu.Unlock()
+					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
+				}()
+			}
+
+			tm.finalizeTaskPersistence(task)
 
 			// Send task finished system update
 			tm.sendTaskFinishedUpdate(task, "failed")
@@ -405,6 +553,7 @@ func (tm *TaskModule) executeTask(task *Task) {
 		// Execute app upgrade
 		log.Printf("Executing app upgrade for task: %s, app: %s", task.ID, task.AppName)
 		result, err = tm.AppUpgrade(task)
+		task.Result = result
 		if err != nil {
 			log.Printf("App upgrade failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
@@ -419,10 +568,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			}
 
 			// Remove failed task from running tasks
-			tm.mu.Lock()
-			delete(tm.runningTasks, task.ID)
-			tm.mu.Unlock()
-			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			if tm.mu.TryLock() {
+				delete(tm.runningTasks, task.ID)
+				tm.mu.Unlock()
+				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			} else {
+				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
+				// Retry in a goroutine
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					tm.mu.Lock()
+					delete(tm.runningTasks, task.ID)
+					tm.mu.Unlock()
+					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
+				}()
+			}
+
+			tm.finalizeTaskPersistence(task)
 
 			// Send task finished system update
 			tm.sendTaskFinishedUpdate(task, "failed")
@@ -436,6 +598,7 @@ func (tm *TaskModule) executeTask(task *Task) {
 		// Execute app clone
 		log.Printf("Executing app clone for task: %s, app: %s", task.ID, task.AppName)
 		result, err = tm.AppClone(task)
+		task.Result = result
 		if err != nil {
 			log.Printf("App clone failed for task: %s, app: %s, error: %v", task.ID, task.AppName, err)
 			task.Status = Failed
@@ -450,10 +613,23 @@ func (tm *TaskModule) executeTask(task *Task) {
 			}
 
 			// Remove failed task from running tasks
-			tm.mu.Lock()
-			delete(tm.runningTasks, task.ID)
-			tm.mu.Unlock()
-			log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			if tm.mu.TryLock() {
+				delete(tm.runningTasks, task.ID)
+				tm.mu.Unlock()
+				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
+			} else {
+				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
+				// Retry in a goroutine
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					tm.mu.Lock()
+					delete(tm.runningTasks, task.ID)
+					tm.mu.Unlock()
+					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
+				}()
+			}
+
+			tm.finalizeTaskPersistence(task)
 
 			// Send task finished system update
 			tm.sendTaskFinishedUpdate(task, "failed")
@@ -465,6 +641,7 @@ func (tm *TaskModule) executeTask(task *Task) {
 	}
 
 	// Task completed successfully
+	task.Result = result
 	task.Status = Completed
 	now := time.Now()
 	task.CompletedAt = &now
@@ -473,6 +650,27 @@ func (tm *TaskModule) executeTask(task *Task) {
 
 	// Log the result summary
 	log.Printf("Task result summary: ID=%s, Result length=%d bytes", task.ID, len(result))
+
+	if tm.mu.TryLock() {
+		delete(tm.runningTasks, task.ID)
+		tm.mu.Unlock()
+		log.Printf("Removed completed task from running tasks: ID=%s", task.ID)
+	} else {
+		log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
+		// Retry in a goroutine
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			tm.mu.Lock()
+			delete(tm.runningTasks, task.ID)
+			tm.mu.Unlock()
+			log.Printf("Removed completed task from running tasks (retry): ID=%s", task.ID)
+		}()
+	}
+
+	tm.finalizeTaskPersistence(task)
+
+	// Send task finished system update
+	tm.sendTaskFinishedUpdate(task, "succeed")
 
 	// Call callback if exists (for synchronous requests)
 	if task.Callback != nil {
@@ -610,6 +808,12 @@ func (tm *TaskModule) Stop() {
 
 	tm.cancel()
 
+	if tm.taskStore != nil {
+		if err := tm.taskStore.Close(); err != nil {
+			log.Printf("[%s] Failed to close task store: %v", tm.instanceID, err)
+		}
+	}
+
 	log.Println("Task module stopped")
 }
 
@@ -742,7 +946,9 @@ func (tm *TaskModule) GetInstanceID() string {
 
 // InstallTaskSucceed marks an install task as completed successfully by opID or appName+user
 func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return fmt.Errorf("failed to acquire lock for InstallTaskSucceed")
+	}
 	defer tm.mu.Unlock()
 
 	// First try to find the install task with matching opID in running tasks
@@ -774,6 +980,7 @@ func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 	targetTask.Status = Completed
 	now := time.Now()
 	targetTask.CompletedAt = &now
+	targetTask.Result = "Installation completed successfully via external signal"
 
 	log.Printf("[%s] InstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
 		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
@@ -781,6 +988,8 @@ func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
 	log.Printf("[%s] InstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	tm.finalizeTaskPersistence(targetTask)
 
 	// Record task completion in history
 	tm.recordTaskResult(targetTask, "Installation completed successfully via external signal", nil)
@@ -793,7 +1002,9 @@ func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 
 // InstallTaskFailed marks an install task as failed by opID or appName+user
 func (tm *TaskModule) InstallTaskFailed(opID, appName, user, errorMsg string) error {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return fmt.Errorf("failed to acquire lock for InstallTaskFailed")
+	}
 	defer tm.mu.Unlock()
 
 	// First try to find the install task with matching opID in running tasks
@@ -826,6 +1037,7 @@ func (tm *TaskModule) InstallTaskFailed(opID, appName, user, errorMsg string) er
 	now := time.Now()
 	targetTask.CompletedAt = &now
 	targetTask.ErrorMsg = errorMsg
+	targetTask.Result = "Installation failed via external signal"
 
 	log.Printf("[%s] InstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
 		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
@@ -833,6 +1045,8 @@ func (tm *TaskModule) InstallTaskFailed(opID, appName, user, errorMsg string) er
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
 	log.Printf("[%s] InstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	tm.finalizeTaskPersistence(targetTask)
 
 	// Record task failure in history
 	tm.recordTaskResult(targetTask, "Installation failed via external signal", fmt.Errorf(errorMsg))
@@ -845,7 +1059,9 @@ func (tm *TaskModule) InstallTaskFailed(opID, appName, user, errorMsg string) er
 
 // InstallTaskCanceled marks an install task as canceled by app name and user
 func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user string) error {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return fmt.Errorf("failed to acquire lock for InstallTaskCanceled")
+	}
 	defer tm.mu.Unlock()
 
 	// Find the install task with matching criteria in running tasks
@@ -868,6 +1084,7 @@ func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user stri
 	now := time.Now()
 	targetTask.CompletedAt = &now
 	targetTask.ErrorMsg = "Installation canceled via external signal"
+	targetTask.Result = "Installation canceled via external signal"
 
 	log.Printf("[%s] InstallTaskCanceled - Task marked as canceled: ID=%s, AppName=%s, User=%s, Duration=%v",
 		tm.instanceID, targetTask.ID, appName, user, now.Sub(*targetTask.StartedAt))
@@ -875,6 +1092,8 @@ func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user stri
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
 	log.Printf("[%s] InstallTaskCanceled - Removed canceled task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	tm.finalizeTaskPersistence(targetTask)
 
 	// Record task cancellation in history
 	tm.recordTaskResult(targetTask, "Installation canceled via external signal", fmt.Errorf("installation canceled"))
@@ -887,7 +1106,9 @@ func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user stri
 
 // CancelInstallTaskSucceed marks a cancel install task as completed successfully by opID or appName+user
 func (tm *TaskModule) CancelInstallTaskSucceed(opID, appName, user string) error {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return fmt.Errorf("failed to acquire lock for CancelInstallTaskSucceed")
+	}
 	defer tm.mu.Unlock()
 
 	// First try to find the cancel install task with matching opID in running tasks
@@ -919,6 +1140,7 @@ func (tm *TaskModule) CancelInstallTaskSucceed(opID, appName, user string) error
 	targetTask.Status = Completed
 	now := time.Now()
 	targetTask.CompletedAt = &now
+	targetTask.Result = "Cancel installation completed successfully via external signal"
 
 	log.Printf("[%s] CancelInstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
 		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
@@ -926,6 +1148,8 @@ func (tm *TaskModule) CancelInstallTaskSucceed(opID, appName, user string) error
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
 	log.Printf("[%s] CancelInstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	tm.finalizeTaskPersistence(targetTask)
 
 	// Record task completion in history
 	tm.recordTaskResult(targetTask, "Cancel installation completed successfully via external signal", nil)
@@ -938,7 +1162,9 @@ func (tm *TaskModule) CancelInstallTaskSucceed(opID, appName, user string) error
 
 // CancelInstallTaskFailed marks a cancel install task as failed by opID or appName+user
 func (tm *TaskModule) CancelInstallTaskFailed(opID, appName, user, errorMsg string) error {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return fmt.Errorf("failed to acquire lock for CancelInstallTaskFailed")
+	}
 	defer tm.mu.Unlock()
 
 	// First try to find the cancel install task with matching opID in running tasks
@@ -971,6 +1197,7 @@ func (tm *TaskModule) CancelInstallTaskFailed(opID, appName, user, errorMsg stri
 	now := time.Now()
 	targetTask.CompletedAt = &now
 	targetTask.ErrorMsg = errorMsg
+	targetTask.Result = "Cancel installation failed via external signal"
 
 	log.Printf("[%s] CancelInstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
 		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
@@ -978,6 +1205,8 @@ func (tm *TaskModule) CancelInstallTaskFailed(opID, appName, user, errorMsg stri
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
 	log.Printf("[%s] CancelInstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	tm.finalizeTaskPersistence(targetTask)
 
 	// Record task failure in history
 	tm.recordTaskResult(targetTask, "Cancel installation failed via external signal", fmt.Errorf(errorMsg))
@@ -990,7 +1219,9 @@ func (tm *TaskModule) CancelInstallTaskFailed(opID, appName, user, errorMsg stri
 
 // UninstallTaskSucceed marks an uninstall task as completed successfully by opID or appName+user
 func (tm *TaskModule) UninstallTaskSucceed(opID, appName, user string) error {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return fmt.Errorf("failed to acquire lock for UninstallTaskSucceed")
+	}
 	defer tm.mu.Unlock()
 
 	// First try to find the uninstall task with matching opID in running tasks
@@ -1022,6 +1253,7 @@ func (tm *TaskModule) UninstallTaskSucceed(opID, appName, user string) error {
 	targetTask.Status = Completed
 	now := time.Now()
 	targetTask.CompletedAt = &now
+	targetTask.Result = "Uninstallation completed successfully via external signal"
 
 	log.Printf("[%s] UninstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
 		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
@@ -1029,6 +1261,8 @@ func (tm *TaskModule) UninstallTaskSucceed(opID, appName, user string) error {
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
 	log.Printf("[%s] UninstallTaskSucceed - Removed completed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	tm.finalizeTaskPersistence(targetTask)
 
 	// Record task completion in history
 	tm.recordTaskResult(targetTask, "Uninstallation completed successfully via external signal", nil)
@@ -1041,7 +1275,9 @@ func (tm *TaskModule) UninstallTaskSucceed(opID, appName, user string) error {
 
 // UninstallTaskFailed marks an uninstall task as failed by opID or appName+user
 func (tm *TaskModule) UninstallTaskFailed(opID, appName, user, errorMsg string) error {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return fmt.Errorf("failed to acquire lock for UninstallTaskFailed")
+	}
 	defer tm.mu.Unlock()
 
 	// First try to find the uninstall task with matching opID in running tasks
@@ -1074,6 +1310,7 @@ func (tm *TaskModule) UninstallTaskFailed(opID, appName, user, errorMsg string) 
 	now := time.Now()
 	targetTask.CompletedAt = &now
 	targetTask.ErrorMsg = errorMsg
+	targetTask.Result = "Uninstallation failed via external signal"
 
 	log.Printf("[%s] UninstallTaskFailed - Task marked as failed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v, Error: %s",
 		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt), errorMsg)
@@ -1081,6 +1318,8 @@ func (tm *TaskModule) UninstallTaskFailed(opID, appName, user, errorMsg string) 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
 	log.Printf("[%s] UninstallTaskFailed - Removed failed task from running tasks: ID=%s", tm.instanceID, targetTask.ID)
+
+	tm.finalizeTaskPersistence(targetTask)
 
 	// Record task failure in history
 	tm.recordTaskResult(targetTask, "Uninstallation failed via external signal", fmt.Errorf(errorMsg))
