@@ -682,6 +682,70 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				}
 			}
 			glog.Infof("Updated %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
+
+			// After batch updateAppStateLatest, check if any EntranceStatuses were preserved and force push was sent
+			// If so, remove the corresponding pending notifications to avoid duplicate push
+			// This is similar to the single state update case, but we need to check all notifications
+			if len(pendingNotifications) > 0 {
+				// Create a map to track which apps had force push sent
+				forcePushedApps := make(map[string]bool)
+
+				// Check each updated state to see if force push was sent
+				for _, appState := range appStatesData {
+					if appState == nil || appState.Status.Name == "" {
+						continue
+					}
+
+					// Check if EntranceStatuses was preserved by checking the state in cache
+					var updatedState *types.AppStateLatestData
+					for _, state := range sourceData.AppStateLatest {
+						if state != nil && state.Status.Name == appState.Status.Name {
+							updatedState = state
+							break
+						}
+					}
+
+					// If updated state has EntranceStatuses (was preserved), check if main state/progress didn't change
+					if updatedState != nil && len(updatedState.Status.EntranceStatuses) > 0 {
+						// Find the existing state before update
+						var existingStateBeforeUpdate *types.AppStateLatestData
+						for _, notify := range pendingNotifications {
+							if notify.appName == appState.Status.Name {
+								for _, state := range notify.existing {
+									if state != nil && state.Status.Name == appState.Status.Name {
+										existingStateBeforeUpdate = state
+										break
+									}
+								}
+								break
+							}
+						}
+
+						if existingStateBeforeUpdate != nil {
+							mainStateChanged := updatedState.Status.State != existingStateBeforeUpdate.Status.State
+							progressChanged := updatedState.Status.Progress != existingStateBeforeUpdate.Status.Progress
+							if !mainStateChanged && !progressChanged {
+								// EntranceStatuses was preserved, main state/progress didn't change,
+								// and force push was already sent in updateAppStateLatest
+								forcePushedApps[appState.Status.Name] = true
+							}
+						}
+					}
+				}
+
+				// Remove pending notifications for apps that had force push sent
+				if len(forcePushedApps) > 0 {
+					filteredNotifications := make([]pendingNotify, 0, len(pendingNotifications))
+					for _, notify := range pendingNotifications {
+						if notify.changeReason == "entrance statuses changed" && forcePushedApps[notify.appName] {
+							glog.Infof("Removing duplicate batch pending notification for app=%s (force push already sent)", notify.appName)
+							continue
+						}
+						filteredNotifications = append(filteredNotifications, notify)
+					}
+					pendingNotifications = filteredNotifications
+				}
+			}
 		} else {
 			// Fallback to old logic for backward compatibility
 			// Check if entrance URLs are missing and fetch them if needed
