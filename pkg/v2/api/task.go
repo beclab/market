@@ -789,6 +789,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 
 	// Step 7: Find the app in AppInfoLatest
 	var targetApp *types.AppInfoLatestData
+	var rawAppName string
 	for _, appInfoData := range sourceData.AppInfoLatest {
 		if appInfoData == nil || appInfoData.RawData == nil {
 			continue
@@ -801,14 +802,62 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// If not found in AppInfoLatest, check AppStateLatest for clone apps
 	if targetApp == nil {
-		log.Printf("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
-		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
-		return
+		log.Printf("App not found in AppInfoLatest: %s version %s in source: %s, checking AppStateLatest", request.AppName, request.Version, request.Source)
+
+		// Search in AppStateLatest for clone apps
+		var foundStateApp *types.AppStateLatestData
+		for _, appStateData := range sourceData.AppStateLatest {
+			if appStateData == nil {
+				continue
+			}
+
+			// Check if app name matches and has rawAppName (indicating it's a clone app)
+			if appStateData.Status.Name == request.AppName && appStateData.Status.RawAppName != "" {
+				foundStateApp = appStateData
+				rawAppName = appStateData.Status.RawAppName
+				log.Printf("Found clone app in AppStateLatest: %s with rawAppName: %s", request.AppName, rawAppName)
+				break
+			}
+		}
+
+		// If found in AppStateLatest with rawAppName, search for the original app in AppInfoLatest
+		if foundStateApp != nil && rawAppName != "" {
+			log.Printf("Searching for original app in AppInfoLatest: rawAppName=%s, version=%s", rawAppName, request.Version)
+
+			// Search for the original app using rawAppName
+			for _, appInfoData := range sourceData.AppInfoLatest {
+				if appInfoData == nil || appInfoData.RawData == nil {
+					continue
+				}
+
+				// Check if app matches the rawAppName and version
+				if appInfoData.RawData.Name == rawAppName && appInfoData.RawData.Version == request.Version {
+					targetApp = appInfoData
+					log.Printf("Found original app in AppInfoLatest: %s version %s for clone app: %s", rawAppName, request.Version, request.AppName)
+					break
+				}
+			}
+
+			// If still not found, return error
+			if targetApp == nil {
+				log.Printf("Original app not found: %s version %s in source: %s for clone app: %s", rawAppName, request.Version, request.Source, request.AppName)
+				s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("Original app not found: %s version %s", rawAppName, request.Version), nil)
+				return
+			}
+		} else {
+			// Not found in AppStateLatest either
+			log.Printf("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
+			s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
+			return
+		}
 	}
 
 	// Step 8: Verify chart package exists
-	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
+	// Use targetApp.RawData.Name for chart filename (handles both direct and clone apps)
+	chartAppName := targetApp.RawData.Name
+	chartFilename := fmt.Sprintf("%s-%s.tgz", chartAppName, request.Version)
 	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
 
 	// if _, err := os.Stat(chartPath); err != nil {
@@ -839,13 +888,19 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"source":     request.Source,
-		"app_name":   request.AppName,
+		"app_name":   request.AppName, // Use request.AppName (clone app name) for upgrade task
 		"version":    request.Version,
 		"chart_path": chartPath,
 		"token":      utils.GetTokenFromRequest(restfulReq),
 		"cfgType":    cfgType, // Add cfgType to metadata
 		"images":     images,
 		"envs":       request.Envs,
+	}
+
+	// If this is a clone app, add rawAppName to metadata
+	if rawAppName != "" {
+		taskMetadata["rawAppName"] = rawAppName
+		log.Printf("Adding rawAppName to upgrade task metadata: %s for clone app: %s", rawAppName, request.AppName)
 	}
 
 	// Handle synchronous requests with proper blocking
