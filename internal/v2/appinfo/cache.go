@@ -730,6 +730,52 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			// Update or add the app state using name matching
 			cm.updateAppStateLatest(userID, sourceIDFromRecord, sourceData, appData)
 			glog.Infof("Updated single app state for user=%s, source=%s", userID, sourceIDFromRecord)
+
+			// After updateAppStateLatest, check if EntranceStatuses was preserved and force push was sent
+			// If so, remove the corresponding pending notification to avoid duplicate push
+			// This happens when: EntranceStatuses was empty -> preserved, but HasStateChanged detected "entrance statuses changed"
+			// before the preservation happened, and updateAppStateLatest sent a force push
+			if len(pendingNotifications) > 0 {
+				lastIdx := len(pendingNotifications) - 1
+				lastNotify := &pendingNotifications[lastIdx]
+				if lastNotify.appName == appData.Status.Name &&
+					lastNotify.changeReason == "entrance statuses changed" {
+					// Check if EntranceStatuses was actually preserved by checking the state in cache
+					var updatedState *types.AppStateLatestData
+					for _, state := range sourceData.AppStateLatest {
+						if state != nil && state.Status.Name == appData.Status.Name {
+							updatedState = state
+							break
+						}
+					}
+
+					// If updated state has EntranceStatuses (was preserved) and main state/progress didn't change,
+					// it means updateAppStateLatest sent a force push, so remove this pending notification
+					if updatedState != nil && len(updatedState.Status.EntranceStatuses) > 0 {
+						// Compare with original appData to check if main state/progress changed
+						// Note: appData was modified by updateAppStateLatest (EntranceStatuses was preserved),
+						// so we need to compare with the existing state before update
+						var existingStateBeforeUpdate *types.AppStateLatestData
+						for _, state := range lastNotify.existing {
+							if state != nil && state.Status.Name == appData.Status.Name {
+								existingStateBeforeUpdate = state
+								break
+							}
+						}
+
+						if existingStateBeforeUpdate != nil {
+							mainStateChanged := updatedState.Status.State != existingStateBeforeUpdate.Status.State
+							progressChanged := updatedState.Status.Progress != existingStateBeforeUpdate.Status.Progress
+							if !mainStateChanged && !progressChanged {
+								// EntranceStatuses was preserved, main state/progress didn't change,
+								// and force push was already sent in updateAppStateLatest, so remove this notification
+								glog.Infof("Removing duplicate pending notification for app=%s (force push already sent)", appData.Status.Name)
+								pendingNotifications = pendingNotifications[:lastIdx]
+							}
+						}
+					}
+				}
+			}
 		}
 	case AppInfoLatest:
 		appData := NewAppInfoLatestData(data)
