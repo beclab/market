@@ -446,33 +446,48 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 				glog.Infof("New app state for %s has empty EntranceStatuses, preserving old entrance statuses", newAppState.Status.Name)
 				newAppState.Status.EntranceStatuses = existingAppState.Status.EntranceStatuses
 
-				// Directly send app info update without state change detection
-				if cm.dataSender != nil {
-					// Find corresponding AppInfoLatestData
-					var appInfoLatest *types.AppInfoLatestData
-					for _, appInfo := range sourceData.AppInfoLatest {
-						if appInfo != nil && appInfo.RawData != nil && appInfo.RawData.Name == newAppState.Status.Name {
-							appInfoLatest = appInfo
-							break
+				// Check if main state has changed - if yes, let pendingNotifications handle it to avoid duplicate push
+				// Only force push if main state hasn't changed AND other fields haven't changed either
+				// This ensures we only push when EntranceStatuses preservation is the only change
+				mainStateChanged := newAppState.Status.State != existingAppState.Status.State
+				progressChanged := newAppState.Status.Progress != existingAppState.Status.Progress
+				otherFieldsChanged := mainStateChanged || progressChanged
+
+				if !otherFieldsChanged {
+					// Only EntranceStatuses was "changed" (from empty to preserved), but after preservation,
+					// the state is actually the same as before. However, we still need to notify to ensure
+					// client gets the updated state with preserved EntranceStatuses (in case statusTime or other metadata changed)
+					if cm.dataSender != nil {
+						// Find corresponding AppInfoLatestData
+						var appInfoLatest *types.AppInfoLatestData
+						for _, appInfo := range sourceData.AppInfoLatest {
+							if appInfo != nil && appInfo.RawData != nil && appInfo.RawData.Name == newAppState.Status.Name {
+								appInfoLatest = appInfo
+								break
+							}
+						}
+
+						// Create and send update directly
+						update := types.AppInfoUpdate{
+							AppStateLatest: newAppState,
+							AppInfoLatest:  appInfoLatest,
+							Timestamp:      time.Now().Unix(),
+							User:           userID,
+							AppName:        newAppState.Status.Name,
+							NotifyType:     "app_state_change",
+							Source:         sourceID,
+						}
+
+						if err := cm.dataSender.SendAppInfoUpdate(update); err != nil {
+							glog.Warningf("Force push state update for app %s failed: %v", newAppState.Status.Name, err)
+						} else {
+							glog.Infof("Force pushed state update for app %s due to EntranceStatuses fallback (only metadata changed)", newAppState.Status.Name)
 						}
 					}
-
-					// Create and send update directly
-					update := types.AppInfoUpdate{
-						AppStateLatest: newAppState,
-						AppInfoLatest:  appInfoLatest,
-						Timestamp:      time.Now().Unix(),
-						User:           userID,
-						AppName:        newAppState.Status.Name,
-						NotifyType:     "app_state_change",
-						Source:         sourceID,
-					}
-
-					if err := cm.dataSender.SendAppInfoUpdate(update); err != nil {
-						glog.Warningf("Force push state update for app %s failed: %v", newAppState.Status.Name, err)
-					} else {
-						glog.Infof("Force pushed state update for app %s due to EntranceStatuses fallback", newAppState.Status.Name)
-					}
+				} else {
+					// Main state or progress has changed, pendingNotifications will handle the notification
+					// No need to force push here to avoid duplicate
+					glog.Infof("Skipping force push for app %s - state/progress changed, will be handled by pendingNotifications", newAppState.Status.Name)
 				}
 			}
 
