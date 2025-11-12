@@ -156,6 +156,7 @@ type AppStateLatestData struct {
 	Version string      `json:"version"` // Version field, cannot be empty
 	Status  struct {
 		Name               string `json:"name"`
+		RawAppName         string `json:"rawAppName"`
 		State              string `json:"state"`
 		UpdateTime         string `json:"updateTime"`
 		StatusTime         string `json:"statusTime"`
@@ -601,7 +602,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 // NewAppStateLatestData creates a new app state latest data structure
 func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
 	// Extract status information from data
-	var name, state, updateTime, statusTime, lastTransitionTime, progress string
+	var name, rawAppName, state, updateTime, statusTime, lastTransitionTime, progress string
 	var entranceStatuses []struct {
 		ID         string `json:"id"`
 		Name       string `json:"name"`
@@ -644,6 +645,10 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	}
 	if progressVal, ok := data["progress"].(string); ok {
 		progress = progressVal
+	}
+	// Extract rawAppName from data
+	if rawAppNameVal, ok := data["rawAppName"].(string); ok {
+		rawAppName = rawAppNameVal
 	}
 
 	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
@@ -780,6 +785,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		Version: version,
 		Status: struct {
 			Name               string `json:"name"`
+			RawAppName         string `json:"rawAppName"`
 			State              string `json:"state"`
 			UpdateTime         string `json:"updateTime"`
 			StatusTime         string `json:"statusTime"`
@@ -796,6 +802,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			} `json:"entranceStatuses"`
 		}{
 			Name:               name,
+			RawAppName:         rawAppName,
 			State:              state,
 			UpdateTime:         updateTime,
 			StatusTime:         statusTime,
