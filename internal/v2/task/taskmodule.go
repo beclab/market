@@ -119,22 +119,79 @@ func NewTaskModule() (*TaskModule, error) {
 
 // SetHistoryModule sets the history module for recording task events
 func (tm *TaskModule) SetHistoryModule(historyModule *history.HistoryModule) {
-	tm.mu.Lock()
+	// Retry mechanism for acquiring lock (max 3 attempts with 10ms delay)
+	maxRetries := 3
+	retryDelay := 10 * time.Millisecond
+
+	var lockAcquired bool
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if tm.mu.TryLock() {
+			lockAcquired = true
+			break
+		}
+
+		if attempt < maxRetries-1 {
+			time.Sleep(retryDelay)
+			continue
+		}
+	}
+
+	if !lockAcquired {
+		log.Printf("[%s] Failed to acquire lock for SetHistoryModule after %d attempts", tm.instanceID, maxRetries)
+		return
+	}
 	defer tm.mu.Unlock()
 	tm.historyModule = historyModule
 }
 
 // SetDataSender sets the data sender for sending system updates
 func (tm *TaskModule) SetDataSender(dataSender DataSenderInterface) {
-	tm.mu.Lock()
+	// Retry mechanism for acquiring lock (max 3 attempts with 10ms delay)
+	maxRetries := 3
+	retryDelay := 10 * time.Millisecond
+
+	var lockAcquired bool
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if tm.mu.TryLock() {
+			lockAcquired = true
+			break
+		}
+
+		if attempt < maxRetries-1 {
+			time.Sleep(retryDelay)
+			continue
+		}
+	}
+
+	if !lockAcquired {
+		log.Printf("[%s] Failed to acquire lock for SetDataSender after %d attempts", tm.instanceID, maxRetries)
+		return
+	}
 	defer tm.mu.Unlock()
 	tm.dataSender = dataSender
 }
 
 // AddTask adds a new task to the pending queue
 func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, metadata map[string]interface{}, callback TaskCallback) (*Task, error) {
-	if !tm.mu.TryLock() {
-		return nil, fmt.Errorf("failed to acquire lock for AddTask")
+	// Retry mechanism for acquiring lock (max 3 attempts with 10ms delay)
+	maxRetries := 3
+	retryDelay := 10 * time.Millisecond
+
+	var lockAcquired bool
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if tm.mu.TryLock() {
+			lockAcquired = true
+			break
+		}
+
+		if attempt < maxRetries-1 {
+			time.Sleep(retryDelay)
+			continue
+		}
+	}
+
+	if !lockAcquired {
+		return nil, fmt.Errorf("failed to acquire lock for AddTask after %d attempts", maxRetries)
 	}
 	defer tm.mu.Unlock()
 
@@ -429,14 +486,17 @@ func (tm *TaskModule) executeTask(task *Task) {
 				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
 			} else {
 				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
-				// Retry in a goroutine
-				go func() {
+				// Retry in a goroutine with TryLock
+				go func(taskID string) {
 					time.Sleep(100 * time.Millisecond)
-					tm.mu.Lock()
-					delete(tm.runningTasks, task.ID)
-					tm.mu.Unlock()
-					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
-				}()
+					if tm.mu.TryLock() {
+						delete(tm.runningTasks, taskID)
+						tm.mu.Unlock()
+						log.Printf("Removed failed task from running tasks (retry): ID=%s", taskID)
+					} else {
+						log.Printf("Failed to acquire lock on retry for task: ID=%s, task will be cleaned up later", taskID)
+					}
+				}(task.ID)
 			}
 
 			tm.finalizeTaskPersistence(task)
@@ -474,14 +534,17 @@ func (tm *TaskModule) executeTask(task *Task) {
 				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
 			} else {
 				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
-				// Retry in a goroutine
-				go func() {
+				// Retry in a goroutine with TryLock
+				go func(taskID string) {
 					time.Sleep(100 * time.Millisecond)
-					tm.mu.Lock()
-					delete(tm.runningTasks, task.ID)
-					tm.mu.Unlock()
-					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
-				}()
+					if tm.mu.TryLock() {
+						delete(tm.runningTasks, taskID)
+						tm.mu.Unlock()
+						log.Printf("Removed failed task from running tasks (retry): ID=%s", taskID)
+					} else {
+						log.Printf("Failed to acquire lock on retry for task: ID=%s, task will be cleaned up later", taskID)
+					}
+				}(task.ID)
 			}
 
 			tm.finalizeTaskPersistence(task)
@@ -521,14 +584,17 @@ func (tm *TaskModule) executeTask(task *Task) {
 				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
 			} else {
 				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
-				// Retry in a goroutine
-				go func() {
+				// Retry in a goroutine with TryLock
+				go func(taskID string) {
 					time.Sleep(100 * time.Millisecond)
-					tm.mu.Lock()
-					delete(tm.runningTasks, task.ID)
-					tm.mu.Unlock()
-					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
-				}()
+					if tm.mu.TryLock() {
+						delete(tm.runningTasks, taskID)
+						tm.mu.Unlock()
+						log.Printf("Removed failed task from running tasks (retry): ID=%s", taskID)
+					} else {
+						log.Printf("Failed to acquire lock on retry for task: ID=%s, task will be cleaned up later", taskID)
+					}
+				}(task.ID)
 			}
 
 			tm.finalizeTaskPersistence(task)
@@ -576,14 +642,17 @@ func (tm *TaskModule) executeTask(task *Task) {
 				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
 			} else {
 				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
-				// Retry in a goroutine
-				go func() {
+				// Retry in a goroutine with TryLock
+				go func(taskID string) {
 					time.Sleep(100 * time.Millisecond)
-					tm.mu.Lock()
-					delete(tm.runningTasks, task.ID)
-					tm.mu.Unlock()
-					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
-				}()
+					if tm.mu.TryLock() {
+						delete(tm.runningTasks, taskID)
+						tm.mu.Unlock()
+						log.Printf("Removed failed task from running tasks (retry): ID=%s", taskID)
+					} else {
+						log.Printf("Failed to acquire lock on retry for task: ID=%s, task will be cleaned up later", taskID)
+					}
+				}(task.ID)
 			}
 
 			tm.finalizeTaskPersistence(task)
@@ -621,14 +690,17 @@ func (tm *TaskModule) executeTask(task *Task) {
 				log.Printf("Removed failed task from running tasks: ID=%s", task.ID)
 			} else {
 				log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
-				// Retry in a goroutine
-				go func() {
+				// Retry in a goroutine with TryLock
+				go func(taskID string) {
 					time.Sleep(100 * time.Millisecond)
-					tm.mu.Lock()
-					delete(tm.runningTasks, task.ID)
-					tm.mu.Unlock()
-					log.Printf("Removed failed task from running tasks (retry): ID=%s", task.ID)
-				}()
+					if tm.mu.TryLock() {
+						delete(tm.runningTasks, taskID)
+						tm.mu.Unlock()
+						log.Printf("Removed failed task from running tasks (retry): ID=%s", taskID)
+					} else {
+						log.Printf("Failed to acquire lock on retry for task: ID=%s, task will be cleaned up later", taskID)
+					}
+				}(task.ID)
 			}
 
 			tm.finalizeTaskPersistence(task)
@@ -659,14 +731,17 @@ func (tm *TaskModule) executeTask(task *Task) {
 		log.Printf("Removed completed task from running tasks: ID=%s", task.ID)
 	} else {
 		log.Printf("Failed to acquire lock to remove task from running tasks: ID=%s, will retry later", task.ID)
-		// Retry in a goroutine
-		go func() {
+		// Retry in a goroutine with TryLock
+		go func(taskID string) {
 			time.Sleep(100 * time.Millisecond)
-			tm.mu.Lock()
-			delete(tm.runningTasks, task.ID)
-			tm.mu.Unlock()
-			log.Printf("Removed completed task from running tasks (retry): ID=%s", task.ID)
-		}()
+			if tm.mu.TryLock() {
+				delete(tm.runningTasks, taskID)
+				tm.mu.Unlock()
+				log.Printf("Removed completed task from running tasks (retry): ID=%s", taskID)
+			} else {
+				log.Printf("Failed to acquire lock on retry for task: ID=%s, task will be cleaned up later", taskID)
+			}
+		}(task.ID)
 	}
 
 	tm.finalizeTaskPersistence(task)
