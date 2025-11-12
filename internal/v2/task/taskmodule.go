@@ -133,7 +133,9 @@ func (tm *TaskModule) SetDataSender(dataSender DataSenderInterface) {
 
 // AddTask adds a new task to the pending queue
 func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, metadata map[string]interface{}, callback TaskCallback) (*Task, error) {
-	tm.mu.Lock()
+	if !tm.mu.TryLock() {
+		return nil, fmt.Errorf("failed to acquire lock for AddTask")
+	}
 	defer tm.mu.Unlock()
 
 	if metadata == nil {
