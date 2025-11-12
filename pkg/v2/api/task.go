@@ -26,7 +26,6 @@ type InstallAppRequest struct {
 type CloneAppRequest struct {
 	Source  string           `json:"source"`
 	AppName string           `json:"app_name"`
-	Version string           `json:"version"`
 	Title   string           `json:"title"` // Title for cloned app
 	Sync    bool             `json:"sync"`  // Whether this is a synchronous request
 	Envs    []task.AppEnvVar `json:"envs,omitempty"`
@@ -254,9 +253,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Validate required fields
-	if request.Source == "" || request.AppName == "" || request.Version == "" || request.Title == "" {
+	if request.Source == "" || request.AppName == "" || request.Title == "" {
 		log.Printf("Missing required fields in request")
-		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source, app_name, version, and title are required", nil)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source, app_name, and title are required", nil)
 		return
 	}
 
@@ -283,22 +282,22 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 7: Find the app in AppInfoLatest
+	// Step 7: Find the app in AppInfoLatest (by name only, no version check)
 	var targetApp *types.AppInfoLatestData
 	for _, appInfoData := range sourceData.AppInfoLatest {
 		if appInfoData == nil || appInfoData.RawData == nil {
 			continue
 		}
 
-		// Check if app matches the requested name and version
-		if appInfoData.RawData.Name == request.AppName && appInfoData.RawData.Version == request.Version {
+		// Check if app matches the requested name (use latest version found)
+		if appInfoData.RawData.Name == request.AppName {
 			targetApp = appInfoData
 			break
 		}
 	}
 
 	if targetApp == nil {
-		log.Printf("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
+		log.Printf("App not found: %s in source: %s", request.AppName, request.Source)
 		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
 		return
 	}
@@ -313,10 +312,15 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 
 	// Step 9: Construct new app name: rawAppName + Title
 	newAppName := rawAppName + request.Title
-	log.Printf("Cloning app: rawAppName=%s, title=%s, newAppName=%s", rawAppName, request.Title, newAppName)
+	// Get version from targetApp
+	appVersion := targetApp.RawData.Version
+	if appVersion == "" {
+		appVersion = targetApp.Version
+	}
+	log.Printf("Cloning app: rawAppName=%s, title=%s, newAppName=%s, version=%s", rawAppName, request.Title, newAppName, appVersion)
 
-	// Step 10: Verify chart package exists
-	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
+	// Step 10: Verify chart package exists (use version from targetApp)
+	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, appVersion)
 	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
 
 	// Step 11: Get app cfgType from cache
@@ -343,7 +347,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"source":     request.Source,
-		"version":    request.Version,
+		"version":    appVersion, // Use version from targetApp
 		"chart_path": chartPath,
 		"token":      utils.GetTokenFromRequest(restfulReq),
 		"cfgType":    cfgType,
