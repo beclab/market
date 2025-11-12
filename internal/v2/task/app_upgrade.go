@@ -22,10 +22,18 @@ type UpgradeOptions struct {
 
 // AppUpgrade upgrades an application using the app service.
 func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
+	// Use task.AppName which is the clone app name (e.g., windowstest) for clone apps
+	// or the original app name for regular apps
 	appName := task.AppName
 	user := task.User
 
-	log.Printf("Starting app upgrade: app=%s, user=%s, task_id=%s", appName, user, task.ID)
+	// Check if this is a clone app upgrade
+	rawAppName, isCloneApp := task.Metadata["rawAppName"].(string)
+	if isCloneApp && rawAppName != "" {
+		log.Printf("Starting clone app upgrade: cloneAppName=%s, rawAppName=%s, user=%s, task_id=%s", appName, rawAppName, user, task.ID)
+	} else {
+		log.Printf("Starting app upgrade: app=%s, user=%s, task_id=%s", appName, user, task.ID)
+	}
 
 	token, ok := task.Metadata["token"].(string)
 	if !ok {
@@ -61,13 +69,18 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
 
+	// Use appName (clone app name for clone apps, original app name for regular apps) in URL
 	var urlStr string
 	// if cfgType == "recommend" {
 	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/upgrade", appServiceHost, appServicePort, appName)
 	// 	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
 	// } else {
 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
-	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+	if isCloneApp && rawAppName != "" {
+		log.Printf("App service URL for clone app upgrade: %s (cloneAppName=%s, rawAppName=%s) for task: %s, version: %s", urlStr, appName, rawAppName, task.ID, version)
+	} else {
+		log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+	}
 
 	// }
 

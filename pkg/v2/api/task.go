@@ -22,6 +22,16 @@ type InstallAppRequest struct {
 	Envs    []task.AppEnvVar `json:"envs,omitempty"`
 }
 
+// CloneAppRequest represents the request body for app clone
+type CloneAppRequest struct {
+	Source  string           `json:"source"`
+	AppName string           `json:"app_name"`
+	Version string           `json:"version"`
+	Title   string           `json:"title"` // Title for cloned app
+	Sync    bool             `json:"sync"`  // Whether this is a synchronous request
+	Envs    []task.AppEnvVar `json:"envs,omitempty"`
+}
+
 // CancelInstallRequest represents the request body for cancel installation
 type CancelInstallRequest struct {
 	Sync bool `json:"sync"` // Whether this is a synchronous request
@@ -122,11 +132,13 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	images := []task.Image{}
-	for _, image := range targetApp.AppInfo.ImageAnalysis.Images {
-		images = append(images, task.Image{
-			Name: image.Name,
-			Size: image.TotalSize,
-		})
+	if targetApp.AppInfo != nil && targetApp.AppInfo.ImageAnalysis != nil {
+		for _, image := range targetApp.AppInfo.ImageAnalysis.Images {
+			images = append(images, task.Image{
+				Name: image.Name,
+				Size: image.TotalSize,
+			})
+		}
 	}
 
 	// Step 10: Create installation task
@@ -157,9 +169,9 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task
-		task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create installation task for app: %s", request.AppName)
+		task, err := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create installation task for app: %s, error: %v", request.AppName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create installation task", nil)
 			return
 		}
@@ -202,9 +214,9 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create installation task for app: %s", request.AppName)
+	task, err := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create installation task for app: %s, error: %v", request.AppName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create installation task", nil)
 		return
 	}
@@ -213,6 +225,205 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 
 	// Return immediately for asynchronous requests
 	s.sendResponse(w, http.StatusOK, true, "App installation started successfully", map[string]interface{}{
+		"task_id": task.ID,
+	})
+}
+
+// 6.1. Clone application (single)
+func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+	log.Printf("POST /api/v2/apps/%s/clone - Cloning app", appID)
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for clone request: %s", userID)
+
+	// Step 2: Parse request body
+	var request CloneAppRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		log.Printf("Failed to parse request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid request format", nil)
+		return
+	}
+
+	// Step 3: Validate required fields
+	if request.Source == "" || request.AppName == "" || request.Version == "" || request.Title == "" {
+		log.Printf("Missing required fields in request")
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source, app_name, version, and title are required", nil)
+		return
+	}
+
+	// Step 4: Check if cache manager is available
+	if s.cacheManager == nil {
+		log.Printf("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Step 5: Get user data from cache
+	userData := s.cacheManager.GetUserData(userID)
+	if userData == nil {
+		log.Printf("User data not found for user: %s", userID)
+		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+		return
+	}
+
+	// Step 6: Get source data
+	sourceData := userData.Sources[request.Source]
+	if sourceData == nil {
+		log.Printf("Source data not found: %s for user: %s", request.Source, userID)
+		s.sendResponse(w, http.StatusNotFound, false, "Source data not found", nil)
+		return
+	}
+
+	// Step 7: Find the app in AppInfoLatest
+	var targetApp *types.AppInfoLatestData
+	for _, appInfoData := range sourceData.AppInfoLatest {
+		if appInfoData == nil || appInfoData.RawData == nil {
+			continue
+		}
+
+		// Check if app matches the requested name and version
+		if appInfoData.RawData.Name == request.AppName && appInfoData.RawData.Version == request.Version {
+			targetApp = appInfoData
+			break
+		}
+	}
+
+	if targetApp == nil {
+		log.Printf("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
+		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
+		return
+	}
+
+	// Step 8: Get rawAppName from app info (应用信息中的名字)
+	rawAppName := targetApp.RawData.Name
+	if rawAppName == "" {
+		log.Printf("Raw app name not found for app: %s", request.AppName)
+		s.sendResponse(w, http.StatusBadRequest, false, "Raw app name not found", nil)
+		return
+	}
+
+	// Step 9: Construct new app name: rawAppName + Title
+	newAppName := rawAppName + request.Title
+	log.Printf("Cloning app: rawAppName=%s, title=%s, newAppName=%s", rawAppName, request.Title, newAppName)
+
+	// Step 10: Verify chart package exists
+	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
+	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
+
+	// Step 11: Get app cfgType from cache
+	var cfgType string
+	if targetApp != nil && targetApp.RawData != nil {
+		cfgType = targetApp.RawData.CfgType
+		log.Printf("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
+	} else {
+		log.Printf("Warning: Could not retrieve cfgType for app: %s, using default", request.AppName)
+		cfgType = "app" // Default to app type
+	}
+
+	images := []task.Image{}
+	if targetApp.AppInfo != nil && targetApp.AppInfo.ImageAnalysis != nil {
+		for _, image := range targetApp.AppInfo.ImageAnalysis.Images {
+			images = append(images, task.Image{
+				Name: image.Name,
+				Size: image.TotalSize,
+			})
+		}
+	}
+
+	// Step 12: Create clone installation task
+	taskMetadata := map[string]interface{}{
+		"user_id":    userID,
+		"source":     request.Source,
+		"version":    request.Version,
+		"chart_path": chartPath,
+		"token":      utils.GetTokenFromRequest(restfulReq),
+		"cfgType":    cfgType,
+		"images":     images,
+		"envs":       request.Envs,
+		"rawAppName": rawAppName,    // Pass rawAppName in metadata
+		"title":      request.Title, // Pass title in metadata
+	}
+
+	// Handle synchronous requests with proper blocking
+	if request.Sync {
+		// Create channel to wait for task completion
+		done := make(chan struct{})
+		var taskResult string
+		var taskError error
+
+		// Create callback function that will be called when task completes
+		callback := func(result string, err error) {
+			taskResult = result
+			taskError = err
+			close(done)
+		}
+
+		// Start the task with CloneApp type, using newAppName (rawAppName+Title) as appName
+		task, err := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create clone installation task for app: %s, error: %v", newAppName, err)
+			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create clone installation task", nil)
+			return
+		}
+
+		log.Printf("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, title=%s)", task.ID, newAppName, rawAppName, request.Title)
+
+		// Wait for task completion
+		<-done
+
+		// Parse taskResult to avoid nested JSON strings
+		var resultData map[string]interface{}
+		if taskResult != "" {
+			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
+				// If parsing fails, return raw result
+				log.Printf("Failed to parse task result as JSON: %v", err)
+				resultData = map[string]interface{}{
+					"raw_result": taskResult,
+				}
+			}
+		}
+
+		// Send response based on task result
+		if taskError != nil {
+			log.Printf("Synchronous clone installation failed for app: %s, error: %v", newAppName, taskError)
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Clone installation failed: %v", taskError), resultData)
+		} else {
+			log.Printf("Synchronous clone installation completed successfully for app: %s", newAppName)
+			s.sendResponse(w, http.StatusOK, true, "App clone installation completed successfully", resultData)
+		}
+		return
+	}
+
+	// Handle asynchronous requests
+	callback := func(result string, err error) {
+		// For async requests, callback is just for logging
+		if err != nil {
+			log.Printf("Asynchronous clone installation failed for app: %s, error: %v", newAppName, err)
+		} else {
+			log.Printf("Asynchronous clone installation completed successfully for app: %s", newAppName)
+		}
+	}
+
+	task, err := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create clone installation task for app: %s, error: %v", newAppName, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create clone installation task", nil)
+		return
+	}
+
+	log.Printf("Created asynchronous clone installation task: ID=%s for app: %s (rawAppName=%s, title=%s)", task.ID, newAppName, rawAppName, request.Title)
+
+	// Return immediately for asynchronous requests
+	s.sendResponse(w, http.StatusOK, true, "App clone installation started successfully", map[string]interface{}{
 		"task_id": task.ID,
 	})
 }
@@ -306,9 +517,9 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task
-		task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create cancel installation task for app: %s", appName)
+		task, err := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create cancel installation task for app: %s, error: %v", appName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create cancel installation task", nil)
 			return
 		}
@@ -351,9 +562,9 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create cancel installation task for app: %s", appName)
+	task, err := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create cancel installation task for app: %s, error: %v", appName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create cancel installation task", nil)
 		return
 	}
@@ -462,9 +673,9 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task
-		task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create uninstallation task for app: %s", appName)
+		task, err := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create uninstallation task for app: %s, error: %v", appName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create uninstallation task", nil)
 			return
 		}
@@ -507,9 +718,9 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create uninstallation task for app: %s", appName)
+	task, err := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create uninstallation task for app: %s, error: %v", appName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create uninstallation task", nil)
 		return
 	}
@@ -578,6 +789,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 
 	// Step 7: Find the app in AppInfoLatest
 	var targetApp *types.AppInfoLatestData
+	var rawAppName string
 	for _, appInfoData := range sourceData.AppInfoLatest {
 		if appInfoData == nil || appInfoData.RawData == nil {
 			continue
@@ -590,14 +802,62 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// If not found in AppInfoLatest, check AppStateLatest for clone apps
 	if targetApp == nil {
-		log.Printf("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
-		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
-		return
+		log.Printf("App not found in AppInfoLatest: %s version %s in source: %s, checking AppStateLatest", request.AppName, request.Version, request.Source)
+
+		// Search in AppStateLatest for clone apps
+		var foundStateApp *types.AppStateLatestData
+		for _, appStateData := range sourceData.AppStateLatest {
+			if appStateData == nil {
+				continue
+			}
+
+			// Check if app name matches and has rawAppName (indicating it's a clone app)
+			if appStateData.Status.Name == request.AppName && appStateData.Status.RawAppName != "" {
+				foundStateApp = appStateData
+				rawAppName = appStateData.Status.RawAppName
+				log.Printf("Found clone app in AppStateLatest: %s with rawAppName: %s", request.AppName, rawAppName)
+				break
+			}
+		}
+
+		// If found in AppStateLatest with rawAppName, search for the original app in AppInfoLatest
+		if foundStateApp != nil && rawAppName != "" {
+			log.Printf("Searching for original app in AppInfoLatest: rawAppName=%s, version=%s", rawAppName, request.Version)
+
+			// Search for the original app using rawAppName
+			for _, appInfoData := range sourceData.AppInfoLatest {
+				if appInfoData == nil || appInfoData.RawData == nil {
+					continue
+				}
+
+				// Check if app matches the rawAppName and version
+				if appInfoData.RawData.Name == rawAppName && appInfoData.RawData.Version == request.Version {
+					targetApp = appInfoData
+					log.Printf("Found original app in AppInfoLatest: %s version %s for clone app: %s", rawAppName, request.Version, request.AppName)
+					break
+				}
+			}
+
+			// If still not found, return error
+			if targetApp == nil {
+				log.Printf("Original app not found: %s version %s in source: %s for clone app: %s", rawAppName, request.Version, request.Source, request.AppName)
+				s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("Original app not found: %s version %s", rawAppName, request.Version), nil)
+				return
+			}
+		} else {
+			// Not found in AppStateLatest either
+			log.Printf("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
+			s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
+			return
+		}
 	}
 
 	// Step 8: Verify chart package exists
-	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
+	// Use targetApp.RawData.Name for chart filename (handles both direct and clone apps)
+	chartAppName := targetApp.RawData.Name
+	chartFilename := fmt.Sprintf("%s-%s.tgz", chartAppName, request.Version)
 	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
 
 	// if _, err := os.Stat(chartPath); err != nil {
@@ -628,13 +888,19 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"source":     request.Source,
-		"app_name":   request.AppName,
+		"app_name":   request.AppName, // Use request.AppName (clone app name) for upgrade task
 		"version":    request.Version,
 		"chart_path": chartPath,
 		"token":      utils.GetTokenFromRequest(restfulReq),
 		"cfgType":    cfgType, // Add cfgType to metadata
 		"images":     images,
 		"envs":       request.Envs,
+	}
+
+	// If this is a clone app, add rawAppName to metadata
+	if rawAppName != "" {
+		taskMetadata["rawAppName"] = rawAppName
+		log.Printf("Adding rawAppName to upgrade task metadata: %s for clone app: %s", rawAppName, request.AppName)
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -652,9 +918,9 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Start the task
-		task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
-		if task == nil {
-			log.Printf("Failed to create upgrade task for app: %s", request.AppName)
+		task, err := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
+		if err != nil {
+			log.Printf("Failed to create upgrade task for app: %s, error: %v", request.AppName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create upgrade task", nil)
 			return
 		}
@@ -697,9 +963,9 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
-	if task == nil {
-		log.Printf("Failed to create upgrade task for app: %s", request.AppName)
+	task, err := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
+	if err != nil {
+		log.Printf("Failed to create upgrade task for app: %s, error: %v", request.AppName, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create upgrade task", nil)
 		return
 	}
