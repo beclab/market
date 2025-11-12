@@ -193,7 +193,6 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, me
 	if !lockAcquired {
 		return nil, fmt.Errorf("failed to acquire lock for AddTask after %d attempts", maxRetries)
 	}
-	defer tm.mu.Unlock()
 
 	if metadata == nil {
 		metadata = make(map[string]interface{})
@@ -210,16 +209,19 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, me
 		Callback:  callback,
 	}
 
+	// Add to pending queue first (fast memory operation)
+	tm.pendingTasks = append(tm.pendingTasks, task)
+	tm.mu.Unlock()
+
+	// Persist task outside of lock (database operation may be slow)
 	if err := tm.persistTask(task); err != nil {
 		log.Printf("[%s] Failed to persist task %s: %v", tm.instanceID, task.ID, err)
-		return nil, err
+		// Don't return error - task is already in memory queue, will be persisted later
 	}
-
-	tm.pendingTasks = append(tm.pendingTasks, task)
 
 	log.Printf("[%s] Task added: ID=%s, Type=%d, AppName=%s, User=%s, HasCallback=%v", tm.instanceID, task.ID, task.Type, task.AppName, user, callback != nil)
 
-	// Record task addition in history
+	// Record task addition in history (outside of lock)
 	tm.recordTaskHistory(task, user)
 
 	return task, nil
@@ -423,29 +425,34 @@ func (tm *TaskModule) executeNextTask() {
 	if !tm.mu.TryLock() {
 		return
 	}
-	defer tm.mu.Unlock()
 
-	if len(tm.pendingTasks) == 0 {
+	var task *Task
+	if len(tm.pendingTasks) > 0 {
+		// Get the first task (FIFO)
+		task = tm.pendingTasks[0]
+		tm.pendingTasks = tm.pendingTasks[1:]
+
+		// Move to running tasks
+		task.Status = Running
+		now := time.Now()
+		task.StartedAt = &now
+		tm.runningTasks[task.ID] = task
+	}
+
+	tm.mu.Unlock()
+
+	if task == nil {
 		return
 	}
 
-	// Get the first task (FIFO)
-	task := tm.pendingTasks[0]
-	tm.pendingTasks = tm.pendingTasks[1:]
-
-	// Move to running tasks
-	task.Status = Running
-	now := time.Now()
-	task.StartedAt = &now
-	tm.runningTasks[task.ID] = task
-
+	// Persist task state outside of lock (database operation may be slow)
 	if err := tm.persistTask(task); err != nil {
 		log.Printf("[%s] Failed to persist running task state for %s: %v", tm.instanceID, task.ID, err)
 	}
 
 	log.Printf("[%s] Executing task: ID=%s, Type=%d, AppName=%s", tm.instanceID, task.ID, task.Type, task.AppName)
 
-	// Execute the task
+	// Execute the task outside of lock (may take minutes)
 	tm.executeTask(task)
 }
 
