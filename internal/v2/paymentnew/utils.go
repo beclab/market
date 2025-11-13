@@ -372,18 +372,27 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 		"product_credential_manifest": manifestData,
 	}
 
-	// Only add application_verifiable_credential if all required fields are present
-	if productID != "" && txHash != "" && systemChainID != 0 {
+	// Include product_id and application_verifiable_credential if productID is available
+	if productID != "" {
+		// Always include product_id at top level (needed for signature request identification)
+		signBody["product_id"] = productID
+
+		// Build application_verifiable_credential (txHash and systemChainID are optional)
 		appVerifiableCredential := map[string]interface{}{
-			"productId":     productID,
-			"systemChainId": systemChainID,
-			"txHash":        txHash,
+			"productId": productID,
+		}
+		// Only include systemChainId if it's non-zero (payment may not have completed yet)
+		if systemChainID != 0 {
+			appVerifiableCredential["systemChainId"] = systemChainID
+		}
+		// Only include txHash if available (payment may not have completed yet)
+		if txHash != "" {
+			appVerifiableCredential["txHash"] = txHash
 		}
 		signBody["application_verifiable_credential"] = appVerifiableCredential
-		log.Printf("Including application_verifiable_credential in sign notification for user %s, app %s", userID, appID)
-	} else {
-		log.Printf("Skipping application_verifiable_credential for user %s, app %s (productID: %s, txHash: %s, systemChainID: %d)",
-			userID, appID, productID, txHash, systemChainID)
+
+		log.Printf("Including product_id and application_verifiable_credential in sign notification for user %s, app %s, productID: %s, systemChainID: %d, txHash: %s",
+			userID, appID, productID, systemChainID, txHash)
 	}
 
 	// Build callback URL using X-Forwarded-Host from request
@@ -443,6 +452,10 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 		log.Printf("notifyLarePassToFetchSignature: ERROR - productID is empty for user %s, app %s, cannot build application_verifiable_credential", userID, appID)
 		return errors.New("productID is required but not available")
 	}
+
+	// Always include product_id at top level for consistency and easy identification
+	signBody["product_id"] = productID
+	log.Printf("notifyLarePassToFetchSignature: Including product_id in sign notification for user %s, app %s, productID: %s", userID, appID, productID)
 
 	appVerifiableCredential := map[string]interface{}{
 		"productId": productID,
