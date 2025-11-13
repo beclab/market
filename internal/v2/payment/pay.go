@@ -200,7 +200,7 @@ func (tm *TaskManager) stepNotifySign(task *PaymentTask) error {
 	}
 
 	// Call NotifyLarePassToSign with application_verifiable_credential and X-Forwarded-Host
-	if err := NotifyLarePassToSign(tm.dataSender, task.UserID, task.AppID, task.ProductID, task.TxHash, xForwardedHost, task.SystemChainID); err != nil {
+	if err := NotifyLarePassToSign(tm.dataSender, task.UserID, task.AppID, task.ProductID, task.TxHash, xForwardedHost, task.SystemChainID, task.DeveloperName); err != nil {
 		return fmt.Errorf("failed to notify LarePass to sign: %w", err)
 	}
 

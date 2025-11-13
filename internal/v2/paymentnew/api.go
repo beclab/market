@@ -705,7 +705,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 	// Build PurchaseInfo from PaymentState (return nil if state does not exist)
 	pi := buildPurchaseInfoFromState(state)
 	if pi != nil && strings.EqualFold(pi.Status, "purchased") {
-		ok := verifyPurchaseInfo(pi)
+		ok := verifyPurchaseInfo(pi, state.ProductID, state.DeveloperName)
 		if !ok {
 			return nil, fmt.Errorf("purchase info not verified for user=%s app=%s product=%s", userID, appID, productID)
 		}

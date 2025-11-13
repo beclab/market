@@ -176,6 +176,7 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 				newState.TxHash,
 				effectiveHost,
 				newState.SystemChainID,
+				newState.DeveloperName,
 			)
 		}
 		return &newState, nil
@@ -380,6 +381,7 @@ func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, stat
 			newState.TxHash,
 			newState.XForwardedHost,
 			newState.SystemChainID,
+			newState.DeveloperName,
 		)
 	}
 
@@ -648,6 +650,7 @@ func triggerPaymentStateSync(state *PaymentState) error {
 					state.ProductID,
 					state.XForwardedHost,
 					state.SystemChainID,
+					state.DeveloperName,
 				)
 			}
 		}
@@ -661,6 +664,7 @@ func triggerPaymentStateSync(state *PaymentState) error {
 				state.ProductID,
 				state.XForwardedHost,
 				state.SystemChainID,
+				state.DeveloperName,
 			)
 		}
 	case LarePassSyncCompleted:
