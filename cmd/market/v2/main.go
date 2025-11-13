@@ -224,6 +224,10 @@ func main() {
 	settingsManager.SetCacheManager(cacheManager)
 	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
 
+	// Set cache version getter for GetAppInfoLastInstalled to access app state
+	utils.SetCacheVersionGetter(cacheManager)
+	log.Println("Cache version getter set successfully")
+
 	// Get hydrator for HTTP server
 	log.Printf("Getting hydrator for HTTP server...")
 	hydrator := appInfoModule.GetHydrator()

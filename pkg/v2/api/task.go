@@ -312,12 +312,25 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 
 	// Step 9: Construct new app name: rawAppName + Title
 	newAppName := rawAppName + request.Title
-	// Get version from targetApp
-	appVersion := targetApp.RawData.Version
-	if appVersion == "" {
-		appVersion = targetApp.Version
+
+	// For clone app, get version from installed original app's state
+	// Clone operation requires the original app to be installed
+	var appVersion string
+	if s.cacheManager == nil {
+		log.Printf("Cache manager not available, cannot verify installed original app")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
 	}
-	log.Printf("Cloning app: rawAppName=%s, title=%s, newAppName=%s, version=%s", rawAppName, request.Title, newAppName, appVersion)
+
+	stateVersion, found := s.cacheManager.GetAppVersionFromState(userID, request.Source, rawAppName)
+	if !found || stateVersion == "" {
+		log.Printf("Original app not found in installed state: %s in source: %s for user: %s", rawAppName, request.Source, userID)
+		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("Original app %s is not installed in source %s", rawAppName, request.Source), nil)
+		return
+	}
+
+	appVersion = stateVersion
+	log.Printf("Cloning app: rawAppName=%s, title=%s, newAppName=%s, version=%s (from installed original app)", rawAppName, request.Title, newAppName, appVersion)
 
 	// Step 10: Verify chart package exists (use version from targetApp)
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, appVersion)

@@ -379,6 +379,35 @@ func (cm *CacheManager) GetSourceData(userID, sourceID string) *SourceData {
 	return nil
 }
 
+// GetAppVersionFromState retrieves app version from AppStateLatest in the specified source
+// Returns version and found flag
+func (cm *CacheManager) GetAppVersionFromState(userID, sourceID, appName string) (version string, found bool) {
+	if !cm.mutex.TryRLock() {
+		return "", false
+	}
+	defer cm.mutex.RUnlock()
+
+	userData := cm.cache.Users[userID]
+	if userData == nil {
+		return "", false
+	}
+
+	sourceData := userData.Sources[sourceID]
+	if sourceData == nil {
+		return "", false
+	}
+
+	// Search for the app in AppStateLatest in the specified source
+	for _, appState := range sourceData.AppStateLatest {
+		if appState != nil && appState.Status.Name == appName {
+			if appState.Version != "" {
+				return appState.Version, true
+			}
+		}
+	}
+	return "", false
+}
+
 // getSourceData internal method to get source data without external locking
 func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 	if userData, exists := cm.cache.Users[userID]; exists {

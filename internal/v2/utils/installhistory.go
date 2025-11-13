@@ -12,6 +12,33 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// CacheVersionGetter is an interface for getting app version from cache state
+type CacheVersionGetter interface {
+	GetAppVersionFromState(userID, sourceID, appName string) (version string, found bool)
+}
+
+var (
+	cacheVersionGetter CacheVersionGetter
+	cacheGetterMutex   sync.RWMutex
+)
+
+// SetCacheVersionGetter sets the cache version getter interface
+func SetCacheVersionGetter(getter CacheVersionGetter) {
+	cacheGetterMutex.Lock()
+	defer cacheGetterMutex.Unlock()
+	cacheVersionGetter = getter
+}
+
+// getVersionFromCacheState gets app version from cache state if available
+func getVersionFromCacheState(userID, sourceID, appName string) (version string, found bool) {
+	cacheGetterMutex.RLock()
+	defer cacheGetterMutex.RUnlock()
+	if cacheVersionGetter != nil {
+		return cacheVersionGetter.GetAppVersionFromState(userID, sourceID, appName)
+	}
+	return "", false
+}
+
 // GetAppInfoFromDownloadRecord fetches app version and source from chart-repo service
 func GetAppInfoFromDownloadRecord(userID, appName string) (string, string, error) {
 
@@ -172,42 +199,11 @@ func GetAppInfoLastInstalled(userID, appName string) (string, string, error) {
 						source = s
 					}
 
-					// For CloneApp, if we found a task but metadata doesn't have version/source,
-					// try to query the original app (rawAppName) from metadata
-					if taskType == 5 { // CloneApp = 5
-						if rawAppName, ok := metadataMap["rawAppName"].(string); ok && rawAppName != "" {
-							// If version or source is missing, try to get from original app's task
-							if version == "" || source == "" {
-								originalQuery := `
-								SELECT metadata
-								FROM task_records
-								WHERE app_name = $1 
-									AND user_account = $2 
-									AND status = $3
-									AND type IN ($4, $5, $6)
-								ORDER BY completed_at DESC NULLS LAST, created_at DESC
-								LIMIT 1
-								`
-								var originalMetadataStr string
-								originalErr := db.QueryRow(originalQuery, rawAppName, userID, 3, 1, 4, 5).Scan(&originalMetadataStr)
-								if originalErr == nil && originalMetadataStr != "" {
-									var originalMetadataMap map[string]interface{}
-									if err := json.Unmarshal([]byte(originalMetadataStr), &originalMetadataMap); err == nil {
-										if version == "" {
-											if v, ok := originalMetadataMap["version"].(string); ok && v != "" {
-												version = v
-											}
-										}
-										if source == "" {
-											if s, ok := originalMetadataMap["source"].(string); ok && s != "" {
-												source = s
-											}
-										}
-									}
-								}
-							}
-						}
-					}
+					// For CloneApp, version should already be stored in metadata when task was created
+					// The version was set from the installed original app's state at clone time
+					// So we just use the version from metadata directly, no need to query state again
+					// This ensures that even if the original app is upgraded later, the clone app's version
+					// remains the version it was cloned with
 
 					// If we have both version and source, return them
 					if version != "" && source != "" {
