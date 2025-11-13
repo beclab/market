@@ -12,6 +12,33 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// CacheVersionGetter is an interface for getting app version from cache state
+type CacheVersionGetter interface {
+	GetAppVersionFromState(userID, sourceID, appName string) (version string, found bool)
+}
+
+var (
+	cacheVersionGetter CacheVersionGetter
+	cacheGetterMutex   sync.RWMutex
+)
+
+// SetCacheVersionGetter sets the cache version getter interface
+func SetCacheVersionGetter(getter CacheVersionGetter) {
+	cacheGetterMutex.Lock()
+	defer cacheGetterMutex.Unlock()
+	cacheVersionGetter = getter
+}
+
+// getVersionFromCacheState gets app version from cache state if available
+func getVersionFromCacheState(userID, sourceID, appName string) (version string, found bool) {
+	cacheGetterMutex.RLock()
+	defer cacheGetterMutex.RUnlock()
+	if cacheVersionGetter != nil {
+		return cacheVersionGetter.GetAppVersionFromState(userID, sourceID, appName)
+	}
+	return "", false
+}
+
 // GetAppInfoFromDownloadRecord fetches app version and source from chart-repo service
 func GetAppInfoFromDownloadRecord(userID, appName string) (string, string, error) {
 
@@ -172,11 +199,21 @@ func GetAppInfoLastInstalled(userID, appName string) (string, string, error) {
 						source = s
 					}
 
-					// For CloneApp, if we found a task but metadata doesn't have version/source,
-					// try to query the original app (rawAppName) from metadata
+					// For CloneApp, get version from the installed original app's state
+					// Clone app should use the same version as the installed original app
 					if taskType == 5 { // CloneApp = 5
 						if rawAppName, ok := metadataMap["rawAppName"].(string); ok && rawAppName != "" {
-							// If version or source is missing, try to get from original app's task
+							// Try to get version from original app's state in cache first
+							// Use the source from metadata if available, otherwise skip cache lookup
+							if source != "" {
+								stateVersion, found := getVersionFromCacheState(userID, source, rawAppName)
+								if found && stateVersion != "" {
+									// Use version from state (installed original app's version)
+									version = stateVersion
+								}
+							}
+
+							// If version is still empty, try to get from original app's task record
 							if version == "" || source == "" {
 								originalQuery := `
 								SELECT metadata
