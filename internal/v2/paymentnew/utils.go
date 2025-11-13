@@ -142,12 +142,35 @@ func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, err
 	result := &VCQueryResult{}
 
 	// Prefer using returned code field when available
-	if response.Code > 0 {
-		result.Code = response.Code
+	switch response.Code {
+	case 0:
+		if response.VerifiableCredential == "" {
+			return nil, errors.New("developer ActivateAndGrant returned code 0 but verifiableCredential is empty")
+		}
+		result.VC = response.VerifiableCredential
+		result.Code = 0
+		return result, nil
+	case 1100, 1101:
+		// Various JWS validation failures (expired, missing fields, etc.)
+		result.Code = 2
+		return result, nil
+	case 1502:
+		// No payment records found for user
+		result.Code = 1
+		return result, nil
+	case 1501:
+		// Treat as no record according to current backend design
+		result.Code = 1
 		return result, nil
 	}
 
-	// If code is absent, infer from error and verifiableCredential
+	if response.Code > 0 {
+		// All other positive codes fall back to "no record" semantics
+		result.Code = 1
+		return result, nil
+	}
+
+	// If code is absent or unrecognized, fall back to inferring from error/message fields
 	if response.Error != "" {
 		errorLower := strings.ToLower(response.Error)
 		if strings.Contains(errorLower, "no record") || strings.Contains(errorLower, "not found") ||
