@@ -102,6 +102,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps/{id}/install", s.installApp).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/apps/{id}/install")
 
+	// 6.1. Clone application (single)
+	api.HandleFunc("/apps/{id}/clone", s.cloneApp).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/apps/{id}/clone")
+
 	// 7. Cancel installation (single)
 	api.HandleFunc("/apps/{id}/install", s.cancelInstall).Methods("DELETE")
 	log.Printf("Route configured: DELETE /app-store/api/v2/apps/{id}/install")

@@ -224,6 +224,10 @@ func main() {
 	settingsManager.SetCacheManager(cacheManager)
 	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
 
+	// Set cache version getter for GetAppInfoLastInstalled to access app state
+	utils.SetCacheVersionGetter(cacheManager)
+	log.Println("Cache version getter set successfully")
+
 	// Get hydrator for HTTP server
 	log.Printf("Getting hydrator for HTTP server...")
 	hydrator := appInfoModule.GetHydrator()
@@ -240,7 +244,10 @@ func main() {
 		log.Println("History module started successfully")
 
 		// 3. Initialize Task Module
-		taskModule = task.NewTaskModule()
+		taskModule, err = task.NewTaskModule()
+		if err != nil {
+			log.Fatalf("Failed to create Task module: %v", err)
+		}
 		// Set history module reference for task recording
 		taskModule.SetHistoryModule(historyModule)
 

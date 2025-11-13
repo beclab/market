@@ -3,16 +3,14 @@ package task
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-
 	"net/http"
 	"os"
 	"strings"
 )
 
-// InstallOptions represents the options for app installation
-type InstallOptions struct {
+// CloneOptions represents the options for app clone installation
+type CloneOptions struct {
 	App          string      `json:"appName,omitempty"`
 	Dev          bool        `json:"devMode,omitempty"`
 	RepoUrl      string      `json:"repoUrl,omitempty"`
@@ -23,43 +21,35 @@ type InstallOptions struct {
 	MarketSource string      `json:"x_market_source,omitempty"`
 	Images       []Image     `json:"images,omitempty"`
 	Envs         []AppEnvVar `json:"envs"`
+	RawAppName   string      `json:"rawAppName,omitempty"` // Raw app name for clone operations
+	Title        string      `json:"title,omitempty"`      // Title for clone operations
 }
 
-type AppEnvVar struct {
-	EnvName string `json:"envName" yaml:"envName" validate:"required"`
-	Value   string `json:"value,omitempty" yaml:"value,omitempty"`
-}
-
-type Image struct {
-	Name string `json:"name"`
-	Size int64  `json:"size"`
-}
-
-// AppInstall installs an application using the app service
-func (tm *TaskModule) AppInstall(task *Task) (string, error) {
+// AppClone clones an application using the app service
+func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	appName := task.AppName
 	user := task.User
 
-	log.Printf("Starting app installation: app=%s, user=%s, task_id=%s", appName, user, task.ID)
+	log.Printf("Starting app clone: app=%s, user=%s, task_id=%s", appName, user, task.ID)
 
-	// Check if there's already a running or pending install task for the same app
+	// Check if there's already a running or pending clone task for the same app
 	tm.mu.RLock()
 
 	// Check running tasks
 	for _, runningTask := range tm.runningTasks {
-		if runningTask.Type == InstallApp && runningTask.AppName == appName && runningTask.ID != task.ID {
+		if runningTask.Type == CloneApp && runningTask.AppName == appName && runningTask.ID != task.ID {
 			tm.mu.RUnlock()
-			log.Printf("Installation failed: another install task is already running for app: %s, existing task ID: %s", appName, runningTask.ID)
+			log.Printf("Clone failed: another clone task is already running for app: %s, existing task ID: %s", appName, runningTask.ID)
 			errorResult := map[string]interface{}{
-				"operation":        "install",
+				"operation":        "clone",
 				"app_name":         appName,
 				"user":             user,
-				"error":            "Another installation task is already running for this app",
+				"error":            "Another clone task is already running for this app",
 				"status":           "failed",
 				"existing_task_id": runningTask.ID,
 			}
 			errorJSON, _ := json.Marshal(errorResult)
-			return string(errorJSON), fmt.Errorf("another installation task is already running for app: %s", appName)
+			return string(errorJSON), fmt.Errorf("another clone task is already running for app: %s", appName)
 		}
 	}
 
@@ -85,9 +75,24 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		cfgType = "app" // Default to app type
 	}
 
+	// Get rawAppName and title from metadata
+	rawAppName, ok := task.Metadata["rawAppName"].(string)
+	if !ok || rawAppName == "" {
+		log.Printf("Missing rawAppName in task metadata for task: %s", task.ID)
+		return "", fmt.Errorf("missing rawAppName in task metadata")
+	}
+
+	title, ok := task.Metadata["title"].(string)
+	if !ok || title == "" {
+		log.Printf("Missing title in task metadata for task: %s", task.ID)
+		return "", fmt.Errorf("missing title in task metadata")
+	}
+
+	// Construct URL app name: rawAppName + Title
+	urlAppName := rawAppName + title
+	log.Printf("Clone operation: rawAppName=%s, title=%s, urlAppName=%s for task: %s", rawAppName, title, urlAppName, task.ID)
+
 	// Convert app source to API source parameter
-	// If app source is "local", use "custom" for API
-	// Otherwise, use "market" for API
 	var apiSource string
 	if appSource == "upload" {
 		apiSource = "custom"
@@ -102,18 +107,9 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	// Choose API endpoint based on cfgType
 	var urlStr string
-	// if cfgType == "middleware" {
-	// 	// Use middleware API for middleware type
-	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/install", appServiceHost, appServicePort, appName)
-	// 	log.Printf("Using middleware API for installation: %s", urlStr)
-	// } else if cfgType == "recommend" {
-	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/install", appServiceHost, appServicePort, appName)
-	// 	log.Printf("Using middleware API for installation: %s", urlStr)
-	// } else {
-	// 	// Use regular app API for other types
-	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)
-	log.Printf("Using regular app API for installation: %s", urlStr)
-	// }
+	// Use rawAppName+Title for URL in clone operations
+	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, urlAppName)
+	log.Printf("Using app API for clone installation: %s", urlStr)
 
 	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
 
@@ -132,20 +128,24 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		}
 	}
 
-	installInfo := &InstallOptions{
+	// Create clone options with rawAppName and Title
+	cloneInfo := &CloneOptions{
 		RepoUrl:      getRepoUrl(),
-		Source:       apiSource, // Use converted API source
+		Source:       apiSource,
 		User:         user,
 		MarketSource: appSource,
 		Images:       images,
 		Envs:         envs,
+		RawAppName:   rawAppName, // Pass rawAppName
+		Title:        title,      // Pass title
 	}
-	ms, err := json.Marshal(installInfo)
+
+	ms, err := json.Marshal(cloneInfo)
 	if err != nil {
-		log.Printf("Failed to marshal install info for task %s: %v", task.ID, err)
+		log.Printf("Failed to marshal clone info for task %s: %v", task.ID, err)
 		return "", err
 	}
-	log.Printf("Install request prepared: url=%s, installInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
+	log.Printf("Clone request prepared: url=%s, cloneInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
 
 	headers := map[string]string{
 		"X-Authorization": token,
@@ -156,19 +156,21 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	log.Printf("Sending HTTP request for app installation: task=%s", task.ID)
+	log.Printf("Sending HTTP request for app clone: task=%s", task.ID)
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
-		log.Printf("HTTP request failed for app installation: task=%s, error=%v", task.ID, err)
+		log.Printf("HTTP request failed for app clone: task=%s, error=%v", task.ID, err)
 		// Create detailed error result
 		errorResult := map[string]interface{}{
-			"operation":  "install",
-			"app_name":   appName,
+			"operation":  "clone",
+			"app_name":   urlAppName,
 			"user":       user,
-			"app_source": appSource, // Log original app source
-			"api_source": apiSource, // Log converted API source
-			"cfgType":    cfgType,   // Log cfgType
+			"app_source": appSource,
+			"api_source": apiSource,
+			"cfgType":    cfgType,
 			"url":        urlStr,
+			"rawAppName": rawAppName,
+			"title":      title,
 			"error":      err.Error(),
 			"status":     "failed",
 		}
@@ -176,21 +178,23 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		return string(errorJSON), err
 	}
 
-	log.Printf("HTTP request completed successfully for app installation: task=%s, response_length=%d", task.ID, len(response))
+	log.Printf("HTTP request completed successfully for app clone: task=%s, response_length=%d", task.ID, len(response))
 
-	// Parse response to extract opID if installation is successful
+	// Parse response to extract opID if clone is successful
 	var responseData map[string]interface{}
 	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
 		log.Printf("Failed to parse response JSON for task %s: %v", task.ID, err)
 		// Create error result for JSON parsing failure
 		errorResult := map[string]interface{}{
-			"operation":    "install",
-			"app_name":     appName,
+			"operation":    "clone",
+			"app_name":     urlAppName,
 			"user":         user,
 			"app_source":   appSource,
 			"api_source":   apiSource,
 			"cfgType":      cfgType,
 			"url":          urlStr,
+			"rawAppName":   rawAppName,
+			"title":        title,
 			"raw_response": response,
 			"error":        fmt.Sprintf("Failed to parse response JSON: %v", err),
 			"status":       "failed",
@@ -199,7 +203,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		return string(errorJSON), fmt.Errorf("failed to parse response JSON: %v", err)
 	}
 
-	// Check if installation was successful by checking code field
+	// Check if clone was successful by checking code field
 	if code, ok := responseData["code"].(float64); ok && code == 200 {
 		if data, ok := responseData["data"].(map[string]interface{}); ok {
 			if opID, ok := data["opID"].(string); ok && opID != "" {
@@ -209,13 +213,15 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 				log.Printf("opID not found in response data for task: %s", task.ID)
 				// Return backend response with additional context
 				errorResult := map[string]interface{}{
-					"operation":        "install",
-					"app_name":         appName,
+					"operation":        "clone",
+					"app_name":         urlAppName,
 					"user":             user,
 					"app_source":       appSource,
 					"api_source":       apiSource,
 					"cfgType":          cfgType,
 					"url":              urlStr,
+					"rawAppName":       rawAppName,
+					"title":            title,
 					"backend_response": responseData,
 					"error":            "opID not found in response data",
 					"status":           "failed",
@@ -227,13 +233,15 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 			log.Printf("Data field not found or not a map in response for task: %s", task.ID)
 			// Return backend response with additional context
 			errorResult := map[string]interface{}{
-				"operation":        "install",
-				"app_name":         appName,
+				"operation":        "clone",
+				"app_name":         urlAppName,
 				"user":             user,
 				"app_source":       appSource,
 				"api_source":       apiSource,
 				"cfgType":          cfgType,
 				"url":              urlStr,
+				"rawAppName":       rawAppName,
+				"title":            title,
 				"backend_response": responseData,
 				"error":            "Data field not found or not a map in response",
 				"status":           "failed",
@@ -242,71 +250,42 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 			return string(errorJSON), fmt.Errorf("data field not found or not a map in response")
 		}
 	} else {
-		log.Printf("Installation code is not 200 for task: %s, code: %v", task.ID, code)
+		log.Printf("Clone code is not 200 for task: %s, code: %v", task.ID, code)
 		// Return backend response with additional context
 		errorResult := map[string]interface{}{
-			"operation":        "install",
-			"app_name":         appName,
+			"operation":        "clone",
+			"app_name":         urlAppName,
 			"user":             user,
 			"app_source":       appSource,
 			"api_source":       apiSource,
 			"cfgType":          cfgType,
 			"url":              urlStr,
+			"rawAppName":       rawAppName,
+			"title":            title,
 			"backend_response": responseData,
-			"error":            fmt.Sprintf("Installation failed with code: %v", code),
+			"error":            fmt.Sprintf("Clone failed with code: %v", code),
 			"status":           "failed",
 		}
 		errorJSON, _ := json.Marshal(errorResult)
-		return string(errorJSON), fmt.Errorf("installation failed with code: %v", code)
+		return string(errorJSON), fmt.Errorf("clone failed with code: %v", code)
 	}
 
 	// Return backend response with additional context on success
 	successResult := map[string]interface{}{
-		"operation":        "install",
-		"app_name":         appName,
+		"operation":        "clone",
+		"app_name":         urlAppName,
 		"user":             user,
 		"app_source":       appSource,
 		"api_source":       apiSource,
 		"cfgType":          cfgType,
 		"url":              urlStr,
+		"rawAppName":       rawAppName,
+		"title":            title,
 		"backend_response": responseData,
 		"opID":             task.OpID,
 		"status":           "success",
 	}
 	successJSON, _ := json.Marshal(successResult)
-	log.Printf("App installation completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
+	log.Printf("App clone completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
 	return string(successJSON), nil
-}
-
-// getRepoUrl returns the repository URL
-func getRepoUrl() string {
-	repoServiceHost := os.Getenv("REPO_URL_HOST")
-	repoStoreServicePort := os.Getenv("REPO_URL_PORT")
-	return fmt.Sprintf("http://%s:%s/", repoServiceHost, repoStoreServicePort)
-}
-
-// sendHttpRequest sends an HTTP request with the given token
-func sendHttpRequest(method, urlStr string, headers map[string]string, body io.Reader) (string, error) {
-	req, err := http.NewRequest(method, urlStr, body)
-	if err != nil {
-		return "", err
-	}
-
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(bodyBytes), nil
 }

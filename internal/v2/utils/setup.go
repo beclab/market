@@ -504,7 +504,7 @@ func createMiddlewareStateLatestData(middleware struct {
 	// })
 	// data["entranceStatuses"] = entrances
 
-	return types.NewAppStateLatestData(data, middleware.User, GetAppInfoFromDownloadRecord)
+	return types.NewAppStateLatestData(data, middleware.User, GetAppInfoLastInstalled)
 }
 
 // FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service
@@ -640,7 +640,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	}
 	data["entranceStatuses"] = entrances
 
-	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppInfoFromDownloadRecord)
+	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppInfoLastInstalled)
 }
 
 // DependencyServiceResponse represents the response structure from dependency service

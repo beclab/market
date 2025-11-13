@@ -938,9 +938,30 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 	version := ""
 	source := ""
 	if userID != "" && app.Spec.Name != "" {
-		if versionFromRecord, sourceFromRecord, err := utils.GetAppInfoFromDownloadRecord(userID, app.Spec.Name); err == nil && versionFromRecord != "" {
+		if versionFromRecord, sourceFromRecord, err := utils.GetAppInfoLastInstalled(userID, app.Spec.Name); err == nil && versionFromRecord != "" {
 			version = versionFromRecord
 			source = sourceFromRecord
+		}
+	}
+
+	// Try to get rawAppName from cache if available
+	rawAppName := ""
+	if scc.cacheManager != nil && userID != "" && app.Spec.Name != "" {
+		userData := scc.cacheManager.GetUserData(userID)
+		if userData != nil {
+			for _, sourceData := range userData.Sources {
+				for _, cachedAppState := range sourceData.AppStateLatest {
+					if cachedAppState != nil && cachedAppState.Status.Name == app.Spec.Name {
+						rawAppName = cachedAppState.Status.RawAppName
+						if rawAppName != "" {
+							break
+						}
+					}
+				}
+				if rawAppName != "" {
+					break
+				}
+			}
 		}
 	}
 
@@ -949,6 +970,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 		Version: version,
 		Status: struct {
 			Name               string `json:"name"`
+			RawAppName         string `json:"rawAppName"`
 			State              string `json:"state"`
 			UpdateTime         string `json:"updateTime"`
 			StatusTime         string `json:"statusTime"`
@@ -965,6 +987,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			} `json:"entranceStatuses"`
 		}{
 			Name:               app.Spec.Name,
+			RawAppName:         rawAppName,
 			State:              app.Status.State,
 			UpdateTime:         app.Status.UpdateTime,
 			StatusTime:         app.Status.StatusTime,
@@ -985,6 +1008,11 @@ func (scc *StatusCorrectionChecker) createStateDataFromAppStateData(appStateData
 		"lastTransitionTime": appStateData.Status.LastTransitionTime,
 		"progress":           appStateData.Status.Progress,
 	}
+
+	// Get rawAppName from AppStateLatestData
+	rawAppName := appStateData.Status.RawAppName
+	// Add rawAppName to stateData
+	stateData["rawAppName"] = rawAppName
 
 	// Convert entrance statuses to interface{} slice
 	entranceStatuses := make([]interface{}, len(appStateData.Status.EntranceStatuses))
