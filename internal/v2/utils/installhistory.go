@@ -199,52 +199,11 @@ func GetAppInfoLastInstalled(userID, appName string) (string, string, error) {
 						source = s
 					}
 
-					// For CloneApp, get version from the installed original app's state
-					// Clone app should use the same version as the installed original app
-					if taskType == 5 { // CloneApp = 5
-						if rawAppName, ok := metadataMap["rawAppName"].(string); ok && rawAppName != "" {
-							// Try to get version from original app's state in cache first
-							// Use the source from metadata if available, otherwise skip cache lookup
-							if source != "" {
-								stateVersion, found := getVersionFromCacheState(userID, source, rawAppName)
-								if found && stateVersion != "" {
-									// Use version from state (installed original app's version)
-									version = stateVersion
-								}
-							}
-
-							// If version is still empty, try to get from original app's task record
-							if version == "" || source == "" {
-								originalQuery := `
-								SELECT metadata
-								FROM task_records
-								WHERE app_name = $1 
-									AND user_account = $2 
-									AND status = $3
-									AND type IN ($4, $5, $6)
-								ORDER BY completed_at DESC NULLS LAST, created_at DESC
-								LIMIT 1
-								`
-								var originalMetadataStr string
-								originalErr := db.QueryRow(originalQuery, rawAppName, userID, 3, 1, 4, 5).Scan(&originalMetadataStr)
-								if originalErr == nil && originalMetadataStr != "" {
-									var originalMetadataMap map[string]interface{}
-									if err := json.Unmarshal([]byte(originalMetadataStr), &originalMetadataMap); err == nil {
-										if version == "" {
-											if v, ok := originalMetadataMap["version"].(string); ok && v != "" {
-												version = v
-											}
-										}
-										if source == "" {
-											if s, ok := originalMetadataMap["source"].(string); ok && s != "" {
-												source = s
-											}
-										}
-									}
-								}
-							}
-						}
-					}
+					// For CloneApp, version should already be stored in metadata when task was created
+					// The version was set from the installed original app's state at clone time
+					// So we just use the version from metadata directly, no need to query state again
+					// This ensures that even if the original app is upgraded later, the clone app's version
+					// remains the version it was cloned with
 
 					// If we have both version and source, return them
 					if version != "" && source != "" {
