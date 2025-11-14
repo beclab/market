@@ -378,6 +378,7 @@ type TokenInfo struct {
 	TokenDecimals int    `json:"token_decimals"`           // Token decimals
 	TokenContract string `json:"token_contract,omitempty"` // Token contract address
 	TokenAmount   string `json:"token_amount,omitempty"`   // Token amount
+	TokenIcon     string `json:"token_icon,omitempty"`     // Token icon URL
 	ReceiveWallet string `json:"receive_wallet,omitempty"` // Developer's receive wallet address
 }
 

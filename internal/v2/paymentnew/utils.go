@@ -3,6 +3,7 @@ package paymentnew
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -696,17 +697,41 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 										if prices, ok := product["price"].([]interface{}); ok {
 											for _, pr := range prices {
 												if price, ok := pr.(map[string]interface{}); ok {
+													priceChain, _ := price["chain"].(string)
+													log.Printf("Checking price entry: chain=%s, expected=%s", priceChain, priceEntry.Chain)
 													if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
+														log.Printf("Chain matched! Extracting token info from price entry: %+v", price)
+														// Extract token_decimals (handle multiple number types from JSON)
 														if decimals, ok := price["token_decimals"].(float64); ok {
 															tokenInfo.TokenDecimals = int(decimals)
+															log.Printf("Extracted token_decimals as float64: %f -> %d", decimals, tokenInfo.TokenDecimals)
+														} else if decimals, ok := price["token_decimals"].(int); ok {
+															tokenInfo.TokenDecimals = decimals
+															log.Printf("Extracted token_decimals as int: %d", tokenInfo.TokenDecimals)
+														} else if decimals, ok := price["token_decimals"].(int64); ok {
+															tokenInfo.TokenDecimals = int(decimals)
+															log.Printf("Extracted token_decimals as int64: %d -> %d", decimals, tokenInfo.TokenDecimals)
+														} else {
+															log.Printf("WARNING: token_decimals not found or wrong type in price entry, available keys: %v", getMapKeys(price))
 														}
 														if contract, ok := price["token_contract"].(string); ok {
 															tokenInfo.TokenContract = contract
+															log.Printf("Extracted token_contract: %s", contract)
+														} else {
+															log.Printf("WARNING: token_contract not found in price entry")
 														}
 														if amount, ok := price["token_amount"].(string); ok {
 															tokenInfo.TokenAmount = amount
+															log.Printf("Extracted token_amount: %s", amount)
 														}
-														log.Printf("Extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s", productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount)
+														if icon, ok := price["token_icon"].(string); ok {
+															tokenInfo.TokenIcon = icon
+															log.Printf("Extracted token_icon: %s", icon)
+														} else {
+															log.Printf("WARNING: token_icon not found in price entry")
+														}
+														log.Printf("Final extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
+															productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount, tokenInfo.TokenIcon)
 														break
 													}
 												}
@@ -749,17 +774,41 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 												if prices, ok := prod["price"].([]interface{}); ok {
 													for _, pr := range prices {
 														if price, ok := pr.(map[string]interface{}); ok {
+															priceChain, _ := price["chain"].(string)
+															log.Printf("Checking price entry (Products): chain=%s, expected=%s", priceChain, priceEntry.Chain)
 															if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
+																log.Printf("Chain matched! Extracting token info from price entry (Products): %+v", price)
+																// Extract token_decimals (handle multiple number types from JSON)
 																if decimals, ok := price["token_decimals"].(float64); ok {
 																	tokenInfo.TokenDecimals = int(decimals)
+																	log.Printf("Extracted token_decimals as float64: %f -> %d", decimals, tokenInfo.TokenDecimals)
+																} else if decimals, ok := price["token_decimals"].(int); ok {
+																	tokenInfo.TokenDecimals = decimals
+																	log.Printf("Extracted token_decimals as int: %d", tokenInfo.TokenDecimals)
+																} else if decimals, ok := price["token_decimals"].(int64); ok {
+																	tokenInfo.TokenDecimals = int(decimals)
+																	log.Printf("Extracted token_decimals as int64: %d -> %d", decimals, tokenInfo.TokenDecimals)
+																} else {
+																	log.Printf("WARNING: token_decimals not found or wrong type in price entry, available keys: %v", getMapKeys(price))
 																}
 																if contract, ok := price["token_contract"].(string); ok {
 																	tokenInfo.TokenContract = contract
+																	log.Printf("Extracted token_contract: %s", contract)
+																} else {
+																	log.Printf("WARNING: token_contract not found in price entry")
 																}
 																if amount, ok := price["token_amount"].(string); ok {
 																	tokenInfo.TokenAmount = amount
+																	log.Printf("Extracted token_amount: %s", amount)
 																}
-																log.Printf("Extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s", productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount)
+																if icon, ok := price["token_icon"].(string); ok {
+																	tokenInfo.TokenIcon = icon
+																	log.Printf("Extracted token_icon: %s", icon)
+																} else {
+																	log.Printf("WARNING: token_icon not found in price entry")
+																}
+																log.Printf("Final extracted token info (Products) for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
+																	productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount, tokenInfo.TokenIcon)
 																break
 															}
 														}
@@ -819,18 +868,24 @@ func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, us
 			log.Printf("createFrontendPaymentData: Successfully fetched developer info, RSAPublicKeys count=%d", len(apiResp.Data.RSAPublicKeys))
 			// Extract RSA public key (use current key if available)
 			if len(apiResp.Data.RSAPublicKeys) > 0 {
+				var rawKey string
 				for _, key := range apiResp.Data.RSAPublicKeys {
 					if key.IsCurrent {
 						// Remove quotes if present
-						paymentData.RSAPublicKey = strings.Trim(key.Key, "\"")
-						log.Printf("createFrontendPaymentData: Found current RSA public key, length=%d", len(paymentData.RSAPublicKey))
+						rawKey = strings.Trim(key.Key, "\"")
+						log.Printf("createFrontendPaymentData: Found current RSA public key, length=%d", len(rawKey))
 						break
 					}
 				}
 				// If no current key found, use the first one
-				if paymentData.RSAPublicKey == "" && len(apiResp.Data.RSAPublicKeys) > 0 {
-					paymentData.RSAPublicKey = strings.Trim(apiResp.Data.RSAPublicKeys[0].Key, "\"")
-					log.Printf("createFrontendPaymentData: Using first RSA public key (no current key), length=%d", len(paymentData.RSAPublicKey))
+				if rawKey == "" && len(apiResp.Data.RSAPublicKeys) > 0 {
+					rawKey = strings.Trim(apiResp.Data.RSAPublicKeys[0].Key, "\"")
+					log.Printf("createFrontendPaymentData: Using first RSA public key (no current key), length=%d", len(rawKey))
+				}
+				// Convert RSA key from hex to PEM format
+				if rawKey != "" {
+					paymentData.RSAPublicKey = convertRSAKeyToPEM(rawKey)
+					log.Printf("createFrontendPaymentData: Converted RSA key to PEM format, length=%d", len(paymentData.RSAPublicKey))
 				}
 			} else {
 				log.Printf("createFrontendPaymentData: No RSA public keys found in API response")
@@ -845,6 +900,50 @@ func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, us
 	}
 
 	return paymentData
+}
+
+// getMapKeys returns the keys of a map as a slice of strings (helper function)
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// convertRSAKeyToPEM converts RSA public key from hex format (0x...) to PEM format
+func convertRSAKeyToPEM(hexKey string) string {
+	if hexKey == "" || hexKey == "0x" {
+		return ""
+	}
+
+	// Remove 0x prefix if present
+	hexKey = strings.TrimPrefix(hexKey, "0x")
+	hexKey = strings.TrimSpace(hexKey)
+
+	// Decode hex string to bytes
+	keyBytes, err := hex.DecodeString(hexKey)
+	if err != nil {
+		log.Printf("convertRSAKeyToPEM: Failed to decode hex key: %v", err)
+		return hexKey // Return original if conversion fails
+	}
+
+	// Encode to base64
+	base64Key := base64.StdEncoding.EncodeToString(keyBytes)
+
+	// Format as PEM (64 characters per line)
+	var pemLines []string
+	pemLines = append(pemLines, "-----BEGIN RSA PUBLIC KEY-----")
+	for i := 0; i < len(base64Key); i += 64 {
+		end := i + 64
+		if end > len(base64Key) {
+			end = len(base64Key)
+		}
+		pemLines = append(pemLines, base64Key[i:end])
+	}
+	pemLines = append(pemLines, "-----END RSA PUBLIC KEY-----")
+
+	return strings.Join(pemLines, "\n")
 }
 
 // checkIfAppIsPaid checks if an app is a paid app by examining its Price configuration
