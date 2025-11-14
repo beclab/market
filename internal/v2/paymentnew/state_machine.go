@@ -9,6 +9,8 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/go-resty/resty/v2"
+
 	"market/internal/v2/types"
 )
 
@@ -203,6 +205,7 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 					newState.ProductID,
 					newState.Developer.DID,
 					effectiveHost,
+					nil, // appInfo not available in state machine context
 				)
 
 				_ = psm.updateState(newState.GetKey(), func(s *PaymentState) error {
@@ -784,7 +787,7 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 
 // BuildPurchaseResponse builds API-facing response content based on current state
 // Only constructs response payload; it does not introduce new side effects.
-func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost string, state *PaymentState) (map[string]interface{}, error) {
+func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost string, state *PaymentState, appInfo *types.AppInfo) (map[string]interface{}, error) {
 	if state == nil {
 		return nil, fmt.Errorf("state is nil")
 	}
@@ -796,6 +799,22 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}, nil
 	}
 
+	// Create HTTP client for API calls
+	httpClient := resty.New()
+	httpClient.SetTimeout(10 * time.Second)
+	ctx := context.Background()
+
+	// Extract developer name and price config
+	var developerName string
+	var priceConfig *types.PriceConfig
+	if appInfo != nil {
+		priceConfig = appInfo.Price
+		developerName = getDeveloperNameFromPrice(appInfo)
+	} else {
+		// Fallback to state's developer name
+		developerName = state.DeveloperName
+	}
+
 	// 2) Signed -> return payment data for frontend transfer
 	if state.SignatureStatus == SignatureRequiredAndSigned {
 		developerDID := state.Developer.DID
@@ -803,7 +822,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
 		}
-		paymentData := createFrontendPaymentData(userDID, developerDID, state.ProductID)
+		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName)
 		return map[string]interface{}{
 			"status":       "payment_required",
 			"payment_data": paymentData,
@@ -818,7 +837,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
 		}
-		paymentData := createFrontendPaymentData(userDID, developerDID, state.ProductID)
+		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName)
 		return map[string]interface{}{
 			"status":       "payment_required",
 			"payment_data": paymentData,

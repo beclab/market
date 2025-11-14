@@ -173,7 +173,7 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	}
 
 	// Delegate response building to state machine for consistency
-	return globalStateMachine.buildPurchaseResponse(userID, xForwardedHost, latest)
+	return globalStateMachine.buildPurchaseResponse(userID, xForwardedHost, latest, appInfo)
 }
 
 // GetPaymentStatus returns payment status inferred from PaymentState directly
@@ -334,6 +334,7 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 			state.ProductID,
 			state.Developer.DID,
 			xForwardedHost,
+			nil, // appInfo not available in SubmitSignature context
 		); err != nil {
 			log.Printf("Failed to notify frontend payment required: %v", err)
 			return fmt.Errorf("failed to notify frontend payment required: %w", err)
@@ -466,7 +467,7 @@ func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInf
 		}
 	}
 
-	return globalStateMachine.buildPurchaseResponse(userID, xForwardedHost, latest)
+	return globalStateMachine.buildPurchaseResponse(userID, xForwardedHost, latest, appInfo)
 }
 
 // StartPaymentPolling starts polling for VC after payment completion

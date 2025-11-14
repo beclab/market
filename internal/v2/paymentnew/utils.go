@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -497,7 +498,7 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 }
 
 // notifyFrontendPaymentRequired notifies market frontend that payment is required (internal)
-func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID, appName, sourceID, productID, developerDID, xForwardedHost string) error {
+func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID, appName, sourceID, productID, developerDID, xForwardedHost string, appInfo *types.AppInfo) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
 	}
@@ -508,7 +509,20 @@ func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID
 		return fmt.Errorf("failed to get user DID: %w", err)
 	}
 
-	paymentData := createFrontendPaymentData(userDID, developerDID, productID)
+	// Create HTTP client for API calls
+	httpClient := resty.New()
+	httpClient.SetTimeout(10 * time.Second)
+	ctx := context.Background()
+
+	// Extract developer name and price config
+	var developerName string
+	var priceConfig *types.PriceConfig
+	if appInfo != nil {
+		priceConfig = appInfo.Price
+		developerName = getDeveloperNameFromPrice(appInfo)
+	}
+
+	paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, productID, priceConfig, developerName)
 
 	// Create notification with payment data
 	update := types.MarketSystemUpdate{
@@ -551,9 +565,193 @@ func notifyFrontendPurchaseCompleted(dataSender DataSenderInterface, userID, app
 	return dataSender.SendMarketSystemUpdate(update)
 }
 
-// createFrontendPaymentData creates frontend payment data (internal)
-func createFrontendPaymentData(userDID, developerDID, productID string) *types.FrontendPaymentData {
-	return &types.FrontendPaymentData{
+// DeveloperAPIResponse represents the response from appstore-git-bot developer API
+type DeveloperAPIResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		Apps          map[string]interface{} `json:"apps"`
+		Developer     string                 `json:"developer"`
+		RSAPublicKeys []struct {
+			IsCurrent bool   `json:"isCurrent"`
+			Key       string `json:"key"`
+		} `json:"rsa_public_keys"`
+	} `json:"data"`
+}
+
+// fetchDeveloperInfoFromAPI fetches developer information from appstore-git-bot API (internal)
+func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, developerName string) (*DeveloperAPIResponse, error) {
+	if developerName == "" {
+		return nil, errors.New("developer name is empty")
+	}
+	if httpClient == nil {
+		httpClient = resty.New()
+	}
+	httpClient.SetTimeout(10 * time.Second)
+
+	// Get appstore base URL from environment or use default
+	appstoreBase := os.Getenv("APPSTORE_BASE_URL")
+	if appstoreBase == "" {
+		// Try to get from SystemRemoteService
+		if base := getSystemRemoteServiceBase(); base != "" {
+			// Extract base domain from SystemRemoteService
+			appstoreBase = base
+		}
+	}
+	if appstoreBase == "" {
+		appstoreBase = "https://appstore-server-prod.bttcdn.com"
+		log.Printf("Using default appstore base URL: %s", appstoreBase)
+	}
+
+	// Build URL: {appstoreBase}/appstore-git-bot/v1/developer/{developer}
+	appstoreBase = strings.TrimRight(appstoreBase, "/")
+	escaped := url.PathEscape(developerName)
+	endpoint := fmt.Sprintf("%s/appstore-git-bot/v1/developer/%s", appstoreBase, escaped)
+
+	log.Printf("Fetching developer info from API: %s", endpoint)
+
+	resp, err := httpClient.R().
+		SetContext(ctx).
+		Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call developer API: %w", err)
+	}
+	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+		return nil, fmt.Errorf("developer API returned non-2xx status: %d", resp.StatusCode())
+	}
+
+	var apiResp DeveloperAPIResponse
+	if err := json.Unmarshal(resp.Body(), &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse developer API response: %w", err)
+	}
+	if apiResp.Code != 0 {
+		return nil, fmt.Errorf("developer API returned error code: %d, message: %s", apiResp.Code, apiResp.Message)
+	}
+
+	return &apiResp, nil
+}
+
+// extractTokenInfoFromPriceConfig extracts token information from PriceConfig and API response
+func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *DeveloperAPIResponse, productID string) []types.TokenInfo {
+	if priceConfig == nil {
+		return nil
+	}
+
+	var tokenInfos []types.TokenInfo
+
+	// Extract from Paid section
+	if priceConfig.Paid != nil && len(priceConfig.Paid.Price) > 0 {
+		for _, priceEntry := range priceConfig.Paid.Price {
+			tokenInfo := types.TokenInfo{
+				Chain:         priceEntry.Chain,
+				TokenSymbol:   priceEntry.TokenSymbol,
+				ReceiveWallet: priceEntry.ReceiveWallet,
+			}
+
+			// Try to get token decimals from API response
+			if apiResp != nil && apiResp.Data.Apps != nil {
+				// Iterate through all apps in the response (apps is a map with dynamic keys like "app_name")
+				for appKey, appDataInterface := range apiResp.Data.Apps {
+					if appData, ok := appDataInterface.(map[string]interface{}); ok {
+						if products, ok := appData["products"].([]interface{}); ok {
+							for _, p := range products {
+								if product, ok := p.(map[string]interface{}); ok {
+									if pid, ok := product["product_id"].(string); ok && pid == productID {
+										if prices, ok := product["price"].([]interface{}); ok {
+											for _, pr := range prices {
+												if price, ok := pr.(map[string]interface{}); ok {
+													if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
+														if decimals, ok := price["token_decimals"].(float64); ok {
+															tokenInfo.TokenDecimals = int(decimals)
+														}
+														if contract, ok := price["token_contract"].(string); ok {
+															tokenInfo.TokenContract = contract
+														}
+														if amount, ok := price["token_amount"].(string); ok {
+															tokenInfo.TokenAmount = amount
+														}
+														log.Printf("Extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s", productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount)
+														break
+													}
+												}
+											}
+										}
+										log.Printf("Found product %s in app %s", productID, appKey)
+										break
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			tokenInfos = append(tokenInfos, tokenInfo)
+		}
+	}
+
+	// Extract from Products section
+	if len(priceConfig.Products) > 0 {
+		for _, product := range priceConfig.Products {
+			if product.ProductID == productID && len(product.Price) > 0 {
+				for _, priceEntry := range product.Price {
+					tokenInfo := types.TokenInfo{
+						Chain:         priceEntry.Chain,
+						TokenSymbol:   priceEntry.TokenSymbol,
+						ReceiveWallet: priceEntry.ReceiveWallet,
+					}
+
+					// Try to get token decimals from API response
+					if apiResp != nil && apiResp.Data.Apps != nil {
+						// Iterate through all apps in the response (apps is a map with dynamic keys like "app_name")
+						for appKey, appDataInterface := range apiResp.Data.Apps {
+							if appData, ok := appDataInterface.(map[string]interface{}); ok {
+								if products, ok := appData["products"].([]interface{}); ok {
+									for _, p := range products {
+										if prod, ok := p.(map[string]interface{}); ok {
+											if pid, ok := prod["product_id"].(string); ok && pid == productID {
+												if prices, ok := prod["price"].([]interface{}); ok {
+													for _, pr := range prices {
+														if price, ok := pr.(map[string]interface{}); ok {
+															if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
+																if decimals, ok := price["token_decimals"].(float64); ok {
+																	tokenInfo.TokenDecimals = int(decimals)
+																}
+																if contract, ok := price["token_contract"].(string); ok {
+																	tokenInfo.TokenContract = contract
+																}
+																if amount, ok := price["token_amount"].(string); ok {
+																	tokenInfo.TokenAmount = amount
+																}
+																log.Printf("Extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s", productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount)
+																break
+															}
+														}
+													}
+												}
+												log.Printf("Found product %s in app %s", productID, appKey)
+												break
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+
+					tokenInfos = append(tokenInfos, tokenInfo)
+				}
+				break
+			}
+		}
+	}
+
+	return tokenInfos
+}
+
+// createFrontendPaymentData creates frontend payment data with enhanced information (internal)
+func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, userDID, developerDID, productID string, priceConfig *types.PriceConfig, developerName string) *types.FrontendPaymentData {
+	paymentData := &types.FrontendPaymentData{
 		From: userDID,
 		To:   developerDID,
 		Product: []struct {
@@ -561,7 +759,36 @@ func createFrontendPaymentData(userDID, developerDID, productID string) *types.F
 		}{
 			{ProductID: productID},
 		},
+		PriceConfig: priceConfig,
 	}
+
+	// Fetch developer info from API to get RSA public key and token info
+	if developerName != "" && httpClient != nil {
+		apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName)
+		if err != nil {
+			log.Printf("Failed to fetch developer info from API: %v, continuing without RSA key and token info", err)
+		} else {
+			// Extract RSA public key (use current key if available)
+			if len(apiResp.Data.RSAPublicKeys) > 0 {
+				for _, key := range apiResp.Data.RSAPublicKeys {
+					if key.IsCurrent {
+						// Remove quotes if present
+						paymentData.RSAPublicKey = strings.Trim(key.Key, "\"")
+						break
+					}
+				}
+				// If no current key found, use the first one
+				if paymentData.RSAPublicKey == "" && len(apiResp.Data.RSAPublicKeys) > 0 {
+					paymentData.RSAPublicKey = strings.Trim(apiResp.Data.RSAPublicKeys[0].Key, "\"")
+				}
+			}
+
+			// Extract token info from price config and API response
+			paymentData.TokenInfo = extractTokenInfoFromPriceConfig(priceConfig, apiResp, productID)
+		}
+	}
+
+	return paymentData
 }
 
 // checkIfAppIsPaid checks if an app is a paid app by examining its Price configuration

@@ -366,6 +366,19 @@ type FrontendPaymentData struct {
 	Product []struct {
 		ProductID string `json:"product_id"`
 	} `json:"product"` // Product information
+	RSAPublicKey string       `json:"rsa_public_key,omitempty"` // Developer's RSA public key
+	PriceConfig  *PriceConfig `json:"price_config,omitempty"`   // Original payment information from PriceConfig
+	TokenInfo    []TokenInfo  `json:"token_info,omitempty"`     // Token information including decimals
+}
+
+// TokenInfo represents token information for payment
+type TokenInfo struct {
+	Chain         string `json:"chain"`                    // Chain name (e.g., "optimism", "eth")
+	TokenSymbol   string `json:"token_symbol"`             // Token symbol (e.g., "USDC", "USDT")
+	TokenDecimals int    `json:"token_decimals"`           // Token decimals
+	TokenContract string `json:"token_contract,omitempty"` // Token contract address
+	TokenAmount   string `json:"token_amount,omitempty"`   // Token amount
+	ReceiveWallet string `json:"receive_wallet,omitempty"` // Developer's receive wallet address
 }
 
 // AppsInfoRequest represents the request body for applications/info API
