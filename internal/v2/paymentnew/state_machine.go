@@ -836,7 +836,20 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}, nil
 	}
 
-	// Default syncing
+	// Default syncing - log all state information for debugging
+	log.Printf("buildPurchaseResponse: returning syncing status for user=%s, app=%s, product=%s", userID, state.AppID, state.ProductID)
+	log.Printf("buildPurchaseResponse: PaymentNeed=%s, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
+		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus)
+	log.Printf("buildPurchaseResponse: JWS present=%v, VC present=%v, TxHash=%s, SystemChainID=%d",
+		state.JWS != "", state.VC != "", state.TxHash, state.SystemChainID)
+	log.Printf("buildPurchaseResponse: XForwardedHost=%s, FrontendData length=%d, CreatedAt=%v, UpdatedAt=%v",
+		state.XForwardedHost, len(state.FrontendData), state.CreatedAt, state.UpdatedAt)
+	log.Printf("buildPurchaseResponse: DeveloperName=%s, SourceID=%s, AppName=%s",
+		state.DeveloperName, state.SourceID, state.AppName)
+	if state.Developer.DID != "" {
+		log.Printf("buildPurchaseResponse: Developer.DID=%s", state.Developer.DID)
+	}
+
 	return map[string]interface{}{
 		"status":  "syncing",
 		"message": "synchronizing payment state",
