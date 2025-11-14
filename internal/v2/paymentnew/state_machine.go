@@ -810,6 +810,21 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}, nil
 	}
 
+	// 2.5) Has JWS and payment notification sent -> return payment data for frontend transfer
+	// This handles cases where signature status might be in error state but JWS exists and payment notification was sent
+	if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent {
+		developerDID := state.Developer.DID
+		userDID, err := getUserDID(userID, xForwardedHost)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user DID: %w", err)
+		}
+		paymentData := createFrontendPaymentData(userDID, developerDID, state.ProductID)
+		return map[string]interface{}{
+			"status":       "payment_required",
+			"payment_data": paymentData,
+		}, nil
+	}
+
 	// 3) Frontend has completed payment
 	if state.PaymentStatus == PaymentFrontendStarted {
 		response := map[string]interface{}{
