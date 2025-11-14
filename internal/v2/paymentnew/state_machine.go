@@ -810,9 +810,11 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 	if appInfo != nil {
 		priceConfig = appInfo.Price
 		developerName = getDeveloperNameFromPrice(appInfo)
+		log.Printf("buildPurchaseResponse: Extracted developerName=%s from appInfo", developerName)
 	} else {
 		// Fallback to state's developer name
 		developerName = state.DeveloperName
+		log.Printf("buildPurchaseResponse: Using developerName=%s from state (appInfo is nil)", developerName)
 	}
 
 	// 2) Signed -> return payment data for frontend transfer
@@ -822,7 +824,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
 		}
-		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName)
+		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, xForwardedHost)
 		return map[string]interface{}{
 			"status":       "payment_required",
 			"payment_data": paymentData,
@@ -837,7 +839,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
 		}
-		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName)
+		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, xForwardedHost)
 		return map[string]interface{}{
 			"status":       "payment_required",
 			"payment_data": paymentData,

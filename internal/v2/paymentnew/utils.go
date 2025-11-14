@@ -522,7 +522,7 @@ func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID
 		developerName = getDeveloperNameFromPrice(appInfo)
 	}
 
-	paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, productID, priceConfig, developerName)
+	paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, productID, priceConfig, developerName, xForwardedHost)
 
 	// Create notification with payment data
 	update := types.MarketSystemUpdate{
@@ -580,7 +580,7 @@ type DeveloperAPIResponse struct {
 }
 
 // fetchDeveloperInfoFromAPI fetches developer information from appstore-git-bot API (internal)
-func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, developerName string) (*DeveloperAPIResponse, error) {
+func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, developerName string, xForwardedHost string) (*DeveloperAPIResponse, error) {
 	if developerName == "" {
 		return nil, errors.New("developer name is empty")
 	}
@@ -589,18 +589,28 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 	}
 	httpClient.SetTimeout(10 * time.Second)
 
-	// Get appstore base URL from environment or use default
-	appstoreBase := os.Getenv("APPSTORE_BASE_URL")
-	if appstoreBase == "" {
-		// Try to get from SystemRemoteService
-		if base := getSystemRemoteServiceBase(); base != "" {
-			// Extract base domain from SystemRemoteService
-			appstoreBase = base
+	// Get appstore base URL - prefer X-Forwarded-Host, then environment, then SystemRemoteService, then default
+	var appstoreBase string
+	if xForwardedHost != "" {
+		// Use X-Forwarded-Host to build API URL (e.g., market.saidevgp03.olares.cn)
+		appstoreBase = xForwardedHost
+		if !strings.HasPrefix(appstoreBase, "http://") && !strings.HasPrefix(appstoreBase, "https://") {
+			appstoreBase = "https://" + appstoreBase
 		}
-	}
-	if appstoreBase == "" {
-		appstoreBase = "https://appstore-server-prod.bttcdn.com"
-		log.Printf("Using default appstore base URL: %s", appstoreBase)
+		log.Printf("Using X-Forwarded-Host for appstore base URL: %s", appstoreBase)
+	} else {
+		appstoreBase = os.Getenv("APPSTORE_BASE_URL")
+		if appstoreBase == "" {
+			// Try to get from SystemRemoteService
+			if base := getSystemRemoteServiceBase(); base != "" {
+				// Extract base domain from SystemRemoteService
+				appstoreBase = base
+			}
+		}
+		if appstoreBase == "" {
+			appstoreBase = "https://appstore-server-prod.bttcdn.com"
+			log.Printf("Using default appstore base URL: %s", appstoreBase)
+		}
 	}
 
 	// Build URL: {appstoreBase}/appstore-git-bot/v1/developer/{developer}
@@ -750,7 +760,7 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 }
 
 // createFrontendPaymentData creates frontend payment data with enhanced information (internal)
-func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, userDID, developerDID, productID string, priceConfig *types.PriceConfig, developerName string) *types.FrontendPaymentData {
+func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, userDID, developerDID, productID string, priceConfig *types.PriceConfig, developerName string, xForwardedHost string) *types.FrontendPaymentData {
 	paymentData := &types.FrontendPaymentData{
 		From: userDID,
 		To:   developerDID,
@@ -762,30 +772,50 @@ func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, us
 		PriceConfig: priceConfig,
 	}
 
+	log.Printf("createFrontendPaymentData: developerName=%s, httpClient=%v, priceConfig=%v", developerName, httpClient != nil, priceConfig != nil)
+
 	// Fetch developer info from API to get RSA public key and token info
-	if developerName != "" && httpClient != nil {
-		apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName)
+	if developerName != "" {
+		if httpClient == nil {
+			httpClient = resty.New()
+			httpClient.SetTimeout(10 * time.Second)
+			log.Printf("createFrontendPaymentData: Created new HTTP client")
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		log.Printf("createFrontendPaymentData: Calling fetchDeveloperInfoFromAPI for developer=%s, xForwardedHost=%s", developerName, xForwardedHost)
+		apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName, xForwardedHost)
 		if err != nil {
-			log.Printf("Failed to fetch developer info from API: %v, continuing without RSA key and token info", err)
+			log.Printf("createFrontendPaymentData: Failed to fetch developer info from API: %v, continuing without RSA key and token info", err)
 		} else {
+			log.Printf("createFrontendPaymentData: Successfully fetched developer info, RSAPublicKeys count=%d", len(apiResp.Data.RSAPublicKeys))
 			// Extract RSA public key (use current key if available)
 			if len(apiResp.Data.RSAPublicKeys) > 0 {
 				for _, key := range apiResp.Data.RSAPublicKeys {
 					if key.IsCurrent {
 						// Remove quotes if present
 						paymentData.RSAPublicKey = strings.Trim(key.Key, "\"")
+						log.Printf("createFrontendPaymentData: Found current RSA public key, length=%d", len(paymentData.RSAPublicKey))
 						break
 					}
 				}
 				// If no current key found, use the first one
 				if paymentData.RSAPublicKey == "" && len(apiResp.Data.RSAPublicKeys) > 0 {
 					paymentData.RSAPublicKey = strings.Trim(apiResp.Data.RSAPublicKeys[0].Key, "\"")
+					log.Printf("createFrontendPaymentData: Using first RSA public key (no current key), length=%d", len(paymentData.RSAPublicKey))
 				}
+			} else {
+				log.Printf("createFrontendPaymentData: No RSA public keys found in API response")
 			}
 
 			// Extract token info from price config and API response
 			paymentData.TokenInfo = extractTokenInfoFromPriceConfig(priceConfig, apiResp, productID)
+			log.Printf("createFrontendPaymentData: Extracted token info count=%d", len(paymentData.TokenInfo))
 		}
+	} else {
+		log.Printf("createFrontendPaymentData: developerName is empty, skipping API call")
 	}
 
 	return paymentData
