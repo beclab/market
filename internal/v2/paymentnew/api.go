@@ -153,6 +153,20 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 		latest = target
 	}
 
+	// Correct SourceID if it doesn't match the request sourceID
+	if latest != nil && sourceID != "" && latest.SourceID != sourceID {
+		log.Printf("PurchaseApp: Correcting SourceID mismatch - state has %s, request has %s", latest.SourceID, sourceID)
+		_ = globalStateMachine.updateState(latest.GetKey(), func(s *PaymentState) error {
+			s.SourceID = sourceID
+			return nil
+		})
+		// Reload state to get updated SourceID
+		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			latest = updated
+			log.Printf("PurchaseApp: SourceID corrected to %s", latest.SourceID)
+		}
+	}
+
 	// Update XForwardedHost in state if available (needed for LarePass callbacks)
 	if xForwardedHost != "" && latest.XForwardedHost == "" {
 		_ = globalStateMachine.updateState(latest.GetKey(), func(s *PaymentState) error {
@@ -453,6 +467,20 @@ func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInf
 	latest, _ := globalStateMachine.getState(userID, realAppID, productID)
 	if latest == nil {
 		latest = state
+	}
+
+	// Correct SourceID if it doesn't match the request sourceID
+	if latest != nil && sourceID != "" && latest.SourceID != sourceID {
+		log.Printf("StartFrontendPayment: Correcting SourceID mismatch - state has %s, request has %s", latest.SourceID, sourceID)
+		_ = globalStateMachine.updateState(latest.GetKey(), func(s *PaymentState) error {
+			s.SourceID = sourceID
+			return nil
+		})
+		// Reload state to get updated SourceID
+		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			latest = updated
+			log.Printf("StartFrontendPayment: SourceID corrected to %s", latest.SourceID)
+		}
 	}
 
 	if xForwardedHost != "" && latest != nil && latest.XForwardedHost == "" {
