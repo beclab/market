@@ -522,7 +522,12 @@ func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID
 		developerName = getDeveloperNameFromPrice(appInfo)
 	}
 
-	paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, productID, priceConfig, developerName, xForwardedHost)
+	// Get settingsManager from global state machine if available
+	var settingsManager *settings.SettingsManager
+	if globalStateMachine != nil {
+		settingsManager = globalStateMachine.settingsManager
+	}
+	paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, productID, priceConfig, developerName, settingsManager, sourceID)
 
 	// Create notification with payment data
 	update := types.MarketSystemUpdate{
@@ -580,7 +585,7 @@ type DeveloperAPIResponse struct {
 }
 
 // fetchDeveloperInfoFromAPI fetches developer information from appstore-git-bot API (internal)
-func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, developerName string, xForwardedHost string) (*DeveloperAPIResponse, error) {
+func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, developerName string, settingsManager *settings.SettingsManager, sourceID string) (*DeveloperAPIResponse, error) {
 	if developerName == "" {
 		return nil, errors.New("developer name is empty")
 	}
@@ -589,21 +594,36 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 	}
 	httpClient.SetTimeout(10 * time.Second)
 
-	// Get appstore base URL - prefer X-Forwarded-Host, then environment, then SystemRemoteService, then default
+	// Get appstore base URL from market source (same approach as data_fetch_step.go and detail_fetch_step.go)
 	var appstoreBase string
-	if xForwardedHost != "" {
-		// Use X-Forwarded-Host to build API URL (e.g., market.saidevgp03.olares.cn)
-		appstoreBase = xForwardedHost
-		if !strings.HasPrefix(appstoreBase, "http://") && !strings.HasPrefix(appstoreBase, "https://") {
-			appstoreBase = "https://" + appstoreBase
+	if settingsManager != nil && sourceID != "" {
+		// Try to get market source by sourceID
+		marketSources := settingsManager.GetMarketSources()
+		if marketSources != nil && marketSources.Sources != nil {
+			for _, source := range marketSources.Sources {
+				if source.ID == sourceID || source.Name == sourceID {
+					appstoreBase = source.BaseURL
+					log.Printf("Found market source for sourceID=%s: %s", sourceID, appstoreBase)
+					break
+				}
+			}
 		}
-		log.Printf("Using X-Forwarded-Host for appstore base URL: %s", appstoreBase)
-	} else {
+		// If not found by sourceID, try to get default or first active source
+		if appstoreBase == "" {
+			activeSources := settingsManager.GetActiveMarketSources()
+			if len(activeSources) > 0 {
+				appstoreBase = activeSources[0].BaseURL
+				log.Printf("Using first active market source: %s", appstoreBase)
+			}
+		}
+	}
+
+	// Fallback to environment or default
+	if appstoreBase == "" {
 		appstoreBase = os.Getenv("APPSTORE_BASE_URL")
 		if appstoreBase == "" {
 			// Try to get from SystemRemoteService
 			if base := getSystemRemoteServiceBase(); base != "" {
-				// Extract base domain from SystemRemoteService
 				appstoreBase = base
 			}
 		}
@@ -613,10 +633,16 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 		}
 	}
 
-	// Build URL: {appstoreBase}/appstore-git-bot/v1/developer/{developer}
-	appstoreBase = strings.TrimRight(appstoreBase, "/")
-	escaped := url.PathEscape(developerName)
-	endpoint := fmt.Sprintf("%s/appstore-git-bot/v1/developer/%s", appstoreBase, escaped)
+	// Build URL using SettingsManager.BuildAPIURL (same as data_fetch_step.go)
+	var endpoint string
+	if settingsManager != nil {
+		endpoint = settingsManager.BuildAPIURL(appstoreBase, "/appstore-git-bot/v1/developer/"+url.PathEscape(developerName))
+	} else {
+		// Fallback manual URL building
+		appstoreBase = strings.TrimRight(appstoreBase, "/")
+		escaped := url.PathEscape(developerName)
+		endpoint = fmt.Sprintf("%s/appstore-git-bot/v1/developer/%s", appstoreBase, escaped)
+	}
 
 	log.Printf("Fetching developer info from API: %s", endpoint)
 
@@ -760,7 +786,7 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 }
 
 // createFrontendPaymentData creates frontend payment data with enhanced information (internal)
-func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, userDID, developerDID, productID string, priceConfig *types.PriceConfig, developerName string, xForwardedHost string) *types.FrontendPaymentData {
+func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, userDID, developerDID, productID string, priceConfig *types.PriceConfig, developerName string, settingsManager *settings.SettingsManager, sourceID string) *types.FrontendPaymentData {
 	paymentData := &types.FrontendPaymentData{
 		From: userDID,
 		To:   developerDID,
@@ -785,8 +811,8 @@ func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, us
 			ctx = context.Background()
 		}
 
-		log.Printf("createFrontendPaymentData: Calling fetchDeveloperInfoFromAPI for developer=%s, xForwardedHost=%s", developerName, xForwardedHost)
-		apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName, xForwardedHost)
+		log.Printf("createFrontendPaymentData: Calling fetchDeveloperInfoFromAPI for developer=%s, sourceID=%s", developerName, sourceID)
+		apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName, settingsManager, sourceID)
 		if err != nil {
 			log.Printf("createFrontendPaymentData: Failed to fetch developer info from API: %v, continuing without RSA key and token info", err)
 		} else {

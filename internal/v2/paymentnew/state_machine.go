@@ -824,7 +824,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
 		}
-		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, xForwardedHost)
+		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
 		return map[string]interface{}{
 			"status":       "payment_required",
 			"payment_data": paymentData,
@@ -839,7 +839,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
 		}
-		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, xForwardedHost)
+		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
 		return map[string]interface{}{
 			"status":       "payment_required",
 			"payment_data": paymentData,
