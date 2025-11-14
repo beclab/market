@@ -671,36 +671,131 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 // extractTokenInfoFromPriceConfig extracts token information from PriceConfig and API response
 func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *DeveloperAPIResponse, productID string) []types.TokenInfo {
 	if priceConfig == nil {
+		log.Printf("extractTokenInfoFromPriceConfig: priceConfig is nil")
 		return nil
 	}
+
+	log.Printf("extractTokenInfoFromPriceConfig: Starting extraction for productID=%s", productID)
+	log.Printf("extractTokenInfoFromPriceConfig: apiResp=%v, apiResp.Data.Apps=%v", apiResp != nil, apiResp != nil && apiResp.Data.Apps != nil)
 
 	var tokenInfos []types.TokenInfo
 
 	// Extract from Paid section
 	if priceConfig.Paid != nil && len(priceConfig.Paid.Price) > 0 {
+		log.Printf("extractTokenInfoFromPriceConfig: Processing Paid section with %d price entries", len(priceConfig.Paid.Price))
 		for _, priceEntry := range priceConfig.Paid.Price {
 			tokenInfo := types.TokenInfo{
 				Chain:         priceEntry.Chain,
 				TokenSymbol:   priceEntry.TokenSymbol,
 				ReceiveWallet: priceEntry.ReceiveWallet,
 			}
+			log.Printf("extractTokenInfoFromPriceConfig: Processing price entry: chain=%s, symbol=%s", priceEntry.Chain, priceEntry.TokenSymbol)
 
 			// Try to get token decimals from API response
 			if apiResp != nil && apiResp.Data.Apps != nil {
-				// Iterate through all apps in the response (apps is a map with dynamic keys like "app_name")
-				for appKey, appDataInterface := range apiResp.Data.Apps {
-					if appData, ok := appDataInterface.(map[string]interface{}); ok {
-						if products, ok := appData["products"].([]interface{}); ok {
+				log.Printf("extractTokenInfoFromPriceConfig: API response has Apps")
+				// Log the structure of Apps for debugging
+				if appsJSON, err := json.Marshal(apiResp.Data.Apps); err == nil {
+					log.Printf("extractTokenInfoFromPriceConfig: Apps structure: %s", string(appsJSON))
+				}
+				// apps is a map[string]interface{} that represents a JSON object
+				// It contains "app_name" and "products" fields directly
+				// So we should access apps["products"] directly, not iterate through it
+				log.Printf("extractTokenInfoFromPriceConfig: Apps is a map, checking for products...")
+				if products, ok := apiResp.Data.Apps["products"].([]interface{}); ok {
+					log.Printf("extractTokenInfoFromPriceConfig: Found %d products", len(products))
+					for _, p := range products {
+						if product, ok := p.(map[string]interface{}); ok {
+							pid, _ := product["product_id"].(string)
+							log.Printf("extractTokenInfoFromPriceConfig: Checking product_id=%s (expected=%s)", pid, productID)
+							if pid == productID {
+								log.Printf("extractTokenInfoFromPriceConfig: Product ID matched! Checking prices...")
+								if prices, ok := product["price"].([]interface{}); ok {
+									log.Printf("extractTokenInfoFromPriceConfig: Found %d price entries", len(prices))
+									for _, pr := range prices {
+										if price, ok := pr.(map[string]interface{}); ok {
+											priceChain, _ := price["chain"].(string)
+											log.Printf("Checking price entry: chain=%s, expected=%s", priceChain, priceEntry.Chain)
+											if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
+												log.Printf("Chain matched! Extracting token info from price entry: %+v", price)
+												// Extract token_decimals (handle multiple number types from JSON)
+												if decimals, ok := price["token_decimals"].(float64); ok {
+													tokenInfo.TokenDecimals = int(decimals)
+													log.Printf("Extracted token_decimals as float64: %f -> %d", decimals, tokenInfo.TokenDecimals)
+												} else if decimals, ok := price["token_decimals"].(int); ok {
+													tokenInfo.TokenDecimals = decimals
+													log.Printf("Extracted token_decimals as int: %d", tokenInfo.TokenDecimals)
+												} else if decimals, ok := price["token_decimals"].(int64); ok {
+													tokenInfo.TokenDecimals = int(decimals)
+													log.Printf("Extracted token_decimals as int64: %d -> %d", decimals, tokenInfo.TokenDecimals)
+												} else {
+													log.Printf("WARNING: token_decimals not found or wrong type in price entry, available keys: %v", getMapKeys(price))
+												}
+												if contract, ok := price["token_contract"].(string); ok {
+													tokenInfo.TokenContract = contract
+													log.Printf("Extracted token_contract: %s", contract)
+												} else {
+													log.Printf("WARNING: token_contract not found in price entry")
+												}
+												if amount, ok := price["token_amount"].(string); ok {
+													tokenInfo.TokenAmount = amount
+													log.Printf("Extracted token_amount: %s", amount)
+												}
+												if icon, ok := price["token_icon"].(string); ok {
+													tokenInfo.TokenIcon = icon
+													log.Printf("Extracted token_icon: %s", icon)
+												} else {
+													log.Printf("WARNING: token_icon not found in price entry")
+												}
+												log.Printf("Final extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
+													productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount, tokenInfo.TokenIcon)
+												break
+											}
+										}
+									}
+								} else {
+									log.Printf("extractTokenInfoFromPriceConfig: Product price field is not an array")
+								}
+								log.Printf("Found product %s", productID)
+								break
+							}
+						}
+					}
+				} else {
+					log.Printf("extractTokenInfoFromPriceConfig: No products array found in apps")
+				}
+			}
+
+			tokenInfos = append(tokenInfos, tokenInfo)
+		}
+	}
+
+	// Extract from Products section
+	if len(priceConfig.Products) > 0 {
+		for _, product := range priceConfig.Products {
+			if product.ProductID == productID && len(product.Price) > 0 {
+				for _, priceEntry := range product.Price {
+					tokenInfo := types.TokenInfo{
+						Chain:         priceEntry.Chain,
+						TokenSymbol:   priceEntry.TokenSymbol,
+						ReceiveWallet: priceEntry.ReceiveWallet,
+					}
+
+					// Try to get token decimals from API response
+					if apiResp != nil && apiResp.Data.Apps != nil {
+						// apps is a map[string]interface{} that represents a JSON object
+						// It contains "app_name" and "products" fields directly
+						if products, ok := apiResp.Data.Apps["products"].([]interface{}); ok {
 							for _, p := range products {
-								if product, ok := p.(map[string]interface{}); ok {
-									if pid, ok := product["product_id"].(string); ok && pid == productID {
-										if prices, ok := product["price"].([]interface{}); ok {
+								if prod, ok := p.(map[string]interface{}); ok {
+									if pid, ok := prod["product_id"].(string); ok && pid == productID {
+										if prices, ok := prod["price"].([]interface{}); ok {
 											for _, pr := range prices {
 												if price, ok := pr.(map[string]interface{}); ok {
 													priceChain, _ := price["chain"].(string)
-													log.Printf("Checking price entry: chain=%s, expected=%s", priceChain, priceEntry.Chain)
+													log.Printf("Checking price entry (Products): chain=%s, expected=%s", priceChain, priceEntry.Chain)
 													if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
-														log.Printf("Chain matched! Extracting token info from price entry: %+v", price)
+														log.Printf("Chain matched! Extracting token info from price entry (Products): %+v", price)
 														// Extract token_decimals (handle multiple number types from JSON)
 														if decimals, ok := price["token_decimals"].(float64); ok {
 															tokenInfo.TokenDecimals = int(decimals)
@@ -730,94 +825,15 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 														} else {
 															log.Printf("WARNING: token_icon not found in price entry")
 														}
-														log.Printf("Final extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
+														log.Printf("Final extracted token info (Products) for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
 															productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount, tokenInfo.TokenIcon)
 														break
 													}
 												}
 											}
 										}
-										log.Printf("Found product %s in app %s", productID, appKey)
+										log.Printf("Found product %s", productID)
 										break
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-
-			tokenInfos = append(tokenInfos, tokenInfo)
-		}
-	}
-
-	// Extract from Products section
-	if len(priceConfig.Products) > 0 {
-		for _, product := range priceConfig.Products {
-			if product.ProductID == productID && len(product.Price) > 0 {
-				for _, priceEntry := range product.Price {
-					tokenInfo := types.TokenInfo{
-						Chain:         priceEntry.Chain,
-						TokenSymbol:   priceEntry.TokenSymbol,
-						ReceiveWallet: priceEntry.ReceiveWallet,
-					}
-
-					// Try to get token decimals from API response
-					if apiResp != nil && apiResp.Data.Apps != nil {
-						// Iterate through all apps in the response (apps is a map with dynamic keys like "app_name")
-						for appKey, appDataInterface := range apiResp.Data.Apps {
-							if appData, ok := appDataInterface.(map[string]interface{}); ok {
-								if products, ok := appData["products"].([]interface{}); ok {
-									for _, p := range products {
-										if prod, ok := p.(map[string]interface{}); ok {
-											if pid, ok := prod["product_id"].(string); ok && pid == productID {
-												if prices, ok := prod["price"].([]interface{}); ok {
-													for _, pr := range prices {
-														if price, ok := pr.(map[string]interface{}); ok {
-															priceChain, _ := price["chain"].(string)
-															log.Printf("Checking price entry (Products): chain=%s, expected=%s", priceChain, priceEntry.Chain)
-															if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
-																log.Printf("Chain matched! Extracting token info from price entry (Products): %+v", price)
-																// Extract token_decimals (handle multiple number types from JSON)
-																if decimals, ok := price["token_decimals"].(float64); ok {
-																	tokenInfo.TokenDecimals = int(decimals)
-																	log.Printf("Extracted token_decimals as float64: %f -> %d", decimals, tokenInfo.TokenDecimals)
-																} else if decimals, ok := price["token_decimals"].(int); ok {
-																	tokenInfo.TokenDecimals = decimals
-																	log.Printf("Extracted token_decimals as int: %d", tokenInfo.TokenDecimals)
-																} else if decimals, ok := price["token_decimals"].(int64); ok {
-																	tokenInfo.TokenDecimals = int(decimals)
-																	log.Printf("Extracted token_decimals as int64: %d -> %d", decimals, tokenInfo.TokenDecimals)
-																} else {
-																	log.Printf("WARNING: token_decimals not found or wrong type in price entry, available keys: %v", getMapKeys(price))
-																}
-																if contract, ok := price["token_contract"].(string); ok {
-																	tokenInfo.TokenContract = contract
-																	log.Printf("Extracted token_contract: %s", contract)
-																} else {
-																	log.Printf("WARNING: token_contract not found in price entry")
-																}
-																if amount, ok := price["token_amount"].(string); ok {
-																	tokenInfo.TokenAmount = amount
-																	log.Printf("Extracted token_amount: %s", amount)
-																}
-																if icon, ok := price["token_icon"].(string); ok {
-																	tokenInfo.TokenIcon = icon
-																	log.Printf("Extracted token_icon: %s", icon)
-																} else {
-																	log.Printf("WARNING: token_icon not found in price entry")
-																}
-																log.Printf("Final extracted token info (Products) for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
-																	productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount, tokenInfo.TokenIcon)
-																break
-															}
-														}
-													}
-												}
-												log.Printf("Found product %s in app %s", productID, appKey)
-												break
-											}
-										}
 									}
 								}
 							}
