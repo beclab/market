@@ -66,9 +66,8 @@ type OpenAppRequest struct {
 
 // ApplicationVerifiableCredential represents the application verifiable credential structure
 type ApplicationVerifiableCredential struct {
-	ProductID     string `json:"productId"`
-	SystemChainID int    `json:"systemChainId"`
-	TxHash        string `json:"txHash"`
+	ProductID string `json:"productId"`
+	TxHash    string `json:"txHash"`
 }
 
 // SubmitSignatureRequest represents the request body for submitting signature
@@ -913,7 +912,6 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 	log.Printf("req.ApplicationVerifiableCredential: present=%v", req.ApplicationVerifiableCredential != nil)
 	if req.ApplicationVerifiableCredential != nil {
 		log.Printf("  - productId: %s", req.ApplicationVerifiableCredential.ProductID)
-		log.Printf("  - systemChainId: %d", req.ApplicationVerifiableCredential.SystemChainID)
 		log.Printf("  - txHash: %s", req.ApplicationVerifiableCredential.TxHash)
 	}
 	log.Printf("req.ProductCredentialManifest: present=%v, length=%d", len(req.ProductCredentialManifest) > 0, len(req.ProductCredentialManifest))

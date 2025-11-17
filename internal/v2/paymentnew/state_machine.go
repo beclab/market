@@ -177,7 +177,6 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 				newState.ProductID,
 				newState.TxHash,
 				effectiveHost,
-				newState.SystemChainID,
 				newState.DeveloperName,
 			)
 		}
@@ -316,20 +315,20 @@ func (psm *PaymentStateMachine) handleSignatureSubmitted(ctx context.Context, st
 func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
 	log.Printf("Handling payment_completed event")
 
-	// Extract txHash and systemChainID from payload
+	// Extract txHash from payload
 	type PaymentPayload struct {
-		TxHash        string
-		SystemChainID int
+		TxHash string
 	}
 
-	payloadData, ok := payload.(PaymentPayload)
+	payloadData, ok := payload.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid payload for payment_completed event")
 	}
 
 	newState := *state
-	newState.TxHash = payloadData.TxHash
-	newState.SystemChainID = payloadData.SystemChainID
+	if txHash, ok := payloadData["tx_hash"].(string); ok {
+		newState.TxHash = txHash
+	}
 	newState.PaymentStatus = PaymentFrontendCompleted
 	newState.FrontendData = nil
 
@@ -383,7 +382,6 @@ func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, stat
 			newState.ProductID,
 			newState.TxHash,
 			newState.XForwardedHost,
-			newState.SystemChainID,
 			newState.DeveloperName,
 		)
 	}
@@ -652,7 +650,6 @@ func triggerPaymentStateSync(state *PaymentState) error {
 					state.AppID,
 					state.ProductID,
 					state.XForwardedHost,
-					state.SystemChainID,
 					state.DeveloperName,
 				)
 			}
@@ -666,7 +663,6 @@ func triggerPaymentStateSync(state *PaymentState) error {
 				state.AppID,
 				state.ProductID,
 				state.XForwardedHost,
-				state.SystemChainID,
 				state.DeveloperName,
 			)
 		}
@@ -876,8 +872,8 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 	log.Printf("buildPurchaseResponse: returning syncing status for user=%s, app=%s, product=%s", userID, state.AppID, state.ProductID)
 	log.Printf("buildPurchaseResponse: PaymentNeed=%s, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
 		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus)
-	log.Printf("buildPurchaseResponse: JWS present=%v, VC present=%v, TxHash=%s, SystemChainID=%d",
-		state.JWS != "", state.VC != "", state.TxHash, state.SystemChainID)
+	log.Printf("buildPurchaseResponse: JWS present=%v, VC present=%v, TxHash=%s",
+		state.JWS != "", state.VC != "", state.TxHash)
 	log.Printf("buildPurchaseResponse: XForwardedHost=%s, FrontendData length=%d, CreatedAt=%v, UpdatedAt=%v",
 		state.XForwardedHost, len(state.FrontendData), state.CreatedAt, state.UpdatedAt)
 	log.Printf("buildPurchaseResponse: DeveloperName=%s, SourceID=%s, AppName=%s",

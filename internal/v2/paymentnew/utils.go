@@ -353,7 +353,7 @@ type VCQueryResult struct {
 
 // notifyLarePassToSign notifies larepass client to sign (internal)
 // Equivalent to the original NotifyLarePassToSign
-func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, productID, txHash, xForwardedHost string, systemChainID int, developerName string) error {
+func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, productID, txHash, xForwardedHost string, developerName string) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
 	}
@@ -379,13 +379,9 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 		// Always include product_id at top level (needed for signature request identification)
 		signBody["product_id"] = productID
 
-		// Build application_verifiable_credential (txHash and systemChainID are optional)
+		// Build application_verifiable_credential (txHash is optional)
 		appVerifiableCredential := map[string]interface{}{
 			"productId": productID,
-		}
-		// Only include systemChainId if it's non-zero (payment may not have completed yet)
-		if systemChainID != 0 {
-			appVerifiableCredential["systemChainId"] = systemChainID
 		}
 		// Only include txHash if available (payment may not have completed yet)
 		if txHash != "" {
@@ -393,8 +389,8 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 		}
 		signBody["application_verifiable_credential"] = appVerifiableCredential
 
-		log.Printf("Including product_id and application_verifiable_credential in sign notification for user %s, app %s, productID: %s, systemChainID: %d, txHash: %s",
-			userID, appID, productID, systemChainID, txHash)
+		log.Printf("Including product_id and application_verifiable_credential in sign notification for user %s, app %s, productID: %s, txHash: %s",
+			userID, appID, productID, txHash)
 	}
 
 	// Build callback URL using X-Forwarded-Host from request
@@ -422,7 +418,7 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 }
 
 // notifyLarePassToFetchSignature notifies larepass client to fetch signature (same payload as NotifyLarePassToSign, different topic, omits txHash)
-func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, productID, xForwardedHost string, systemChainID int, developerName string) error {
+func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, productID, xForwardedHost string, developerName string) error {
 	log.Printf("notifyLarePassToFetchSignature: Starting notification for user=%s app=%s productID=%s", userID, appID, productID)
 
 	if dataSender == nil {
@@ -449,7 +445,6 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 	}
 
 	// productID is required for application_verifiable_credential (omit txHash by design)
-	// Note: systemChainID may be 0 at fetch-signature stage (before payment), so we only require productID
 	if productID == "" {
 		log.Printf("notifyLarePassToFetchSignature: ERROR - productID is empty for user %s, app %s, cannot build application_verifiable_credential", userID, appID)
 		return errors.New("productID is required but not available")
@@ -462,12 +457,8 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 	appVerifiableCredential := map[string]interface{}{
 		"productId": productID,
 	}
-	// Only include systemChainId if it's non-zero (payment may not have completed yet)
-	if systemChainID != 0 {
-		appVerifiableCredential["systemChainId"] = systemChainID
-	}
 	signBody["application_verifiable_credential"] = appVerifiableCredential
-	log.Printf("notifyLarePassToFetchSignature: Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s, productID: %s, systemChainID: %d", userID, appID, productID, systemChainID)
+	log.Printf("notifyLarePassToFetchSignature: Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s, productID: %s", userID, appID, productID)
 
 	if xForwardedHost == "" {
 		log.Printf("notifyLarePassToFetchSignature: ERROR - X-Forwarded-Host is empty for user %s, cannot build callback URL (fetch-signature)", userID)

@@ -499,13 +499,12 @@ func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInf
 }
 
 // StartPaymentPolling starts polling for VC after payment completion
-func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string, systemChainID int, appInfoLatest *types.AppInfoLatestData) error {
+func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string, appInfoLatest *types.AppInfoLatestData) error {
 	log.Printf("=== Starting Payment Polling ===")
 	log.Printf("User ID: %s", userID)
 	log.Printf("Source ID: %s", sourceID)
 	log.Printf("App ID: %s", appID)
 	log.Printf("TxHash: %s", txHash)
-	log.Printf("SystemChainID: %d", systemChainID)
 	log.Printf("X-Forwarded-Host: %s", xForwardedHost)
 
 	if appInfoLatest != nil && appInfoLatest.RawData != nil {
@@ -547,7 +546,6 @@ func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string,
 	key := fmt.Sprintf("%s:%s:%s", userID, appID, productID)
 	if err := globalStateMachine.updateState(key, func(s *PaymentState) error {
 		s.TxHash = txHash
-		s.SystemChainID = systemChainID
 		s.XForwardedHost = xForwardedHost
 		return nil
 	}); err != nil {
@@ -563,8 +561,7 @@ func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string,
 		productID,
 		"payment_completed",
 		map[string]interface{}{
-			"tx_hash":         txHash,
-			"system_chain_id": systemChainID,
+			"tx_hash": txHash,
 		},
 	); err != nil {
 		log.Printf("Failed to process payment_completed event: %v", err)

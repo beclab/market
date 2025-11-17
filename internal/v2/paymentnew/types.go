@@ -92,7 +92,6 @@ type PaymentState struct {
 	SignBody       string                 `json:"sign_body,omitempty"`
 	VC             string                 `json:"vc,omitempty"`
 	TxHash         string                 `json:"tx_hash,omitempty"`
-	SystemChainID  int                    `json:"system_chain_id,omitempty"`
 	XForwardedHost string                 `json:"x_forwarded_host,omitempty"`
 	FrontendData   map[string]interface{} `json:"frontend_data,omitempty"`
 
