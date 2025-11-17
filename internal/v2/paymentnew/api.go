@@ -391,8 +391,29 @@ func HandleFetchSignatureCallback(jws, signBody, user string, signed bool) error
 	return nil
 }
 
+func resolveProductID(appInfo *types.AppInfo, realAppID string) string {
+	if appInfo == nil {
+		return realAppID
+	}
+
+	if appInfo.Price != nil && appInfo.Price.Paid != nil {
+		if pid := strings.TrimSpace(appInfo.Price.Paid.ProductID); pid != "" {
+			return pid
+		}
+		if len(appInfo.Price.Paid.Price) > 0 && realAppID != "" {
+			return realAppID
+		}
+	}
+
+	if pid := getProductIDFromAppInfo(appInfo); pid != "" {
+		return pid
+	}
+
+	return realAppID
+}
+
 // StartFrontendPayment marks payment state as frontend started and caches frontend provided data
-func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInfo *types.AppInfo, frontendData map[string]interface{}) (map[string]interface{}, error) {
+func StartFrontendPayment(userID, appID, sourceID, productID, xForwardedHost string, appInfo *types.AppInfo, frontendData map[string]interface{}) (map[string]interface{}, error) {
 	log.Printf("=== StartFrontendPayment ===")
 	log.Printf("User ID: %s", userID)
 	log.Printf("Source ID: %s", sourceID)
@@ -413,31 +434,18 @@ func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInf
 		log.Printf("StartFrontendPayment: Using real app ID from AppEntry: %s (URL param was: %s)", realAppID, appID)
 	}
 
-	var productID string
-	if appInfo.Price != nil && appInfo.Price.Paid != nil {
-		if appInfo.Price.Paid.ProductID != "" {
-			productID = appInfo.Price.Paid.ProductID
-			log.Printf("StartFrontendPayment: Using productID from Price.Paid: %s", productID)
-		} else if len(appInfo.Price.Paid.Price) > 0 {
-			productID = realAppID
-			log.Printf("StartFrontendPayment: Paid app without product_id, using app ID fallback: %s", productID)
-		}
-	}
-	if productID == "" {
-		productID = getProductIDFromAppInfo(appInfo)
-		if productID != "" {
-			log.Printf("StartFrontendPayment: Using productID from Products: %s", productID)
-		}
-	}
-	if productID == "" {
-		productID = realAppID
-		log.Printf("StartFrontendPayment: No productID found, using real app ID as fallback: %s", productID)
+	resolvedProductID := strings.TrimSpace(productID)
+	if resolvedProductID != "" {
+		log.Printf("StartFrontendPayment: Using productID from request: %s", resolvedProductID)
+	} else {
+		log.Printf("StartFrontendPayment: Request missing productID, deriving from app info")
+		resolvedProductID = resolveProductID(appInfo, realAppID)
 	}
 
-	state, err := globalStateMachine.getState(userID, realAppID, productID)
+	state, err := globalStateMachine.getState(userID, realAppID, resolvedProductID)
 	if err != nil || state == nil {
 		log.Printf("StartFrontendPayment: State not found in memory, attempting to load from Redis. Err: %v", err)
-		state, err = globalStateMachine.LoadState(userID, realAppID, productID)
+		state, err = globalStateMachine.LoadState(userID, realAppID, resolvedProductID)
 		if err != nil || state == nil {
 			return nil, fmt.Errorf("payment state not found for frontend payment start: %w", err)
 		}
@@ -457,14 +465,14 @@ func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInf
 		context.Background(),
 		userID,
 		realAppID,
-		productID,
+		resolvedProductID,
 		"frontend_payment_started",
 		payload,
 	); err != nil {
 		return nil, fmt.Errorf("failed to process frontend_payment_started event: %w", err)
 	}
 
-	latest, _ := globalStateMachine.getState(userID, realAppID, productID)
+	latest, _ := globalStateMachine.getState(userID, realAppID, resolvedProductID)
 	if latest == nil {
 		latest = state
 	}
@@ -477,7 +485,7 @@ func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInf
 			return nil
 		})
 		// Reload state to get updated SourceID
-		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+		if updated, err := globalStateMachine.getState(userID, realAppID, resolvedProductID); err == nil && updated != nil {
 			latest = updated
 			log.Printf("StartFrontendPayment: SourceID corrected to %s", latest.SourceID)
 		}
@@ -490,7 +498,7 @@ func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInf
 			}
 			return nil
 		})
-		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+		if updated, err := globalStateMachine.getState(userID, realAppID, resolvedProductID); err == nil && updated != nil {
 			latest = updated
 		}
 	}
@@ -499,11 +507,12 @@ func StartFrontendPayment(userID, appID, sourceID, xForwardedHost string, appInf
 }
 
 // StartPaymentPolling starts polling for VC after payment completion
-func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string, appInfoLatest *types.AppInfoLatestData) error {
+func StartPaymentPolling(userID, sourceID, appID, productID, txHash, xForwardedHost string, appInfoLatest *types.AppInfoLatestData) error {
 	log.Printf("=== Starting Payment Polling ===")
 	log.Printf("User ID: %s", userID)
 	log.Printf("Source ID: %s", sourceID)
 	log.Printf("App ID: %s", appID)
+	log.Printf("Product ID: %s", productID)
 	log.Printf("TxHash: %s", txHash)
 	log.Printf("X-Forwarded-Host: %s", xForwardedHost)
 
@@ -522,28 +531,31 @@ func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string,
 		return fmt.Errorf("state machine not initialized")
 	}
 
-	// Get product ID from app price information
-	var productID string
-	if appInfoLatest != nil && appInfoLatest.AppInfo != nil {
-		productID = getProductIDFromAppInfo(appInfoLatest.AppInfo)
+	realAppID := appID
+	if appInfoLatest != nil && appInfoLatest.AppInfo != nil && appInfoLatest.AppInfo.AppEntry != nil && appInfoLatest.AppInfo.AppEntry.ID != "" {
+		realAppID = appInfoLatest.AppInfo.AppEntry.ID
 	}
 
-	if productID == "" {
-		log.Printf("Product ID not found, using empty string")
-		productID = ""
+	resolvedProductID := strings.TrimSpace(productID)
+	if resolvedProductID != "" {
+		log.Printf("StartPaymentPolling: Using productID from request: %s", resolvedProductID)
+	} else if appInfoLatest != nil && appInfoLatest.AppInfo != nil {
+		log.Printf("StartPaymentPolling: Request missing productID, deriving from app info")
+		resolvedProductID = resolveProductID(appInfoLatest.AppInfo, realAppID)
+	} else {
+		log.Printf("StartPaymentPolling: No productID and no app info, reverting to app ID: %s", realAppID)
+		resolvedProductID = realAppID
 	}
-
-	// Not computing app/developer names here
 
 	// 获取已存在状态
-	_, err := globalStateMachine.getState(userID, appID, productID)
+	_, err := globalStateMachine.getState(userID, realAppID, resolvedProductID)
 	if err != nil {
 		log.Printf("Failed to get state for polling: %v", err)
 		return fmt.Errorf("payment state not found; ensure preprocessing ran: %w", err)
 	}
 
 	// Update state with payment info
-	key := fmt.Sprintf("%s:%s:%s", userID, appID, productID)
+	key := fmt.Sprintf("%s:%s:%s", userID, realAppID, resolvedProductID)
 	if err := globalStateMachine.updateState(key, func(s *PaymentState) error {
 		s.TxHash = txHash
 		s.XForwardedHost = xForwardedHost
@@ -557,8 +569,8 @@ func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string,
 	if err := globalStateMachine.processEvent(
 		context.Background(),
 		userID,
-		appID,
-		productID,
+		realAppID,
+		resolvedProductID,
 		"payment_completed",
 		map[string]interface{}{
 			"tx_hash": txHash,
@@ -568,7 +580,7 @@ func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string,
 		return fmt.Errorf("failed to process payment_completed event: %w", err)
 	}
 
-	log.Printf("Payment polling started for user %s, app %s", userID, appID)
+	log.Printf("Payment polling started for user %s, app %s, product %s", userID, realAppID, resolvedProductID)
 	return nil
 }
 

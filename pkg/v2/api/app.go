@@ -32,15 +32,17 @@ type AppQueryInfo struct {
 
 // paymentPollingRequest is a local request model for starting payment polling
 type paymentPollingRequest struct {
-	SourceID string `json:"source_id"`
-	AppID    string `json:"app_id"`
-	TxHash   string `json:"tx_hash"`
+	SourceID  string `json:"source_id"`
+	AppID     string `json:"app_id"`
+	TxHash    string `json:"tx_hash"`
+	ProductID string `json:"product_id"`
 }
 
 // frontendPaymentStartRequest is a local request model for frontend payment start event
 type frontendPaymentStartRequest struct {
 	SourceID     string                 `json:"source_id"`
 	AppID        string                 `json:"app_id"`
+	ProductID    string                 `json:"product_id"`
 	FrontendData map[string]interface{} `json:"frontend_data"`
 }
 
@@ -2254,15 +2256,15 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Validate required fields (source_id, app_id, tx_hash)
-	if request.SourceID == "" || request.AppID == "" || request.TxHash == "" {
+	// Step 3: Validate required fields (source_id, app_id, tx_hash, product_id)
+	if strings.TrimSpace(request.SourceID) == "" || strings.TrimSpace(request.AppID) == "" || strings.TrimSpace(request.TxHash) == "" || strings.TrimSpace(request.ProductID) == "" {
 		log.Printf("Missing required fields in payment polling request")
-		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source_id, app_id, tx_hash", nil)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source_id, app_id, tx_hash, product_id", nil)
 		return
 	}
 
-	log.Printf("Received payment polling request for user: %s, source: %s, app: %s, tx_hash: %s",
-		userID, request.SourceID, request.AppID, request.TxHash)
+	log.Printf("Received payment polling request for user: %s, source: %s, app: %s, product_id: %s, tx_hash: %s",
+		userID, request.SourceID, request.AppID, request.ProductID, request.TxHash)
 
 	// Derive AppInfoLatest from cache
 	var appInfoLatest *types.AppInfoLatestData
@@ -2281,6 +2283,7 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 		userID,
 		request.SourceID,
 		request.AppID,
+		request.ProductID,
 		request.TxHash,
 		xForwardedHost,
 		appInfoLatest,
@@ -2342,6 +2345,13 @@ func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	productID := strings.TrimSpace(request.ProductID)
+	if productID == "" {
+		log.Printf("Missing product_id in frontend payment start request for user: %s, app: %s, source: %s", userID, request.AppID, request.SourceID)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required field: product_id", nil)
+		return
+	}
+
 	if s.cacheManager == nil {
 		log.Printf("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
@@ -2370,7 +2380,7 @@ func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result, err := paymentnew.StartFrontendPayment(userID, request.AppID, request.SourceID, xForwardedHost, appInfoLatest.AppInfo, frontendData)
+	result, err := paymentnew.StartFrontendPayment(userID, request.AppID, request.SourceID, productID, xForwardedHost, appInfoLatest.AppInfo, frontendData)
 	if err != nil {
 		log.Printf("Failed to start frontend payment: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to update payment state", nil)

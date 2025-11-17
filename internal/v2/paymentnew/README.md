@@ -72,8 +72,8 @@ Typical sequence: preprocessing → fetch signature → submit signature → fro
 - Preprocess: `PreprocessAppPaymentData(ctx, appInfo, userID, sourceID, settingsManager, client)`
 - Query: `GetPaymentStatus(userID, appID, sourceID, appInfo)`
 - Advance purchase: `PurchaseApp(userID, appID, sourceID, xForwardedHost, appInfo)`
-- Mark frontend ready: `StartFrontendPayment(userID, appID, sourceID, xForwardedHost, appInfo, frontendData)`
-- Poll after payment completion: `StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost, systemChainID, appInfoLatest)`
+- Mark frontend ready: `StartFrontendPayment(userID, appID, sourceID, productID, xForwardedHost, appInfo, frontendData)`
+- Poll after payment completion: `StartPaymentPolling(userID, sourceID, appID, productID, txHash, xForwardedHost, systemChainID, appInfoLatest)`
 - Signature callbacks:
   - Submit signature: `ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)`
   - Fetch signature: `HandleFetchSignatureCallback(jws, signBody, user, signed)`
