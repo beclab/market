@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,12 +31,38 @@ type AppQueryInfo struct {
 	SourceDataName string `json:"sourceDataName"`
 }
 
+// flexibleInt is a type that can unmarshal from both string and int
+type flexibleInt int
+
+// UnmarshalJSON implements custom JSON unmarshaling for flexibleInt
+// It accepts both string and int types
+func (fi *flexibleInt) UnmarshalJSON(data []byte) error {
+	// Try to unmarshal as int first
+	var i int
+	if err := json.Unmarshal(data, &i); err == nil {
+		*fi = flexibleInt(i)
+		return nil
+	}
+	// If that fails, try as string
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		// Parse string to int
+		parsed, err := strconv.Atoi(s)
+		if err != nil {
+			return fmt.Errorf("cannot parse system_chain_id as int: %w", err)
+		}
+		*fi = flexibleInt(parsed)
+		return nil
+	}
+	return fmt.Errorf("system_chain_id must be either int or string representing an int")
+}
+
 // paymentPollingRequest is a local request model for starting payment polling
 type paymentPollingRequest struct {
-	SourceID      string `json:"source_id"`
-	AppID         string `json:"app_id"`
-	TxHash        string `json:"tx_hash"`
-	SystemChainID int    `json:"system_chain_id"`
+	SourceID      string      `json:"source_id"`
+	AppID         string      `json:"app_id"`
+	TxHash        string      `json:"tx_hash"`
+	SystemChainID flexibleInt `json:"system_chain_id"`
 }
 
 // frontendPaymentStartRequest is a local request model for frontend payment start event
@@ -2256,14 +2283,15 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Validate required fields (source_id, app_id, tx_hash, system_chain_id)
-	if request.SourceID == "" || request.AppID == "" || request.TxHash == "" || request.SystemChainID == 0 {
+	systemChainID := int(request.SystemChainID)
+	if request.SourceID == "" || request.AppID == "" || request.TxHash == "" || systemChainID == 0 {
 		log.Printf("Missing required fields in payment polling request")
 		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source_id, app_id, tx_hash, system_chain_id", nil)
 		return
 	}
 
 	log.Printf("Received payment polling request for user: %s, source: %s, app: %s, tx_hash: %s, system_chain_id: %d",
-		userID, request.SourceID, request.AppID, request.TxHash, request.SystemChainID)
+		userID, request.SourceID, request.AppID, request.TxHash, systemChainID)
 
 	// Derive AppInfoLatest from cache
 	var appInfoLatest *types.AppInfoLatestData
@@ -2284,7 +2312,7 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 		request.AppID,
 		request.TxHash,
 		xForwardedHost,
-		request.SystemChainID,
+		systemChainID,
 		appInfoLatest,
 	); err != nil {
 		log.Printf("Failed to start payment polling: %v", err)
