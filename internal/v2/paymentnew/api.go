@@ -323,27 +323,25 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 	if err := globalStateMachine.updateState(state.GetKey(), func(s *PaymentState) error {
 		s.SignatureStatus = SignatureRequiredAndSigned
 		s.JWS = jws
+		s.LarePassSync = LarePassSyncCompleted
 		return nil
 	}); err != nil {
 		log.Printf("Failed to update signature status: %v", err)
 		return fmt.Errorf("failed to update signature status: %w", err)
 	}
 
-	// Step 3.1: Read latest state; if already at a later stage, skip duplicate notification (idempotent guard)
+	// Step 3.1: Read latest state for downstream decisions
 	latest, _ := globalStateMachine.getState(state.UserID, state.AppID, state.ProductID)
-	if latest != nil {
-		if latest.PaymentStatus == PaymentNotificationSent ||
-			latest.PaymentStatus == PaymentFrontendStarted ||
-			latest.PaymentStatus == PaymentFrontendCompleted ||
-			latest.PaymentStatus == PaymentDeveloperConfirmed {
-			log.Printf("Skip notifying payment_required: current status=%s", latest.PaymentStatus)
-			log.Printf("=== End of Payment State Machine Processing ===")
-			return nil
-		}
+	if latest == nil {
+		latest = state
 	}
 
+	// Determine follow-up actions based on payment status
+	shouldNotifyFrontend := latest.PaymentStatus == PaymentNotEvaluated || latest.PaymentStatus == PaymentNotNotified
+	shouldPollDeveloper := latest.PaymentStatus == PaymentFrontendCompleted
+
 	// Step 4: Notify frontend to pay (only when not notified/early stage)
-	if globalStateMachine.dataSender != nil {
+	if shouldNotifyFrontend && globalStateMachine.dataSender != nil {
 		if err := notifyFrontendPaymentRequired(
 			globalStateMachine.dataSender,
 			state.UserID,
@@ -367,6 +365,15 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 			}
 			return nil
 		})
+	} else if !shouldNotifyFrontend {
+		log.Printf("Skip notifying payment_required: current status=%s", latest.PaymentStatus)
+	}
+
+	// Step 5: If frontend payment already completed, restart VC polling with fresh signature
+	if shouldPollDeveloper {
+		log.Printf("Payment already completed; restarting VC polling with refreshed signature")
+		latestCopy := *latest
+		go globalStateMachine.pollForVCFromDeveloper(&latestCopy)
 	}
 
 	log.Printf("=== End of Payment State Machine Processing ===")

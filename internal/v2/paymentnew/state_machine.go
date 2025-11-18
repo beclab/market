@@ -163,13 +163,8 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 		log.Printf("handleStartPayment: signature marked invalid, resetting state for re-sign (%s)", newState.GetKey())
 		resetForResign := func(ps *PaymentState) {
 			ps.SignatureStatus = SignatureRequired
-			ps.LarePassSync = LarePassSyncNotStarted
-			ps.DeveloperSync = DeveloperSyncNotStarted
-			ps.PaymentStatus = PaymentNotNotified
 			ps.JWS = ""
 			ps.SignBody = ""
-			ps.VC = ""
-			ps.TxHash = ""
 		}
 		resetForResign(&newState)
 		isReSignFlow = true
@@ -194,7 +189,9 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 		} else if effectiveHost == "" && newState.XForwardedHost != "" {
 			effectiveHost = newState.XForwardedHost
 		}
-		if newState.LarePassSync == LarePassSyncNotStarted || newState.LarePassSync == LarePassSyncFailed {
+		if isReSignFlow {
+			newState.LarePassSync = LarePassSyncInProgress
+		} else if newState.LarePassSync == LarePassSyncNotStarted || newState.LarePassSync == LarePassSyncFailed {
 			newState.LarePassSync = LarePassSyncInProgress
 		}
 
@@ -204,7 +201,9 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 				if s.XForwardedHost == "" {
 					s.XForwardedHost = effectiveHost
 				}
-				if s.LarePassSync == LarePassSyncNotStarted || s.LarePassSync == LarePassSyncFailed {
+				if isReSignFlow {
+					s.LarePassSync = LarePassSyncInProgress
+				} else if s.LarePassSync == LarePassSyncNotStarted || s.LarePassSync == LarePassSyncFailed {
 					s.LarePassSync = LarePassSyncInProgress
 				}
 				return nil
