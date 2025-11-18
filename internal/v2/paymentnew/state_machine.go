@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -156,8 +157,47 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	}
 
 	// Branch by current signature/payment status to advance flow
+	// 0) Signature invalid → reset and re-trigger sign flow
+	isReSignFlow := false
+	if newState.SignatureStatus == SignatureErrorNeedReSign {
+		log.Printf("handleStartPayment: signature marked invalid, resetting state for re-sign (%s)", newState.GetKey())
+		resetForResign := func(ps *PaymentState) {
+			ps.SignatureStatus = SignatureRequired
+			ps.LarePassSync = LarePassSyncNotStarted
+			ps.DeveloperSync = DeveloperSyncNotStarted
+			ps.PaymentStatus = PaymentNotNotified
+			ps.JWS = ""
+			ps.SignBody = ""
+			ps.VC = ""
+			ps.TxHash = ""
+		}
+		resetForResign(&newState)
+		isReSignFlow = true
+
+		if psm != nil {
+			if err := psm.updateState(newState.GetKey(), func(s *PaymentState) error {
+				resetForResign(s)
+				if s.XForwardedHost == "" && effectiveHost != "" {
+					s.XForwardedHost = effectiveHost
+				}
+				return nil
+			}); err != nil {
+				log.Printf("handleStartPayment: failed to persist re-sign reset: %v", err)
+			}
+		}
+	}
+
 	// 1) Need to initiate signature
 	if newState.SignatureStatus == SignatureRequired || newState.SignatureStatus == SignatureRequiredButPending {
+		if newState.XForwardedHost == "" && effectiveHost != "" {
+			newState.XForwardedHost = effectiveHost
+		} else if effectiveHost == "" && newState.XForwardedHost != "" {
+			effectiveHost = newState.XForwardedHost
+		}
+		if newState.LarePassSync == LarePassSyncNotStarted || newState.LarePassSync == LarePassSyncFailed {
+			newState.LarePassSync = LarePassSyncInProgress
+		}
+
 		if psm != nil && psm.dataSender != nil && effectiveHost != "" {
 			// write host before notifying to ensure callback URL is valid
 			_ = psm.updateState(newState.GetKey(), func(s *PaymentState) error {
@@ -178,6 +218,7 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 				newState.TxHash,
 				effectiveHost,
 				newState.DeveloperName,
+				isReSignFlow,
 			)
 		}
 		return &newState, nil
@@ -373,6 +414,18 @@ func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, stat
 	newState := *state
 	newState.SignatureStatus = SignatureRequired
 
+	isReSign := state.SignatureStatus == SignatureErrorNeedReSign
+	if payloadMap, ok := payload.(map[string]interface{}); ok {
+		if raw, ok := payloadMap["resign"]; ok {
+			switch v := raw.(type) {
+			case bool:
+				isReSign = v
+			case string:
+				isReSign = strings.EqualFold(v, "true") || v == "1"
+			}
+		}
+	}
+
 	// 通知 LarePass 进行签名
 	if psm.dataSender != nil && newState.XForwardedHost != "" {
 		notifyLarePassToSign(
@@ -383,6 +436,7 @@ func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, stat
 			newState.TxHash,
 			newState.XForwardedHost,
 			newState.DeveloperName,
+			isReSign,
 		)
 	}
 
@@ -807,6 +861,20 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 	if state.SignatureStatus == SignatureRequired || state.SignatureStatus == SignatureRequiredButPending {
 		return map[string]interface{}{
 			"status": "signature_required",
+		}, nil
+	}
+
+	// 1.5) Error states that should short-circuit
+	if state.SignatureStatus == SignatureErrorNoRecord {
+		return map[string]interface{}{
+			"status":  "signature_no_record",
+			"message": "developer has no matching payment record, please retry payment",
+		}, nil
+	}
+	if state.SignatureStatus == SignatureErrorNeedReSign {
+		return map[string]interface{}{
+			"status":  "signature_need_resign",
+			"message": "signature invalid or expired, please re-sign to continue",
 		}, nil
 	}
 

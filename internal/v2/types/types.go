@@ -579,6 +579,7 @@ type SignNotificationUpdate struct {
 type SignNotificationData struct {
 	CallbackURL string                 `json:"callback_url"`
 	SignBody    map[string]interface{} `json:"sign_body"`
+	IsReSign    bool                   `json:"is_resign,omitempty"`
 }
 
 // NewCacheData creates a new cache data structure

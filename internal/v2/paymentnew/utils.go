@@ -353,7 +353,7 @@ type VCQueryResult struct {
 
 // notifyLarePassToSign notifies larepass client to sign (internal)
 // Equivalent to the original NotifyLarePassToSign
-func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, productID, txHash, xForwardedHost string, developerName string) error {
+func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, productID, txHash, xForwardedHost string, developerName string, isReSign bool) error {
 	if dataSender == nil {
 		return errors.New("data sender is nil")
 	}
@@ -416,6 +416,7 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 		Sign: types.SignNotificationData{
 			CallbackURL: callbackURL,
 			SignBody:    signBody,
+			IsReSign:    isReSign,
 		},
 		User:  userID,
 		Vars:  make(map[string]string),
