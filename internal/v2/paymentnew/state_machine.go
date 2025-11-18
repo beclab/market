@@ -579,7 +579,7 @@ func (psm *PaymentStateMachine) LoadState(userID, appID, productID string) (*Pay
 	}
 	var st PaymentState
 	if err := json.Unmarshal([]byte(val), &st); err != nil {
-		return nil, fmt.Errorf("failed to parse state from redis: %w")
+		return nil, fmt.Errorf("failed to parse state from redis: %w", err)
 	}
 	psm.setState(&st)
 	return &st, nil

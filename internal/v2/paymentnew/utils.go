@@ -61,7 +61,7 @@ type GetApplicationSchemaIdResponse struct {
 var merchantProductLicenseCredentialManifestJSON = `{"id":"","spec_version":"https://identity.foundation/credential-manifest/spec/v1.0.0/","name":"Merchant Product License Credential Manifest","description":"Credential manifest for issuing merchant product license based on payment proof","issuer":{"id":"did:key:z6Mkp53XYSGCVFu4sKin6QVKPjiqfUCauTqxW8QpoYq5nUZ9","name":"did:key:z6Mkp53XYSGCVFu4sKin6QVKPjiqfUCauTqxW8QpoYq5nUZ9"},"output_descriptors":[{"id":"70c236a7-7dbb-cf15-6d5c-5ceffb6caf24","schema":"3a8adbf4-a083-ea50-ecee-b5d55107e2a3","name":"Merchant Product License Credential","description":"Product license credential with complete payment and product information","display":{"title":{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},"properties":[{"label":"Product ID","path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},{"label":"systemChainId","path":["$.credentialSubject.systemChainId","$.vc.credentialSubject.systemChainId"],"schema":{"type":"string"}},{"label":"txHash","path":["$.credentialSubject.txHash","$.vc.credentialSubject.txHash"],"schema":{"type":"string"}}]},"styles":{"background":{"color":"#1e40af"},"text":{"color":"#ffffff"}}}],"format":{"jwt_vc":{"alg":["EdDSA"]}},"presentation_definition":{"id":"de434d03-052c-027a-d4cc-887be81aa941","name":"Merchant Product License Application Presentation Manifest","purpose":"Request presentation of application credentials for merchant product license","input_descriptors":[{"id":"productId","name":"Product ID","purpose":"Provide your product ID to activate from payment transaction","format":{"jwt_vc":{"alg":["EdDSA"]}},"constraints":{"fields":[{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"]}],"subject_is_issuer":"preferred"}}]}}`
 
 // Temporarily unusable data
-//var merchantProductLicenseApplicationVerifiableCredentialJSON = `{"id":"6ad3d05c-ccf2-90df-32e9-aea5d5cf3115","type":"CredentialSchema2023","credentialSchema":"eyJhbGciOiJFZERTQSIsImtpZCI6ImRpZDprZXk6ejZNa3A1M1hZU0dDVkZ1NHNLaW42UVZLUGppcWZVQ2F1VHF4VzhRcG9ZcTVuVVo5I3o2TWtwNTNYWVNHQ1ZGdTRzS2luNlFWS1BqaXFmVUNhdVRxeFc4UXBvWXE1blVaOSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NjI3NzIyMTEsImlzcyI6ImRpZDprZXk6ejZNa3A1M1hZU0dDVkZ1NHNLaW42UVZLUGppcWZVQ2F1VHF4VzhRcG9ZcTVuVVo5IiwianRpIjoiaHR0cDovL2xvY2FsaG9zdDo2MDAzL3YxL3NjaGVtYXMvNmFkM2QwNWMtY2NmMi05MGRmLTMyZTktYWVhNWQ1Y2YzMTE1IiwibmJmIjoxNzYyNzcyMjExLCJub25jZSI6IjlmY2U0ZjMwLTdjNWItNGRkOC04MjAzLTc5Yjk2MDg5ZGQ0ZiIsInZjIjp7IkBjb250ZXh0IjpbImh0dHBzOi8vd3d3LnczLm9yZy8yMDE4L2NyZWRlbnRpYWxzL3YxIl0sInR5cGUiOlsiVmVyaWZpYWJsZUNyZWRlbnRpYWwiXSwiY3JlZGVudGlhbFN1YmplY3QiOnsiJGlkIjoiNmFkM2QwNWMtY2NmMi05MGRmLTMyZTktYWVhNWQ1Y2YzMTE1IiwiJHNjaGVtYSI6Imh0dHBzOi8vanNvbi1zY2hlbWEub3JnL2RyYWZ0LzIwMjAtMTIvc2NoZW1hIiwiZGVzY3JpcHRpb24iOiJNZXJjaGFudCBQcm9kdWN0IExpY2Vuc2UgQXBwbGljYXRpb24gQ3JlZGVudGlhbCBTY2hlbWEiLCJuYW1lIjoiTWVyY2hhbnQgUHJvZHVjdCBMaWNlbnNlIEFwcGxpY2F0aW9uIENyZWRlbnRpYWwgU2NoZW1hIiwicHJvcGVydGllcyI6eyJjcmVkZW50aWFsU3ViamVjdCI6eyJhZGRpdGlvbmFsUHJvcGVydGllcyI6dHJ1ZSwicHJvcGVydGllcyI6eyJwcm9kdWN0SWQiOnsiZGVzY3JpcHRpb24iOiJQcm9kdWN0IElEIHRvIGFjdGl2YXRlIChzaW5jZSBwYXltZW50IG1heSBjb250YWluIG11bHRpcGxlIHByb2R1Y3RzKSIsInR5cGUiOiJzdHJpbmcifX0sInJlcXVpcmVkIjpbInByb2R1Y3RJZCJdLCJ0eXBlIjoib2JqZWN0In19LCJ0eXBlIjoib2JqZWN0In19fQ.ACqzHn9ADQyzZ3B3moprQ6ADRTRkuxo07Zu72uYP2r2BmHcHvhpFUZ3lcJgCeJ17Sx_cFpOdgLJCDZqGrDC7Cg","schema":{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"credentialSubject":{"$id":"6ad3d05c-ccf2-90df-32e9-aea5d5cf3115","$schema":"https://json-schema.org/draft/2020-12/schema","description":"Merchant Product License Application Credential Schema","name":"Merchant Product License Application Credential Schema","properties":{"credentialSubject":{"additionalProperties":true,"properties":{"productId":{"description":"Product ID to activate (since payment may contain multiple products)","type":"string"}},"required":["productId"],"type":"object"}},"type":"object"}}}`
+var merchantProductLicenseApplicationVerifiableCredentialJSON = `{"id":"6ad3d05c-ccf2-90df-32e9-aea5d5cf3115","type":"CredentialSchema2023","credentialSchema":"eyJhbGciOiJFZERTQSIsImtpZCI6ImRpZDprZXk6ejZNa3A1M1hZU0dDVkZ1NHNLaW42UVZLUGppcWZVQ2F1VHF4VzhRcG9ZcTVuVVo5I3o2TWtwNTNYWVNHQ1ZGdTRzS2luNlFWS1BqaXFmVUNhdVRxeFc4UXBvWXE1blVaOSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NjI3NzIyMTEsImlzcyI6ImRpZDprZXk6ejZNa3A1M1hZU0dDVkZ1NHNLaW42UVZLUGppcWZVQ2F1VHF4VzhRcG9ZcTVuVVo5IiwianRpIjoiaHR0cDovL2xvY2FsaG9zdDo2MDAzL3YxL3NjaGVtYXMvNmFkM2QwNWMtY2NmMi05MGRmLTMyZTktYWVhNWQ1Y2YzMTE1IiwibmJmIjoxNzYyNzcyMjExLCJub25jZSI6IjlmY2U0ZjMwLTdjNWItNGRkOC04MjAzLTc5Yjk2MDg5ZGQ0ZiIsInZjIjp7IkBjb250ZXh0IjpbImh0dHBzOi8vd3d3LnczLm9yZy8yMDE4L2NyZWRlbnRpYWxzL3YxIl0sInR5cGUiOlsiVmVyaWZpYWJsZUNyZWRlbnRpYWwiXSwiY3JlZGVudGlhbFN1YmplY3QiOnsiJGlkIjoiNmFkM2QwNWMtY2NmMi05MGRmLTMyZTktYWVhNWQ1Y2YzMTE1IiwiJHNjaGVtYSI6Imh0dHBzOi8vanNvbi1zY2hlbWEub3JnL2RyYWZ0LzIwMjAtMTIvc2NoZW1hIiwiZGVzY3JpcHRpb24iOiJNZXJjaGFudCBQcm9kdWN0IExpY2Vuc2UgQXBwbGljYXRpb24gQ3JlZGVudGlhbCBTY2hlbWEiLCJuYW1lIjoiTWVyY2hhbnQgUHJvZHVjdCBMaWNlbnNlIEFwcGxpY2F0aW9uIENyZWRlbnRpYWwgU2NoZW1hIiwicHJvcGVydGllcyI6eyJjcmVkZW50aWFsU3ViamVjdCI6eyJhZGRpdGlvbmFsUHJvcGVydGllcyI6dHJ1ZSwicHJvcGVydGllcyI6eyJwcm9kdWN0SWQiOnsiZGVzY3JpcHRpb24iOiJQcm9kdWN0IElEIHRvIGFjdGl2YXRlIChzaW5jZSBwYXltZW50IG1heSBjb250YWluIG11bHRpcGxlIHByb2R1Y3RzKSIsInR5cGUiOiJzdHJpbmcifX0sInJlcXVpcmVkIjpbInByb2R1Y3RJZCJdLCJ0eXBlIjoib2JqZWN0In19LCJ0eXBlIjoib2JqZWN0In19fQ.ACqzHn9ADQyzZ3B3moprQ6ADRTRkuxo07Zu72uYP2r2BmHcHvhpFUZ3lcJgCeJ17Sx_cFpOdgLJCDZqGrDC7Cg","schema":{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"credentialSubject":{"$id":"6ad3d05c-ccf2-90df-32e9-aea5d5cf3115","$schema":"https://json-schema.org/draft/2020-12/schema","description":"Merchant Product License Application Credential Schema","name":"Merchant Product License Application Credential Schema","properties":{"credentialSubject":{"additionalProperties":true,"properties":{"productId":{"description":"Product ID to activate (since payment may contain multiple products)","type":"string"}},"required":["productId"],"type":"object"}},"type":"object"}}}`
 
 // Local in-memory cache (paymentStateStore) removed; use state machine memory and Redis uniformly
 
@@ -152,7 +152,7 @@ func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, err
 		result.VC = response.VerifiableCredential
 		result.Code = 0
 		return result, nil
-	case 1100, 1101:
+	case 1100, 1101, 1604:
 		// Various JWS validation failures (expired, missing fields, etc.)
 		result.Code = 2
 		return result, nil
@@ -374,6 +374,15 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 		"product_credential_manifest": manifestData,
 	}
 
+	// Include application_verifiable_credential_schema for larepass
+	var applicationCredentialSchema map[string]interface{}
+	if err := json.Unmarshal([]byte(merchantProductLicenseApplicationVerifiableCredentialJSON), &applicationCredentialSchema); err != nil {
+		return fmt.Errorf("failed to parse application VC schema JSON: %w", err)
+	}
+	signBody["application_verifiable_credential_schema"] = applicationCredentialSchema
+	log.Printf("Including application_verifiable_credential_schema in sign notification for user %s, app %s, productID: %s",
+		userID, appID, productID)
+
 	// Include product_id and application_verifiable_credential if productID is available
 	if productID != "" {
 		// Always include product_id at top level (needed for signature request identification)
@@ -443,6 +452,16 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 	signBody := map[string]interface{}{
 		"product_credential_manifest": manifestData,
 	}
+
+	// Include application_verifiable_credential_schema for fetch-signature flow
+	var applicationCredentialSchema map[string]interface{}
+	if err := json.Unmarshal([]byte(merchantProductLicenseApplicationVerifiableCredentialJSON), &applicationCredentialSchema); err != nil {
+		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to parse application VC schema JSON: %v", err)
+		return fmt.Errorf("failed to parse application VC schema JSON: %w", err)
+	}
+	signBody["application_verifiable_credential_schema"] = applicationCredentialSchema
+	log.Printf("notifyLarePassToFetchSignature: Including application_verifiable_credential_schema for user %s, app %s, productID: %s",
+		userID, appID, productID)
 
 	// productID is required for application_verifiable_credential (omit txHash by design)
 	if productID == "" {
