@@ -180,10 +180,15 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	}
 
 	// Trigger sync again now that XForwardedHost is available
-	// This ensures LarePass notification is sent even if preprocessing failed due to missing XForwardedHost
-	if latest != nil && !(latest.DeveloperSync == DeveloperSyncCompleted && latest.LarePassSync == LarePassSyncCompleted) {
-		log.Printf("PurchaseApp: Triggering payment state sync after start_payment event")
+	// Skip if we're still waiting for a (re)signature to be produced to avoid double-publishing
+	if latest != nil &&
+		latest.SignatureStatus != SignatureRequired &&
+		latest.SignatureStatus != SignatureRequiredButPending &&
+		!(latest.DeveloperSync == DeveloperSyncCompleted && latest.LarePassSync == LarePassSyncCompleted) {
+		log.Printf("PurchaseApp: Triggering payment state sync after start_payment event (signature status=%s)", latest.SignatureStatus)
 		_ = triggerPaymentStateSync(latest)
+	} else if latest != nil {
+		log.Printf("PurchaseApp: Skip triggerPaymentStateSync because signature is still pending (status=%s)", latest.SignatureStatus)
 	}
 
 	// Delegate response building to state machine for consistency

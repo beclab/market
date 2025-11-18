@@ -703,6 +703,14 @@ func triggerPaymentStateSync(state *PaymentState) error {
 		return nil
 	}
 
+	// Signature still pending or needs re-sign: wait until sign flow produces JWS before fetching
+	if state.SignatureStatus == SignatureRequired ||
+		state.SignatureStatus == SignatureRequiredButPending ||
+		state.SignatureStatus == SignatureErrorNeedReSign {
+		log.Printf("triggerPaymentStateSync: Signature status %s for %s, skip fetch-signature push", state.SignatureStatus, state.GetKey())
+		return nil
+	}
+
 	// LarePassSync scheduling logic (reentrant)
 	switch state.LarePassSync {
 	case LarePassSyncNotStarted:
