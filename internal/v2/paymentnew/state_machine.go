@@ -522,7 +522,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 		// Fetch latest state to avoid stale closure copy
 		latest, err := psm.getState(state.UserID, state.AppID, state.ProductID)
 		if err == nil && latest != nil {
-			if (latest.VC != "" && latest.DeveloperSync == DeveloperSyncCompleted) || latest.PaymentStatus == PaymentDeveloperConfirmed {
+			if (latest.VC != "" && latest.DeveloperSync == DeveloperSyncCompleted) || (latest.PaymentStatus == PaymentDeveloperConfirmed && latest.VC != "") {
 				log.Printf("VC already confirmed; stop polling for user %s, app %s", state.UserID, state.AppID)
 				return
 			}
