@@ -132,9 +132,12 @@ func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, err
 	// Parse response to extract verifiableCredential
 	var response struct {
 		VerifiableCredential string `json:"verifiableCredential"`
-		Error                string `json:"error,omitempty"`
-		Message              string `json:"message,omitempty"`
-		Code                 int    `json:"code,omitempty"`
+		Data                 struct {
+			VerifiableCredential string `json:"verifiableCredential"`
+		} `json:"data"`
+		Error   string `json:"error,omitempty"`
+		Message string `json:"message,omitempty"`
+		Code    int    `json:"code,omitempty"`
 	}
 
 	if err := json.Unmarshal(resp.Body(), &response); err != nil {
@@ -143,13 +146,18 @@ func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, err
 
 	result := &VCQueryResult{}
 
+	vcValue := response.VerifiableCredential
+	if vcValue == "" {
+		vcValue = response.Data.VerifiableCredential
+	}
+
 	// Prefer using returned code field when available
 	switch response.Code {
 	case 0:
-		if response.VerifiableCredential == "" {
+		if vcValue == "" {
 			return nil, errors.New("developer ActivateAndGrant returned code 0 but verifiableCredential is empty")
 		}
-		result.VC = response.VerifiableCredential
+		result.VC = vcValue
 		result.Code = 0
 		return result, nil
 	case 1100, 1101, 1604:
@@ -190,13 +198,13 @@ func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, err
 		return result, nil
 	}
 
-	if response.VerifiableCredential == "" {
+	if vcValue == "" {
 		result.Code = 1 // no record
 		return result, nil
 	}
 
 	// Success
-	result.VC = response.VerifiableCredential
+	result.VC = vcValue
 	result.Code = 0
 	return result, nil
 }

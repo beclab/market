@@ -530,9 +530,18 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 			}
 			return
 		} else {
-			log.Printf("VC query returned code=%d, continuing poll...", result.Code)
-
-			if result.Code == 1 || result.Code == 2 {
+			if result.Code == 0 && result.VC == "" {
+				log.Printf("VC polling attempt %d failed: code=0 but VC empty; treating as developer error", attempt)
+				if attempt == maxAttempts {
+					_ = psm.updateState(key, func(s *PaymentState) error {
+						if s.DeveloperSync != DeveloperSyncCompleted {
+							s.DeveloperSync = DeveloperSyncFailed
+						}
+						return nil
+					})
+					return
+				}
+			} else if result.Code == 1 || result.Code == 2 {
 				log.Printf("VC polling received terminal code=%d, stop polling for user %s, app %s", result.Code, state.UserID, state.AppID)
 				_ = psm.updateState(key, func(s *PaymentState) error {
 					s.DeveloperSync = DeveloperSyncCompleted
