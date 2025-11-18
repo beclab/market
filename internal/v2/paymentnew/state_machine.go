@@ -478,6 +478,21 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 			return
 		} else {
 			log.Printf("VC query returned code=%d, continuing poll...", result.Code)
+
+			if result.Code == 1 || result.Code == 2 {
+				log.Printf("VC polling received terminal code=%d, stop polling for user %s, app %s", result.Code, state.UserID, state.AppID)
+				_ = psm.updateState(key, func(s *PaymentState) error {
+					s.DeveloperSync = DeveloperSyncCompleted
+					switch result.Code {
+					case 1:
+						s.SignatureStatus = SignatureErrorNoRecord
+					case 2:
+						s.SignatureStatus = SignatureErrorNeedReSign
+					}
+					return nil
+				})
+				return
+			}
 		}
 
 		if attempt == maxAttempts {
