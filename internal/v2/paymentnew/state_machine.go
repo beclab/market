@@ -480,6 +480,11 @@ func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
 func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 	log.Printf("Starting VC polling for user %s, app %s", state.UserID, state.AppID)
 
+	// Refresh state from store to avoid stale in-memory copy (especially after re-sign)
+	if _, err := psm.forceReloadState(state.UserID, state.AppID, state.ProductID); err != nil {
+		log.Printf("VC polling: failed to refresh state from store: %v", err)
+	}
+
 	key := state.GetKey()
 
 	// Reentrancy guard: return if already in progress; otherwise mark in progress
@@ -652,6 +657,31 @@ func (psm *PaymentStateMachine) LoadState(userID, appID, productID string) (*Pay
 		return st, nil
 	}
 	// Fallback to Redis
+	if psm.settingsManager == nil {
+		return nil, fmt.Errorf("settings manager is nil")
+	}
+	rc := psm.settingsManager.GetRedisClient()
+	if rc == nil {
+		return nil, fmt.Errorf("redis client is nil")
+	}
+	redisKey := getRedisStateKey(userID, appID, productID)
+	val, err := rc.Get(redisKey)
+	if err != nil || val == "" {
+		return nil, fmt.Errorf("state not found in redis: %w", err)
+	}
+	var st PaymentState
+	if err := json.Unmarshal([]byte(val), &st); err != nil {
+		return nil, fmt.Errorf("failed to parse state from redis: %w", err)
+	}
+	psm.setState(&st)
+	return &st, nil
+}
+
+// forceReloadState bypasses in-memory cache and forcibly loads state from Redis
+func (psm *PaymentStateMachine) forceReloadState(userID, appID, productID string) (*PaymentState, error) {
+	if psm == nil {
+		return nil, fmt.Errorf("state machine is nil")
+	}
 	if psm.settingsManager == nil {
 		return nil, fmt.Errorf("settings manager is nil")
 	}
