@@ -223,6 +223,16 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 		return &newState, nil
 	}
 
+	// 1.5) Signed + frontend already completed -> restart VC polling (e.g. re-sign flow)
+	if newState.SignatureStatus == SignatureRequiredAndSigned &&
+		newState.PaymentStatus == PaymentFrontendCompleted {
+		log.Printf("handleStartPayment: signature ready and payment already completed; restarting VC polling for %s", newState.GetKey())
+		if psm != nil {
+			go psm.pollForVCFromDeveloper(&newState)
+		}
+		return &newState, nil
+	}
+
 	// 2) Already signed -> notify frontend to pay (idempotent)
 	if newState.SignatureStatus == SignatureRequiredAndSigned {
 		if psm != nil && psm.dataSender != nil {
