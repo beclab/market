@@ -256,12 +256,22 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 		log.Printf("GetPaymentStatus: No productID found, using appID as final fallback: %s", productID)
 	}
 
-	// Step 3: Find state
+	// Step 3: Find state (try memory first, then fallback to Redis)
 	var state *PaymentState
 	if globalStateMachine != nil {
-		s, err := globalStateMachine.getState(userID, appID, productID)
-		if err == nil {
+		// Try getState first (memory only)
+		if s, err := globalStateMachine.getState(userID, appID, productID); err == nil {
 			state = s
+			log.Printf("GetPaymentStatus: Found state in memory for user=%s app=%s productID=%s", userID, appID, productID)
+		} else {
+			// Try LoadState (will check Redis and load to memory)
+			log.Printf("GetPaymentStatus: State not in memory, trying LoadState from Redis. Error: %v", err)
+			if s, err := globalStateMachine.LoadState(userID, appID, productID); err == nil {
+				state = s
+				log.Printf("GetPaymentStatus: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, appID, productID)
+			} else {
+				log.Printf("GetPaymentStatus: State not found in Redis either. Error: %v", err)
+			}
 		}
 	}
 
