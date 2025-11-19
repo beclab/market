@@ -224,11 +224,18 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 		return &PaymentStatusResult{RequiresPurchase: false, Status: "free", Message: "This is a free app"}, nil
 	}
 
+	// Use real app ID from AppEntry, not the URL parameter (which might be name)
+	realAppID := appID
+	if appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
+		realAppID = appInfo.AppEntry.ID
+		log.Printf("GetPaymentStatus: Using real app ID from AppEntry: %s (URL param was: %s)", realAppID, appID)
+	}
+
 	// Step 2: Determine productID for state machine lookup
 	// Priority order:
 	// 1. For paid apps with Price.Paid.ProductID (buyout), use Price.Paid.ProductID
 	// 2. For apps with Products (in-app purchases), use productID from Products
-	// 3. Fallback to appID if neither exists
+	// 3. Fallback to realAppID if neither exists
 	var productID string
 	if appInfo.Price != nil && appInfo.Price.Paid != nil {
 		if appInfo.Price.Paid.ProductID != "" {
@@ -236,9 +243,9 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 			productID = appInfo.Price.Paid.ProductID
 			log.Printf("GetPaymentStatus: Paid buyout app, using productID from Price.Paid: %s", productID)
 		} else if len(appInfo.Price.Paid.Price) > 0 {
-			// Paid buyout app without product_id - use appID as fallback
-			productID = appID
-			log.Printf("GetPaymentStatus: Paid buyout app without product_id, using appID as fallback: %s", productID)
+			// Paid buyout app without product_id - use realAppID as fallback
+			productID = realAppID
+			log.Printf("GetPaymentStatus: Paid buyout app without product_id, using realAppID as fallback: %s", productID)
 		}
 	}
 
@@ -250,25 +257,26 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 		}
 	}
 
-	// Final fallback: use appID
+	// Final fallback: use realAppID
 	if productID == "" {
-		productID = appID
-		log.Printf("GetPaymentStatus: No productID found, using appID as final fallback: %s", productID)
+		productID = realAppID
+		log.Printf("GetPaymentStatus: No productID found, using realAppID as final fallback: %s", productID)
 	}
 
 	// Step 3: Find state (try memory first, then fallback to Redis)
+	// Use realAppID for state lookup to match PurchaseApp behavior
 	var state *PaymentState
 	if globalStateMachine != nil {
 		// Try getState first (memory only)
-		if s, err := globalStateMachine.getState(userID, appID, productID); err == nil {
+		if s, err := globalStateMachine.getState(userID, realAppID, productID); err == nil {
 			state = s
-			log.Printf("GetPaymentStatus: Found state in memory for user=%s app=%s productID=%s", userID, appID, productID)
+			log.Printf("GetPaymentStatus: Found state in memory for user=%s app=%s productID=%s", userID, realAppID, productID)
 		} else {
 			// Try LoadState (will check Redis and load to memory)
 			log.Printf("GetPaymentStatus: State not in memory, trying LoadState from Redis. Error: %v", err)
-			if s, err := globalStateMachine.LoadState(userID, appID, productID); err == nil {
+			if s, err := globalStateMachine.LoadState(userID, realAppID, productID); err == nil {
 				state = s
-				log.Printf("GetPaymentStatus: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, appID, productID)
+				log.Printf("GetPaymentStatus: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, realAppID, productID)
 			} else {
 				log.Printf("GetPaymentStatus: State not found in Redis either. Error: %v", err)
 			}
