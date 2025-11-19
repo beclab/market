@@ -281,20 +281,31 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 	switch status {
 	case "purchased":
 		result.Message = "App is already purchased"
-	case string(PaymentFrontendCompleted):
+	case "waiting_developer_confirmation":
 		result.Message = "Payment completed on frontend, waiting for developer confirmation"
-	case string(PaymentFrontendStarted):
+	case "payment_frontend_started":
 		result.Message = "Frontend preparing on-chain payment"
 		if state != nil && len(state.FrontendData) > 0 {
 			result.FrontendData = state.FrontendData
 		}
-	case string(PaymentNotificationSent):
+	case "payment_required":
+		result.Message = "Payment required"
+		// Include frontend data if it exists
+		if state != nil && len(state.FrontendData) > 0 {
+			result.FrontendData = state.FrontendData
+		}
+	case "notification_sent":
 		result.Message = "Payment notification sent"
-	case string(PaymentNotNotified):
+	case "signature_required":
+		result.Message = "Signature required"
+	case "signature_no_record":
+		result.Message = "Developer has no matching payment record, please retry payment"
+	case "signature_need_resign":
+		result.Message = "Signature invalid or expired, please re-sign to continue"
+	case string(PaymentNotNotified), "not_buy":
 		result.Message = "Payment not started"
-	// Reserved/compatibility: not produced by current flows, kept for forward/backward compatibility
-	case "not_buy":
-		result.Message = "Payment not started"
+	case "not_evaluated":
+		result.Message = "Payment status not evaluated"
 	default:
 		result.Message = "Payment status updated"
 	}

@@ -1048,6 +1048,19 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 	if state.PaymentStatus == PaymentFrontendStarted {
 		return "payment_frontend_started"
 	}
+	// 2.6) Payment notification sent, waiting for frontend to pay
+	if state.PaymentStatus == PaymentNotificationSent {
+		// If signature is already signed, payment is required
+		if state.SignatureStatus == SignatureRequiredAndSigned {
+			return "payment_required"
+		}
+		// If JWS exists but signature status is in error, still allow payment retry
+		if state.JWS != "" {
+			return "payment_required"
+		}
+		// Otherwise, notification sent but signature not ready yet
+		return "notification_sent"
+	}
 	// 3) Signed, payment required
 	if state.SignatureStatus == SignatureRequiredAndSigned {
 		return "payment_required"
