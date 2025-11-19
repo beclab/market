@@ -118,6 +118,15 @@ Typical sequence: preprocessing → fetch signature → submit signature → fro
 - Implement JSONPath checks and signature validation in `verifyVCAgainstManifest`.
 - Add configurable backoff, phase timeouts, and cleanup strategies.
 
+## Pending Issues
+
+When product definitions change between installs, recovering historical purchases becomes ambiguous:
+1. The user purchases an app and completes installation.
+2. The purchased `productID` is retired and replaced with a new `productID`.
+3. The user uninstalls the app and later reinstalls it.
+
+Because the original `productID` is no longer present, the market cannot determine which historical product was owned. Querying every historical `productID` would bloat `price.yaml`, and each query must be pushed through LarePass, leading to poor experience. The recommended approach is for the frontend to present a “restore historical purchase” page or modal. Opening it triggers the market to fetch historical products from GitBot, lets the user select the desired entry, and then continues with the normal restore flow.
+
 ## Frontend-visible status mapping (suggested)
 
 - `developer_confirmed` → Purchased (installable)
