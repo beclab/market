@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"market/internal/v2/history"
+	"market/internal/v2/settings"
 	"market/internal/v2/types"
 )
 
@@ -74,17 +75,18 @@ type DataSenderInterface interface {
 
 // TaskModule manages task queues and execution
 type TaskModule struct {
-	instanceID     string // Unique instance identifier for debugging
-	mu             sync.RWMutex
-	pendingTasks   []*Task          // queue for pending tasks
-	runningTasks   map[string]*Task // map for running tasks
-	taskStore      *TaskStore       // persistent task store
-	executorTicker *time.Ticker     // ticker for task execution (every 2 seconds)
-	statusTicker   *time.Ticker     // ticker for status update (every 10 seconds)
-	ctx            context.Context
-	cancel         context.CancelFunc
-	historyModule  *history.HistoryModule // Add history module reference
-	dataSender     DataSenderInterface    // Add data sender interface reference
+	instanceID      string // Unique instance identifier for debugging
+	mu              sync.RWMutex
+	pendingTasks    []*Task          // queue for pending tasks
+	runningTasks    map[string]*Task // map for running tasks
+	taskStore       *TaskStore       // persistent task store
+	executorTicker  *time.Ticker     // ticker for task execution (every 2 seconds)
+	statusTicker    *time.Ticker     // ticker for status update (every 10 seconds)
+	ctx             context.Context
+	cancel          context.CancelFunc
+	historyModule   *history.HistoryModule    // Add history module reference
+	dataSender      DataSenderInterface       // Add data sender interface reference
+	settingsManager *settings.SettingsManager // Add settings manager reference
 }
 
 // NewTaskModule creates a new task module instance
@@ -169,6 +171,33 @@ func (tm *TaskModule) SetDataSender(dataSender DataSenderInterface) {
 	}
 	defer tm.mu.Unlock()
 	tm.dataSender = dataSender
+}
+
+// SetSettingsManager sets the settings manager for accessing Redis
+func (tm *TaskModule) SetSettingsManager(settingsManager *settings.SettingsManager) {
+	// Retry mechanism for acquiring lock (max 3 attempts with 10ms delay)
+	maxRetries := 3
+	retryDelay := 10 * time.Millisecond
+
+	var lockAcquired bool
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if tm.mu.TryLock() {
+			lockAcquired = true
+			break
+		}
+
+		if attempt < maxRetries-1 {
+			time.Sleep(retryDelay)
+			continue
+		}
+	}
+
+	if !lockAcquired {
+		log.Printf("[%s] Failed to acquire lock for SetSettingsManager after %d attempts", tm.instanceID, maxRetries)
+		return
+	}
+	defer tm.mu.Unlock()
+	tm.settingsManager = settingsManager
 }
 
 // AddTask adds a new task to the pending queue

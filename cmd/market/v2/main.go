@@ -260,6 +260,14 @@ func main() {
 			log.Println("Warning: Data sender not available from AppInfo module, Task module will run without system notifications")
 		}
 
+		// Set settings manager for accessing Redis
+		if settingsManager != nil {
+			taskModule.SetSettingsManager(settingsManager)
+			log.Println("Settings manager set in Task module successfully")
+		} else {
+			log.Println("Warning: Settings manager not available, Task module will run without Redis access")
+		}
+
 		log.Println("Task module started successfully")
 
 		// Set task module reference in AppInfo module
