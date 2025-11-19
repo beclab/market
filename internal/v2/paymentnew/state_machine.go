@@ -224,8 +224,13 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	}
 
 	// 1.5) Signed + frontend already completed -> restart VC polling (e.g. re-sign flow)
+	// Skip if VC already confirmed to avoid unnecessary polling
 	if newState.SignatureStatus == SignatureRequiredAndSigned &&
 		newState.PaymentStatus == PaymentFrontendCompleted {
+		if newState.DeveloperSync == DeveloperSyncCompleted && newState.VC != "" {
+			log.Printf("handleStartPayment: VC already confirmed, skipping VC polling for %s", newState.GetKey())
+			return &newState, nil
+		}
 		log.Printf("handleStartPayment: signature ready and payment already completed; restarting VC polling for %s", newState.GetKey())
 		if psm != nil {
 			go psm.pollForVCFromDeveloper(&newState)
@@ -934,6 +939,15 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}, nil
 	}
 
+	// 1.6) VC already confirmed -> purchased (check before signature/payment status)
+	// This takes priority over other states to avoid returning payment_required when already purchased
+	if state.DeveloperSync == DeveloperSyncCompleted && state.VC != "" {
+		return map[string]interface{}{
+			"status":  "purchased",
+			"message": "already purchased, ready to install",
+		}, nil
+	}
+
 	// Create HTTP client for API calls
 	httpClient := resty.New()
 	httpClient.SetTimeout(10 * time.Second)
@@ -999,7 +1013,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}, nil
 	}
 
-	// 4) VC present -> purchased
+	// 4) VC present -> purchased (fallback check, should have been caught earlier)
 	if state.DeveloperSync == DeveloperSyncCompleted && state.VC != "" {
 		return map[string]interface{}{
 			"status":  "purchased",
