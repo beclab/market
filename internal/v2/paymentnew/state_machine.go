@@ -157,7 +157,13 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	}
 
 	// Branch by current signature/payment status to advance flow
-	// 0) Signature invalid → reset and re-trigger sign flow
+	// 0) Error states that should short-circuit (no further processing)
+	if newState.SignatureStatus == SignatureErrorNoRecord {
+		log.Printf("handleStartPayment: signature status is error_no_record, no further processing needed for %s", newState.GetKey())
+		return &newState, nil
+	}
+
+	// 0.5) Signature invalid → reset and re-trigger sign flow
 	isReSignFlow := false
 	if newState.SignatureStatus == SignatureErrorNeedReSign {
 		log.Printf("handleStartPayment: signature marked invalid, resetting state for re-sign (%s)", newState.GetKey())
@@ -757,9 +763,11 @@ func triggerPaymentStateSync(state *PaymentState) error {
 	}
 
 	// Signature still pending or needs re-sign: wait until sign flow produces JWS before fetching
+	// Error states are terminal and should not trigger further sync attempts
 	if state.SignatureStatus == SignatureRequired ||
 		state.SignatureStatus == SignatureRequiredButPending ||
-		state.SignatureStatus == SignatureErrorNeedReSign {
+		state.SignatureStatus == SignatureErrorNeedReSign ||
+		state.SignatureStatus == SignatureErrorNoRecord {
 		log.Printf("triggerPaymentStateSync: Signature status %s for %s, skip fetch-signature push", state.SignatureStatus, state.GetKey())
 		return nil
 	}
@@ -925,20 +933,6 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}, nil
 	}
 
-	// 1.5) Error states that should short-circuit
-	if state.SignatureStatus == SignatureErrorNoRecord {
-		return map[string]interface{}{
-			"status":  "signature_no_record",
-			"message": "developer has no matching payment record, please retry payment",
-		}, nil
-	}
-	if state.SignatureStatus == SignatureErrorNeedReSign {
-		return map[string]interface{}{
-			"status":  "signature_need_resign",
-			"message": "signature invalid or expired, please re-sign to continue",
-		}, nil
-	}
-
 	// 1.6) VC already confirmed -> purchased (check before signature/payment status)
 	// This takes priority over other states to avoid returning payment_required when already purchased
 	if state.DeveloperSync == DeveloperSyncCompleted && state.VC != "" {
@@ -966,6 +960,42 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		log.Printf("buildPurchaseResponse: Using developerName=%s from state (appInfo is nil)", developerName)
 	}
 
+	// 1.5) Error states handling: check if we can still return payment info for retry
+	// If JWS exists and payment notification was sent, allow frontend to retry payment
+	if state.SignatureStatus == SignatureErrorNoRecord {
+		// If JWS exists and payment notification was sent, return payment data to allow retry
+		if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent {
+			log.Printf("buildPurchaseResponse: error_no_record but JWS and notification exist, returning payment data for retry")
+			developerDID := state.Developer.DID
+			userDID, err := getUserDID(userID, xForwardedHost)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get user DID: %w", err)
+			}
+			paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
+			response := map[string]interface{}{
+				"status":       "payment_required",
+				"payment_data": paymentData,
+				"message":      "developer has no matching payment record, please retry payment",
+			}
+			// Include frontend data if it exists
+			if len(state.FrontendData) > 0 {
+				response["frontend_data"] = state.FrontendData
+			}
+			return response, nil
+		}
+		// Otherwise return error message
+		return map[string]interface{}{
+			"status":  "signature_no_record",
+			"message": "developer has no matching payment record, please retry payment",
+		}, nil
+	}
+	if state.SignatureStatus == SignatureErrorNeedReSign {
+		return map[string]interface{}{
+			"status":  "signature_need_resign",
+			"message": "signature invalid or expired, please re-sign to continue",
+		}, nil
+	}
+
 	// 2) Signed -> return payment data for frontend transfer
 	if state.SignatureStatus == SignatureRequiredAndSigned {
 		developerDID := state.Developer.DID
@@ -974,10 +1004,15 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
 		}
 		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
-		return map[string]interface{}{
+		response := map[string]interface{}{
 			"status":       "payment_required",
 			"payment_data": paymentData,
-		}, nil
+		}
+		// Include frontend data if it exists
+		if len(state.FrontendData) > 0 {
+			response["frontend_data"] = state.FrontendData
+		}
+		return response, nil
 	}
 
 	// 2.5) Has JWS and payment notification sent -> return payment data for frontend transfer
@@ -989,10 +1024,15 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
 		}
 		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
-		return map[string]interface{}{
+		response := map[string]interface{}{
 			"status":       "payment_required",
 			"payment_data": paymentData,
-		}, nil
+		}
+		// Include frontend data if it exists
+		if len(state.FrontendData) > 0 {
+			response["frontend_data"] = state.FrontendData
+		}
+		return response, nil
 	}
 
 	// 3) Frontend has completed payment

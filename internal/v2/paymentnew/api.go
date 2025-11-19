@@ -182,9 +182,12 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	// Trigger sync again now that XForwardedHost is available
 	// Skip if we're still waiting for a (re)signature to be produced to avoid double-publishing
 	// Also skip if VC already confirmed (purchase completed) to avoid unnecessary operations
+	// Also skip error states (error_no_record, error_need_resign) as they are terminal states
 	if latest != nil &&
 		latest.SignatureStatus != SignatureRequired &&
 		latest.SignatureStatus != SignatureRequiredButPending &&
+		latest.SignatureStatus != SignatureErrorNoRecord &&
+		latest.SignatureStatus != SignatureErrorNeedReSign &&
 		!(latest.DeveloperSync == DeveloperSyncCompleted && latest.LarePassSync == LarePassSyncCompleted) &&
 		!(latest.DeveloperSync == DeveloperSyncCompleted && latest.VC != "") {
 		log.Printf("PurchaseApp: Triggering payment state sync after start_payment event (signature status=%s)", latest.SignatureStatus)
@@ -192,6 +195,8 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 	} else if latest != nil {
 		if latest.DeveloperSync == DeveloperSyncCompleted && latest.VC != "" {
 			log.Printf("PurchaseApp: Skip triggerPaymentStateSync because VC already confirmed (purchase completed)")
+		} else if latest.SignatureStatus == SignatureErrorNoRecord || latest.SignatureStatus == SignatureErrorNeedReSign {
+			log.Printf("PurchaseApp: Skip triggerPaymentStateSync because signature is in error state (status=%s)", latest.SignatureStatus)
 		} else {
 			log.Printf("PurchaseApp: Skip triggerPaymentStateSync because signature is still pending (status=%s)", latest.SignatureStatus)
 		}
