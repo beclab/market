@@ -185,12 +185,29 @@ func (s *Server) setupRoutes() {
 	log.Printf("Route configured: POST /app-store/api/v2/payment/submit-signature")
 
 	// 24. Check app payment status
-	api.HandleFunc("/apps/{id}/payment-status", s.getAppPaymentStatus).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/payment-status")
+	// New route with source parameter (recommended)
+	api.HandleFunc("/sources/{source}/apps/{id}/payment-status", s.getAppPaymentStatus).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/sources/{source}/apps/{id}/payment-status")
+
+	// 24.1 Purchase app
+	api.HandleFunc("/sources/{source}/apps/{id}/purchase", s.purchaseApp).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/sources/{source}/apps/{id}/purchase")
+
+	// Legacy route for backward compatibility (searches all sources)
+	api.HandleFunc("/apps/{id}/payment-status", s.getAppPaymentStatusLegacy).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/payment-status (legacy)")
 
 	// 25. Start payment polling after frontend payment completion
 	api.HandleFunc("/payment/start-polling", s.startPaymentPolling).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/payment/start-polling")
+
+	// 26. Frontend signals payment readiness
+	api.HandleFunc("/payment/frontend-start", s.startFrontendPayment).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/payment/frontend-start")
+
+	// 27. Fetch signature callback (from LarePass)
+	api.HandleFunc("/payment/fetch-signature-callback", s.fetchSignatureCallback).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/payment/fetch-signature-callback")
 
 	log.Printf("All routes configured successfully")
 }

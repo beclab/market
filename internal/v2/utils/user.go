@@ -249,3 +249,28 @@ func GetAdminUsername(token string) (string, error) {
 
 	return response.Data.Username, nil
 }
+
+// UserInfoFromAPI represents user information returned from app-service API
+type UserInfoFromAPI struct {
+	UID               string   `json:"uid"`
+	Name              string   `json:"name"`
+	DisplayName       string   `json:"display_name"`
+	Description       string   `json:"description"`
+	Email             string   `json:"email"`
+	State             string   `json:"state"`
+	LastLoginTime     *int64   `json:"last_login_time"`
+	CreationTimestamp int64    `json:"creation_timestamp"`
+	Avatar            string   `json:"avatar"`
+	TerminusName      string   `json:"terminusName"`
+	WizardComplete    bool     `json:"wizard_complete"`
+	Roles             []string `json:"roles"`
+	MemoryLimit       string   `json:"memory_limit"`
+	CPULimit          string   `json:"cpu_limit"`
+}
+
+// UsersListResponse represents the response structure for users list API
+type UsersListResponse struct {
+	Code   int                `json:"code"`
+	Data   []*UserInfoFromAPI `json:"data"`
+	Totals int                `json:"totals"`
+}

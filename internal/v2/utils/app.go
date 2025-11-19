@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"log"
 	"market/internal/v2/types"
 )
 
@@ -83,4 +84,46 @@ func FindAppInSourceData(sourceData *types.SourceData, appID string) *types.AppI
 func CheckAppExistsInUserData(userData *types.UserData, appID string) bool {
 	app, _ := FindAppInUserData(userData, appID)
 	return app != nil
+}
+
+// FindAppInUserDataWithSource finds an app in user data by app ID and specific source
+// If source is empty, it searches all sources (same behavior as FindAppInUserData)
+func FindAppInUserDataWithSource(userData *types.UserData, appID string, source string) (*types.AppInfoLatestData, string) {
+	if userData == nil {
+		return nil, ""
+	}
+
+	// If source is specified, only search in that source
+	if source != "" {
+		sourceData, exists := userData.Sources[source]
+		if !exists {
+			// Log available sources for debugging
+			var availableSources []string
+			if userData.Sources != nil {
+				for src := range userData.Sources {
+					availableSources = append(availableSources, src)
+				}
+			}
+			log.Printf("Source '%s' not found in user data. Available sources: %v", source, availableSources)
+			return nil, ""
+		}
+
+		// Log if source exists but has no apps
+		if sourceData == nil || sourceData.AppInfoLatest == nil || len(sourceData.AppInfoLatest) == 0 {
+			log.Printf("Source '%s' exists but has no apps in AppInfoLatest", source)
+			return nil, ""
+		}
+
+		app := FindAppInSourceData(sourceData, appID)
+		if app != nil {
+			return app, source
+		}
+
+		// Log when app not found but source and apps exist
+		log.Printf("App '%s' not found in source '%s' (source has %d apps)", appID, source, len(sourceData.AppInfoLatest))
+		return nil, ""
+	}
+
+	// If source is not specified, search all sources (fallback to original behavior)
+	return FindAppInUserData(userData, appID)
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,17 +23,21 @@ const (
 
 // PaymentTask represents a payment task with unique key
 type PaymentTask struct {
-	UserID        string     `json:"user_id"`
-	AppID         string     `json:"app_id"`
-	AppName       string     `json:"app_name,omitempty"`
-	ProductID     string     `json:"product_id"`
-	Status        TaskStatus `json:"status"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	JWS           string     `json:"jws,omitempty"`
-	SignBody      string     `json:"sign_body,omitempty"`
-	DeveloperName string     `json:"developer_name,omitempty"`
-	VC            string     `json:"vc,omitempty"`
+	UserID         string     `json:"user_id"`
+	AppID          string     `json:"app_id"`
+	AppName        string     `json:"app_name,omitempty"`
+	SourceID       string     `json:"source_id,omitempty"` // Add source_id field
+	ProductID      string     `json:"product_id"`
+	Status         TaskStatus `json:"status"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	JWS            string     `json:"jws,omitempty"`
+	SignBody       string     `json:"sign_body,omitempty"`
+	DeveloperName  string     `json:"developer_name,omitempty"`
+	VC             string     `json:"vc,omitempty"`
+	TxHash         string     `json:"tx_hash,omitempty"`
+	SystemChainID  int        `json:"system_chain_id,omitempty"`
+	XForwardedHost string     `json:"x_forwarded_host,omitempty"` // X-Forwarded-Host header from request
 }
 
 // TaskManager manages payment tasks with unique key constraint
@@ -58,7 +63,7 @@ func (tm *TaskManager) generateKey(userID, appID, productID string) string {
 }
 
 // CreateOrGetTask creates a new task or returns existing one
-func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, developerName, appName string) (*PaymentTask, error) {
+func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, appName, sourceID string, appInfo *types.AppInfo) (*PaymentTask, error) {
 	// Try to acquire lock with timeout
 	if !tm.mu.TryLock() {
 		return nil, fmt.Errorf("failed to acquire lock, task manager is busy")
@@ -73,23 +78,46 @@ func (tm *TaskManager) CreateOrGetTask(userID, appID, productID, developerName, 
 		return task, nil
 	}
 
+	// Get developer identifier from app price info
+	developerDID := ""
+	developerIdentifier := ""
+	if appInfo != nil && appInfo.Price != nil {
+		// In new format, developer is a string (email/identifier)
+		developerIdentifier = strings.TrimSpace(appInfo.Price.Developer)
+		log.Printf("Extracted developer identifier from price info: %s", developerIdentifier)
+
+		// If it's in DID format, extract DID part
+		if strings.HasPrefix(developerIdentifier, "did:key:") {
+			developerDID = developerIdentifier
+			developerIdentifier = strings.TrimPrefix(developerIdentifier, "did:key:")
+			log.Printf("Extracted developer identifier from DID: %s", developerIdentifier)
+		} else {
+			developerDID = developerIdentifier
+			log.Printf("Warning: DID format not recognized, using full DID as identifier: %s", developerDID)
+		}
+	}
+	if developerDID == "" {
+		log.Printf("Warning: developer DID not found in price info for app %s", appID)
+	}
+
 	// Create new task
 	task := &PaymentTask{
 		UserID:        userID,
 		AppID:         appID,
 		AppName:       appName,
+		SourceID:      sourceID,
 		ProductID:     productID,
 		Status:        TaskStatusNotSign,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
-		DeveloperName: developerName,
+		DeveloperName: developerIdentifier, // Store the identifier, not the full DID
 	}
 
 	tm.tasks[key] = task
-	log.Printf("Created new payment task for key %s", key)
+	log.Printf("Created new payment task for key %s with developer DID: %s, identifier: %s", key, developerDID, developerIdentifier)
 
 	// Start the task workflow
-	go tm.executeTaskWorkflow(task)
+	// go tm.executeTaskWorkflow(task)
 
 	return task, nil
 }
@@ -145,10 +173,12 @@ func (tm *TaskManager) executeTaskWorkflow(task *PaymentTask) {
 	log.Printf("Starting payment workflow for task %s:%s:%s", task.UserID, task.AppID, task.ProductID)
 
 	// Step 2.1: Change status to not_sign and send notification
-	if err := tm.stepNotifySign(task); err != nil {
-		log.Printf("Error in step 2.1 (notify sign): %v", err)
-		return
-	}
+	// if err := tm.stepNotifySign(task); err != nil {
+	// 	log.Printf("Error in step 2.1 (notify sign): %v", err)
+	// 	return
+	// }
+
+	globalTaskManager.stepNotifyPaymentRequired(task)
 
 	// Wait for signature submission (this will be handled by ProcessSignatureSubmission)
 	log.Printf("Task workflow started, waiting for signature submission for task %s:%s:%s",
@@ -162,11 +192,15 @@ func (tm *TaskManager) stepNotifySign(task *PaymentTask) error {
 		return fmt.Errorf("failed to update task status to not_sign: %w", err)
 	}
 
-	// Call NotifyLarePassToSign
-	signBody := fmt.Sprintf(`{"user_id":"%s","app_id":"%s","product_id":"%s"}`,
-		task.UserID, task.AppID, task.ProductID)
+	// Use X-Forwarded-Host from task for callback URL (required)
+	xForwardedHost := task.XForwardedHost
+	if xForwardedHost == "" {
+		log.Printf("ERROR: X-Forwarded-Host is empty for user %s, cannot build callback URL", task.UserID)
+		return fmt.Errorf("X-Forwarded-Host is required but not available in task")
+	}
 
-	if err := NotifyLarePassToSign(tm.dataSender, signBody, task.UserID); err != nil {
+	// Call NotifyLarePassToSign with application_verifiable_credential and X-Forwarded-Host
+	if err := NotifyLarePassToSign(tm.dataSender, task.UserID, task.AppID, task.ProductID, task.TxHash, xForwardedHost, task.SystemChainID, task.DeveloperName); err != nil {
 		return fmt.Errorf("failed to notify LarePass to sign: %w", err)
 	}
 
@@ -250,7 +284,12 @@ func (tm *TaskManager) stepNotifyPaymentRequired(task *PaymentTask) {
 	// Note: In a real implementation, you would need to get user DID and developer DID
 	// For now, we'll use placeholder values
 	userDID := "did:key:z6Mkgk8SGZQqXahNc9RumbX8LvUdCLWZskY7LFNMULdT5Z6r" // This should come from user info
-	developerDID := fmt.Sprintf("did:key:%s", task.DeveloperName)         // This should come from app info
+	// DeveloperName now contains the identifier extracted from price info
+	// Reconstruct full DID if it doesn't already have the prefix
+	developerDID := task.DeveloperName
+	if !strings.HasPrefix(developerDID, "did:") {
+		developerDID = fmt.Sprintf("did:key:%s", task.DeveloperName)
+	}
 
 	paymentData := CreateFrontendPaymentData(userDID, developerDID, task.ProductID)
 
@@ -260,8 +299,9 @@ func (tm *TaskManager) stepNotifyPaymentRequired(task *PaymentTask) {
 		Timestamp:  time.Now().Unix(),
 		NotifyType: "payment_required",
 		Extensions: map[string]string{
-			"app_id":   task.AppID,
-			"app_name": task.AppName,
+			"app_id":    task.AppID,
+			"app_name":  task.AppName,
+			"source_id": task.SourceID, // Add source_id to notification
 		},
 		ExtensionsObj: map[string]interface{}{
 			"payment_data": paymentData,
@@ -288,8 +328,9 @@ func (tm *TaskManager) stepNotifyPurchased(task *PaymentTask) {
 		Timestamp:  time.Now().Unix(),
 		NotifyType: "purchase_completed",
 		Extensions: map[string]string{
-			"app_id":   task.AppID,
-			"app_name": task.AppName,
+			"app_id":    task.AppID,
+			"app_name":  task.AppName,
+			"source_id": task.SourceID, // Add source_id to notification
 		},
 	}
 
@@ -385,8 +426,31 @@ func (tm *TaskManager) CleanupCompletedTasks(olderThan time.Duration) {
 	}
 }
 
+// GetProductIDFromAppInfo extracts the product ID from app price information
+// Returns the product_id from the first product, or empty string if not found
+func GetProductIDFromAppInfo(appInfo *types.AppInfo) string {
+	// Check if price info exists
+	if appInfo == nil || appInfo.Price == nil {
+		log.Printf("GetProductIDFromAppInfo: No price info available, returning empty string")
+		return ""
+	}
+
+	// Get product ID from first product in products array
+	if len(appInfo.Price.Products) > 0 {
+		productID := appInfo.Price.Products[0].ProductID
+		if productID != "" {
+			log.Printf("GetProductIDFromAppInfo: Found product ID: %s", productID)
+			return productID
+		}
+		log.Printf("GetProductIDFromAppInfo: First product has empty product_id")
+	}
+
+	log.Printf("GetProductIDFromAppInfo: No products found, returning empty string")
+	return ""
+}
+
 // StartPaymentProcess starts the payment process for a new purchase
-func StartPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
+func StartPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo) error {
 	log.Printf("=== Pay Module Starting Payment Process ===")
 	log.Printf("User ID: %s", userID)
 	log.Printf("App ID: %s", appID)
@@ -403,31 +467,23 @@ func StartPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
 		return fmt.Errorf("app info is nil")
 	}
 
-	// Get developer name from app info
-	developerName := ""
-	if appInfo.AppEntry != nil {
-		developerName = appInfo.AppEntry.Developer
-	}
-	if developerName == "" {
-		return fmt.Errorf("developer name not found in app info")
-	}
-
 	// Get app name from app info
 	appName := ""
 	if appInfo.AppEntry != nil {
 		appName = appInfo.AppEntry.Name
 	}
 
-	// Use a default product ID if not specified
-	productID := "NonConsumable" // Default product ID
-	// Note: PriceConfig doesn't have ProductID field, using default
+	// Get product ID from app price information
+	productID := GetProductIDFromAppInfo(appInfo)
 
 	// Create or get existing payment task
-	task, err := globalTaskManager.CreateOrGetTask(userID, appID, productID, developerName, appName)
+	task, err := globalTaskManager.CreateOrGetTask(userID, appID, productID, appName, sourceID, appInfo)
 	if err != nil {
 		log.Printf("Error creating payment task: %v", err)
 		return fmt.Errorf("failed to create payment task: %w", err)
 	}
+
+	go globalTaskManager.executeTaskWorkflow(task)
 
 	log.Printf("Payment task created/retrieved: %s:%s:%s, status: %s",
 		task.UserID, task.AppID, task.ProductID, task.Status)
@@ -437,7 +493,7 @@ func StartPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
 }
 
 // RetryPaymentProcess retries the payment process for existing purchase attempts
-func RetryPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
+func RetryPaymentProcess(userID, appID, sourceID string, appInfo *types.AppInfo) error {
 	log.Printf("=== Pay Module Retrying Payment Process ===")
 	log.Printf("User ID: %s", userID)
 	log.Printf("App ID: %s", appID)
@@ -463,16 +519,15 @@ func RetryPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
 		return fmt.Errorf("developer name not found in app info")
 	}
 
-	// Use a default product ID if not specified
-	productID := "NonConsumable" // Default product ID
-	// Note: PriceConfig doesn't have ProductID field, using default
+	// Get product ID from app price information
+	productID := GetProductIDFromAppInfo(appInfo)
 
 	// Check if task exists
 	task, exists := globalTaskManager.GetTask(userID, appID, productID)
 	if !exists {
 		log.Printf("No existing task found for retry, creating new task")
 		// Create new task if none exists
-		return StartPaymentProcess(userID, appID, appInfo)
+		return StartPaymentProcess(userID, appID, sourceID, appInfo)
 	}
 
 	// Check task status and decide retry strategy
@@ -505,8 +560,10 @@ func RetryPaymentProcess(userID, appID string, appInfo *types.AppInfo) error {
 
 // PaymentPollingRequest represents the request for payment polling
 type PaymentPollingRequest struct {
-	UserID string `json:"user_id"`
-	AppID  string `json:"app_id"`
+	SourceID      string `json:"source_id"`
+	AppID         string `json:"app_id"`
+	TxHash        string `json:"tx_hash"`
+	SystemChainID int    `json:"system_chain_id"`
 }
 
 // PaymentPollingResponse represents the response for payment polling
@@ -518,10 +575,14 @@ type PaymentPollingResponse struct {
 
 // StartPaymentPolling starts polling for VC after payment completion
 // appName and developerName are provided by caller (queried from cache in API layer)
-func StartPaymentPolling(userID, appID string, appInfoLatest *types.AppInfoLatestData) error {
+func StartPaymentPolling(userID, sourceID, appID, txHash, xForwardedHost string, systemChainID int, appInfoLatest *types.AppInfoLatestData) error {
 	log.Printf("=== Starting Payment Polling ===")
 	log.Printf("User ID: %s", userID)
+	log.Printf("Source ID: %s", sourceID)
 	log.Printf("App ID: %s", appID)
+	log.Printf("TxHash: %s", txHash)
+	log.Printf("SystemChainID: %d", systemChainID)
+	log.Printf("X-Forwarded-Host: %s", xForwardedHost)
 	if appInfoLatest != nil && appInfoLatest.RawData != nil {
 		if appInfoLatest.RawData.Name != "" {
 			log.Printf("App Name: %s", appInfoLatest.RawData.Name)
@@ -543,12 +604,30 @@ func StartPaymentPolling(userID, appID string, appInfoLatest *types.AppInfoLates
 		log.Printf("No existing task found for user %s app %s, creating new task from provided appInfoLatest", userID, appID)
 
 		// Try to create a new task using provided app info
-		newTask, err := createTaskFromCache(userID, appID, appInfoLatest)
+		newTask, err := createTaskFromCache(userID, sourceID, appID, txHash, xForwardedHost, systemChainID, appInfoLatest)
 		if err != nil {
 			log.Printf("Failed to create task from cache: %v", err)
 			return fmt.Errorf("no payment task found and failed to create from cache: %w", err)
 		}
+
+		// Add the new task to the task manager's map
+		if !globalTaskManager.mu.TryLock() {
+			return fmt.Errorf("failed to acquire lock to add new task")
+		}
+		key := globalTaskManager.generateKey(userID, appID, newTask.ProductID)
+		globalTaskManager.tasks[key] = newTask
+		globalTaskManager.mu.Unlock()
+		log.Printf("Added new task to manager with key: %s", key)
+
 		task = newTask
+	} else {
+		// Update existing task with sourceID, txHash, systemChainID and xForwardedHost
+		task.SourceID = sourceID
+		task.TxHash = txHash
+		task.SystemChainID = systemChainID
+		task.XForwardedHost = xForwardedHost
+		task.UpdatedAt = time.Now()
+		log.Printf("Updated existing task with sourceID, txHash, systemChainID and xForwardedHost")
 	}
 
 	// Snapshot needed fields to avoid race
@@ -675,19 +754,55 @@ func notifySignatureRequired(userID, appID, productID, developerName string) {
 		return
 	}
 
-	// Create a temporary task for notification
-	task := &PaymentTask{
-		UserID:        userID,
-		AppID:         appID,
-		ProductID:     productID,
-		DeveloperName: developerName,
-		Status:        TaskStatusNotSign,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+	// Try to find existing task first
+	existingTask := globalTaskManager.findTaskByUserApp(userID, appID)
+
+	var task *PaymentTask
+	if existingTask != nil {
+		// Use existing task (it already has txHash and systemChainID from StartPaymentPolling)
+		task = existingTask
+		log.Printf("Found existing task for user %s, app %s", userID, appID)
+	} else {
+		// Create new task and add to map
+		if !globalTaskManager.mu.TryLock() {
+			log.Printf("Failed to acquire lock to create task for signature notification")
+			return
+		}
+
+		// Double-check after acquiring lock
+		key := globalTaskManager.generateKey(userID, appID, productID)
+		if existingTaskInMap, exists := globalTaskManager.tasks[key]; exists {
+			task = existingTaskInMap
+			globalTaskManager.mu.Unlock()
+			log.Printf("Task already exists in map for key %s", key)
+		} else {
+			// Create new task
+			task = &PaymentTask{
+				UserID:        userID,
+				AppID:         appID,
+				ProductID:     productID,
+				DeveloperName: developerName,
+				Status:        TaskStatusNotSign,
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+			}
+
+			// Add to map
+			globalTaskManager.tasks[key] = task
+			globalTaskManager.mu.Unlock()
+			log.Printf("Created new task in map for key %s", key)
+		}
 	}
 
-	// Send signature required notification (trigger payment flow again)
-	globalTaskManager.stepNotifySign(task)
+	log.Printf("Notifying signature required for user %s, app %s, product %s", userID, appID, productID)
+
+	// Send signature required notification using stepNotifySign
+	if err := globalTaskManager.stepNotifySign(task); err != nil {
+		log.Printf("Error in stepNotifySign for user %s, app %s: %v", userID, appID, err)
+		return
+	}
+
+	log.Printf("Signature required notification sent successfully for user %s, app %s", userID, appID)
 }
 
 // notifyPollingTimeout notifies frontend about polling timeout error
@@ -717,13 +832,12 @@ func notifyPollingTimeout(userID, appID, productID, developerName string) {
 }
 
 // createTaskFromCache creates a new payment task from cache data
-func createTaskFromCache(userID, appID string, appInfoLatest *types.AppInfoLatestData) (*PaymentTask, error) {
+func createTaskFromCache(userID, sourceID, appID, txHash, xForwardedHost string, systemChainID int, appInfoLatest *types.AppInfoLatestData) (*PaymentTask, error) {
 	if globalTaskManager == nil {
 		return nil, fmt.Errorf("task manager not initialized")
 	}
 
 	// Try to derive app basic info using Redis-stored app info if available later (not modifying cache manager)
-	productID := "NonConsumable" // Default product ID
 	appName := appID
 	developerName := ""
 
@@ -753,18 +867,31 @@ func createTaskFromCache(userID, appID string, appInfoLatest *types.AppInfoLates
 		developerName = "unknown"
 	}
 
+	// Get product ID from app price information
+	var productID string
+	if appInfoLatest != nil && appInfoLatest.AppInfo != nil {
+		productID = GetProductIDFromAppInfo(appInfoLatest.AppInfo)
+	} else {
+		productID = "" // Empty string if no app info available
+		log.Printf("createTaskFromCache: No app info available, product ID will be empty string")
+	}
+
 	// Create a new task with minimal information
 	// The task will be in not_pay status since we're assuming payment was completed
 	task := &PaymentTask{
-		UserID:        userID,
-		AppID:         appID,
-		AppName:       appName,
-		ProductID:     productID,
-		Status:        TaskStatusNotPay, // Assume payment was completed, waiting for VC
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
-		DeveloperName: developerName,
-		JWS:           "", // Will try to load from Redis below
+		UserID:         userID,
+		AppID:          appID,
+		AppName:        appName,
+		SourceID:       sourceID,
+		ProductID:      productID,
+		Status:         TaskStatusNotPay, // Assume payment was completed, waiting for VC
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		DeveloperName:  developerName,
+		JWS:            "", // Will try to load from Redis below
+		TxHash:         txHash,
+		SystemChainID:  systemChainID,
+		XForwardedHost: xForwardedHost,
 	}
 
 	// Try loading JWS from Redis if available

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"market/internal/v2/settings"
 )
 
 // CloneOptions represents the options for app clone installation
@@ -118,6 +120,43 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
 		envs, _ = envsData.([]AppEnvVar)
 		log.Printf("Retrieved %d environment variables for task: %s", len(envs), task.ID)
+	}
+
+	// Get VC from purchase receipt using rawAppName and inject into environment variables
+	var settingsManager *settings.SettingsManager
+	if tm.mu.TryRLock() {
+		settingsManager = tm.settingsManager
+		tm.mu.RUnlock()
+	} else {
+		log.Printf("Failed to acquire read lock for settingsManager, skipping VC injection for task: %s", task.ID)
+	}
+
+	if settingsManager != nil {
+		vc := getVCForClone(settingsManager, user, rawAppName, task.Metadata)
+		if vc != "" {
+			// Check if VERIFIABLE_CREDENTIAL already exists in envs
+			vcExists := false
+			for i := range envs {
+				if envs[i].EnvName == "VERIFIABLE_CREDENTIAL" {
+					envs[i].Value = vc
+					vcExists = true
+					log.Printf("Updated VERIFIABLE_CREDENTIAL in envs for task: %s", task.ID)
+					break
+				}
+			}
+			// If not exists, add it
+			if !vcExists {
+				envs = append(envs, AppEnvVar{
+					EnvName: "VERIFIABLE_CREDENTIAL",
+					Value:   vc,
+				})
+				log.Printf("Added VERIFIABLE_CREDENTIAL to envs for task: %s", task.ID)
+			}
+		} else {
+			log.Printf("VC not found for app clone, skipping VERIFIABLE_CREDENTIAL injection for task: %s", task.ID)
+		}
+	} else {
+		log.Printf("Settings manager not available, skipping VC injection for task: %s", task.ID)
 	}
 
 	// Get images from metadata

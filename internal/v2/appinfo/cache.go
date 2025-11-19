@@ -250,16 +250,19 @@ func (cm *CacheManager) Start() error {
 		cm.mutex.Lock()
 		glog.Infof("[LOCK] cm.mutex.Lock() @102 Success (wait=%v)", time.Since(lockStart))
 		_wd := cm.startLockWatchdog("@102:initUsers")
+		newUsers := make([]string, 0)
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.Infof("Creating data structure for new user: %s", userID)
 				cm.cache.Users[userID] = NewUserData()
+				newUsers = append(newUsers, userID)
 			}
 		}
 		cm.mutex.Unlock()
 		_wd()
 
 		glog.Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
+
 	}
 
 	glog.Infof("[LOCK] cm.mutex.Lock() @114 Start")
@@ -1038,6 +1041,7 @@ func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataTyp
 	cm.updateLockStats("lock")
 	glog.Infof("[LOCK] cm.mutex.TryLock() @SetLocalAppData Success")
 	_wd := cm.startLockWatchdog("@SetLocalAppData")
+
 	defer func() {
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
@@ -1444,7 +1448,8 @@ func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) erro
 		for _, userID := range newUserConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.Infof("Creating data structure for newly configured user: %s", userID)
-				cm.cache.Users[userID] = NewUserData()
+				userData := NewUserData()
+				cm.cache.Users[userID] = userData
 
 				// Trigger sync to Redis for the new user
 				if cm.isRunning {
@@ -1512,11 +1517,14 @@ func (cm *CacheManager) syncUserListToCacheInternal() error {
 	glog.Infof("Syncing user list to cache")
 
 	newUsersCount := 0
+	newUsersList := make([]string, 0)
 	for _, userID := range cm.userConfig.UserList {
 		if _, exists := cm.cache.Users[userID]; !exists {
 			glog.Infof("Adding missing user to cache: %s", userID)
-			cm.cache.Users[userID] = NewUserData()
+			userData := NewUserData()
+			cm.cache.Users[userID] = userData
 			newUsersCount++
+			newUsersList = append(newUsersList, userID)
 
 			// Trigger sync to Redis for the new user
 			if cm.isRunning {
@@ -1529,6 +1537,7 @@ func (cm *CacheManager) syncUserListToCacheInternal() error {
 	}
 
 	glog.Infof("User list sync completed, added %d new users", newUsersCount)
+
 	return nil
 }
 

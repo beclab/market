@@ -1,0 +1,27 @@
+## Contribution and Review Checklist (paymentnew module)
+
+### Must follow
+
+- Access state only via `PaymentStateMachine` APIs:
+  - Read: `LoadState(userID, appID, productID)` (loads from memory, falls back to Redis, rehydrates memory)
+  - Write: `SaveState(state)` (writes to Redis and syncs memory)
+  - Delete: `DeleteState(userID, appID, productID)` (deletes from Redis and memory)
+- Do NOT read/write Redis directly or introduce side caches for payment state.
+- For state transitions, prefer `processEvent(...)` + `updateState(...)` to ensure atomic updates, timestamps, and persistence.
+- After sending “payment required” notification, update `PaymentStatus=notification_sent` accordingly.
+- When frontend signals readiness before on-chain transfer, update `PaymentStatus=frontend_started` and persist provided payload via `StartFrontendPayment`.
+- When developer VC returns with `code==0`, you must:
+  - Set `PaymentStatus=developer_confirmed`
+  - Persist purchase receipt via `storePurchaseInfo`
+  - Notify frontend purchase completion (`notifyFrontendPurchaseCompleted`)
+
+### Recommended practices
+
+- Add timeout, backoff, and observability (metrics/logs) to polling and network calls.
+- Log return codes and duration for external calls (DID gate / developer service).
+- Current version requirement: `X-Forwarded-Host` is mandatory for payment flows
+  - Used to construct callback URLs for LarePass (submit/fetch signature)
+  - Used to derive user DID in `notifyFrontendPaymentRequired`
+  - If missing or invalid, flows will fail fast by design in this version
+
+
