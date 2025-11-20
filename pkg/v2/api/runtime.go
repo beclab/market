@@ -354,11 +354,11 @@ func generateDashboardHTML(snapshotJSON string) string {
         <div class="stats-grid" id="statsGrid"></div>
         
         <div class="tabs">
-            <button class="tab active" onclick="showTab('apps')">Applications</button>
-            <button class="tab" onclick="showTab('tasks')">Tasks</button>
-            <button class="tab" onclick="showTab('components')">Components</button>
-            <button class="tab" onclick="showTab('chartrepo')">Chart Repo</button>
-            <button class="tab" onclick="showTab('raw')">Raw JSON</button>
+            <button class="tab active" onclick="showTab('apps', this)">Applications</button>
+            <button class="tab" onclick="showTab('tasks', this)">Tasks</button>
+            <button class="tab" onclick="showTab('components', this)">Components</button>
+            <button class="tab" onclick="showTab('chartrepo', this)">Chart Repo</button>
+            <button class="tab" onclick="showTab('raw', this)">Raw JSON</button>
         </div>
         
         <div id="apps" class="tab-content active">
@@ -492,8 +492,16 @@ func generateDashboardHTML(snapshotJSON string) string {
     </div>
     
     <script>
-        let snapshotData = %s;
+        let snapshotData = {};
         let autoRefreshInterval = null;
+        
+        // Parse JSON data safely
+        try {
+            snapshotData = JSON.parse('%s');
+        } catch (e) {
+            console.error('Failed to parse snapshot data:', e);
+            snapshotData = {};
+        }
         
         function formatTimestamp(timestamp) {
             if (!timestamp) return 'N/A';
@@ -673,7 +681,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             viewer.textContent = JSON.stringify(snapshotData, null, 2);
         }
         
-        function showTab(tabName) {
+        function showTab(tabName, element) {
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
@@ -684,7 +692,16 @@ func generateDashboardHTML(snapshotJSON string) string {
             
             // Show selected tab
             document.getElementById(tabName).classList.add('active');
-            event.target.classList.add('active');
+            if (element) {
+                element.classList.add('active');
+            } else {
+                // Find the button by text content
+                document.querySelectorAll('.tab').forEach(tab => {
+                    if (tab.textContent.trim() === tabName || tab.getAttribute('data-tab') === tabName) {
+                        tab.classList.add('active');
+                    }
+                });
+            }
             
             // Render content based on tab
             if (tabName === 'apps') renderApps();
