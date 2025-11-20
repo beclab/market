@@ -24,6 +24,8 @@ func getVCFromPurchaseReceipt(settingsManager *settings.SettingsManager, userID,
 		return ""
 	}
 
+	log.Printf("getVCFromPurchaseReceipt: start lookup user=%s app=%s product=%s developer=%s", userID, appID, productID, developerName)
+
 	// Try to get VC from payment state machine first
 	if globalStateMachine := paymentnew.GetStateMachine(); globalStateMachine != nil && productID != "" {
 		if state, err := globalStateMachine.LoadState(userID, appID, productID); err == nil && state != nil {
@@ -73,6 +75,8 @@ func getVCForInstall(settingsManager *settings.SettingsManager, userID, appID st
 	if developerNameData, ok := metadata["developerName"].(string); ok {
 		developerName = developerNameData
 	}
+
+	log.Printf("getVCForInstall: metadata snapshot user=%s app=%s productID=%s developer=%s", userID, appID, productID, developerName)
 
 	// If we have productID, try to get from payment state machine or purchase receipt
 	if productID != "" {

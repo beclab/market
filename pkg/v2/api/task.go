@@ -151,6 +151,14 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if targetApp.AppInfo == nil {
+		log.Printf("installApp: targetApp.AppInfo is nil for app=%s source=%s", request.AppName, request.Source)
+	} else if targetApp.AppInfo.Price == nil {
+		log.Printf("installApp: targetApp.AppInfo.Price is nil for app=%s source=%s", request.AppName, request.Source)
+	} else {
+		log.Printf("installApp: targetApp.AppInfo.Price detected for app=%s source=%s", request.AppName, request.Source)
+	}
+
 	// Step 8: Verify chart package exists
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
 	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
@@ -182,6 +190,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	productID, developerName := extractInstallProductMetadata(targetApp.AppInfo)
+	log.Printf("installApp: extracted product metadata app=%s source=%s productID=%s developer=%s", request.AppName, request.Source, productID, developerName)
 
 	// Step 10: Create installation task
 	taskMetadata := map[string]interface{}{
@@ -197,9 +206,11 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if productID != "" {
 		taskMetadata["productID"] = productID
+		log.Printf("installApp: added productID=%s to metadata for app=%s source=%s", productID, request.AppName, request.Source)
 	}
 	if developerName != "" {
 		taskMetadata["developerName"] = developerName
+		log.Printf("installApp: added developerName=%s to metadata for app=%s source=%s", developerName, request.AppName, request.Source)
 	}
 
 	// Handle synchronous requests with proper blocking

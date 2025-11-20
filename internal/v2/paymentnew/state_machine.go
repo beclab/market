@@ -416,7 +416,13 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 	newState.FrontendData = nil
 
 	// Store purchase info to Redis
-	go psm.storePurchaseInfo(&newState)
+	go func(stateCopy PaymentState) {
+		if err := psm.storePurchaseInfo(&stateCopy); err != nil {
+			log.Printf("storePurchaseInfo failed for user=%s app=%s product=%s: %v", stateCopy.UserID, stateCopy.AppID, stateCopy.ProductID, err)
+		} else {
+			log.Printf("storePurchaseInfo succeeded for user=%s app=%s product=%s", stateCopy.UserID, stateCopy.AppID, stateCopy.ProductID)
+		}
+	}(newState)
 
 	// Notify frontend of purchase completion
 	if psm.dataSender != nil {
@@ -607,6 +613,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 // storePurchaseInfo stores purchase info into Redis
 func (psm *PaymentStateMachine) storePurchaseInfo(state *PaymentState) error {
 	if psm.settingsManager == nil {
+		log.Printf("storePurchaseInfo: settings manager is nil for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
 		return errors.New("settings manager is nil")
 	}
 
@@ -632,6 +639,7 @@ func (psm *PaymentStateMachine) storePurchaseInfo(state *PaymentState) error {
 	}
 
 	if err := rc.Set(key, string(data), 0); err != nil {
+		log.Printf("storePurchaseInfo: failed to store purchase info in Redis for key=%s: %v", key, err)
 		return fmt.Errorf("failed to store purchase info in Redis: %w", err)
 	}
 
