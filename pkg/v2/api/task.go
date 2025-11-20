@@ -192,6 +192,14 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	productID, developerName := extractInstallProductMetadata(targetApp.AppInfo)
 	log.Printf("installApp: extracted product metadata app=%s source=%s productID=%s developer=%s", request.AppName, request.Source, productID, developerName)
 
+	realAppID := request.AppName
+	if targetApp.AppInfo != nil && targetApp.AppInfo.AppEntry != nil && targetApp.AppInfo.AppEntry.ID != "" {
+		realAppID = targetApp.AppInfo.AppEntry.ID
+	} else if targetApp.RawData != nil && targetApp.RawData.AppID != "" {
+		realAppID = targetApp.RawData.AppID
+	}
+	log.Printf("installApp: resolved realAppID=%s for app=%s source=%s", realAppID, request.AppName, request.Source)
+
 	// Step 10: Create installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
@@ -211,6 +219,10 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	if developerName != "" {
 		taskMetadata["developerName"] = developerName
 		log.Printf("installApp: added developerName=%s to metadata for app=%s source=%s", developerName, request.AppName, request.Source)
+	}
+	if realAppID != "" {
+		taskMetadata["realAppID"] = realAppID
+		log.Printf("installApp: added realAppID=%s to metadata for app=%s source=%s", realAppID, request.AppName, request.Source)
 	}
 
 	// Handle synchronous requests with proper blocking

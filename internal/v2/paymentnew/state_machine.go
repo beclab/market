@@ -414,6 +414,7 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 	newState.DeveloperSync = DeveloperSyncCompleted
 	newState.PaymentStatus = PaymentDeveloperConfirmed
 	newState.FrontendData = nil
+	log.Printf("vc_received: updated state user=%s app=%s product=%s developerSync=%s paymentStatus=%s", newState.UserID, newState.AppID, newState.ProductID, newState.DeveloperSync, newState.PaymentStatus)
 
 	// Store purchase info to Redis
 	go func(stateCopy PaymentState) {
