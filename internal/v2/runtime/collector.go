@@ -2,7 +2,11 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -122,6 +126,9 @@ func (c *StateCollector) collect() {
 
 	// Collect component statuses
 	c.collectComponentStatuses(taskModule, appInfoModule)
+
+	// Collect chart repo status
+	c.collectChartRepoStatus(appInfoModule)
 }
 
 // collectTaskStates collects all task states from TaskModule
@@ -404,4 +411,510 @@ func (c *StateCollector) OnTaskCreated(t *task.Task) {
 func (c *StateCollector) OnTaskUpdated(t *task.Task) {
 	taskState := c.convertTaskToTaskState(t, "")
 	c.store.UpdateTask(taskState)
+}
+
+// collectChartRepoStatus collects status from chart repo
+func (c *StateCollector) collectChartRepoStatus(aim *appinfo.AppInfoModule) {
+	if aim == nil {
+		return
+	}
+
+	cacheManager := aim.GetCacheManager()
+	if cacheManager == nil {
+		return
+	}
+
+	// Get chart repo service host from environment
+	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	if chartRepoHost == "" {
+		chartRepoHost = "localhost:82" // Default port 82
+	}
+
+	// Get all users and sources from cache
+	allUsersData := cacheManager.GetAllUsersData()
+	if allUsersData == nil {
+		return
+	}
+
+	// Aggregate chart repo status from all users and sources
+	var allApps []*ChartRepoAppState
+	var allImages []*ChartRepoImageState
+	var allTasks *ChartRepoTasksStatus
+	var systemStatus *ChartRepoSystemStatus
+
+	// Collect status for each user and source
+	for userID, userData := range allUsersData {
+		if userData == nil || userData.Sources == nil {
+			continue
+		}
+
+		for sourceID := range userData.Sources {
+			status := c.fetchChartRepoStatus(chartRepoHost, userID, sourceID)
+			if status != nil {
+				if status.Apps != nil {
+					allApps = append(allApps, status.Apps...)
+				}
+				if status.Images != nil {
+					allImages = append(allImages, status.Images...)
+				}
+				if status.Tasks != nil {
+					if allTasks == nil {
+						allTasks = &ChartRepoTasksStatus{}
+					}
+					// Merge tasks status
+					if status.Tasks.Hydrator != nil {
+						if allTasks.Hydrator == nil {
+							allTasks.Hydrator = &ChartRepoHydratorStatus{}
+						}
+						allTasks.Hydrator.QueueLength += status.Tasks.Hydrator.QueueLength
+						allTasks.Hydrator.ActiveTasks += status.Tasks.Hydrator.ActiveTasks
+						allTasks.Hydrator.CompletedTasks += status.Tasks.Hydrator.CompletedTasks
+						allTasks.Hydrator.FailedTasks += status.Tasks.Hydrator.FailedTasks
+						if status.Tasks.Hydrator.Tasks != nil {
+							if allTasks.Hydrator.Tasks == nil {
+								allTasks.Hydrator.Tasks = []*ChartRepoTaskState{}
+							}
+							allTasks.Hydrator.Tasks = append(allTasks.Hydrator.Tasks, status.Tasks.Hydrator.Tasks...)
+						}
+						if status.Tasks.Hydrator.RecentFailed != nil {
+							if allTasks.Hydrator.RecentFailed == nil {
+								allTasks.Hydrator.RecentFailed = []*ChartRepoTaskState{}
+							}
+							allTasks.Hydrator.RecentFailed = append(allTasks.Hydrator.RecentFailed, status.Tasks.Hydrator.RecentFailed...)
+						}
+					}
+					if status.Tasks.ImageAnalyzer != nil {
+						allTasks.ImageAnalyzer = status.Tasks.ImageAnalyzer // Use the latest one
+					}
+				}
+				if status.System != nil && systemStatus == nil {
+					systemStatus = status.System
+				}
+			}
+		}
+	}
+
+	// Create aggregated chart repo status
+	chartRepoStatus := &ChartRepoStatus{
+		System:     systemStatus,
+		Apps:       allApps,
+		Images:     allImages,
+		Tasks:      allTasks,
+		LastUpdate: time.Now(),
+	}
+
+	c.store.UpdateChartRepoStatus(chartRepoStatus)
+}
+
+// fetchChartRepoStatus fetches status from chart repo for a specific user and source
+func (c *StateCollector) fetchChartRepoStatus(host, userID, sourceID string) *ChartRepoStatus {
+	// Build URL
+	url := fmt.Sprintf("http://%s/chart-repo/api/v2/status?user=%s&source=%s&include=apps,images,tasks", host, userID, sourceID)
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// Make request
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Printf("Failed to fetch chart repo status from %s: %v", url, err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Chart repo status API returned non-OK status: %d", resp.StatusCode)
+		return nil
+	}
+
+	// Parse response
+	var apiResponse struct {
+		Success bool                   `json:"success"`
+		Message string                 `json:"message"`
+		Data    map[string]interface{} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+		log.Printf("Failed to decode chart repo status response: %v", err)
+		return nil
+	}
+
+	if !apiResponse.Success {
+		log.Printf("Chart repo status API returned error: %s", apiResponse.Message)
+		return nil
+	}
+
+	// Convert response to ChartRepoStatus
+	return c.convertChartRepoResponse(apiResponse.Data)
+}
+
+// convertChartRepoResponse converts API response to ChartRepoStatus
+func (c *StateCollector) convertChartRepoResponse(data map[string]interface{}) *ChartRepoStatus {
+	status := &ChartRepoStatus{
+		LastUpdate: time.Now(),
+	}
+
+	// Parse system status
+	if systemData, ok := data["system"].(map[string]interface{}); ok {
+		status.System = &ChartRepoSystemStatus{
+			Components:    make(map[string]interface{}),
+			ResourceUsage: make(map[string]interface{}),
+		}
+		if uptime, ok := systemData["uptime"].(float64); ok {
+			status.System.Uptime = int64(uptime)
+		}
+		if version, ok := systemData["version"].(string); ok {
+			status.System.Version = version
+		}
+		if hostname, ok := systemData["hostname"].(string); ok {
+			status.System.Hostname = hostname
+		}
+		if components, ok := systemData["components"].(map[string]interface{}); ok {
+			status.System.Components = components
+		}
+		if resourceUsage, ok := systemData["resource_usage"].(map[string]interface{}); ok {
+			status.System.ResourceUsage = resourceUsage
+		}
+	}
+
+	// Parse apps
+	if appsData, ok := data["apps"].([]interface{}); ok {
+		status.Apps = make([]*ChartRepoAppState, 0, len(appsData))
+		for _, appData := range appsData {
+			if appMap, ok := appData.(map[string]interface{}); ok {
+				appState := c.convertChartRepoAppState(appMap)
+				if appState != nil {
+					status.Apps = append(status.Apps, appState)
+				}
+			}
+		}
+	}
+
+	// Parse images
+	if imagesData, ok := data["images"].([]interface{}); ok {
+		status.Images = make([]*ChartRepoImageState, 0, len(imagesData))
+		for _, imageData := range imagesData {
+			if imageMap, ok := imageData.(map[string]interface{}); ok {
+				imageState := c.convertChartRepoImageState(imageMap)
+				if imageState != nil {
+					status.Images = append(status.Images, imageState)
+				}
+			}
+		}
+	}
+
+	// Parse tasks
+	if tasksData, ok := data["tasks"].(map[string]interface{}); ok {
+		status.Tasks = &ChartRepoTasksStatus{}
+
+		// Parse hydrator
+		if hydratorData, ok := tasksData["hydrator"].(map[string]interface{}); ok {
+			status.Tasks.Hydrator = c.convertChartRepoHydratorStatus(hydratorData)
+		}
+
+		// Parse image_analyzer
+		if analyzerData, ok := tasksData["image_analyzer"].(map[string]interface{}); ok {
+			status.Tasks.ImageAnalyzer = c.convertChartRepoImageAnalyzerStatus(analyzerData)
+		}
+	}
+
+	return status
+}
+
+// convertChartRepoAppState converts app state from API response
+func (c *StateCollector) convertChartRepoAppState(data map[string]interface{}) *ChartRepoAppState {
+	appState := &ChartRepoAppState{
+		LastUpdate: time.Now(),
+	}
+
+	if appID, ok := data["app_id"].(string); ok {
+		appState.AppID = appID
+	}
+	if appName, ok := data["app_name"].(string); ok {
+		appState.AppName = appName
+	}
+	if userID, ok := data["user_id"].(string); ok {
+		appState.UserID = userID
+	}
+	if sourceID, ok := data["source_id"].(string); ok {
+		appState.SourceID = sourceID
+	}
+	if state, ok := data["state"].(string); ok {
+		appState.State = state
+	}
+
+	// Parse current_step
+	if stepData, ok := data["current_step"].(map[string]interface{}); ok {
+		appState.CurrentStep = &ChartRepoStep{}
+		if name, ok := stepData["name"].(string); ok {
+			appState.CurrentStep.Name = name
+		}
+		if index, ok := stepData["index"].(float64); ok {
+			appState.CurrentStep.Index = int(index)
+		}
+		if total, ok := stepData["total"].(float64); ok {
+			appState.CurrentStep.Total = int(total)
+		}
+		if status, ok := stepData["status"].(string); ok {
+			appState.CurrentStep.Status = status
+		}
+		if startedAt, ok := stepData["started_at"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, startedAt); err == nil {
+				appState.CurrentStep.StartedAt = t
+			}
+		}
+		if updatedAt, ok := stepData["updated_at"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+				appState.CurrentStep.UpdatedAt = t
+			}
+		}
+		if retryCount, ok := stepData["retry_count"].(float64); ok {
+			appState.CurrentStep.RetryCount = int(retryCount)
+		}
+	}
+
+	// Parse processing
+	if procData, ok := data["processing"].(map[string]interface{}); ok {
+		appState.Processing = &ChartRepoProcessing{}
+		if taskID, ok := procData["task_id"].(string); ok {
+			appState.Processing.TaskID = taskID
+		}
+		if duration, ok := procData["duration"].(float64); ok {
+			appState.Processing.Duration = int64(duration)
+		}
+	}
+
+	// Parse timestamps
+	if tsData, ok := data["timestamps"].(map[string]interface{}); ok {
+		appState.Timestamps = &ChartRepoTimestamps{}
+		if createdAt, ok := tsData["created_at"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+				appState.Timestamps.CreatedAt = t
+			}
+		}
+		if updatedAt, ok := tsData["last_updated_at"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+				appState.Timestamps.LastUpdatedAt = t
+			}
+		}
+	}
+
+	// Parse error
+	if errData, ok := data["error"].(map[string]interface{}); ok {
+		appState.Error = &ChartRepoError{}
+		if message, ok := errData["message"].(string); ok {
+			appState.Error.Message = message
+		}
+		if step, ok := errData["step"].(string); ok {
+			appState.Error.Step = step
+		}
+	}
+
+	return appState
+}
+
+// convertChartRepoImageState converts image state from API response
+func (c *StateCollector) convertChartRepoImageState(data map[string]interface{}) *ChartRepoImageState {
+	imageState := &ChartRepoImageState{
+		LastUpdate: time.Now(),
+	}
+
+	if imageName, ok := data["image_name"].(string); ok {
+		imageState.ImageName = imageName
+	}
+	if appID, ok := data["app_id"].(string); ok {
+		imageState.AppID = appID
+	}
+	if appName, ok := data["app_name"].(string); ok {
+		imageState.AppName = appName
+	}
+	if status, ok := data["status"].(string); ok {
+		imageState.Status = status
+	}
+	if arch, ok := data["architecture"].(string); ok {
+		imageState.Architecture = arch
+	}
+	if totalSize, ok := data["total_size"].(float64); ok {
+		imageState.TotalSize = int64(totalSize)
+	}
+	if downloadedSize, ok := data["downloaded_size"].(float64); ok {
+		imageState.DownloadedSize = int64(downloadedSize)
+	}
+	if progress, ok := data["download_progress"].(float64); ok {
+		imageState.DownloadProgress = progress
+	}
+	if layerCount, ok := data["layer_count"].(float64); ok {
+		imageState.LayerCount = int(layerCount)
+	}
+	if downloadedLayers, ok := data["downloaded_layers"].(float64); ok {
+		imageState.DownloadedLayers = int(downloadedLayers)
+	}
+	if analysisStatus, ok := data["analysis_status"].(string); ok {
+		imageState.AnalysisStatus = analysisStatus
+	}
+	if analyzedAt, ok := data["analyzed_at"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, analyzedAt); err == nil {
+			imageState.AnalyzedAt = &t
+		}
+	}
+	if errorMsg, ok := data["error_message"].(string); ok {
+		imageState.ErrorMessage = errorMsg
+	}
+
+	// Parse nodes
+	if nodesData, ok := data["nodes"].([]interface{}); ok {
+		imageState.Nodes = make([]*ChartRepoImageNode, 0, len(nodesData))
+		for _, nodeData := range nodesData {
+			if nodeMap, ok := nodeData.(map[string]interface{}); ok {
+				node := &ChartRepoImageNode{}
+				if nodeName, ok := nodeMap["node_name"].(string); ok {
+					node.NodeName = nodeName
+				}
+				if arch, ok := nodeMap["architecture"].(string); ok {
+					node.Architecture = arch
+				}
+				if os, ok := nodeMap["os"].(string); ok {
+					node.OS = os
+				}
+				if totalSize, ok := nodeMap["total_size"].(float64); ok {
+					node.TotalSize = int64(totalSize)
+				}
+				if downloadedSize, ok := nodeMap["downloaded_size"].(float64); ok {
+					node.DownloadedSize = int64(downloadedSize)
+				}
+				if layerCount, ok := nodeMap["layer_count"].(float64); ok {
+					node.LayerCount = int(layerCount)
+				}
+				if downloadedLayers, ok := nodeMap["downloaded_layers"].(float64); ok {
+					node.DownloadedLayers = int(downloadedLayers)
+				}
+				if progress, ok := nodeMap["progress"].(float64); ok {
+					node.Progress = progress
+				}
+				imageState.Nodes = append(imageState.Nodes, node)
+			}
+		}
+	}
+
+	return imageState
+}
+
+// convertChartRepoHydratorStatus converts hydrator status from API response
+func (c *StateCollector) convertChartRepoHydratorStatus(data map[string]interface{}) *ChartRepoHydratorStatus {
+	status := &ChartRepoHydratorStatus{
+		Tasks:        []*ChartRepoTaskState{},
+		RecentFailed: []*ChartRepoTaskState{},
+	}
+
+	if queueLength, ok := data["queue_length"].(float64); ok {
+		status.QueueLength = int(queueLength)
+	}
+	if activeTasks, ok := data["active_tasks"].(float64); ok {
+		status.ActiveTasks = int(activeTasks)
+	}
+	if completedTasks, ok := data["completed_tasks"].(float64); ok {
+		status.CompletedTasks = int(completedTasks)
+	}
+	if failedTasks, ok := data["failed_tasks"].(float64); ok {
+		status.FailedTasks = int(failedTasks)
+	}
+	if workerCount, ok := data["worker_count"].(float64); ok {
+		status.WorkerCount = int(workerCount)
+	}
+
+	// Parse tasks
+	if tasksData, ok := data["tasks"].([]interface{}); ok {
+		for _, taskData := range tasksData {
+			if taskMap, ok := taskData.(map[string]interface{}); ok {
+				taskState := c.convertChartRepoTaskState(taskMap)
+				if taskState != nil {
+					status.Tasks = append(status.Tasks, taskState)
+				}
+			}
+		}
+	}
+
+	// Parse recent_failed
+	if failedData, ok := data["recent_failed"].([]interface{}); ok {
+		for _, taskData := range failedData {
+			if taskMap, ok := taskData.(map[string]interface{}); ok {
+				taskState := c.convertChartRepoTaskState(taskMap)
+				if taskState != nil {
+					status.RecentFailed = append(status.RecentFailed, taskState)
+				}
+			}
+		}
+	}
+
+	return status
+}
+
+// convertChartRepoTaskState converts task state from API response
+func (c *StateCollector) convertChartRepoTaskState(data map[string]interface{}) *ChartRepoTaskState {
+	taskState := &ChartRepoTaskState{}
+
+	if taskID, ok := data["task_id"].(string); ok {
+		taskState.TaskID = taskID
+	}
+	if userID, ok := data["user_id"].(string); ok {
+		taskState.UserID = userID
+	}
+	if sourceID, ok := data["source_id"].(string); ok {
+		taskState.SourceID = sourceID
+	}
+	if appID, ok := data["app_id"].(string); ok {
+		taskState.AppID = appID
+	}
+	if appName, ok := data["app_name"].(string); ok {
+		taskState.AppName = appName
+	}
+	if status, ok := data["status"].(string); ok {
+		taskState.Status = status
+	}
+	if stepName, ok := data["step_name"].(string); ok {
+		taskState.StepName = stepName
+	}
+	if totalSteps, ok := data["total_steps"].(float64); ok {
+		taskState.TotalSteps = int(totalSteps)
+	}
+	if retryCount, ok := data["retry_count"].(float64); ok {
+		taskState.RetryCount = int(retryCount)
+	}
+	if lastError, ok := data["last_error"].(string); ok {
+		taskState.LastError = lastError
+	}
+	if createdAt, ok := data["created_at"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			taskState.CreatedAt = t
+		}
+	}
+	if updatedAt, ok := data["updated_at"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+			taskState.UpdatedAt = t
+		}
+	}
+
+	return taskState
+}
+
+// convertChartRepoImageAnalyzerStatus converts image analyzer status from API response
+func (c *StateCollector) convertChartRepoImageAnalyzerStatus(data map[string]interface{}) *ChartRepoImageAnalyzerStatus {
+	status := &ChartRepoImageAnalyzerStatus{}
+
+	if queueLength, ok := data["queue_length"].(float64); ok {
+		status.QueueLength = int(queueLength)
+	}
+	if activeWorkers, ok := data["active_workers"].(float64); ok {
+		status.ActiveWorkers = int(activeWorkers)
+	}
+	if cachedImages, ok := data["cached_images"].(float64); ok {
+		status.CachedImages = int(cachedImages)
+	}
+	if analyzingCount, ok := data["analyzing_count"].(float64); ok {
+		status.AnalyzingCount = int(analyzingCount)
+	}
+
+	return status
 }

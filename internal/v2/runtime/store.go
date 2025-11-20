@@ -13,6 +13,7 @@ type StateStore struct {
 	appStates  map[string]*AppFlowState    // key: userID:sourceID:appName
 	tasks      map[string]*TaskState       // key: taskID
 	components map[string]*ComponentStatus // key: component name
+	chartRepo  *ChartRepoStatus            // Chart repo status
 	lastUpdate time.Time
 }
 
@@ -196,6 +197,11 @@ func (s *StateStore) GetSnapshot() *RuntimeSnapshot {
 		snapshot.Components[k] = v
 	}
 
+	// Copy chart repo status
+	if s.chartRepo != nil {
+		snapshot.ChartRepo = s.chartRepo
+	}
+
 	// Calculate summary
 	snapshot.Summary = s.calculateSummary(snapshot)
 
@@ -243,6 +249,31 @@ func (s *StateStore) calculateSummary(snapshot *RuntimeSnapshot) *RuntimeSummary
 // getAppStateKey generates a key for app state map
 func (s *StateStore) getAppStateKey(userID, sourceID, appName string) string {
 	return fmt.Sprintf("%s:%s:%s", userID, sourceID, appName)
+}
+
+// UpdateChartRepoStatus updates chart repo status
+func (s *StateStore) UpdateChartRepoStatus(status *ChartRepoStatus) {
+	if !s.mu.TryLock() {
+		log.Printf("Failed to acquire lock for UpdateChartRepoStatus, skipping update")
+		return
+	}
+	defer s.mu.Unlock()
+
+	if status != nil {
+		status.LastUpdate = time.Now()
+	}
+	s.chartRepo = status
+	s.lastUpdate = time.Now()
+}
+
+// GetChartRepoStatus retrieves chart repo status
+func (s *StateStore) GetChartRepoStatus() *ChartRepoStatus {
+	if !s.mu.TryRLock() {
+		log.Printf("Failed to acquire read lock for GetChartRepoStatus, returning nil")
+		return nil
+	}
+	defer s.mu.RUnlock()
+	return s.chartRepo
 }
 
 // GetLastUpdate returns the last update time

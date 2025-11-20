@@ -61,12 +61,146 @@ type ComponentStatus struct {
 	Message   string                 `json:"message,omitempty"`
 }
 
+// ChartRepoAppState represents app processing state from chart repo
+type ChartRepoAppState struct {
+	AppID       string               `json:"app_id"`
+	AppName     string               `json:"app_name"`
+	UserID      string               `json:"user_id"`
+	SourceID    string               `json:"source_id"`
+	State       string               `json:"state"` // processing, completed, failed
+	CurrentStep *ChartRepoStep       `json:"current_step,omitempty"`
+	Processing  *ChartRepoProcessing `json:"processing,omitempty"`
+	Timestamps  *ChartRepoTimestamps `json:"timestamps,omitempty"`
+	Error       *ChartRepoError      `json:"error,omitempty"`
+	LastUpdate  time.Time            `json:"last_update"`
+}
+
+// ChartRepoStep represents a processing step
+type ChartRepoStep struct {
+	Name       string    `json:"name"`
+	Index      int       `json:"index"`
+	Total      int       `json:"total"`
+	Status     string    `json:"status"` // running, completed, failed
+	StartedAt  time.Time `json:"started_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	RetryCount int       `json:"retry_count"`
+}
+
+// ChartRepoProcessing represents processing information
+type ChartRepoProcessing struct {
+	TaskID   string `json:"task_id"`
+	Duration int64  `json:"duration"` // nanoseconds
+}
+
+// ChartRepoTimestamps represents timestamp information
+type ChartRepoTimestamps struct {
+	CreatedAt     time.Time `json:"created_at"`
+	LastUpdatedAt time.Time `json:"last_updated_at"`
+}
+
+// ChartRepoError represents error information
+type ChartRepoError struct {
+	Message string `json:"message"`
+	Step    string `json:"step,omitempty"`
+}
+
+// ChartRepoImageState represents image download state from chart repo
+type ChartRepoImageState struct {
+	ImageName        string                `json:"image_name"`
+	AppID            string                `json:"app_id,omitempty"`
+	AppName          string                `json:"app_name,omitempty"`
+	Status           string                `json:"status"` // not_downloaded, partially_downloaded, fully_downloaded, registry_error
+	Architecture     string                `json:"architecture,omitempty"`
+	TotalSize        int64                 `json:"total_size,omitempty"`
+	DownloadedSize   int64                 `json:"downloaded_size,omitempty"`
+	DownloadProgress float64               `json:"download_progress,omitempty"`
+	LayerCount       int                   `json:"layer_count,omitempty"`
+	DownloadedLayers int                   `json:"downloaded_layers,omitempty"`
+	AnalysisStatus   string                `json:"analysis_status,omitempty"`
+	AnalyzedAt       *time.Time            `json:"analyzed_at,omitempty"`
+	ErrorMessage     string                `json:"error_message,omitempty"`
+	Nodes            []*ChartRepoImageNode `json:"nodes,omitempty"`
+	LastUpdate       time.Time             `json:"last_update"`
+}
+
+// ChartRepoImageNode represents image state on a specific node
+type ChartRepoImageNode struct {
+	NodeName         string  `json:"node_name"`
+	Architecture     string  `json:"architecture,omitempty"`
+	OS               string  `json:"os,omitempty"`
+	TotalSize        int64   `json:"total_size,omitempty"`
+	DownloadedSize   int64   `json:"downloaded_size,omitempty"`
+	LayerCount       int     `json:"layer_count,omitempty"`
+	DownloadedLayers int     `json:"downloaded_layers,omitempty"`
+	Progress         float64 `json:"progress,omitempty"`
+}
+
+// ChartRepoTaskState represents task state from chart repo (hydrator tasks)
+type ChartRepoTaskState struct {
+	TaskID     string    `json:"task_id"`
+	UserID     string    `json:"user_id"`
+	SourceID   string    `json:"source_id"`
+	AppID      string    `json:"app_id"`
+	AppName    string    `json:"app_name"`
+	Status     string    `json:"status"` // running, completed, failed
+	StepName   string    `json:"step_name"`
+	TotalSteps int       `json:"total_steps"`
+	RetryCount int       `json:"retry_count"`
+	LastError  string    `json:"last_error,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// ChartRepoStatus represents chart repo status information
+type ChartRepoStatus struct {
+	System     *ChartRepoSystemStatus `json:"system,omitempty"`
+	Apps       []*ChartRepoAppState   `json:"apps,omitempty"`
+	Images     []*ChartRepoImageState `json:"images,omitempty"`
+	Tasks      *ChartRepoTasksStatus  `json:"tasks,omitempty"`
+	LastUpdate time.Time              `json:"last_update"`
+}
+
+// ChartRepoSystemStatus represents system status from chart repo
+type ChartRepoSystemStatus struct {
+	Uptime        int64                  `json:"uptime,omitempty"`
+	Version       string                 `json:"version,omitempty"`
+	Components    map[string]interface{} `json:"components,omitempty"`
+	ResourceUsage map[string]interface{} `json:"resource_usage,omitempty"`
+	Hostname      string                 `json:"hostname,omitempty"`
+}
+
+// ChartRepoTasksStatus represents tasks status from chart repo
+type ChartRepoTasksStatus struct {
+	Hydrator      *ChartRepoHydratorStatus      `json:"hydrator,omitempty"`
+	ImageAnalyzer *ChartRepoImageAnalyzerStatus `json:"image_analyzer,omitempty"`
+}
+
+// ChartRepoHydratorStatus represents hydrator status
+type ChartRepoHydratorStatus struct {
+	QueueLength    int                   `json:"queue_length"`
+	ActiveTasks    int                   `json:"active_tasks"`
+	CompletedTasks int                   `json:"completed_tasks"`
+	FailedTasks    int                   `json:"failed_tasks"`
+	WorkerCount    int                   `json:"worker_count"`
+	Tasks          []*ChartRepoTaskState `json:"tasks,omitempty"`
+	RecentFailed   []*ChartRepoTaskState `json:"recent_failed,omitempty"`
+}
+
+// ChartRepoImageAnalyzerStatus represents image analyzer status
+type ChartRepoImageAnalyzerStatus struct {
+	QueueLength    int `json:"queue_length"`
+	ActiveWorkers  int `json:"active_workers"`
+	CachedImages   int `json:"cached_images"`
+	AnalyzingCount int `json:"analyzing_count"`
+}
+
 // RuntimeSnapshot represents a complete snapshot of the system runtime state
 type RuntimeSnapshot struct {
 	Timestamp  time.Time                   `json:"timestamp"`
-	AppStates  map[string]*AppFlowState    `json:"app_states"` // key: userID:sourceID:appName
-	Tasks      map[string]*TaskState       `json:"tasks"`      // key: taskID
-	Components map[string]*ComponentStatus `json:"components"` // key: component name
+	AppStates  map[string]*AppFlowState    `json:"app_states"`           // key: userID:sourceID:appName
+	Tasks      map[string]*TaskState       `json:"tasks"`                // key: taskID
+	Components map[string]*ComponentStatus `json:"components"`           // key: component name
+	ChartRepo  *ChartRepoStatus            `json:"chart_repo,omitempty"` // Chart repo status
 	Summary    *RuntimeSummary             `json:"summary"`
 }
 
