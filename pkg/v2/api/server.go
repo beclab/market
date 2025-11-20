@@ -217,6 +217,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/runtime/state", s.getRuntimeState).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/runtime/state")
 
+	// 29. Get runtime dashboard (HTML page)
+	api.HandleFunc("/runtime/dashboard", s.getRuntimeDashboard).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/runtime/dashboard")
+
 	log.Printf("All routes configured successfully")
 }
 
