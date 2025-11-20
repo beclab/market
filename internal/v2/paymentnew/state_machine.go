@@ -964,6 +964,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 	// If JWS exists and payment notification was sent, allow frontend to retry payment
 	if state.SignatureStatus == SignatureErrorNoRecord {
 		// If JWS exists and payment notification was sent, return payment data to allow retry
+		// Use payment_retry_required instead of payment_required to distinguish from unpaid state
 		if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent {
 			log.Printf("buildPurchaseResponse: error_no_record but JWS and notification exist, returning payment data for retry")
 			developerDID := state.Developer.DID
@@ -973,7 +974,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			}
 			paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
 			response := map[string]interface{}{
-				"status":       "payment_required",
+				"status":       "payment_retry_required",
 				"payment_data": paymentData,
 				"message":      "developer has no matching payment record, please retry payment",
 			}
@@ -1017,7 +1018,8 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 
 	// 2.5) Has JWS and payment notification sent -> return payment data for frontend transfer
 	// This handles cases where signature status might be in error state but JWS exists and payment notification was sent
-	if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent {
+	// Note: SignatureErrorNoRecord case is already handled above, so we exclude it here
+	if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent && state.SignatureStatus != SignatureErrorNoRecord {
 		developerDID := state.Developer.DID
 		userDID, err := getUserDID(userID, xForwardedHost)
 		if err != nil {
