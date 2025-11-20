@@ -119,11 +119,15 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 		return err
 	}
 
-	// Update state
+	// Update state in memory and persist
 	psm.mu.Lock()
 	nextState.UpdatedAt = time.Now()
 	psm.states[key] = nextState
 	psm.mu.Unlock()
+
+	if err := psm.SaveState(nextState); err != nil {
+		log.Printf("Failed to persist state after event %s for %s: %v", event, key, err)
+	}
 
 	log.Printf("State updated after event %s", event)
 	log.Printf("New state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
