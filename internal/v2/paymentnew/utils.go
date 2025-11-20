@@ -1054,8 +1054,12 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 		if state.SignatureStatus == SignatureRequiredAndSigned {
 			return "payment_required"
 		}
-		// If JWS exists but signature status is in error, still allow payment retry
+		// If JWS exists but signature status is in error, distinguish between error_no_record and other cases
 		if state.JWS != "" {
+			// If signature status is error_no_record, return payment_retry_required to distinguish from unpaid state
+			if state.SignatureStatus == SignatureErrorNoRecord {
+				return "payment_retry_required"
+			}
 			return "payment_required"
 		}
 		// Otherwise, notification sent but signature not ready yet
@@ -1070,6 +1074,7 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 		return "signature_required"
 	}
 	// 5) Error states
+	// Check SignatureErrorNoRecord after checking PaymentNotificationSent to handle JWS case above
 	if state.SignatureStatus == SignatureErrorNoRecord {
 		return "signature_no_record"
 	}

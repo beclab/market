@@ -312,6 +312,12 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 		if state != nil && len(state.FrontendData) > 0 {
 			result.FrontendData = state.FrontendData
 		}
+	case "payment_retry_required":
+		result.Message = "Developer has no matching payment record, please retry payment"
+		// Include frontend data if it exists
+		if state != nil && len(state.FrontendData) > 0 {
+			result.FrontendData = state.FrontendData
+		}
 	case "notification_sent":
 		result.Message = "Payment notification sent"
 	case "signature_required":
