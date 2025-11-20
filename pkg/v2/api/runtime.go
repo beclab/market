@@ -99,7 +99,7 @@ func generateDashboardHTML(snapshotJSON string) string {
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
             color: #333;
@@ -182,7 +182,7 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         table {
-            width: 100%%;
+            width: 100%;
             border-collapse: collapse;
             margin-top: 12px;
         }
@@ -239,7 +239,7 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         .progress-bar {
-            width: 100%%;
+            width: 100%;
             height: 8px;
             background: #e9ecef;
             border-radius: 4px;
@@ -248,8 +248,8 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         .progress-fill {
-            height: 100%%;
-            background: linear-gradient(90deg, #667eea 0%%, #764ba2 100%%);
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
             transition: width 0.3s;
         }
         
@@ -514,8 +514,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             const seconds = Math.floor(ms / 1000);
             const minutes = Math.floor(seconds / 60);
             const hours = Math.floor(minutes / 60);
-            if (hours > 0) return hours + 'h ' + (minutes %% 60) + 'm';
-            if (minutes > 0) return minutes + 'm ' + (seconds %% 60) + 's';
+            if (hours > 0) return hours + 'h ' + (minutes % 60) + 'm';
+            if (minutes > 0) return minutes + 'm ' + (seconds % 60) + 's';
             return seconds + 's';
         }
         
@@ -603,7 +603,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + (task.type || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.app_name || 'N/A') + '</td>' +
-                    '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress + '%%"></div></div>' + progress + '%%</td>' +
+                    '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress + '%"></div></div>' + progress + '%</td>' +
                     '<td>' + formatTimestamp(task.created_at) + '</td>' +
                     '<td>' + (task.error_msg || '-') + '</td>';
                 tbody.appendChild(row);
@@ -654,7 +654,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 row.innerHTML = '<td>' + (image.image_name || 'N/A') + '</td>' +
                     '<td>' + (image.app_name || '-') + '</td>' +
                     '<td>' + getStatusBadge(image.status || 'unknown') + '</td>' +
-                    '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress.toFixed(2) + '%%"></div></div>' + progress.toFixed(2) + '%%</td>' +
+                    '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress.toFixed(2) + '%"></div></div>' + progress.toFixed(2) + '%</td>' +
                     '<td>' + formatBytes(image.total_size) + '</td>';
                 imagesTbody.appendChild(row);
             });
