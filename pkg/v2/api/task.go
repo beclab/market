@@ -4,13 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"path/filepath"
+	"strings"
+
+	"github.com/gorilla/mux"
+
 	"market/internal/v2/task"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
-	"net/http"
-	"path/filepath"
-
-	"github.com/gorilla/mux"
 )
 
 // InstallAppRequest represents the request body for app installation
@@ -34,6 +36,45 @@ type CloneAppRequest struct {
 // CancelInstallRequest represents the request body for cancel installation
 type CancelInstallRequest struct {
 	Sync bool `json:"sync"` // Whether this is a synchronous request
+}
+
+// extractInstallProductMetadata returns productID & developerName to help VC injection
+func extractInstallProductMetadata(appInfo *types.AppInfo) (string, string) {
+	if appInfo == nil {
+		return "", ""
+	}
+
+	var productID string
+	var developerName string
+
+	if appInfo.Price != nil {
+		developerName = strings.TrimSpace(appInfo.Price.Developer)
+
+		if appInfo.Price.Paid != nil {
+			if pid := strings.TrimSpace(appInfo.Price.Paid.ProductID); pid != "" {
+				productID = pid
+			} else if len(appInfo.Price.Paid.Price) > 0 {
+				if appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
+					productID = appInfo.AppEntry.ID
+				}
+			}
+		}
+
+		if productID == "" {
+			for _, product := range appInfo.Price.Products {
+				if pid := strings.TrimSpace(product.ProductID); pid != "" {
+					productID = pid
+					break
+				}
+			}
+		}
+	}
+
+	if productID == "" && appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
+		productID = appInfo.AppEntry.ID
+	}
+
+	return productID, developerName
 }
 
 // 6. Install application (single)
@@ -140,6 +181,8 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	productID, developerName := extractInstallProductMetadata(targetApp.AppInfo)
+
 	// Step 10: Create installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
@@ -151,6 +194,12 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":    cfgType, // Add cfgType to metadata
 		"images":     images,
 		"envs":       request.Envs,
+	}
+	if productID != "" {
+		taskMetadata["productID"] = productID
+	}
+	if developerName != "" {
+		taskMetadata["developerName"] = developerName
 	}
 
 	// Handle synchronous requests with proper blocking
