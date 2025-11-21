@@ -354,6 +354,125 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 				Metrics:   moduleStatus,
 			}
 			c.store.UpdateComponent(component)
+
+			// Collect Syncer status separately
+			if syncerRunning, ok := moduleStatus["syncer_running"].(bool); ok {
+				syncerHealthy := syncerRunning
+				syncerStatus := "running"
+				if !syncerRunning {
+					syncerStatus = "stopped"
+				}
+				syncerComponent := &ComponentStatus{
+					Name:      "syncer",
+					Healthy:   syncerHealthy,
+					Status:    syncerStatus,
+					LastCheck: time.Now(),
+					Message:   "",
+					Metrics: map[string]interface{}{
+						"is_running": syncerRunning,
+					},
+				}
+				c.store.UpdateComponent(syncerComponent)
+			}
+
+			// Collect Hydrator status separately
+			if hydratorRunning, ok := moduleStatus["hydrator_running"].(bool); ok {
+				hydratorHealthy := hydratorRunning
+				hydratorStatus := "running"
+				if !hydratorRunning {
+					hydratorStatus = "stopped"
+				}
+				hydratorMetrics := make(map[string]interface{})
+				if metrics, ok := moduleStatus["hydrator_metrics"].(map[string]interface{}); ok {
+					hydratorMetrics = metrics
+				} else {
+					// Try to convert from struct if it's returned as struct
+					// This handles the case where GetMetrics returns a struct
+					hydrator := aim.GetHydrator()
+					if hydrator != nil {
+						metricsStruct := hydrator.GetMetrics()
+						hydratorMetrics = map[string]interface{}{
+							"total_tasks_processed": metricsStruct.TotalTasksProcessed,
+							"total_tasks_succeeded": metricsStruct.TotalTasksSucceeded,
+							"total_tasks_failed":    metricsStruct.TotalTasksFailed,
+							"active_tasks_count":    metricsStruct.ActiveTasksCount,
+							"completed_tasks_count": metricsStruct.CompletedTasksCount,
+							"failed_tasks_count":    metricsStruct.FailedTasksCount,
+							"queue_length":          metricsStruct.QueueLength,
+						}
+					}
+				}
+				hydratorMetrics["is_running"] = hydratorRunning
+				hydratorComponent := &ComponentStatus{
+					Name:      "hydrator",
+					Healthy:   hydratorHealthy,
+					Status:    hydratorStatus,
+					LastCheck: time.Now(),
+					Message:   "",
+					Metrics:   hydratorMetrics,
+				}
+				c.store.UpdateComponent(hydratorComponent)
+			}
+
+			// Collect Cache statistics
+			if cacheStats, ok := moduleStatus["cache_stats"].(map[string]interface{}); ok {
+				// Calculate detailed cache statistics
+				cacheManager := aim.GetCacheManager()
+				if cacheManager != nil {
+					allUsersData := cacheManager.GetAllUsersData()
+					totalApps := 0
+					totalAppInfoLatest := 0
+					totalAppStateLatest := 0
+					totalAppInfoPending := 0
+
+					for _, userData := range allUsersData {
+						if userData == nil || userData.Sources == nil {
+							continue
+						}
+						for _, sourceData := range userData.Sources {
+							if sourceData == nil {
+								continue
+							}
+							if sourceData.AppInfoLatest != nil {
+								totalAppInfoLatest += len(sourceData.AppInfoLatest)
+							}
+							if sourceData.AppStateLatest != nil {
+								totalAppStateLatest += len(sourceData.AppStateLatest)
+							}
+							if sourceData.AppInfoLatestPending != nil {
+								totalAppInfoPending += len(sourceData.AppInfoLatestPending)
+							}
+						}
+					}
+					// Total apps is the union of AppInfoLatest and AppStateLatest
+					// For simplicity, we use the larger of the two
+					if totalAppInfoLatest > totalAppStateLatest {
+						totalApps = totalAppInfoLatest
+					} else {
+						totalApps = totalAppStateLatest
+					}
+
+					// Merge with existing cache stats
+					enhancedCacheStats := make(map[string]interface{})
+					for k, v := range cacheStats {
+						enhancedCacheStats[k] = v
+					}
+					enhancedCacheStats["total_apps"] = totalApps
+					enhancedCacheStats["total_app_info_latest"] = totalAppInfoLatest
+					enhancedCacheStats["total_app_state_latest"] = totalAppStateLatest
+					enhancedCacheStats["total_app_info_pending"] = totalAppInfoPending
+
+					cacheComponent := &ComponentStatus{
+						Name:      "cache",
+						Healthy:   true,
+						Status:    "running",
+						LastCheck: time.Now(),
+						Message:   "",
+						Metrics:   enhancedCacheStats,
+					}
+					c.store.UpdateComponent(cacheComponent)
+				}
+			}
 		}
 	}
 
