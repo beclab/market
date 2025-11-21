@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"strings"
 	"time"
 
@@ -526,8 +525,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 	// Polling controls
 	maxAttempts := 20
 	maxDuration := 10 * time.Minute
-	baseBackoff := 5 * time.Second
-	maxBackoff := 60 * time.Second
+	fixedInterval := 5 * time.Second
 
 	ctx, cancel := context.WithTimeout(context.Background(), maxDuration)
 	defer cancel()
@@ -578,20 +576,43 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 					})
 					return
 				}
-			} else if result.Code == 1 || result.Code == 2 {
-				log.Printf("VC polling received terminal code=%d, stop polling for user %s, app %s", result.Code, state.UserID, state.AppID)
+				continue
+			}
+
+			switch result.Code {
+			case 1:
+				log.Printf("VC polling attempt %d received no record; will keep polling until max attempts", attempt)
+				if attempt == maxAttempts {
+					log.Printf("VC polling reached max attempts with no record; updating state as no record")
+					_ = psm.updateState(key, func(s *PaymentState) error {
+						s.DeveloperSync = DeveloperSyncCompleted
+						s.SignatureStatus = SignatureErrorNoRecord
+						return nil
+					})
+					return
+				}
+				// keep polling
+			case 2:
+				log.Printf("VC polling received terminal code=2 (need re-sign), stop polling for user %s, app %s", state.UserID, state.AppID)
 				_ = psm.updateState(key, func(s *PaymentState) error {
 					s.DeveloperSync = DeveloperSyncCompleted
-					switch result.Code {
-					case 1:
-						s.SignatureStatus = SignatureErrorNoRecord
-					case 2:
-						s.SignatureStatus = SignatureErrorNeedReSign
-					}
+					s.SignatureStatus = SignatureErrorNeedReSign
 					return nil
 				})
 				return
+			default:
+				log.Printf("VC polling attempt %d received unexpected code=%d; treating as developer error", attempt, result.Code)
+				if attempt == maxAttempts {
+					_ = psm.updateState(key, func(s *PaymentState) error {
+						if s.DeveloperSync != DeveloperSyncCompleted {
+							s.DeveloperSync = DeveloperSyncFailed
+						}
+						return nil
+					})
+					return
+				}
 			}
+			// fallthrough continues to backoff/sleep for next attempt
 		}
 
 		if attempt == maxAttempts {
@@ -605,13 +626,8 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 			return
 		}
 
-		// Exponential backoff + jitter
-		sleep := baseBackoff * time.Duration(1<<uint(attempt-1))
-		if sleep > maxBackoff {
-			sleep = maxBackoff
-		}
-		jitter := time.Duration(rand.Intn(250)) * time.Millisecond
-		time.Sleep(sleep + jitter)
+		// Fixed interval between attempts as requested
+		time.Sleep(fixedInterval)
 	}
 }
 
