@@ -218,7 +218,7 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 
 // GetPaymentStatus returns payment status inferred from PaymentState directly
 // Params and return are the same as ProcessAppPaymentStatus
-func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*PaymentStatusResult, error) {
+func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *types.AppInfo) (*PaymentStatusResult, error) {
 	if appInfo == nil {
 		return nil, fmt.Errorf("app info is nil")
 	}
@@ -297,6 +297,20 @@ func GetPaymentStatus(userID, appID, sourceID string, appInfo *types.AppInfo) (*
 		log.Printf("GetPaymentStatus: state not found for user=%s app=%s product=%s -> not_buy", userID, realAppID, productID)
 		// 需要购买但尚未开始任何流程，标记为 not_buy
 		return &PaymentStatusResult{RequiresPurchase: true, Status: "not_buy", Message: "Payment not started"}, nil
+	}
+
+	// Update XForwardedHost if it is missing in state but provided by caller
+	if globalStateMachine != nil && xForwardedHost != "" && state.XForwardedHost == "" {
+		if err := globalStateMachine.updateState(state.GetKey(), func(s *PaymentState) error {
+			if s.XForwardedHost == "" {
+				s.XForwardedHost = xForwardedHost
+			}
+			return nil
+		}); err != nil {
+			log.Printf("GetPaymentStatus: Failed to update XForwardedHost: %v", err)
+		} else if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			state = updated
+		}
 	}
 
 	log.Printf("GetPaymentStatus: state snapshot user=%s app=%s product=%s developerSync=%s signatureStatus=%s paymentStatus=%s VC_present=%t",

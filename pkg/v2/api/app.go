@@ -2030,6 +2030,9 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Retrieved user ID for payment status request: %s", userID)
 
+	// Read X-Forwarded-Host for downstream callbacks
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
+
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
 		log.Printf("Cache manager is not initialized")
@@ -2056,7 +2059,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
+	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, xForwardedHost, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
@@ -2155,6 +2158,9 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	}
 	log.Printf("Retrieved user ID for payment status request: %s", userID)
 
+	// Read X-Forwarded-Host for downstream callbacks
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
+
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
 		log.Printf("Cache manager is not initialized")
@@ -2181,7 +2187,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	log.Printf("Found app: %s in source: %s for user: %s (legacy search)", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
+	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, xForwardedHost, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)

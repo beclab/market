@@ -70,7 +70,7 @@ Typical sequence: preprocessing → fetch signature → submit signature → fro
 
 - Initialize: `InitStateMachine(dataSender, settingsManager)`
 - Preprocess: `PreprocessAppPaymentData(ctx, appInfo, userID, sourceID, settingsManager, client)`
-- Query: `GetPaymentStatus(userID, appID, sourceID, appInfo)`
+- Query: `GetPaymentStatus(userID, appID, sourceID, xForwardedHost, appInfo)`
 - Advance purchase: `PurchaseApp(userID, appID, sourceID, xForwardedHost, appInfo)`
 - Mark frontend ready: `StartFrontendPayment(userID, appID, sourceID, productID, xForwardedHost, appInfo, frontendData)`
 - Poll after payment completion: `StartPaymentPolling(userID, sourceID, appID, productID, txHash, xForwardedHost, systemChainID, appInfoLatest)`
