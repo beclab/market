@@ -418,43 +418,227 @@ func generateDashboardHTML(snapshotJSON string) string {
                     <h2>Market Status</h2>
                 </div>
                 <div class="stats-grid" id="marketStatsGrid"></div>
-                <div class="section">
-                    <h3>Applications</h3>
-                    <div class="table-container">
-                        <table id="appsTable">
-                            <thead>
-                                <tr>
-                                    <th>App Name</th>
-                                    <th>User ID</th>
-                                    <th>Source ID</th>
-                                    <th>Stage</th>
-                                    <th>Health</th>
-                                    <th>Version</th>
-                                </tr>
-                            </thead>
-                            <tbody id="appsTableBody"></tbody>
-                        </table>
+                
+                <!-- Main Tabs for Applications, Tasks, Components, etc. -->
+                <div class="main-tabs">
+                    <button class="main-tab active" onclick="showMainTab('marketApps', this)">Applications</button>
+                    <button class="main-tab" onclick="showMainTab('marketTasks', this)">Tasks</button>
+                    <button class="main-tab" onclick="showMainTab('marketComponents', this)">Components</button>
+                    <button class="main-tab" onclick="showMainTab('marketCache', this)">Cache & Sync</button>
+                </div>
+                
+                <!-- Applications Tab Content -->
+                <div id="marketApps" class="main-tab-content active">
+                    <!-- Sub-tabs for Applications by stage -->
+                    <div class="sub-tabs">
+                        <button class="sub-tab active" onclick="showSubTab('marketApps', 'all', this)">All</button>
+                        <button class="sub-tab" onclick="showSubTab('marketApps', 'fetching', this)">Fetching</button>
+                        <button class="sub-tab" onclick="showSubTab('marketApps', 'installing', this)">Installing</button>
+                        <button class="sub-tab" onclick="showSubTab('marketApps', 'running', this)">Running</button>
+                        <button class="sub-tab" onclick="showSubTab('marketApps', 'upgrading', this)">Upgrading</button>
+                        <button class="sub-tab" onclick="showSubTab('marketApps', 'failed', this)">Failed</button>
+                    </div>
+                    <div class="sub-tab-content active" id="marketApps-all">
+                        <div class="table-container">
+                            <table id="appsTable">
+                                <thead>
+                                    <tr>
+                                        <th>App Name</th>
+                                        <th>User ID</th>
+                                        <th>Source ID</th>
+                                        <th>Stage</th>
+                                        <th>Health</th>
+                                        <th>Version</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="appsTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketApps-fetching">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>App Name</th>
+                                        <th>User ID</th>
+                                        <th>Source ID</th>
+                                        <th>Stage</th>
+                                        <th>Health</th>
+                                        <th>Version</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="appsFetchingBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketApps-installing">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>App Name</th>
+                                        <th>User ID</th>
+                                        <th>Source ID</th>
+                                        <th>Stage</th>
+                                        <th>Health</th>
+                                        <th>Version</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="appsInstallingBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketApps-running">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>App Name</th>
+                                        <th>User ID</th>
+                                        <th>Source ID</th>
+                                        <th>Stage</th>
+                                        <th>Health</th>
+                                        <th>Version</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="appsRunningBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketApps-upgrading">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>App Name</th>
+                                        <th>User ID</th>
+                                        <th>Source ID</th>
+                                        <th>Stage</th>
+                                        <th>Health</th>
+                                        <th>Version</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="appsUpgradingBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketApps-failed">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>App Name</th>
+                                        <th>User ID</th>
+                                        <th>Source ID</th>
+                                        <th>Stage</th>
+                                        <th>Health</th>
+                                        <th>Version</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="appsFailedBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-                <div class="section">
-                    <h3>Tasks</h3>
-                    <div class="table-container">
-                        <table id="tasksTable">
-                            <thead>
-                                <tr>
-                                    <th>Task ID</th>
-                                    <th>Type</th>
-                                    <th>Status</th>
-                                    <th>App Name</th>
-                                    <th>Progress</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tasksTableBody"></tbody>
-                        </table>
+                
+                <!-- Tasks Tab Content -->
+                <div id="marketTasks" class="main-tab-content">
+                    <!-- Sub-tabs for Tasks by status -->
+                    <div class="sub-tabs">
+                        <button class="sub-tab active" onclick="showSubTab('marketTasks', 'all', this)">All</button>
+                        <button class="sub-tab" onclick="showSubTab('marketTasks', 'pending', this)">Pending</button>
+                        <button class="sub-tab" onclick="showSubTab('marketTasks', 'running', this)">Running</button>
+                        <button class="sub-tab" onclick="showSubTab('marketTasks', 'completed', this)">Completed</button>
+                        <button class="sub-tab" onclick="showSubTab('marketTasks', 'failed', this)">Failed</button>
+                    </div>
+                    <div class="sub-tab-content active" id="marketTasks-all">
+                        <div class="table-container">
+                            <table id="tasksTable">
+                                <thead>
+                                    <tr>
+                                        <th>Task ID</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>App Name</th>
+                                        <th>Created At</th>
+                                        <th>Updated At</th>
+                                        <th>Error</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tasksTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketTasks-pending">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Task ID</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>App Name</th>
+                                        <th>Created At</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tasksPendingBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketTasks-running">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Task ID</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>App Name</th>
+                                        <th>Started At</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tasksRunningBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketTasks-completed">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Task ID</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>App Name</th>
+                                        <th>Completed At</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tasksCompletedBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="sub-tab-content" id="marketTasks-failed">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Task ID</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>App Name</th>
+                                        <th>Error</th>
+                                        <th>Failed At</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tasksFailedBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-                <div class="section">
-                    <h3>Components</h3>
+                
+                <!-- Components Tab Content -->
+                <div id="marketComponents" class="main-tab-content">
                     <div class="table-container">
                         <table id="componentsTable">
                             <thead>
@@ -469,33 +653,59 @@ func generateDashboardHTML(snapshotJSON string) string {
                         </table>
                     </div>
                 </div>
-                <div class="section">
-                    <h3>Syncer & Hydrator</h3>
-                    <div class="table-container">
-                        <table id="syncerHydratorTable">
-                            <thead>
-                                <tr>
-                                    <th>Component</th>
-                                    <th>Status</th>
-                                    <th>Metrics</th>
-                                </tr>
-                            </thead>
-                            <tbody id="syncerHydratorTableBody"></tbody>
-                        </table>
+                
+                <!-- Cache & Sync Tab Content -->
+                <div id="marketCache" class="main-tab-content">
+                    <!-- Sub-tabs for Cache & Sync -->
+                    <div class="sub-tabs">
+                        <button class="sub-tab active" onclick="showSubTab('marketCache', 'syncer', this)">Syncer</button>
+                        <button class="sub-tab" onclick="showSubTab('marketCache', 'hydrator', this)">Hydrator</button>
+                        <button class="sub-tab" onclick="showSubTab('marketCache', 'cache', this)">Cache Statistics</button>
                     </div>
-                </div>
-                <div class="section">
-                    <h3>Cache Statistics</h3>
-                    <div class="table-container">
-                        <table id="cacheStatsTable">
-                            <thead>
-                                <tr>
-                                    <th>Metric</th>
-                                    <th>Value</th>
-                                </tr>
-                            </thead>
-                            <tbody id="cacheStatsTableBody"></tbody>
-                        </table>
+                    
+                    <!-- Syncer Tab Content -->
+                    <div class="sub-tab-content active" id="marketCache-syncer">
+                        <div class="table-container">
+                            <table id="syncerTable">
+                                <thead>
+                                    <tr>
+                                        <th>Property</th>
+                                        <th>Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="syncerTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Hydrator Tab Content -->
+                    <div class="sub-tab-content" id="marketCache-hydrator">
+                        <div class="table-container">
+                            <table id="hydratorTable">
+                                <thead>
+                                    <tr>
+                                        <th>Property</th>
+                                        <th>Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="hydratorTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Cache Statistics Tab Content -->
+                    <div class="sub-tab-content" id="marketCache-cache">
+                        <div class="table-container">
+                            <table id="cacheStatsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Metric</th>
+                                        <th>Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cacheStatsTableBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -868,16 +1078,35 @@ func generateDashboardHTML(snapshotJSON string) string {
         
         function renderApps() {
             const apps = snapshotData.app_states || {};
-            const tbody = document.getElementById('appsTableBody');
+            const appList = Object.values(apps);
+            
+            // Filter apps by stage
+            const appsAll = appList;
+            const appsFetching = appList.filter(app => (app.stage || '').toLowerCase() === 'fetching');
+            const appsInstalling = appList.filter(app => (app.stage || '').toLowerCase() === 'installing');
+            const appsRunning = appList.filter(app => (app.stage || '').toLowerCase() === 'running');
+            const appsUpgrading = appList.filter(app => (app.stage || '').toLowerCase() === 'upgrading');
+            const appsFailed = appList.filter(app => (app.stage || '').toLowerCase() === 'failed');
+            
+            renderAppsTable('appsTableBody', appsAll);
+            renderAppsTable('appsFetchingBody', appsFetching);
+            renderAppsTable('appsInstallingBody', appsInstalling);
+            renderAppsTable('appsRunningBody', appsRunning);
+            renderAppsTable('appsUpgradingBody', appsUpgrading);
+            renderAppsTable('appsFailedBody', appsFailed);
+        }
+        
+        function renderAppsTable(tbodyId, apps) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
             tbody.innerHTML = '';
             
-            const appList = Object.values(apps);
-            if (appList.length === 0) {
+            if (apps.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No applications</td></tr>';
                 return;
             }
             
-            appList.forEach(app => {
+            apps.forEach(app => {
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
@@ -891,23 +1120,105 @@ func generateDashboardHTML(snapshotJSON string) string {
         
         function renderTasks() {
             const tasks = snapshotData.tasks || {};
-            const tbody = document.getElementById('tasksTableBody');
+            const taskList = Object.values(tasks);
+            
+            // Filter tasks by status
+            const tasksAll = taskList;
+            const tasksPending = taskList.filter(task => (task.status || '').toLowerCase() === 'pending');
+            const tasksRunning = taskList.filter(task => (task.status || '').toLowerCase() === 'running');
+            const tasksCompleted = taskList.filter(task => (task.status || '').toLowerCase() === 'completed');
+            const tasksFailed = taskList.filter(task => (task.status || '').toLowerCase() === 'failed');
+            
+            renderTasksTableFull('tasksTableBody', tasksAll);
+            renderTasksTableSimple('tasksPendingBody', tasksPending, 'created_at');
+            renderTasksTableSimple('tasksRunningBody', tasksRunning, 'started_at');
+            renderTasksTableSimple('tasksCompletedBody', tasksCompleted, 'completed_at');
+            renderTasksTableFailed('tasksFailedBody', tasksFailed);
+        }
+        
+        function renderTasksTableFull(tbodyId, tasks) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
             tbody.innerHTML = '';
             
-            const taskList = Object.values(tasks);
-            if (taskList.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tasks</td></tr>';
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No tasks</td></tr>';
                 return;
             }
             
-            taskList.forEach(task => {
-                const progress = task.progress || 0;
+            tasks.forEach(task => {
+                // Determine updated time: use CompletedAt if available, otherwise StartedAt, otherwise CreatedAt
+                let updatedTime = task.created_at;
+                if (task.completed_at) {
+                    updatedTime = task.completed_at;
+                } else if (task.started_at) {
+                    updatedTime = task.started_at;
+                }
+                
+                // Show error message for failed tasks
+                const errorMsg = (task.status === 'failed' && task.error_msg) ? task.error_msg : '-';
+                
                 const row = document.createElement('tr');
                 row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
                     '<td>' + (task.type || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.app_name || 'N/A') + '</td>' +
-                    '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress + '%"></div></div></td>';
+                    '<td style="font-size: 11px;">' + formatTimestamp(task.created_at) + '</td>' +
+                    '<td style="font-size: 11px;">' + formatTimestamp(updatedTime) + '</td>' +
+                    '<td style="font-size: 11px; color: ' + (task.status === 'failed' ? '#991b1b' : '#666') + ';">' + errorMsg + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function renderTasksTableSimple(tbodyId, tasks, timeField) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tasks</td></tr>';
+                return;
+            }
+            
+            tasks.forEach(task => {
+                let timeValue = task.created_at;
+                if (timeField === 'started_at' && task.started_at) {
+                    timeValue = task.started_at;
+                } else if (timeField === 'completed_at' && task.completed_at) {
+                    timeValue = task.completed_at;
+                }
+                
+                const row = document.createElement('tr');
+                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
+                    '<td>' + (task.type || 'N/A') + '</td>' +
+                    '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
+                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + formatTimestamp(timeValue) + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function renderTasksTableFailed(tbodyId, tasks) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No tasks</td></tr>';
+                return;
+            }
+            
+            tasks.forEach(task => {
+                const failedTime = task.completed_at || task.started_at || task.created_at;
+                const errorMsg = task.error_msg || '-';
+                
+                const row = document.createElement('tr');
+                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
+                    '<td>' + (task.type || 'N/A') + '</td>' +
+                    '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
+                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px; color: #991b1b;">' + errorMsg + '</td>' +
+                    '<td style="font-size: 11px;">' + formatTimestamp(failedTime) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -937,41 +1248,71 @@ func generateDashboardHTML(snapshotJSON string) string {
             });
         }
         
-        function renderSyncerHydrator() {
+        function renderSyncer() {
             const components = snapshotData.components || {};
-            const tbody = document.getElementById('syncerHydratorTableBody');
+            const syncer = components.syncer;
+            const tbody = document.getElementById('syncerTableBody');
+            if (!tbody) return;
             tbody.innerHTML = '';
             
-            const syncer = components.syncer;
-            const hydrator = components.hydrator;
-            
-            if (!syncer && !hydrator) {
-                tbody.innerHTML = '<tr><td colspan="3" class="empty-state">No syncer/hydrator data</td></tr>';
+            if (!syncer) {
+                tbody.innerHTML = '<tr><td colspan="2" class="empty-state">No syncer data</td></tr>';
                 return;
             }
             
-            if (syncer) {
-                const metrics = syncer.metrics || {};
+            const metrics = syncer.metrics || {};
+            const stats = [
+                { label: 'Status', value: getStatusBadge(syncer.status || 'unknown'), isHtml: true },
+                { label: 'Healthy', value: syncer.healthy ? 'Yes' : 'No' },
+                { label: 'Is Running', value: metrics.is_running ? 'Yes' : 'No' },
+                { label: 'Enabled', value: metrics.enabled !== undefined ? (metrics.enabled ? 'Yes' : 'No') : 'N/A' },
+                { label: 'Step Count', value: metrics.step_count || 0 },
+                { label: 'Steps', value: Array.isArray(metrics.steps) ? metrics.steps.join(', ') : 'N/A' },
+                { label: 'Last Check', value: formatTimestamp(syncer.last_check) },
+            ];
+            
+            stats.forEach(stat => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td>Syncer</td>' +
-                    '<td>' + getStatusBadge(syncer.status || 'unknown') + '</td>' +
-                    '<td>Running: ' + (metrics.is_running ? 'Yes' : 'No') + '</td>';
+                row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' +
+                    '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
                 tbody.appendChild(row);
+            });
+        }
+        
+        function renderHydrator() {
+            const components = snapshotData.components || {};
+            const hydrator = components.hydrator;
+            const tbody = document.getElementById('hydratorTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            if (!hydrator) {
+                tbody.innerHTML = '<tr><td colspan="2" class="empty-state">No hydrator data</td></tr>';
+                return;
             }
             
-            if (hydrator) {
-                const metrics = hydrator.metrics || {};
-                const metricsText = 'Queue: ' + (metrics.queue_length || 0) + 
-                    ', Active: ' + (metrics.active_tasks_count || 0) + 
-                    ', Processed: ' + (metrics.total_tasks_processed || 0) + 
-                    ', Succeeded: ' + (metrics.total_tasks_succeeded || 0) + 
-                    ', Failed: ' + (metrics.total_tasks_failed || 0);
+            const metrics = hydrator.metrics || {};
+            const stats = [
+                { label: 'Status', value: getStatusBadge(hydrator.status || 'unknown'), isHtml: true },
+                { label: 'Healthy', value: hydrator.healthy ? 'Yes' : 'No' },
+                { label: 'Is Running', value: metrics.is_running ? 'Yes' : 'No' },
+                { label: 'Enabled', value: metrics.enabled !== undefined ? (metrics.enabled ? 'Yes' : 'No') : 'N/A' },
+                { label: 'Queue Length', value: metrics.queue_length || 0 },
+                { label: 'Active Tasks', value: metrics.active_tasks_count || 0 },
+                { label: 'Total Processed', value: metrics.total_tasks_processed || 0 },
+                { label: 'Total Succeeded', value: metrics.total_tasks_succeeded || 0 },
+                { label: 'Total Failed', value: metrics.total_tasks_failed || 0 },
+                { label: 'Completed Tasks', value: metrics.completed_tasks_count || 0 },
+                { label: 'Failed Tasks', value: metrics.failed_tasks_count || 0 },
+                { label: 'Last Check', value: formatTimestamp(hydrator.last_check) },
+            ];
+            
+            stats.forEach(stat => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td>Hydrator</td>' +
-                    '<td>' + getStatusBadge(hydrator.status || 'unknown') + '</td>' +
-                    '<td style="font-size: 11px;">' + metricsText + '</td>';
+                row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' +
+                    '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
                 tbody.appendChild(row);
-            }
+            });
         }
         
         function renderCacheStats() {
@@ -1035,7 +1376,19 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             // Re-render data for the selected tab
-            renderChartRepo();
+            if (tabName.startsWith('market')) {
+                if (tabName === 'marketApps') {
+                    renderApps();
+                } else if (tabName === 'marketTasks') {
+                    renderTasks();
+                } else if (tabName === 'marketCache') {
+                    renderSyncer();
+                    renderHydrator();
+                    renderCacheStats();
+                }
+            } else if (tabName.startsWith('chartRepo')) {
+                renderChartRepo();
+            }
         }
         
         function showSubTab(mainTabName, subTabName, element) {
@@ -1058,7 +1411,23 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             // Re-render data for the selected sub-tab
-            renderChartRepo();
+            if (mainTabName.startsWith('market')) {
+                if (mainTabName === 'marketApps') {
+                    renderApps();
+                } else if (mainTabName === 'marketTasks') {
+                    renderTasks();
+                } else if (mainTabName === 'marketCache') {
+                    if (subTabName === 'syncer') {
+                        renderSyncer();
+                    } else if (subTabName === 'hydrator') {
+                        renderHydrator();
+                    } else if (subTabName === 'cache') {
+                        renderCacheStats();
+                    }
+                }
+            } else if (mainTabName.startsWith('chartRepo')) {
+                renderChartRepo();
+            }
         }
         
         function renderChartRepo() {
@@ -1332,7 +1701,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             renderApps();
             renderTasks();
             renderComponents();
-            renderSyncerHydrator();
+            renderSyncer();
+            renderHydrator();
             renderCacheStats();
             renderChartRepo();
         }

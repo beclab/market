@@ -430,27 +430,50 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 			}
 			c.store.UpdateComponent(component)
 
-			// Collect Syncer status separately
+			// Collect Syncer status separately with detailed information
 			if syncerRunning, ok := moduleStatus["syncer_running"].(bool); ok {
 				syncerHealthy := syncerRunning
 				syncerStatus := "running"
 				if !syncerRunning {
 					syncerStatus = "stopped"
 				}
+
+				syncerMetrics := make(map[string]interface{})
+				syncerMetrics["is_running"] = syncerRunning
+
+				// Get detailed syncer information
+				syncer := aim.GetSyncer()
+				if syncer != nil {
+					steps := syncer.GetSteps()
+					syncerMetrics["step_count"] = len(steps)
+
+					// Get step names
+					stepNames := make([]string, 0, len(steps))
+					for _, step := range steps {
+						if step != nil {
+							stepNames = append(stepNames, step.GetStepName())
+						}
+					}
+					syncerMetrics["steps"] = stepNames
+
+					// Try to get sync interval from module status or config
+					if enableSync, ok := moduleStatus["enable_sync"].(bool); ok {
+						syncerMetrics["enabled"] = enableSync
+					}
+				}
+
 				syncerComponent := &ComponentStatus{
 					Name:      "syncer",
 					Healthy:   syncerHealthy,
 					Status:    syncerStatus,
 					LastCheck: time.Now(),
 					Message:   "",
-					Metrics: map[string]interface{}{
-						"is_running": syncerRunning,
-					},
+					Metrics:   syncerMetrics,
 				}
 				c.store.UpdateComponent(syncerComponent)
 			}
 
-			// Collect Hydrator status separately
+			// Collect Hydrator status separately with detailed information
 			if hydratorRunning, ok := moduleStatus["hydrator_running"].(bool); ok {
 				hydratorHealthy := hydratorRunning
 				hydratorStatus := "running"
@@ -478,6 +501,12 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 					}
 				}
 				hydratorMetrics["is_running"] = hydratorRunning
+
+				// Add additional hydrator information
+				if enableHydrator, ok := moduleStatus["enable_hydrator"].(bool); ok {
+					hydratorMetrics["enabled"] = enableHydrator
+				}
+
 				hydratorComponent := &ComponentStatus{
 					Name:      "hydrator",
 					Healthy:   hydratorHealthy,
