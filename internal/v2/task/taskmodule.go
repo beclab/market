@@ -426,6 +426,22 @@ func (tm *TaskModule) GetRunningTasks() []*Task {
 	return tasks
 }
 
+// GetRecentTasks returns recent tasks from the store (including completed and failed)
+// This method queries the database to get tasks that TaskModule has persisted
+func (tm *TaskModule) GetRecentTasks(limit int) []*Task {
+	if tm.taskStore == nil {
+		return []*Task{}
+	}
+
+	tasks, err := tm.taskStore.LoadRecentTasks(limit)
+	if err != nil {
+		log.Printf("[%s] Failed to load recent tasks: %v", tm.instanceID, err)
+		return []*Task{}
+	}
+
+	return tasks
+}
+
 // start initializes and starts the background goroutines
 func (tm *TaskModule) start() {
 	// Start task executor (every 2 seconds)

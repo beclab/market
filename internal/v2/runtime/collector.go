@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,28 +134,48 @@ func (c *StateCollector) collect() {
 
 // collectTaskStates collects all task states from TaskModule
 func (c *StateCollector) collectTaskStates(tm *task.TaskModule) {
-	// Get pending tasks
+	// Get pending and running tasks from memory
 	pendingTasks := tm.GetPendingTasks()
 	runningTasks := tm.GetRunningTasks()
 
-	// Build a set of active task IDs
-	activeTaskIDs := make(map[string]bool)
+	// Get recent tasks from database (includes completed and failed tasks)
+	// This aligns with TaskModule's logic: if a task exists in the store, it should be shown
+	recentTasks := tm.GetRecentTasks(100) // Get up to 100 recent tasks, matching completedTaskLimit
+
+	// Build a map of all tasks from TaskModule (memory + database)
+	taskModuleTaskMap := make(map[string]*task.Task)
 	for _, t := range pendingTasks {
-		activeTaskIDs[t.ID] = true
-		taskState := c.convertTaskToTaskState(t, "pending")
-		c.store.UpdateTask(taskState)
+		taskModuleTaskMap[t.ID] = t
 	}
-
 	for _, t := range runningTasks {
-		activeTaskIDs[t.ID] = true
-		taskState := c.convertTaskToTaskState(t, "running")
+		taskModuleTaskMap[t.ID] = t
+	}
+	for _, t := range recentTasks {
+		// Only add if not already in map (prioritize memory tasks)
+		if _, exists := taskModuleTaskMap[t.ID]; !exists {
+			taskModuleTaskMap[t.ID] = t
+		}
+	}
+
+	// Update all tasks that exist in TaskModule
+	for _, t := range taskModuleTaskMap {
+		var statusOverride string
+		if t.Status == task.Pending {
+			statusOverride = "pending"
+		} else if t.Status == task.Running {
+			statusOverride = "running"
+		} else {
+			// For completed/failed/canceled, use actual status
+			statusOverride = ""
+		}
+		taskState := c.convertTaskToTaskState(t, statusOverride)
 		c.store.UpdateTask(taskState)
 	}
 
-	// Remove tasks that are no longer active (completed, failed, or canceled)
+	// Remove tasks that no longer exist in TaskModule
 	allStoredTasks := c.store.GetAllTasks()
 	for taskID := range allStoredTasks {
-		if !activeTaskIDs[taskID] {
+		if _, exists := taskModuleTaskMap[taskID]; !exists {
 			c.store.RemoveTask(taskID)
 		}
 	}
@@ -249,6 +270,60 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 					stage := StageRunning
 					health := "healthy"
 
+					// First, check if there's pending data (downloading/syncing)
+					if sourceData.AppInfoLatestPending != nil {
+						for _, pendingData := range sourceData.AppInfoLatestPending {
+							if pendingData != nil && pendingData.RawData != nil {
+								pendingAppName := ""
+								if pendingData.RawData.Name != "" {
+									pendingAppName = pendingData.RawData.Name
+								} else if pendingData.RawData.AppID != "" {
+									pendingAppName = pendingData.RawData.AppID
+								} else if pendingData.RawData.ID != "" {
+									pendingAppName = pendingData.RawData.ID
+								}
+								if pendingAppName == appName {
+									// App has pending data, likely downloading or syncing
+									stage = StageFetching
+									health = "unknown"
+									break
+								}
+							}
+						}
+					}
+
+					// Check app state status for downloading/installing indicators
+					if stage == StageRunning {
+						appStateStr := appState.Status.State
+						progressStr := appState.Status.Progress
+
+						// Check if state indicates downloading or installing
+						if appStateStr != "" {
+							stateLower := strings.ToLower(appStateStr)
+							if strings.Contains(stateLower, "downloading") ||
+								strings.Contains(stateLower, "fetching") ||
+								strings.Contains(stateLower, "syncing") ||
+								strings.Contains(stateLower, "pending") {
+								stage = StageFetching
+								health = "unknown"
+							} else if strings.Contains(stateLower, "installing") {
+								stage = StageInstalling
+								health = "unknown"
+							}
+						}
+
+						// Check progress field for downloading indicators
+						if progressStr != "" && stage == StageRunning {
+							progressLower := strings.ToLower(progressStr)
+							if strings.Contains(progressLower, "downloading") ||
+								strings.Contains(progressLower, "fetching") ||
+								strings.Contains(progressLower, "syncing") {
+								stage = StageFetching
+								health = "unknown"
+							}
+						}
+					}
+
 					// Check if there's a running task for this app
 					var taskModule *task.TaskModule
 					if c.mu.TryRLock() {
@@ -257,7 +332,7 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 					}
 
 					if taskModule != nil {
-						// Check for running install/upgrade tasks
+						// Check for running install/upgrade tasks (override fetching if installing)
 						runningTasks := taskModule.GetRunningTasks()
 						for _, t := range runningTasks {
 							if t.AppName == appName && t.User == userID {
@@ -275,8 +350,8 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 							}
 						}
 
-						// Check for pending tasks
-						if stage == StageRunning {
+						// Check for pending tasks (override fetching if installing)
+						if stage == StageFetching || stage == StageRunning {
 							pendingTasks := taskModule.GetPendingTasks()
 							for _, t := range pendingTasks {
 								if t.AppName == appName && t.User == userID {
