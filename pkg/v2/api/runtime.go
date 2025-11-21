@@ -99,181 +99,58 @@ func generateDashboardHTML(snapshotJSON string) string {
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #f5f7fa;
             min-height: 100vh;
-            padding: 20px;
-            color: #333;
+            padding: 16px;
+            color: #1a1a1a;
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 100%;
             margin: 0 auto;
         }
         
         .header {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
         }
         
         .header h1 {
-            color: #667eea;
-            margin-bottom: 8px;
-            font-size: 28px;
+            color: #1a1a1a;
+            margin-bottom: 12px;
+            font-size: 24px;
+            font-weight: 600;
         }
         
         .header .timestamp {
-            color: #666;
+            color: #666666;
             font-size: 14px;
+            margin-bottom: 12px;
         }
         
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .stat-card {
-            background: white;
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: transform 0.2s;
-        }
-        
-        .stat-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-        }
-        
-        .stat-card .label {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 8px;
-        }
-        
-        .stat-card .value {
-            color: #333;
-            font-size: 32px;
-            font-weight: bold;
-        }
-        
-        .section {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        
-        .section h2 {
-            color: #667eea;
-            margin-bottom: 16px;
-            font-size: 20px;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 8px;
-        }
-        
-        .table-container {
-            overflow-x: auto;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 12px;
-        }
-        
-        th {
-            background: #f8f9fa;
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            color: #333;
-            border-bottom: 2px solid #dee2e6;
-        }
-        
-        td {
-            padding: 12px;
-            border-bottom: 1px solid #dee2e6;
-        }
-        
-        tr:hover {
-            background: #f8f9fa;
-        }
-        
-        .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        
-        .badge-success {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .badge-warning {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .badge-danger {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
-        .badge-info {
-            background: #d1ecf1;
-            color: #0c5460;
-        }
-        
-        .badge-primary {
-            background: #cfe2ff;
-            color: #084298;
-        }
-        
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: #e9ecef;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 4px;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            transition: width 0.3s;
+        .header .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
         
         .refresh-btn {
-            background: #667eea;
+            background: #2563eb;
             color: white;
             border: none;
-            padding: 10px 20px;
+            padding: 8px 16px;
             border-radius: 6px;
             cursor: pointer;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 500;
             transition: background 0.2s;
         }
         
         .refresh-btn:hover {
-            background: #5568d3;
-        }
-        
-        .auto-refresh {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-top: 12px;
+            background: #1d4ed8;
         }
         
         .auto-refresh label {
@@ -281,211 +158,300 @@ func generateDashboardHTML(snapshotJSON string) string {
             align-items: center;
             gap: 8px;
             cursor: pointer;
+            color: #666666;
+            font-size: 14px;
         }
         
         .auto-refresh input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
             cursor: pointer;
         }
         
-        .json-viewer {
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        
+        .panel {
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .panel-header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .panel-header h2 {
+            color: #1a1a1a;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .stat-card {
+            background: #f9fafb;
             border-radius: 6px;
             padding: 16px;
-            max-height: 400px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
+            border: 1px solid #e5e7eb;
+        }
+        
+        .stat-card .label {
+            color: #666666;
             font-size: 12px;
+            margin-bottom: 8px;
+            font-weight: 500;
         }
         
-        .tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 16px;
-            border-bottom: 2px solid #dee2e6;
+        .stat-card .value {
+            color: #1a1a1a;
+            font-size: 24px;
+            font-weight: 700;
         }
         
-        .tab {
-            padding: 12px 24px;
-            cursor: pointer;
-            border: none;
-            background: none;
-            font-size: 14px;
+        .section {
+            margin-bottom: 20px;
+        }
+        
+        .section h3 {
+            color: #1a1a1a;
+            margin-bottom: 12px;
+            font-size: 16px;
             font-weight: 600;
-            color: #666;
-            border-bottom: 3px solid transparent;
-            transition: all 0.2s;
         }
         
-        .tab:hover {
-            color: #667eea;
+        .table-container {
+            overflow-x: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
         }
         
-        .tab.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
         }
         
-        .tab-content {
-            display: none;
+        th {
+            background: #f9fafb;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #1a1a1a;
+            border-bottom: 2px solid #e5e7eb;
+            white-space: nowrap;
         }
         
-        .tab-content.active {
-            display: block;
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            color: #1a1a1a;
+        }
+        
+        tr:hover {
+            background: #f9fafb;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .badge-danger {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #2563eb;
+            transition: width 0.3s;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #9ca3af;
+            font-size: 14px;
+        }
+        
+        @media (max-width: 1200px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Runtime State Dashboard</h1>
+            <h1>Runtime State Dashboard</h1>
             <div class="timestamp">Last Updated: <span id="timestamp"></span></div>
-            <div class="auto-refresh">
-                <button class="refresh-btn" onclick="refreshData()">🔄 Refresh</button>
-                <label>
-                    <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()">
-                    Auto Refresh (5s)
-                </label>
-            </div>
-        </div>
-        
-        <div class="stats-grid" id="statsGrid"></div>
-        
-        <div class="tabs">
-            <button class="tab active" onclick="showTab('apps', this)">Applications</button>
-            <button class="tab" onclick="showTab('tasks', this)">Tasks</button>
-            <button class="tab" onclick="showTab('components', this)">Components</button>
-            <button class="tab" onclick="showTab('chartrepo', this)">Chart Repo</button>
-            <button class="tab" onclick="showTab('raw', this)">Raw JSON</button>
-        </div>
-        
-        <div id="apps" class="tab-content active">
-            <div class="section">
-                <h2>Application States</h2>
-                <div class="table-container">
-                    <table id="appsTable">
-                        <thead>
-                            <tr>
-                                <th>App Name</th>
-                                <th>User ID</th>
-                                <th>Source ID</th>
-                                <th>Stage</th>
-                                <th>Health</th>
-                                <th>Version</th>
-                                <th>Last Update</th>
-                            </tr>
-                        </thead>
-                        <tbody id="appsTableBody"></tbody>
-                    </table>
+            <div class="controls">
+                <button class="refresh-btn" onclick="refreshData()">Refresh</button>
+                <div class="auto-refresh">
+                    <label>
+                        <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()" checked>
+                        Auto Refresh (5s)
+                    </label>
                 </div>
             </div>
         </div>
         
-        <div id="tasks" class="tab-content">
-            <div class="section">
-                <h2>Task States</h2>
-                <div class="table-container">
-                    <table id="tasksTable">
-                        <thead>
-                            <tr>
-                                <th>Task ID</th>
-                                <th>Type</th>
-                                <th>Status</th>
-                                <th>App Name</th>
-                                <th>Progress</th>
-                                <th>Created At</th>
-                                <th>Error</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tasksTableBody"></tbody>
-                    </table>
+        <div class="main-layout">
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Market Status</h2>
+                </div>
+                <div class="stats-grid" id="marketStatsGrid"></div>
+                <div class="section">
+                    <h3>Applications</h3>
+                    <div class="table-container">
+                        <table id="appsTable">
+                            <thead>
+                                <tr>
+                                    <th>App Name</th>
+                                    <th>User ID</th>
+                                    <th>Source ID</th>
+                                    <th>Stage</th>
+                                    <th>Health</th>
+                                    <th>Version</th>
+                                </tr>
+                            </thead>
+                            <tbody id="appsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="section">
+                    <h3>Tasks</h3>
+                    <div class="table-container">
+                        <table id="tasksTable">
+                            <thead>
+                                <tr>
+                                    <th>Task ID</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>App Name</th>
+                                    <th>Progress</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tasksTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="section">
+                    <h3>Components</h3>
+                    <div class="table-container">
+                        <table id="componentsTable">
+                            <thead>
+                                <tr>
+                                    <th>Component</th>
+                                    <th>Status</th>
+                                    <th>Healthy</th>
+                                    <th>Last Check</th>
+                                </tr>
+                            </thead>
+                            <tbody id="componentsTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-        </div>
-        
-        <div id="components" class="tab-content">
-            <div class="section">
-                <h2>Component Status</h2>
-                <div class="table-container">
-                    <table id="componentsTable">
-                        <thead>
-                            <tr>
-                                <th>Component</th>
-                                <th>Status</th>
-                                <th>Healthy</th>
-                                <th>Last Check</th>
-                                <th>Message</th>
-                            </tr>
-                        </thead>
-                        <tbody id="componentsTableBody"></tbody>
-                    </table>
+            
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Chart Repo Status</h2>
                 </div>
-            </div>
-        </div>
-        
-        <div id="chartrepo" class="tab-content">
-            <div class="section">
-                <h2>Chart Repo - Applications</h2>
-                <div class="table-container">
-                    <table id="chartRepoAppsTable">
-                        <thead>
-                            <tr>
-                                <th>App Name</th>
-                                <th>User ID</th>
-                                <th>Source ID</th>
-                                <th>State</th>
-                                <th>Current Step</th>
-                                <th>Error</th>
-                            </tr>
-                        </thead>
-                        <tbody id="chartRepoAppsTableBody"></tbody>
-                    </table>
+                <div class="stats-grid" id="chartRepoStatsGrid"></div>
+                <div class="section">
+                    <h3>Applications</h3>
+                    <div class="table-container">
+                        <table id="chartRepoAppsTable">
+                            <thead>
+                                <tr>
+                                    <th>App Name</th>
+                                    <th>User ID</th>
+                                    <th>Source ID</th>
+                                    <th>State</th>
+                                    <th>Current Step</th>
+                                </tr>
+                            </thead>
+                            <tbody id="chartRepoAppsTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
-            <div class="section">
-                <h2>Chart Repo - Images</h2>
-                <div class="table-container">
-                    <table id="chartRepoImagesTable">
-                        <thead>
-                            <tr>
-                                <th>Image Name</th>
-                                <th>App Name</th>
-                                <th>Status</th>
-                                <th>Progress</th>
-                                <th>Size</th>
-                            </tr>
-                        </thead>
-                        <tbody id="chartRepoImagesTableBody"></tbody>
-                    </table>
+                <div class="section">
+                    <h3>Images</h3>
+                    <div class="table-container">
+                        <table id="chartRepoImagesTable">
+                            <thead>
+                                <tr>
+                                    <th>Image Name</th>
+                                    <th>App Name</th>
+                                    <th>Status</th>
+                                    <th>Progress</th>
+                                </tr>
+                            </thead>
+                            <tbody id="chartRepoImagesTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
-            <div class="section">
-                <h2>Chart Repo - Tasks</h2>
-                <div class="table-container">
-                    <table id="chartRepoTasksTable">
-                        <thead>
-                            <tr>
-                                <th>Task ID</th>
-                                <th>App Name</th>
-                                <th>Status</th>
-                                <th>Step</th>
-                                <th>Retry Count</th>
-                                <th>Error</th>
-                            </tr>
-                        </thead>
-                        <tbody id="chartRepoTasksTableBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        
-        <div id="raw" class="tab-content">
-            <div class="section">
-                <h2>Raw JSON Data</h2>
-                <div class="json-viewer">
-                    <pre id="jsonViewer"></pre>
+                <div class="section">
+                    <h3>Tasks</h3>
+                    <div class="table-container">
+                        <table id="chartRepoTasksTable">
+                            <thead>
+                                <tr>
+                                    <th>Task ID</th>
+                                    <th>App Name</th>
+                                    <th>Status</th>
+                                    <th>Step</th>
+                                    <th>Retry</th>
+                                </tr>
+                            </thead>
+                            <tbody id="chartRepoTasksTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -495,7 +461,6 @@ func generateDashboardHTML(snapshotJSON string) string {
         let snapshotData = {};
         let autoRefreshInterval = null;
         
-        // Parse JSON data safely
         try {
             snapshotData = JSON.parse('%s');
         } catch (e) {
@@ -507,16 +472,6 @@ func generateDashboardHTML(snapshotJSON string) string {
             if (!timestamp) return 'N/A';
             const date = new Date(timestamp);
             return date.toLocaleString('zh-CN');
-        }
-        
-        function formatDuration(ms) {
-            if (!ms) return 'N/A';
-            const seconds = Math.floor(ms / 1000);
-            const minutes = Math.floor(seconds / 60);
-            const hours = Math.floor(minutes / 60);
-            if (hours > 0) return hours + 'h ' + (minutes % 60) + 'm';
-            if (minutes > 0) return minutes + 'm ' + (seconds % 60) + 's';
-            return seconds + 's';
         }
         
         function formatBytes(bytes) {
@@ -539,9 +494,9 @@ func generateDashboardHTML(snapshotJSON string) string {
             return '<span class="badge badge-info">' + status + '</span>';
         }
         
-        function renderStats() {
+        function renderMarketStats() {
             const summary = snapshotData.summary || {};
-            const statsGrid = document.getElementById('statsGrid');
+            const statsGrid = document.getElementById('marketStatsGrid');
             statsGrid.innerHTML = 
                 '<div class="stat-card">' +
                     '<div class="label">Total Apps</div>' +
@@ -558,18 +513,29 @@ func generateDashboardHTML(snapshotJSON string) string {
                 '<div class="stat-card">' +
                     '<div class="label">Pending Tasks</div>' +
                     '<div class="value">' + (summary.pending_tasks || 0) + '</div>' +
+                '</div>';
+        }
+        
+        function renderChartRepoStats() {
+            const chartRepo = snapshotData.chart_repo || {};
+            const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
+            const statsGrid = document.getElementById('chartRepoStatsGrid');
+            statsGrid.innerHTML = 
+                '<div class="stat-card">' +
+                    '<div class="label">Total Apps</div>' +
+                    '<div class="value">' + ((chartRepo.apps && chartRepo.apps.length) || 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Failed Tasks</div>' +
-                    '<div class="value">' + (summary.failed_tasks || 0) + '</div>' +
+                    '<div class="label">Total Images</div>' +
+                    '<div class="value">' + ((chartRepo.images && chartRepo.images.length) || 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Healthy Apps</div>' +
-                    '<div class="value">' + (summary.healthy_apps || 0) + '</div>' +
+                    '<div class="label">Active Tasks</div>' +
+                    '<div class="value">' + (hydrator ? (hydrator.active_tasks || 0) : 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Active Components</div>' +
-                    '<div class="value">' + (summary.active_components || 0) + '</div>' +
+                    '<div class="label">Queue Length</div>' +
+                    '<div class="value">' + (hydrator ? (hydrator.queue_length || 0) : 0) + '</div>' +
                 '</div>';
         }
         
@@ -578,15 +544,20 @@ func generateDashboardHTML(snapshotJSON string) string {
             const tbody = document.getElementById('appsTableBody');
             tbody.innerHTML = '';
             
-            Object.values(apps).forEach(app => {
+            const appList = Object.values(apps);
+            if (appList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No applications</td></tr>';
+                return;
+            }
+            
+            appList.forEach(app => {
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(app.stage || 'unknown') + '</td>' +
                     '<td>' + getStatusBadge(app.health || 'unknown') + '</td>' +
-                    '<td>' + (app.version || 'N/A') + '</td>' +
-                    '<td>' + formatTimestamp(app.last_update) + '</td>';
+                    '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -596,16 +567,20 @@ func generateDashboardHTML(snapshotJSON string) string {
             const tbody = document.getElementById('tasksTableBody');
             tbody.innerHTML = '';
             
-            Object.values(tasks).forEach(task => {
+            const taskList = Object.values(tasks);
+            if (taskList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tasks</td></tr>';
+                return;
+            }
+            
+            taskList.forEach(task => {
                 const progress = task.progress || 0;
                 const row = document.createElement('tr');
-                row.innerHTML = '<td>' + (task.task_id || 'N/A') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
                     '<td>' + (task.type || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.app_name || 'N/A') + '</td>' +
-                    '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress + '%"></div></div>' + progress + '%</td>' +
-                    '<td>' + formatTimestamp(task.created_at) + '</td>' +
-                    '<td>' + (task.error_msg || '-') + '</td>';
+                    '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress + '%"></div></div></td>';
                 tbody.appendChild(row);
             });
         }
@@ -615,13 +590,18 @@ func generateDashboardHTML(snapshotJSON string) string {
             const tbody = document.getElementById('componentsTableBody');
             tbody.innerHTML = '';
             
-            Object.entries(components).forEach(([name, comp]) => {
+            const compList = Object.entries(components);
+            if (compList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No components</td></tr>';
+                return;
+            }
+            
+            compList.forEach(([name, comp]) => {
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + name + '</td>' +
                     '<td>' + getStatusBadge(comp.status || 'unknown') + '</td>' +
                     '<td>' + getStatusBadge(comp.healthy ? 'healthy' : 'unhealthy') + '</td>' +
-                    '<td>' + formatTimestamp(comp.last_check) + '</td>' +
-                    '<td>' + (comp.message || '-') + '</td>';
+                    '<td>' + formatTimestamp(comp.last_check) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -629,86 +609,57 @@ func generateDashboardHTML(snapshotJSON string) string {
         function renderChartRepo() {
             const chartRepo = snapshotData.chart_repo || {};
             
-            // Chart Repo Apps
             const apps = chartRepo.apps || [];
             const appsTbody = document.getElementById('chartRepoAppsTableBody');
             appsTbody.innerHTML = '';
-            apps.forEach(app => {
-                const row = document.createElement('tr');
-                row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
-                    '<td>' + (app.user_id || 'N/A') + '</td>' +
-                    '<td>' + (app.source_id || 'N/A') + '</td>' +
-                    '<td>' + getStatusBadge(app.state || 'unknown') + '</td>' +
-                    '<td>' + (app.current_step ? app.current_step.name : '-') + '</td>' +
-                    '<td>' + (app.error ? app.error.message : '-') + '</td>';
-                appsTbody.appendChild(row);
-            });
+            if (apps.length === 0) {
+                appsTbody.innerHTML = '<tr><td colspan="5" class="empty-state">No applications</td></tr>';
+            } else {
+                apps.forEach(app => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
+                        '<td>' + (app.user_id || 'N/A') + '</td>' +
+                        '<td>' + (app.source_id || 'N/A') + '</td>' +
+                        '<td>' + getStatusBadge(app.state || 'unknown') + '</td>' +
+                        '<td>' + (app.current_step ? app.current_step.name : '-') + '</td>';
+                    appsTbody.appendChild(row);
+                });
+            }
             
-            // Chart Repo Images
             const images = chartRepo.images || [];
             const imagesTbody = document.getElementById('chartRepoImagesTableBody');
             imagesTbody.innerHTML = '';
-            images.forEach(image => {
-                const progress = image.download_progress || 0;
-                const row = document.createElement('tr');
-                row.innerHTML = '<td>' + (image.image_name || 'N/A') + '</td>' +
-                    '<td>' + (image.app_name || '-') + '</td>' +
-                    '<td>' + getStatusBadge(image.status || 'unknown') + '</td>' +
-                    '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress.toFixed(2) + '%"></div></div>' + progress.toFixed(2) + '%</td>' +
-                    '<td>' + formatBytes(image.total_size) + '</td>';
-                imagesTbody.appendChild(row);
-            });
+            if (images.length === 0) {
+                imagesTbody.innerHTML = '<tr><td colspan="4" class="empty-state">No images</td></tr>';
+            } else {
+                images.forEach(image => {
+                    const progress = image.download_progress || 0;
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td style="font-size: 11px;">' + (image.image_name || 'N/A') + '</td>' +
+                        '<td>' + (image.app_name || '-') + '</td>' +
+                        '<td>' + getStatusBadge(image.status || 'unknown') + '</td>' +
+                        '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress.toFixed(2) + '%"></div></div></td>';
+                    imagesTbody.appendChild(row);
+                });
+            }
             
-            // Chart Repo Tasks
             const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
             const tasks = hydrator ? (hydrator.tasks || []) : [];
             const tasksTbody = document.getElementById('chartRepoTasksTableBody');
             tasksTbody.innerHTML = '';
-            tasks.forEach(task => {
-                const row = document.createElement('tr');
-                row.innerHTML = '<td>' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
-                    '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
-                    '<td>' + (task.step_name || '-') + '</td>' +
-                    '<td>' + (task.retry_count || 0) + '</td>' +
-                    '<td>' + (task.last_error || '-') + '</td>';
-                tasksTbody.appendChild(row);
-            });
-        }
-        
-        function renderRawJSON() {
-            const viewer = document.getElementById('jsonViewer');
-            viewer.textContent = JSON.stringify(snapshotData, null, 2);
-        }
-        
-        function showTab(tabName, element) {
-            // Hide all tabs
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            // Show selected tab
-            document.getElementById(tabName).classList.add('active');
-            if (element) {
-                element.classList.add('active');
+            if (tasks.length === 0) {
+                tasksTbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tasks</td></tr>';
             } else {
-                // Find the button by text content
-                document.querySelectorAll('.tab').forEach(tab => {
-                    if (tab.textContent.trim() === tabName || tab.getAttribute('data-tab') === tabName) {
-                        tab.classList.add('active');
-                    }
+                tasks.forEach(task => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
+                        '<td>' + (task.app_name || 'N/A') + '</td>' +
+                        '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
+                        '<td>' + (task.step_name || '-') + '</td>' +
+                        '<td>' + (task.retry_count || 0) + '</td>';
+                    tasksTbody.appendChild(row);
                 });
             }
-            
-            // Render content based on tab
-            if (tabName === 'apps') renderApps();
-            else if (tabName === 'tasks') renderTasks();
-            else if (tabName === 'components') renderComponents();
-            else if (tabName === 'chartrepo') renderChartRepo();
-            else if (tabName === 'raw') renderRawJSON();
         }
         
         function refreshData() {
@@ -722,18 +673,17 @@ func generateDashboardHTML(snapshotJSON string) string {
                 })
                 .catch(error => {
                     console.error('Failed to refresh data:', error);
-                    alert('Failed to refresh data. Please try again.');
                 });
         }
         
         function updateUI() {
             document.getElementById('timestamp').textContent = formatTimestamp(snapshotData.timestamp);
-            renderStats();
+            renderMarketStats();
+            renderChartRepoStats();
             renderApps();
             renderTasks();
             renderComponents();
             renderChartRepo();
-            renderRawJSON();
         }
         
         function toggleAutoRefresh() {
@@ -748,8 +698,10 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
         }
         
-        // Initial render
         updateUI();
+        if (document.getElementById('autoRefresh').checked) {
+            autoRefreshInterval = setInterval(refreshData, 5000);
+        }
     </script>
 </body>
 </html>`

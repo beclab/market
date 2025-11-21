@@ -135,16 +135,28 @@ func (c *StateCollector) collect() {
 func (c *StateCollector) collectTaskStates(tm *task.TaskModule) {
 	// Get pending tasks
 	pendingTasks := tm.GetPendingTasks()
+	runningTasks := tm.GetRunningTasks()
+
+	// Build a set of active task IDs
+	activeTaskIDs := make(map[string]bool)
 	for _, t := range pendingTasks {
+		activeTaskIDs[t.ID] = true
 		taskState := c.convertTaskToTaskState(t, "pending")
 		c.store.UpdateTask(taskState)
 	}
 
-	// Get running tasks
-	runningTasks := tm.GetRunningTasks()
 	for _, t := range runningTasks {
+		activeTaskIDs[t.ID] = true
 		taskState := c.convertTaskToTaskState(t, "running")
 		c.store.UpdateTask(taskState)
+	}
+
+	// Remove tasks that are no longer active (completed, failed, or canceled)
+	allStoredTasks := c.store.GetAllTasks()
+	for taskID := range allStoredTasks {
+		if !activeTaskIDs[taskID] {
+			c.store.RemoveTask(taskID)
+		}
 	}
 }
 
