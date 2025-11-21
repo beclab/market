@@ -16,7 +16,29 @@ import (
 
 // FrontendPaymentStartedPayload carries frontend-provided metadata when payment is about to start on-chain
 type FrontendPaymentStartedPayload struct {
-	Data map[string]interface{}
+	Data map[string]interface{} `json:"data"`
+}
+
+func cloneFrontendData(data map[string]interface{}) map[string]interface{} {
+	if len(data) == 0 {
+		return nil
+	}
+	copyData := make(map[string]interface{}, len(data))
+	for k, val := range data {
+		copyData[k] = val
+	}
+	return copyData
+}
+
+func attachFrontendPayload(response map[string]interface{}, data map[string]interface{}) {
+	cloned := cloneFrontendData(data)
+	if len(cloned) == 0 {
+		return
+	}
+	response["frontend_data"] = cloned
+	response["frontend_payment_started_payload"] = FrontendPaymentStartedPayload{
+		Data: cloned,
+	}
 }
 
 // getOrCreateState only retrieves existing state; creation is no longer done here
@@ -334,15 +356,7 @@ func (psm *PaymentStateMachine) handleFrontendPaymentStarted(ctx context.Context
 	}
 
 	newState := *state
-	if len(data) > 0 {
-		copyData := make(map[string]interface{}, len(data))
-		for k, val := range data {
-			copyData[k] = val
-		}
-		newState.FrontendData = copyData
-	} else {
-		newState.FrontendData = nil
-	}
+	newState.FrontendData = cloneFrontendData(data)
 	newState.PaymentStatus = PaymentFrontendStarted
 
 	return &newState, nil
@@ -394,7 +408,6 @@ func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, stat
 		newState.TxHash = txHash
 	}
 	newState.PaymentStatus = PaymentFrontendCompleted
-	newState.FrontendData = nil
 
 	// Follow-up: poll developer service for VC
 	go psm.pollForVCFromDeveloper(&newState)
@@ -1007,10 +1020,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 				"payment_data": paymentData,
 				"message":      "developer has no matching payment record, please retry payment",
 			}
-			// Include frontend data if it exists
-			if len(state.FrontendData) > 0 {
-				response["frontend_data"] = state.FrontendData
-			}
+			attachFrontendPayload(response, state.FrontendData)
 			return response, nil
 		}
 		// Otherwise return error message
@@ -1038,10 +1048,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"status":       "payment_required",
 			"payment_data": paymentData,
 		}
-		// Include frontend data if it exists
-		if len(state.FrontendData) > 0 {
-			response["frontend_data"] = state.FrontendData
-		}
+		attachFrontendPayload(response, state.FrontendData)
 		return response, nil
 	}
 
@@ -1059,10 +1066,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"status":       "payment_required",
 			"payment_data": paymentData,
 		}
-		// Include frontend data if it exists
-		if len(state.FrontendData) > 0 {
-			response["frontend_data"] = state.FrontendData
-		}
+		attachFrontendPayload(response, state.FrontendData)
 		return response, nil
 	}
 
@@ -1071,17 +1075,17 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		response := map[string]interface{}{
 			"status": "payment_frontend_started",
 		}
-		if len(state.FrontendData) > 0 {
-			response["frontend_data"] = state.FrontendData
-		}
+		attachFrontendPayload(response, state.FrontendData)
 		return response, nil
 	}
 
 	if state.PaymentStatus == PaymentFrontendCompleted {
-		return map[string]interface{}{
+		response := map[string]interface{}{
 			"status":  "waiting_developer_confirmation",
 			"message": "payment completed, waiting for developer confirmation",
-		}, nil
+		}
+		attachFrontendPayload(response, state.FrontendData)
+		return response, nil
 	}
 
 	// 4) VC present -> purchased (fallback check, should have been caught earlier)
