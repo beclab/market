@@ -14,6 +14,7 @@ import (
 	"market/internal/v2/appinfo"
 	"market/internal/v2/history"
 	"market/internal/v2/paymentnew"
+	runtimestate "market/internal/v2/runtime"
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
 	"market/internal/v2/types"
@@ -288,6 +289,31 @@ func main() {
 
 	}
 
+	// Initialize Runtime State Service
+	var runtimeStateService *runtimestate.RuntimeStateService
+	// if !utils.IsPublicEnvironment() {
+	log.Println("=== Initializing Runtime State Service ===")
+	stateStore := runtimestate.NewStateStore()
+	stateCollector := runtimestate.NewStateCollector(stateStore)
+
+	if taskModule != nil {
+		stateCollector.SetTaskModule(taskModule)
+	}
+	if appInfoModule != nil {
+		stateCollector.SetAppInfoModule(appInfoModule)
+	}
+
+	runtimeStateService = runtimestate.NewRuntimeStateService(stateStore, stateCollector)
+
+	// Start the service
+	if err := runtimeStateService.Start(); err != nil {
+		log.Printf("Warning: Failed to start runtime state service: %v", err)
+	} else {
+		log.Println("Runtime state service started successfully")
+	}
+	log.Println("=== End Runtime State Service initialization ===")
+	// }
+
 	// Create and start the HTTP server
 	log.Printf("Preparing to create HTTP server...")
 	log.Printf("Server configuration before creation:")
@@ -297,8 +323,9 @@ func main() {
 	log.Printf("  - AppInfo Module: %v", appInfoModule != nil)
 	log.Printf("  - Task Module: %v", taskModule != nil)
 	log.Printf("  - History Module: %v", historyModule != nil)
+	log.Printf("  - Runtime State Service: %v", runtimeStateService != nil)
 
-	server := api.NewServer("8080", cacheManager, hydrator, taskModule, historyModule)
+	server := api.NewServer("8080", cacheManager, hydrator, taskModule, historyModule, runtimeStateService)
 	log.Printf("HTTP server instance created successfully")
 	// log.Printf("Task module instance ID: %s", taskModule.GetInstanceID())
 
@@ -340,6 +367,9 @@ func main() {
 	log.Println("  POST   /api/v2/apps/upload               - Upload application installation package")
 	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
+	if !utils.IsPublicEnvironment() {
+		log.Println("  GET    /api/v2/runtime/state            - Get runtime state (apps, tasks, components)")
+	}
 
 	if !utils.IsPublicEnvironment() {
 		// Add history record for successful market setup
@@ -434,17 +464,28 @@ func main() {
 		defer close(shutdownComplete)
 
 		// Stop all modules in reverse order
+		if runtimeStateService != nil {
+			log.Println("Stopping Runtime State Service...")
+			runtimeStateService.Stop()
+		}
+
 		log.Println("Stopping Task module...")
-		taskModule.Stop()
+		if taskModule != nil {
+			taskModule.Stop()
+		}
 
 		log.Println("Stopping History module...")
-		if err := historyModule.Close(); err != nil {
-			log.Printf("Error stopping History module: %v", err)
+		if historyModule != nil {
+			if err := historyModule.Close(); err != nil {
+				log.Printf("Error stopping History module: %v", err)
+			}
 		}
 
 		log.Println("Stopping AppInfo module...")
-		if err := appInfoModule.Stop(); err != nil {
-			log.Printf("Error stopping AppInfo module: %v", err)
+		if appInfoModule != nil {
+			if err := appInfoModule.Stop(); err != nil {
+				log.Printf("Error stopping AppInfo module: %v", err)
+			}
 		}
 
 		log.Println("Stopping Settings module...")

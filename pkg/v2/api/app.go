@@ -1946,6 +1946,54 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 6.5: Check if app is uninstalled in upload source (including clone apps)
+	// Only allow deletion if the app is uninstalled or not found in AppStateLatest
+	log.Printf("Checking if app %s is uninstalled in upload source for user: %s", request.AppName, userID)
+	appInstalled := false
+	var installedAppName string
+
+	// Check upload source for installed instances of this app
+	if sourceData.AppStateLatest != nil {
+		for _, appState := range sourceData.AppStateLatest {
+			if appState == nil {
+				continue
+			}
+
+			// Check if this app state matches the app we want to delete
+			// Match by app name or rawAppName (for clone apps)
+			matchesApp := false
+			if appState.Status.Name == request.AppName {
+				matchesApp = true
+				installedAppName = appState.Status.Name
+			} else if appState.Status.RawAppName == request.AppName {
+				// This is a clone app that uses the original app's chart
+				matchesApp = true
+				installedAppName = appState.Status.Name
+			}
+
+			if matchesApp {
+				// Check if app is uninstalled
+				if appState.Status.State != "uninstalled" {
+					appInstalled = true
+					log.Printf("App %s (or its clone %s) is still installed in upload source with state: %s",
+						request.AppName, installedAppName, appState.Status.State)
+					break
+				}
+			}
+		}
+	}
+
+	if appInstalled {
+		log.Printf("Cannot delete app %s: app (or its clone %s) is still installed in upload source",
+			request.AppName, installedAppName)
+		s.sendResponse(w, http.StatusBadRequest, false,
+			fmt.Sprintf("Cannot delete app: app (or its clone %s) is still installed. Please uninstall it first.",
+				installedAppName), nil)
+		return
+	}
+
+	log.Printf("App %s is uninstalled in upload source, proceeding with deletion", request.AppName)
+
 	// Step 7: Delete chart files using LocalRepo
 	// Delete chart package file
 	if err := s.localRepo.DeleteApp(userID, request.AppName, request.AppVersion, token); err != nil {
@@ -2030,6 +2078,9 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Retrieved user ID for payment status request: %s", userID)
 
+	// Read X-Forwarded-Host for downstream callbacks
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
+
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
 		log.Printf("Cache manager is not initialized")
@@ -2056,7 +2107,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
+	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, xForwardedHost, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
@@ -2155,6 +2206,9 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	}
 	log.Printf("Retrieved user ID for payment status request: %s", userID)
 
+	// Read X-Forwarded-Host for downstream callbacks
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
+
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
 		log.Printf("Cache manager is not initialized")
@@ -2181,7 +2235,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	log.Printf("Found app: %s in source: %s for user: %s (legacy search)", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
-	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, foundApp.AppInfo)
+	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, xForwardedHost, foundApp.AppInfo)
 	if err != nil {
 		log.Printf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)

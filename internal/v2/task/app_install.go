@@ -136,7 +136,13 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 
 	if settingsManager != nil {
-		vc := getVCForInstall(settingsManager, user, appName, task.Metadata)
+		vcAppID := appName
+		if realIDRaw, ok := task.Metadata["realAppID"].(string); ok && strings.TrimSpace(realIDRaw) != "" {
+			vcAppID = strings.TrimSpace(realIDRaw)
+		}
+		log.Printf("App install VC lookup using appID=%s (display name %s) for task: %s", vcAppID, appName, task.ID)
+
+		vc := getVCForInstall(settingsManager, user, vcAppID, task.Metadata)
 		if vc != "" {
 			// Check if VERIFIABLE_CREDENTIAL already exists in envs
 			vcExists := false

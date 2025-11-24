@@ -261,11 +261,23 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
 				log.Printf("Processing %d apps in LatestData", len(appsData))
 
+				sourceID := ""
+				if marketSource := data.GetMarketSource(); marketSource != nil {
+					sourceID = marketSource.Name
+				}
+
 				for appID, appData := range appsData {
 					log.Printf("Processing app %s in batch", appID)
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
 						// Check for Suspend or Remove labels before processing the app
 						shouldSkip := false
+						shouldRemoveFromCache := false
+						appInstalled := false
+						var appName string
+						if name, ok := appInfoMap["name"].(string); ok {
+							appName = name
+						}
+
 						if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
 							log.Printf("App %s has %d labels", appID, len(appLabels))
 							for _, labelInterface := range appLabels {
@@ -274,11 +286,20 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 										shouldSkip = true
 										log.Printf("Warning: Skipping app %s - contains label: %s", appID, label)
 
-										// Collect app for removal instead of calling directly to avoid nested locks
-										appsToRemove = append(appsToRemove, struct {
-											appID      string
-											appInfoMap map[string]interface{}
-										}{appID: appID, appInfoMap: appInfoMap})
+										shouldRemoveFromCache = true
+										if d.isAppInstalled(appName, sourceID, data) {
+											shouldRemoveFromCache = false
+											appInstalled = true
+											log.Printf("App %s is suspended but still installed, keep cache entry until uninstall completes", appName)
+										}
+
+										if shouldRemoveFromCache {
+											// Collect app for removal instead of calling directly to avoid nested locks
+											appsToRemove = append(appsToRemove, struct {
+												appID      string
+												appInfoMap map[string]interface{}
+											}{appID: appID, appInfoMap: appInfoMap})
+										}
 										break
 									}
 								}
@@ -290,9 +311,13 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Skip processing if app should be removed
 						if shouldSkip {
 							log.Printf("Skipping app %s due to suspend/remove label", appID)
-							// Remove from LatestData immediately
-							delete(data.LatestData.Data.Apps, appID)
-							log.Printf("Removed app %s from LatestData due to suspend/remove label", appID)
+							if shouldRemoveFromCache {
+								// Remove from LatestData immediately when no installation is active
+								delete(data.LatestData.Data.Apps, appID)
+								log.Printf("Removed app %s from LatestData due to suspend/remove label", appID)
+							} else if appInstalled {
+								log.Printf("App %s remains in LatestData (installed state detected)", appID)
+							}
 							continue
 						}
 
@@ -574,4 +599,35 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 	}
 
 	log.Printf("App removal from cache completed for app: %s", appID)
+}
+
+// isAppInstalled determines whether the given app is currently installed for the active source.
+func (d *DetailFetchStep) isAppInstalled(appName, sourceID string, data *SyncContext) bool {
+	if appName == "" || sourceID == "" || data == nil || data.Cache == nil || data.CacheManager == nil {
+		return false
+	}
+
+	// English comment: use read lock to safely inspect installation states
+	data.CacheManager.RLock()
+	defer data.CacheManager.RUnlock()
+
+	for _, userData := range data.Cache.Users {
+		if userData == nil {
+			continue
+		}
+		sourceData, ok := userData.Sources[sourceID]
+		if !ok || sourceData == nil {
+			continue
+		}
+		for _, appState := range sourceData.AppStateLatest {
+			if appState == nil {
+				continue
+			}
+			if appState.Status.Name == appName && appState.Status.State != "uninstalled" {
+				return true
+			}
+		}
+	}
+
+	return false
 }

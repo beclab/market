@@ -1,16 +1,21 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/gorilla/mux"
+
 	"market/internal/v2/task"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
-	"net/http"
-	"path/filepath"
-
-	"github.com/gorilla/mux"
 )
 
 // InstallAppRequest represents the request body for app installation
@@ -26,14 +31,87 @@ type InstallAppRequest struct {
 type CloneAppRequest struct {
 	Source  string           `json:"source"`
 	AppName string           `json:"app_name"`
-	Title   string           `json:"title"` // Title for cloned app
-	Sync    bool             `json:"sync"`  // Whether this is a synchronous request
+	Sync    bool             `json:"sync"` // Whether this is a synchronous request
 	Envs    []task.AppEnvVar `json:"envs,omitempty"`
 }
 
 // CancelInstallRequest represents the request body for cancel installation
 type CancelInstallRequest struct {
 	Sync bool `json:"sync"` // Whether this is a synchronous request
+}
+
+// calculateEnvsHash calculates SHA256 hash of Envs and returns first 6 characters
+func calculateEnvsHash(envs []task.AppEnvVar) string {
+	if len(envs) == 0 {
+		// If no envs, return hash of empty string
+		hash := sha256.Sum256([]byte(""))
+		return hex.EncodeToString(hash[:])[:6]
+	}
+
+	// Sort envs by name for consistent hashing
+	sortedEnvs := make([]task.AppEnvVar, len(envs))
+	copy(sortedEnvs, envs)
+	sort.Slice(sortedEnvs, func(i, j int) bool {
+		return sortedEnvs[i].EnvName < sortedEnvs[j].EnvName
+	})
+
+	// Marshal to JSON for hashing
+	envsJSON, err := json.Marshal(sortedEnvs)
+	if err != nil {
+		log.Printf("Failed to marshal envs for hash calculation: %v", err)
+		// Fallback: hash the error
+		hash := sha256.Sum256([]byte(fmt.Sprintf("error:%v", err)))
+		return hex.EncodeToString(hash[:])[:6]
+	}
+
+	// Calculate SHA256 hash
+	hash := sha256.Sum256(envsJSON)
+	hashStr := hex.EncodeToString(hash[:])
+
+	// Return first 6 characters
+	if len(hashStr) >= 6 {
+		return hashStr[:6]
+	}
+	return hashStr
+}
+
+// extractInstallProductMetadata returns productID & developerName to help VC injection
+func extractInstallProductMetadata(appInfo *types.AppInfo) (string, string) {
+	if appInfo == nil {
+		return "", ""
+	}
+
+	var productID string
+	var developerName string
+
+	if appInfo.Price != nil {
+		developerName = strings.TrimSpace(appInfo.Price.Developer)
+
+		if appInfo.Price.Paid != nil {
+			if pid := strings.TrimSpace(appInfo.Price.Paid.ProductID); pid != "" {
+				productID = pid
+			} else if len(appInfo.Price.Paid.Price) > 0 {
+				if appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
+					productID = appInfo.AppEntry.ID
+				}
+			}
+		}
+
+		if productID == "" {
+			for _, product := range appInfo.Price.Products {
+				if pid := strings.TrimSpace(product.ProductID); pid != "" {
+					productID = pid
+					break
+				}
+			}
+		}
+	}
+
+	if productID == "" && appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
+		productID = appInfo.AppEntry.ID
+	}
+
+	return productID, developerName
 }
 
 // 6. Install application (single)
@@ -110,6 +188,14 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if targetApp.AppInfo == nil {
+		log.Printf("installApp: targetApp.AppInfo is nil for app=%s source=%s", request.AppName, request.Source)
+	} else if targetApp.AppInfo.Price == nil {
+		log.Printf("installApp: targetApp.AppInfo.Price is nil for app=%s source=%s", request.AppName, request.Source)
+	} else {
+		log.Printf("installApp: targetApp.AppInfo.Price detected for app=%s source=%s", request.AppName, request.Source)
+	}
+
 	// Step 8: Verify chart package exists
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
 	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
@@ -140,6 +226,17 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	productID, developerName := extractInstallProductMetadata(targetApp.AppInfo)
+	log.Printf("installApp: extracted product metadata app=%s source=%s productID=%s developer=%s", request.AppName, request.Source, productID, developerName)
+
+	realAppID := request.AppName
+	if targetApp.AppInfo != nil && targetApp.AppInfo.AppEntry != nil && targetApp.AppInfo.AppEntry.ID != "" {
+		realAppID = targetApp.AppInfo.AppEntry.ID
+	} else if targetApp.RawData != nil && targetApp.RawData.AppID != "" {
+		realAppID = targetApp.RawData.AppID
+	}
+	log.Printf("installApp: resolved realAppID=%s for app=%s source=%s", realAppID, request.AppName, request.Source)
+
 	// Step 10: Create installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
@@ -151,6 +248,18 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":    cfgType, // Add cfgType to metadata
 		"images":     images,
 		"envs":       request.Envs,
+	}
+	if productID != "" {
+		taskMetadata["productID"] = productID
+		log.Printf("installApp: added productID=%s to metadata for app=%s source=%s", productID, request.AppName, request.Source)
+	}
+	if developerName != "" {
+		taskMetadata["developerName"] = developerName
+		log.Printf("installApp: added developerName=%s to metadata for app=%s source=%s", developerName, request.AppName, request.Source)
+	}
+	if realAppID != "" {
+		taskMetadata["realAppID"] = realAppID
+		log.Printf("installApp: added realAppID=%s to metadata for app=%s source=%s", realAppID, request.AppName, request.Source)
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -253,9 +362,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Validate required fields
-	if request.Source == "" || request.AppName == "" || request.Title == "" {
+	if request.Source == "" || request.AppName == "" {
 		log.Printf("Missing required fields in request")
-		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source, app_name, and title are required", nil)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source and app_name are required", nil)
 		return
 	}
 
@@ -310,8 +419,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 9: Construct new app name: rawAppName + Title
-	newAppName := rawAppName + request.Title
+	// Step 9: Calculate hash suffix from Envs and construct new app name: rawAppName + hash
+	envsHash := calculateEnvsHash(request.Envs)
+	newAppName := rawAppName + envsHash
 
 	// For clone app, get version from installed original app's state
 	// Clone operation requires the original app to be installed
@@ -330,7 +440,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appVersion = stateVersion
-	log.Printf("Cloning app: rawAppName=%s, title=%s, newAppName=%s, version=%s (from installed original app)", rawAppName, request.Title, newAppName, appVersion)
+	log.Printf("Cloning app: rawAppName=%s, envsHash=%s, newAppName=%s, version=%s (from installed original app)", rawAppName, envsHash, newAppName, appVersion)
 
 	// Step 10: Verify chart package exists (use version from targetApp)
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, appVersion)
@@ -366,8 +476,8 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":    cfgType,
 		"images":     images,
 		"envs":       request.Envs,
-		"rawAppName": rawAppName,    // Pass rawAppName in metadata
-		"title":      request.Title, // Pass title in metadata
+		"rawAppName": rawAppName, // Pass rawAppName in metadata
+		"envsHash":   envsHash,   // Pass envsHash in metadata
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -384,7 +494,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 			close(done)
 		}
 
-		// Start the task with CloneApp type, using newAppName (rawAppName+Title) as appName
+		// Start the task with CloneApp type, using newAppName (rawAppName+envsHash) as appName
 		task, err := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
 		if err != nil {
 			log.Printf("Failed to create clone installation task for app: %s, error: %v", newAppName, err)
@@ -392,7 +502,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, title=%s)", task.ID, newAppName, rawAppName, request.Title)
+		log.Printf("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, envsHash=%s)", task.ID, newAppName, rawAppName, envsHash)
 
 		// Wait for task completion
 		<-done
@@ -437,7 +547,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created asynchronous clone installation task: ID=%s for app: %s (rawAppName=%s, title=%s)", task.ID, newAppName, rawAppName, request.Title)
+	log.Printf("Created asynchronous clone installation task: ID=%s for app: %s (rawAppName=%s, envsHash=%s)", task.ID, newAppName, rawAppName, envsHash)
 
 	// Return immediately for asynchronous requests
 	s.sendResponse(w, http.StatusOK, true, "App clone installation started successfully", map[string]interface{}{

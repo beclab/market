@@ -10,6 +10,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/history"
+	"market/internal/v2/runtime"
 	"market/internal/v2/task"
 
 	"github.com/gorilla/mux"
@@ -17,22 +18,24 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	router        *mux.Router
-	port          string
-	cacheManager  *appinfo.CacheManager
-	hydrator      *appinfo.Hydrator
-	historyModule *history.HistoryModule
-	taskModule    *task.TaskModule
-	localRepo     *appinfo.LocalRepo
+	router              *mux.Router
+	port                string
+	cacheManager        *appinfo.CacheManager
+	hydrator            *appinfo.Hydrator
+	historyModule       *history.HistoryModule
+	taskModule          *task.TaskModule
+	localRepo           *appinfo.LocalRepo
+	runtimeStateService *runtime.RuntimeStateService
 }
 
 // NewServer creates a new server instance
-func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinfo.Hydrator, taskModule *task.TaskModule, historyModule *history.HistoryModule) *Server {
+func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinfo.Hydrator, taskModule *task.TaskModule, historyModule *history.HistoryModule, runtimeStateService *runtime.RuntimeStateService) *Server {
 	log.Printf("Creating new server instance with port: %s", port)
 	log.Printf("Cache manager provided: %v", cacheManager != nil)
 	log.Printf("Hydrator provided: %v", hydrator != nil)
 	log.Printf("Task module provided: %v", taskModule != nil)
 	log.Printf("History module provided: %v", historyModule != nil)
+	log.Printf("Runtime state service provided: %v", runtimeStateService != nil)
 
 	// Create LocalRepo instance
 	localRepo := appinfo.NewLocalRepo(cacheManager)
@@ -42,13 +45,14 @@ func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinf
 
 	log.Printf("Creating router...")
 	s := &Server{
-		router:        mux.NewRouter(),
-		port:          port,
-		cacheManager:  cacheManager,
-		hydrator:      hydrator,
-		historyModule: historyModule,
-		taskModule:    taskModule,
-		localRepo:     localRepo,
+		router:              mux.NewRouter(),
+		port:                port,
+		cacheManager:        cacheManager,
+		hydrator:            hydrator,
+		historyModule:       historyModule,
+		taskModule:          taskModule,
+		localRepo:           localRepo,
+		runtimeStateService: runtimeStateService,
 	}
 
 	log.Printf("Server struct created successfully")
@@ -208,6 +212,14 @@ func (s *Server) setupRoutes() {
 	// 27. Fetch signature callback (from LarePass)
 	api.HandleFunc("/payment/fetch-signature-callback", s.fetchSignatureCallback).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/payment/fetch-signature-callback")
+
+	// 28. Get runtime state
+	api.HandleFunc("/runtime/state", s.getRuntimeState).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/runtime/state")
+
+	// 29. Get runtime dashboard (HTML page)
+	api.HandleFunc("/runtime/dashboard", s.getRuntimeDashboard).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/runtime/dashboard")
 
 	log.Printf("All routes configured successfully")
 }

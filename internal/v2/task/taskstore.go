@@ -173,6 +173,104 @@ func (ts *TaskStore) UpsertTask(task *Task) error {
 	return nil
 }
 
+// LoadRecentTasks loads recent tasks (including completed and failed) from the database
+// limit specifies the maximum number of tasks to return (default: 100)
+func (ts *TaskStore) LoadRecentTasks(limit int) ([]*Task, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	query := `
+	SELECT task_id, type, status, app_name, user_account, op_id, metadata, result, error_msg,
+		created_at, started_at, completed_at
+	FROM task_records
+	ORDER BY COALESCE(completed_at, started_at, created_at) DESC, created_at DESC
+	LIMIT $1
+	`
+
+	rows, err := ts.db.Queryx(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load recent tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		var (
+			taskID      string
+			taskType    int
+			status      int
+			appName     string
+			user        string
+			opID        string
+			metadata    string
+			result      string
+			errorMsg    string
+			createdAt   time.Time
+			startedAt   sql.NullTime
+			completedAt sql.NullTime
+		)
+
+		if err := rows.Scan(
+			&taskID,
+			&taskType,
+			&status,
+			&appName,
+			&user,
+			&opID,
+			&metadata,
+			&result,
+			&errorMsg,
+			&createdAt,
+			&startedAt,
+			&completedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan task record: %w", err)
+		}
+
+		metadataMap := make(map[string]interface{})
+		if metadata != "" {
+			if err := json.Unmarshal([]byte(metadata), &metadataMap); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal task metadata for %s: %w", taskID, err)
+			}
+		}
+
+		var startedPtr *time.Time
+		if startedAt.Valid {
+			value := startedAt.Time
+			startedPtr = &value
+		}
+
+		var completedPtr *time.Time
+		if completedAt.Valid {
+			value := completedAt.Time
+			completedPtr = &value
+		}
+
+		task := &Task{
+			ID:          taskID,
+			Type:        TaskType(taskType),
+			Status:      TaskStatus(status),
+			AppName:     appName,
+			User:        user,
+			OpID:        opID,
+			CreatedAt:   createdAt,
+			StartedAt:   startedPtr,
+			CompletedAt: completedPtr,
+			Result:      result,
+			ErrorMsg:    errorMsg,
+			Metadata:    metadataMap,
+		}
+		tasks = append(tasks, task)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during task record iteration: %w", err)
+	}
+
+	return tasks, nil
+}
+
 // LoadActiveTasks restores pending and running tasks from the database
 func (ts *TaskStore) LoadActiveTasks() ([]*Task, error) {
 	query := `

@@ -436,7 +436,7 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 }
 
 // notifyLarePassToFetchSignature notifies larepass client to fetch signature (same payload as NotifyLarePassToSign, different topic, omits txHash)
-func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, productID, xForwardedHost string, developerName string) error {
+func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, appName, sourceID, productID, xForwardedHost string, developerName string) error {
 	log.Printf("notifyLarePassToFetchSignature: Starting notification for user=%s app=%s productID=%s", userID, appID, productID)
 
 	if dataSender == nil {
@@ -514,6 +514,14 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 		return err
 	}
 	log.Printf("notifyLarePassToFetchSignature: Successfully sent notification to LarePass for user=%s app=%s productID=%s", userID, appID, productID)
+
+	// Notify frontend of syncing status after successfully sending LarePass notification
+	if err := notifyFrontendStateUpdate(dataSender, userID, appID, appName, sourceID, "syncing"); err != nil {
+		log.Printf("notifyLarePassToFetchSignature: Failed to notify frontend syncing status for user=%s app=%s product=%s: %v", userID, appID, productID, err)
+	} else {
+		log.Printf("notifyLarePassToFetchSignature: Successfully notified frontend syncing status for user=%s app=%s product=%s", userID, appID, productID)
+	}
+
 	return nil
 }
 
@@ -553,11 +561,12 @@ func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID
 	update := types.MarketSystemUpdate{
 		User:       userID,
 		Timestamp:  time.Now().Unix(),
-		NotifyType: "payment_required",
+		NotifyType: "payment_state_update",
 		Extensions: map[string]string{
 			"app_id":    appID,
 			"app_name":  appName,
 			"source_id": sourceID,
+			"status":    "payment_required",
 		},
 		ExtensionsObj: map[string]interface{}{
 			"payment_data": paymentData,
@@ -578,11 +587,35 @@ func notifyFrontendPurchaseCompleted(dataSender DataSenderInterface, userID, app
 	update := types.MarketSystemUpdate{
 		User:       userID,
 		Timestamp:  time.Now().Unix(),
-		NotifyType: "purchase_completed",
+		NotifyType: "payment_state_update",
 		Extensions: map[string]string{
 			"app_id":    appID,
 			"app_name":  appName,
 			"source_id": sourceID,
+			"status":    "purchased",
+		},
+	}
+
+	// Send notification via DataSender
+	return dataSender.SendMarketSystemUpdate(update)
+}
+
+// notifyFrontendStateUpdate notifies frontend of payment state update (internal)
+func notifyFrontendStateUpdate(dataSender DataSenderInterface, userID, appID, appName, sourceID, status string) error {
+	if dataSender == nil {
+		return errors.New("data sender is nil")
+	}
+
+	// Create state update notification
+	update := types.MarketSystemUpdate{
+		User:       userID,
+		Timestamp:  time.Now().Unix(),
+		NotifyType: "payment_state_update",
+		Extensions: map[string]string{
+			"app_id":    appID,
+			"app_name":  appName,
+			"source_id": sourceID,
+			"status":    status,
 		},
 	}
 
@@ -1054,8 +1087,12 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 		if state.SignatureStatus == SignatureRequiredAndSigned {
 			return "payment_required"
 		}
-		// If JWS exists but signature status is in error, still allow payment retry
+		// If JWS exists but signature status is in error, distinguish between error_no_record and other cases
 		if state.JWS != "" {
+			// If signature status is error_no_record, return payment_retry_required to distinguish from unpaid state
+			if state.SignatureStatus == SignatureErrorNoRecord {
+				return "payment_retry_required"
+			}
 			return "payment_required"
 		}
 		// Otherwise, notification sent but signature not ready yet
@@ -1070,6 +1107,7 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 		return "signature_required"
 	}
 	// 5) Error states
+	// Check SignatureErrorNoRecord after checking PaymentNotificationSent to handle JWS case above
 	if state.SignatureStatus == SignatureErrorNoRecord {
 		return "signature_no_record"
 	}
