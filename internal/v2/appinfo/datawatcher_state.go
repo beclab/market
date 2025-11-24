@@ -25,7 +25,7 @@ type EntranceStatus struct {
 	StatusTime string `json:"statusTime"`
 	Reason     string `json:"reason"`
 	Url        string `json:"url"`
-	Invisible  bool   `json:"invisible"`
+	Invisible  *bool  `json:"invisible,omitempty"`
 }
 
 // AppStateMessage represents the message structure from NATS
@@ -58,6 +58,50 @@ type DataWatcherState struct {
 	cacheManager  *CacheManager          // Add cache manager reference
 	taskModule    *task.TaskModule       // Add task module reference
 	dataWatcher   *DataWatcher           // Add data watcher reference for hash calculation
+}
+
+// getExistingEntranceInvisibleMap collects cached invisible flags for the specified app.
+func (dw *DataWatcherState) getExistingEntranceInvisibleMap(userID, appName string) map[string]bool {
+	result := make(map[string]bool)
+	if dw == nil || dw.cacheManager == nil || userID == "" || appName == "" {
+		return result
+	}
+
+	userData := dw.cacheManager.GetUserData(userID)
+	if userData == nil {
+		return result
+	}
+
+	for _, srcData := range userData.Sources {
+		if srcData == nil {
+			continue
+		}
+		for _, appState := range srcData.AppStateLatest {
+			if appState == nil || appState.Status.Name != appName {
+				continue
+			}
+
+			for _, entrance := range appState.Status.EntranceStatuses {
+				result[entrance.Name] = entrance.Invisible
+			}
+			return result
+		}
+	}
+
+	return result
+}
+
+// resolveInvisibleFlag returns upstream value when available, otherwise falls back to cached data.
+func resolveInvisibleFlag(raw *bool, entranceName string, existing map[string]bool) bool {
+	if raw != nil {
+		return *raw
+	}
+
+	if val, ok := existing[entranceName]; ok {
+		return val
+	}
+
+	return false
 }
 
 // NewDataWatcherState creates a new DataWatcherState instance
@@ -395,15 +439,20 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		return
 	}
 
+	// Preload existing invisible flags to avoid overwriting when upstream omits the field.
+	existingInvisible := dw.getExistingEntranceInvisibleMap(userID, msg.Name)
+
 	// Add debug logging for entranceStatuses
 	log.Printf("DEBUG: storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
 	for i, entrance := range msg.EntranceStatuses {
+		invisible := resolveInvisibleFlag(entrance.Invisible, entrance.Name, existingInvisible)
 		log.Printf("DEBUG: storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, Invisible=%t",
-			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, entrance.Invisible)
+			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, invisible)
 	}
 
 	entranceStatuses := make([]interface{}, len(msg.EntranceStatuses))
 	for i, v := range msg.EntranceStatuses {
+		invisible := resolveInvisibleFlag(v.Invisible, v.Name, existingInvisible)
 		entranceStatuses[i] = map[string]interface{}{
 			"id":         v.ID,
 			"name":       v.Name,
@@ -411,7 +460,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			"statusTime": v.StatusTime,
 			"reason":     v.Reason,
 			"url":        v.Url,
-			"invisible":  v.Invisible,
+			"invisible":  invisible,
 		}
 	}
 
