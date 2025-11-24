@@ -553,11 +553,12 @@ func notifyFrontendPaymentRequired(dataSender DataSenderInterface, userID, appID
 	update := types.MarketSystemUpdate{
 		User:       userID,
 		Timestamp:  time.Now().Unix(),
-		NotifyType: "payment_required",
+		NotifyType: "payment_state_update",
 		Extensions: map[string]string{
 			"app_id":    appID,
 			"app_name":  appName,
 			"source_id": sourceID,
+			"status":    "payment_required",
 		},
 		ExtensionsObj: map[string]interface{}{
 			"payment_data": paymentData,
@@ -578,11 +579,35 @@ func notifyFrontendPurchaseCompleted(dataSender DataSenderInterface, userID, app
 	update := types.MarketSystemUpdate{
 		User:       userID,
 		Timestamp:  time.Now().Unix(),
-		NotifyType: "purchase_completed",
+		NotifyType: "payment_state_update",
 		Extensions: map[string]string{
 			"app_id":    appID,
 			"app_name":  appName,
 			"source_id": sourceID,
+			"status":    "purchase_completed",
+		},
+	}
+
+	// Send notification via DataSender
+	return dataSender.SendMarketSystemUpdate(update)
+}
+
+// notifyFrontendStateUpdate notifies frontend of payment state update (internal)
+func notifyFrontendStateUpdate(dataSender DataSenderInterface, userID, appID, appName, sourceID, status string) error {
+	if dataSender == nil {
+		return errors.New("data sender is nil")
+	}
+
+	// Create state update notification
+	update := types.MarketSystemUpdate{
+		User:       userID,
+		Timestamp:  time.Now().Unix(),
+		NotifyType: "payment_state_update",
+		Extensions: map[string]string{
+			"app_id":    appID,
+			"app_name":  appName,
+			"source_id": sourceID,
+			"status":    status,
 		},
 	}
 

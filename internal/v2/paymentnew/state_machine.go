@@ -250,6 +250,13 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 				newState.DeveloperName,
 				isReSignFlow,
 			)
+
+			// Notify frontend of signature_required status
+			if err := notifyFrontendStateUpdate(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID, "signature_required"); err != nil {
+				log.Printf("Failed to notify frontend signature_required for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+			} else {
+				log.Printf("Successfully notified frontend signature_required for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+			}
 		}
 		return &newState, nil
 	}
@@ -409,6 +416,15 @@ func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, stat
 	}
 	newState.PaymentStatus = PaymentFrontendCompleted
 
+	// Notify frontend of waiting_developer_confirmation status
+	if psm.dataSender != nil {
+		if err := notifyFrontendStateUpdate(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID, "waiting_developer_confirmation"); err != nil {
+			log.Printf("Failed to notify frontend waiting_developer_confirmation for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+		} else {
+			log.Printf("Successfully notified frontend waiting_developer_confirmation for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+		}
+	}
+
 	// Follow-up: poll developer service for VC
 	go psm.pollForVCFromDeveloper(&newState)
 
@@ -443,7 +459,13 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 
 	// Notify frontend of purchase completion
 	if psm.dataSender != nil {
-		notifyFrontendPurchaseCompleted(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID)
+		if err := notifyFrontendPurchaseCompleted(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID); err != nil {
+			log.Printf("Failed to notify frontend purchase completed for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+		} else {
+			log.Printf("Successfully notified frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+		}
+	} else {
+		log.Printf("Warning: dataSender is nil, cannot notify frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 	}
 
 	return &newState, nil
@@ -481,6 +503,15 @@ func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, stat
 			newState.DeveloperName,
 			isReSign,
 		)
+	}
+
+	// Notify frontend of signature_required status
+	if psm.dataSender != nil {
+		if err := notifyFrontendStateUpdate(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID, "signature_required"); err != nil {
+			log.Printf("Failed to notify frontend signature_required for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+		} else {
+			log.Printf("Successfully notified frontend signature_required for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+		}
 	}
 
 	return &newState, nil
@@ -602,6 +633,23 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 						s.SignatureStatus = SignatureErrorNoRecord
 						return nil
 					})
+					// Notify frontend of state update
+					if psm.dataSender != nil {
+						latest, _ := psm.getState(state.UserID, state.AppID, state.ProductID)
+						if latest != nil {
+							var statusToNotify string
+							if latest.PaymentStatus == PaymentNotificationSent {
+								statusToNotify = "payment_retry_required"
+							} else {
+								statusToNotify = "signature_no_record"
+							}
+							if err := notifyFrontendStateUpdate(psm.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, statusToNotify); err != nil {
+								log.Printf("Failed to notify frontend %s for user=%s app=%s product=%s: %v", statusToNotify, latest.UserID, latest.AppID, latest.ProductID, err)
+							} else {
+								log.Printf("Successfully notified frontend %s for user=%s app=%s product=%s", statusToNotify, latest.UserID, latest.AppID, latest.ProductID)
+							}
+						}
+					}
 					return
 				}
 				// keep polling
@@ -612,6 +660,17 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 					s.SignatureStatus = SignatureErrorNeedReSign
 					return nil
 				})
+				// Notify frontend of signature_need_resign status
+				if psm.dataSender != nil {
+					latest, _ := psm.getState(state.UserID, state.AppID, state.ProductID)
+					if latest != nil {
+						if err := notifyFrontendStateUpdate(psm.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, "signature_need_resign"); err != nil {
+							log.Printf("Failed to notify frontend signature_need_resign for user=%s app=%s product=%s: %v", latest.UserID, latest.AppID, latest.ProductID, err)
+						} else {
+							log.Printf("Successfully notified frontend signature_need_resign for user=%s app=%s product=%s", latest.UserID, latest.AppID, latest.ProductID)
+						}
+					}
+				}
 				return
 			default:
 				log.Printf("VC polling attempt %d received unexpected code=%d; treating as developer error", attempt, result.Code)
@@ -958,6 +1017,32 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 			}
 			return nil
 		})
+
+		// Notify frontend of state update
+		if psm.dataSender != nil {
+			latest, _ := psm.getState(state.UserID, state.AppID, state.ProductID)
+			if latest != nil {
+				var statusToNotify string
+				switch result.Code {
+				case 1:
+					// Check if payment notification was sent to determine status
+					if latest.PaymentStatus == PaymentNotificationSent {
+						statusToNotify = "payment_retry_required"
+					} else {
+						statusToNotify = "signature_no_record"
+					}
+				case 2:
+					statusToNotify = "signature_need_resign"
+				}
+				if statusToNotify != "" {
+					if err := notifyFrontendStateUpdate(psm.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, statusToNotify); err != nil {
+						log.Printf("Failed to notify frontend %s for user=%s app=%s product=%s: %v", statusToNotify, latest.UserID, latest.AppID, latest.ProductID, err)
+					} else {
+						log.Printf("Successfully notified frontend %s for user=%s app=%s product=%s", statusToNotify, latest.UserID, latest.AppID, latest.ProductID)
+					}
+				}
+			}
+		}
 	}()
 }
 
