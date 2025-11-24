@@ -436,7 +436,7 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 }
 
 // notifyLarePassToFetchSignature notifies larepass client to fetch signature (same payload as NotifyLarePassToSign, different topic, omits txHash)
-func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, productID, xForwardedHost string, developerName string) error {
+func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, appName, sourceID, productID, xForwardedHost string, developerName string) error {
 	log.Printf("notifyLarePassToFetchSignature: Starting notification for user=%s app=%s productID=%s", userID, appID, productID)
 
 	if dataSender == nil {
@@ -514,6 +514,14 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 		return err
 	}
 	log.Printf("notifyLarePassToFetchSignature: Successfully sent notification to LarePass for user=%s app=%s productID=%s", userID, appID, productID)
+
+	// Notify frontend of syncing status after successfully sending LarePass notification
+	if err := notifyFrontendStateUpdate(dataSender, userID, appID, appName, sourceID, "syncing"); err != nil {
+		log.Printf("notifyLarePassToFetchSignature: Failed to notify frontend syncing status for user=%s app=%s product=%s: %v", userID, appID, productID, err)
+	} else {
+		log.Printf("notifyLarePassToFetchSignature: Successfully notified frontend syncing status for user=%s app=%s product=%s", userID, appID, productID)
+	}
+
 	return nil
 }
 
