@@ -592,7 +592,7 @@ func notifyFrontendPurchaseCompleted(dataSender DataSenderInterface, userID, app
 			"app_id":    appID,
 			"app_name":  appName,
 			"source_id": sourceID,
-			"status":    "purchase_completed",
+			"status":    "purchased",
 		},
 	}
 
