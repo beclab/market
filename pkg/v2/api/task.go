@@ -1,11 +1,14 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -28,14 +31,48 @@ type InstallAppRequest struct {
 type CloneAppRequest struct {
 	Source  string           `json:"source"`
 	AppName string           `json:"app_name"`
-	Title   string           `json:"title"` // Title for cloned app
-	Sync    bool             `json:"sync"`  // Whether this is a synchronous request
+	Sync    bool             `json:"sync"` // Whether this is a synchronous request
 	Envs    []task.AppEnvVar `json:"envs,omitempty"`
 }
 
 // CancelInstallRequest represents the request body for cancel installation
 type CancelInstallRequest struct {
 	Sync bool `json:"sync"` // Whether this is a synchronous request
+}
+
+// calculateEnvsHash calculates SHA256 hash of Envs and returns first 6 characters
+func calculateEnvsHash(envs []task.AppEnvVar) string {
+	if len(envs) == 0 {
+		// If no envs, return hash of empty string
+		hash := sha256.Sum256([]byte(""))
+		return hex.EncodeToString(hash[:])[:6]
+	}
+
+	// Sort envs by name for consistent hashing
+	sortedEnvs := make([]task.AppEnvVar, len(envs))
+	copy(sortedEnvs, envs)
+	sort.Slice(sortedEnvs, func(i, j int) bool {
+		return sortedEnvs[i].EnvName < sortedEnvs[j].EnvName
+	})
+
+	// Marshal to JSON for hashing
+	envsJSON, err := json.Marshal(sortedEnvs)
+	if err != nil {
+		log.Printf("Failed to marshal envs for hash calculation: %v", err)
+		// Fallback: hash the error
+		hash := sha256.Sum256([]byte(fmt.Sprintf("error:%v", err)))
+		return hex.EncodeToString(hash[:])[:6]
+	}
+
+	// Calculate SHA256 hash
+	hash := sha256.Sum256(envsJSON)
+	hashStr := hex.EncodeToString(hash[:])
+
+	// Return first 6 characters
+	if len(hashStr) >= 6 {
+		return hashStr[:6]
+	}
+	return hashStr
 }
 
 // extractInstallProductMetadata returns productID & developerName to help VC injection
@@ -325,9 +362,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Validate required fields
-	if request.Source == "" || request.AppName == "" || request.Title == "" {
+	if request.Source == "" || request.AppName == "" {
 		log.Printf("Missing required fields in request")
-		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source, app_name, and title are required", nil)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source and app_name are required", nil)
 		return
 	}
 
@@ -382,8 +419,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 9: Construct new app name: rawAppName + Title
-	newAppName := rawAppName + request.Title
+	// Step 9: Calculate hash suffix from Envs and construct new app name: rawAppName + hash
+	envsHash := calculateEnvsHash(request.Envs)
+	newAppName := rawAppName + envsHash
 
 	// For clone app, get version from installed original app's state
 	// Clone operation requires the original app to be installed
@@ -402,7 +440,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appVersion = stateVersion
-	log.Printf("Cloning app: rawAppName=%s, title=%s, newAppName=%s, version=%s (from installed original app)", rawAppName, request.Title, newAppName, appVersion)
+	log.Printf("Cloning app: rawAppName=%s, envsHash=%s, newAppName=%s, version=%s (from installed original app)", rawAppName, envsHash, newAppName, appVersion)
 
 	// Step 10: Verify chart package exists (use version from targetApp)
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, appVersion)
@@ -438,8 +476,8 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":    cfgType,
 		"images":     images,
 		"envs":       request.Envs,
-		"rawAppName": rawAppName,    // Pass rawAppName in metadata
-		"title":      request.Title, // Pass title in metadata
+		"rawAppName": rawAppName, // Pass rawAppName in metadata
+		"envsHash":   envsHash,   // Pass envsHash in metadata
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -456,7 +494,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 			close(done)
 		}
 
-		// Start the task with CloneApp type, using newAppName (rawAppName+Title) as appName
+		// Start the task with CloneApp type, using newAppName (rawAppName+envsHash) as appName
 		task, err := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
 		if err != nil {
 			log.Printf("Failed to create clone installation task for app: %s, error: %v", newAppName, err)
@@ -464,7 +502,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, title=%s)", task.ID, newAppName, rawAppName, request.Title)
+		log.Printf("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, envsHash=%s)", task.ID, newAppName, rawAppName, envsHash)
 
 		// Wait for task completion
 		<-done
@@ -509,7 +547,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created asynchronous clone installation task: ID=%s for app: %s (rawAppName=%s, title=%s)", task.ID, newAppName, rawAppName, request.Title)
+	log.Printf("Created asynchronous clone installation task: ID=%s for app: %s (rawAppName=%s, envsHash=%s)", task.ID, newAppName, rawAppName, envsHash)
 
 	// Return immediately for asynchronous requests
 	s.sendResponse(w, http.StatusOK, true, "App clone installation started successfully", map[string]interface{}{
