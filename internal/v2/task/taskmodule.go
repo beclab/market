@@ -1073,17 +1073,17 @@ func (tm *TaskModule) GetInstanceID() string {
 	return tm.instanceID
 }
 
-// InstallTaskSucceed marks an install task as completed successfully by opID or appName+user
+// InstallTaskSucceed marks an install or clone task as completed successfully by opID or appName+user
 func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 	if !tm.mu.TryLock() {
 		return fmt.Errorf("failed to acquire lock for InstallTaskSucceed")
 	}
 	defer tm.mu.Unlock()
 
-	// First try to find the install task with matching opID in running tasks
+	// First try to find the install or clone task with matching opID in running tasks
 	var targetTask *Task
 	for _, task := range tm.runningTasks {
-		if task.OpID == opID && task.Type == InstallApp {
+		if task.OpID == opID && (task.Type == InstallApp || task.Type == CloneApp) {
 			targetTask = task
 			break
 		}
@@ -1092,7 +1092,7 @@ func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 	// If opID match failed, try to find by appName and user
 	if targetTask == nil && appName != "" && user != "" {
 		for _, task := range tm.runningTasks {
-			if task.Type == InstallApp && task.AppName == appName && task.User == user {
+			if (task.Type == InstallApp || task.Type == CloneApp) && task.AppName == appName && task.User == user {
 				targetTask = task
 				break
 			}
@@ -1100,19 +1100,26 @@ func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 	}
 
 	if targetTask == nil {
-		log.Printf("[%s] InstallTaskSucceed - No running install task found with opID: %s or appName: %s, user: %s",
+		log.Printf("[%s] InstallTaskSucceed - No running install or clone task found with opID: %s or appName: %s, user: %s",
 			tm.instanceID, opID, appName, user)
-		return fmt.Errorf("no running install task found with opID: %s or appName: %s, user: %s", opID, appName, user)
+		return fmt.Errorf("no running install or clone task found with opID: %s or appName: %s, user: %s", opID, appName, user)
 	}
 
 	// Mark task as completed
 	targetTask.Status = Completed
 	now := time.Now()
 	targetTask.CompletedAt = &now
-	targetTask.Result = "Installation completed successfully via external signal"
 
-	log.Printf("[%s] InstallTaskSucceed - Task marked as completed: ID=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
-		tm.instanceID, targetTask.ID, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
+	// Set appropriate result message based on task type
+	if targetTask.Type == CloneApp {
+		targetTask.Result = "Clone completed successfully via external signal"
+	} else {
+		targetTask.Result = "Installation completed successfully via external signal"
+	}
+
+	taskTypeStr := getTaskTypeString(targetTask.Type)
+	log.Printf("[%s] InstallTaskSucceed - Task marked as completed: ID=%s, Type=%s, OpID=%s, AppName=%s, User=%s, Duration=%v",
+		tm.instanceID, targetTask.ID, taskTypeStr, targetTask.OpID, targetTask.AppName, targetTask.User, now.Sub(*targetTask.StartedAt))
 
 	// Remove task from running tasks
 	delete(tm.runningTasks, targetTask.ID)
@@ -1121,7 +1128,8 @@ func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 	tm.finalizeTaskPersistence(targetTask)
 
 	// Record task completion in history
-	tm.recordTaskResult(targetTask, "Installation completed successfully via external signal", nil)
+	resultMsg := targetTask.Result
+	tm.recordTaskResult(targetTask, resultMsg, nil)
 
 	// Send task finished system update
 	tm.sendTaskFinishedUpdate(targetTask, "succeed")

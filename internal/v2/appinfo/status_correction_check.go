@@ -251,6 +251,9 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		glog.Infof("No status changes detected")
 	}
 
+	// Check and correct task statuses
+	scc.checkAndCorrectTaskStatuses(latestStatus)
+
 	glog.Infof("Status check cycle #%d completed in %v", scc.checkCount, time.Since(startTime))
 }
 
@@ -1087,4 +1090,103 @@ func (scc *StatusCorrectionChecker) SetTaskModule(tm *task.TaskModule) {
 	scc.mutex.Lock()
 	defer scc.mutex.Unlock()
 	scc.taskModule = tm
+}
+
+// checkAndCorrectTaskStatuses checks running tasks and corrects their status based on actual app state
+func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []utils.AppServiceResponse) {
+	if scc.taskModule == nil {
+		return
+	}
+
+	// Get all running tasks
+	runningTasks := scc.taskModule.GetRunningTasks()
+	if len(runningTasks) == 0 {
+		return
+	}
+
+	glog.Infof("Checking %d running tasks for status correction", len(runningTasks))
+
+	// Create a map of app statuses for quick lookup: user:appName -> app status
+	appStatusMap := make(map[string]*utils.AppServiceResponse)
+	for i := range latestStatus {
+		app := &latestStatus[i]
+		key := fmt.Sprintf("%s:%s", app.Spec.Owner, app.Spec.Name)
+		appStatusMap[key] = app
+	}
+
+	correctedCount := 0
+	for _, runningTask := range runningTasks {
+		// Only check tasks that have been running for at least 30 seconds to avoid false positives
+		if runningTask.StartedAt == nil {
+			continue
+		}
+		if time.Since(*runningTask.StartedAt) < 30*time.Second {
+			continue
+		}
+
+		appKey := fmt.Sprintf("%s:%s", runningTask.User, runningTask.AppName)
+		appStatus, exists := appStatusMap[appKey]
+
+		switch runningTask.Type {
+		case task.InstallApp, task.CloneApp:
+			// For install/clone tasks: if app exists and is running, mark task as completed
+			if exists && appStatus != nil && appStatus.Status.State == "running" {
+				taskTypeStr := "Install"
+				if runningTask.Type == task.CloneApp {
+					taskTypeStr = "Clone"
+				}
+				glog.Infof("Task status correction: %s task %s for app %s (user: %s) should be completed - app is running",
+					taskTypeStr, runningTask.ID, runningTask.AppName, runningTask.User)
+				if err := scc.taskModule.InstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
+					glog.Warningf("Failed to mark %s task as succeeded: %v", taskTypeStr, err)
+				} else {
+					correctedCount++
+					glog.Infof("Successfully corrected %s task status: %s", taskTypeStr, runningTask.ID)
+				}
+			}
+
+		case task.UninstallApp:
+			// For uninstall tasks: if app doesn't exist, mark task as completed
+			if !exists {
+				glog.Infof("Task status correction: Uninstall task %s for app %s (user: %s) should be completed - app no longer exists",
+					runningTask.ID, runningTask.AppName, runningTask.User)
+				if err := scc.taskModule.UninstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
+					glog.Warningf("Failed to mark uninstall task as succeeded: %v", err)
+				} else {
+					correctedCount++
+					glog.Infof("Successfully corrected uninstall task status: %s", runningTask.ID)
+				}
+			}
+
+		case task.CancelAppInstall:
+			// For cancel install tasks: if app doesn't exist, mark task as completed
+			if !exists {
+				glog.Infof("Task status correction: Cancel install task %s for app %s (user: %s) should be completed - app no longer exists",
+					runningTask.ID, runningTask.AppName, runningTask.User)
+				if err := scc.taskModule.CancelInstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
+					glog.Warningf("Failed to mark cancel install task as succeeded: %v", err)
+				} else {
+					correctedCount++
+					glog.Infof("Successfully corrected cancel install task status: %s", runningTask.ID)
+				}
+			}
+
+		case task.UpgradeApp:
+			// For upgrade tasks: if app exists and is running, mark task as completed
+			// Note: TaskModule doesn't have UpgradeTaskSucceed method, so upgrade tasks
+			// are typically completed through their normal execution flow.
+			// We log it for monitoring but don't auto-correct to avoid conflicts.
+			if exists && appStatus != nil && appStatus.Status.State == "running" {
+				glog.Infof("Task status correction: Upgrade task %s for app %s (user: %s) appears completed - app is running (not auto-correcting)",
+					runningTask.ID, runningTask.AppName, runningTask.User)
+			}
+		}
+	}
+
+	if correctedCount > 0 {
+		glog.Infof("Task status correction completed: corrected %d task(s)", correctedCount)
+		scc.mutex.Lock()
+		scc.correctionCount += int64(correctedCount)
+		scc.mutex.Unlock()
+	}
 }
