@@ -956,15 +956,62 @@ func (psm *PaymentStateMachine) processFetchSignatureCallback(jws, signBody, use
 		return err
 	}
 
-	// When code==0, trigger the next sync step (same as LarePassSyncCompleted)
 	if signed {
+		// When code==0, trigger the next sync step (same as LarePassSyncCompleted)
 		updatedState, _ := psm.getState(state.UserID, state.AppID, state.ProductID)
 		if updatedState != nil {
 			psm.triggerVCSync(updatedState)
 		}
+	} else {
+		psm.notifyNotBuyState(state.UserID, state.AppID, state.ProductID)
 	}
 
 	return nil
+}
+
+// notifyNotBuyState sends `not_buy` status update when signature fetch reports no record
+func (psm *PaymentStateMachine) notifyNotBuyState(userID, appID, productID string) {
+	if psm == nil || psm.dataSender == nil {
+		return
+	}
+
+	state, err := psm.getState(userID, appID, productID)
+	if err != nil || state == nil {
+		return
+	}
+
+	// Only error_no_record can transition to not_buy (per design)
+	if state.SignatureStatus != SignatureErrorNoRecord {
+		return
+	}
+
+	if !(state.PaymentStatus == PaymentNotEvaluated || state.PaymentStatus == PaymentNotNotified) {
+		return
+	}
+
+	// Ensure status recorded as not_notified
+	if state.PaymentStatus == PaymentNotEvaluated {
+		_ = psm.updateState(state.GetKey(), func(s *PaymentState) error {
+			if s.PaymentStatus == PaymentNotEvaluated {
+				s.PaymentStatus = PaymentNotNotified
+			}
+			return nil
+		})
+		state.PaymentStatus = PaymentNotNotified
+	}
+
+	appName := state.AppName
+	if appName == "" {
+		appName = state.AppID
+	}
+
+	if err := notifyFrontendStateUpdate(psm.dataSender, state.UserID, state.AppID, appName, state.SourceID, "not_buy"); err != nil {
+		log.Printf("notifyNotBuyState: failed to notify frontend not_buy for user=%s app=%s product=%s: %v",
+			state.UserID, state.AppID, state.ProductID, err)
+	} else {
+		log.Printf("notifyNotBuyState: notified frontend not_buy for user=%s app=%s product=%s",
+			state.UserID, state.AppID, state.ProductID)
+	}
 }
 
 // findStateByUserAndProduct matches state via userId + productId
