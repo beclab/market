@@ -25,6 +25,7 @@ type CloneOptions struct {
 	Envs         []AppEnvVar `json:"envs"`
 	RawAppName   string      `json:"rawAppName,omitempty"` // Raw app name for clone operations
 	EnvsHash     string      `json:"envsHash,omitempty"`   // Hash of envs (first 6 chars) for clone operations
+	Title        string      `json:"title,omitempty"`      // Title for clone operations (for display purposes)
 }
 
 // AppClone clones an application using the app service
@@ -90,9 +91,12 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		return "", fmt.Errorf("missing envsHash in task metadata")
 	}
 
-	// Construct URL app name: rawAppName + EnvsHash
+	// Get title from metadata (optional, for display purposes)
+	title, _ := task.Metadata["title"].(string)
+
+	// Construct URL app name: rawAppName + EnvsHash (not rawAppName + Title)
 	urlAppName := rawAppName + envsHash
-	log.Printf("Clone operation: rawAppName=%s, envsHash=%s, urlAppName=%s for task: %s", rawAppName, envsHash, urlAppName, task.ID)
+	log.Printf("Clone operation: rawAppName=%s, envsHash=%s, title=%s, urlAppName=%s for task: %s", rawAppName, envsHash, title, urlAppName, task.ID)
 
 	// Convert app source to API source parameter
 	var apiSource string
@@ -167,7 +171,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		}
 	}
 
-	// Create clone options with rawAppName and EnvsHash
+	// Create clone options with rawAppName, EnvsHash, and Title
 	cloneInfo := &CloneOptions{
 		RepoUrl:      getRepoUrl(),
 		Source:       apiSource,
@@ -177,6 +181,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		Envs:         envs,
 		RawAppName:   rawAppName, // Pass rawAppName
 		EnvsHash:     envsHash,   // Pass envsHash
+		Title:        title,      // Pass title (for display purposes)
 	}
 
 	ms, err := json.Marshal(cloneInfo)
@@ -210,6 +215,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 			"url":        urlStr,
 			"rawAppName": rawAppName,
 			"envsHash":   envsHash,
+			"title":     title,
 			"error":      err.Error(),
 			"status":     "failed",
 		}
@@ -234,6 +240,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 			"url":          urlStr,
 			"rawAppName":   rawAppName,
 			"envsHash":     envsHash,
+			"title":       title,
 			"raw_response": response,
 			"error":        fmt.Sprintf("Failed to parse response JSON: %v", err),
 			"status":       "failed",
@@ -261,6 +268,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 					"url":              urlStr,
 					"rawAppName":       rawAppName,
 					"envsHash":         envsHash,
+					"title":           title,
 					"backend_response": responseData,
 					"error":            "opID not found in response data",
 					"status":           "failed",
@@ -320,6 +328,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		"url":              urlStr,
 		"rawAppName":       rawAppName,
 		"envsHash":         envsHash,
+		"title":           title,
 		"backend_response": responseData,
 		"opID":             task.OpID,
 		"status":           "success",
