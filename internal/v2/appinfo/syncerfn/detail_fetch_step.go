@@ -245,6 +245,15 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	case 200:
 		// Success - process the apps and replace simplified data with detailed data
 		log.Printf("Processing successful response for batch with %d apps", len(appIDs))
+
+		// CRITICAL: Get sourceID BEFORE acquiring mutex lock to avoid deadlock
+		// GetMarketSource() uses RLock() internally, and calling it while holding Lock()
+		// would cause permanent deadlock in the same goroutine
+		sourceID := ""
+		if marketSource := data.GetMarketSource(); marketSource != nil {
+			sourceID = marketSource.Name
+		}
+
 		data.mutex.Lock()
 		log.Printf("Acquired mutex lock for batch processing")
 
@@ -260,11 +269,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 			// Update the original LatestData with detailed information
 			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
 				log.Printf("Processing %d apps in LatestData", len(appsData))
-
-				sourceID := ""
-				if marketSource := data.GetMarketSource(); marketSource != nil {
-					sourceID = marketSource.Name
-				}
 
 				for appID, appData := range appsData {
 					log.Printf("Processing app %s in batch", appID)
