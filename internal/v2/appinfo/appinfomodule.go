@@ -429,6 +429,8 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	// Add syncer status
 	if m.syncer != nil {
 		status["syncer_running"] = m.syncer.IsRunning()
+		status["syncer_metrics"] = m.syncer.GetMetrics()
+		status["syncer_healthy"] = m.syncer.IsHealthy()
 	}
 
 	// Add hydrator status

@@ -432,18 +432,46 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 
 			// Collect Syncer status separately with detailed information
 			if syncerRunning, ok := moduleStatus["syncer_running"].(bool); ok {
+				// Get health status from module status if available
 				syncerHealthy := syncerRunning
+				if healthy, ok := moduleStatus["syncer_healthy"].(bool); ok {
+					syncerHealthy = healthy
+				}
+
 				syncerStatus := "running"
 				if !syncerRunning {
 					syncerStatus = "stopped"
+				} else if !syncerHealthy {
+					syncerStatus = "degraded"
 				}
 
 				syncerMetrics := make(map[string]interface{})
-				syncerMetrics["is_running"] = syncerRunning
 
-				// Get detailed syncer information
+				// Get detailed syncer information directly from syncer
 				syncer := aim.GetSyncer()
 				if syncer != nil {
+					metrics := syncer.GetMetrics()
+					syncerMetrics = map[string]interface{}{
+						"is_running":            metrics.IsRunning,
+						"sync_interval":         metrics.SyncInterval.String(),
+						"last_sync_time":        metrics.LastSyncTime,
+						"last_sync_success":     metrics.LastSyncSuccess,
+						"last_sync_error":       metrics.LastSyncError,
+						"current_step":          metrics.CurrentStep,
+						"current_step_index":    metrics.CurrentStepIndex,
+						"total_steps":           metrics.TotalSteps,
+						"current_source":        metrics.CurrentSource,
+						"total_syncs":           metrics.TotalSyncs,
+						"success_count":         metrics.SuccessCount,
+						"failure_count":         metrics.FailureCount,
+						"consecutive_failures":  metrics.ConsecutiveFailures,
+						"last_sync_duration":    metrics.LastSyncDuration.String(),
+						"last_synced_app_count": metrics.LastSyncedAppCount,
+						"success_rate":          metrics.SuccessRate,
+						"next_sync_time":        metrics.NextSyncTime,
+					}
+
+					// Add step information
 					steps := syncer.GetSteps()
 					syncerMetrics["step_count"] = len(steps)
 
@@ -460,6 +488,21 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 					if enableSync, ok := moduleStatus["enable_sync"].(bool); ok {
 						syncerMetrics["enabled"] = enableSync
 					}
+				} else {
+					// Fallback to basic metrics if syncer is nil
+					syncerMetrics["is_running"] = syncerRunning
+				}
+
+				// Build status message if there are errors
+				statusMessage := ""
+				if errMsg, ok := syncerMetrics["last_sync_error"].(string); ok && errMsg != "" {
+					statusMessage = fmt.Sprintf("Last error: %s", errMsg)
+				}
+				if failures, ok := syncerMetrics["consecutive_failures"].(int64); ok && failures > 0 {
+					if statusMessage != "" {
+						statusMessage += "; "
+					}
+					statusMessage += fmt.Sprintf("%d consecutive failures", failures)
 				}
 
 				syncerComponent := &ComponentStatus{
@@ -467,7 +510,7 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 					Healthy:   syncerHealthy,
 					Status:    syncerStatus,
 					LastCheck: time.Now(),
-					Message:   "",
+					Message:   statusMessage,
 					Metrics:   syncerMetrics,
 				}
 				c.store.UpdateComponent(syncerComponent)
@@ -481,23 +524,28 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 					hydratorStatus = "stopped"
 				}
 				hydratorMetrics := make(map[string]interface{})
-				if metrics, ok := moduleStatus["hydrator_metrics"].(map[string]interface{}); ok {
-					hydratorMetrics = metrics
+
+				// Get metrics directly from hydrator
+				hydrator := aim.GetHydrator()
+				if hydrator != nil {
+					metricsStruct := hydrator.GetMetrics()
+					hydratorMetrics = map[string]interface{}{
+						"total_tasks_processed":  metricsStruct.TotalTasksProcessed,
+						"total_tasks_succeeded":  metricsStruct.TotalTasksSucceeded,
+						"total_tasks_failed":     metricsStruct.TotalTasksFailed,
+						"active_tasks_count":     metricsStruct.ActiveTasksCount,
+						"completed_tasks_count":  metricsStruct.CompletedTasksCount,
+						"failed_tasks_count":     metricsStruct.FailedTasksCount,
+						"queue_length":           metricsStruct.QueueLength,
+						"active_tasks":           metricsStruct.ActiveTasks,
+						"recent_completed_tasks": metricsStruct.RecentCompletedTasks,
+						"recent_failed_tasks":    metricsStruct.RecentFailedTasks,
+						"workers":                metricsStruct.Workers,
+					}
 				} else {
-					// Try to convert from struct if it's returned as struct
-					// This handles the case where GetMetrics returns a struct
-					hydrator := aim.GetHydrator()
-					if hydrator != nil {
-						metricsStruct := hydrator.GetMetrics()
-						hydratorMetrics = map[string]interface{}{
-							"total_tasks_processed": metricsStruct.TotalTasksProcessed,
-							"total_tasks_succeeded": metricsStruct.TotalTasksSucceeded,
-							"total_tasks_failed":    metricsStruct.TotalTasksFailed,
-							"active_tasks_count":    metricsStruct.ActiveTasksCount,
-							"completed_tasks_count": metricsStruct.CompletedTasksCount,
-							"failed_tasks_count":    metricsStruct.FailedTasksCount,
-							"queue_length":          metricsStruct.QueueLength,
-						}
+					// Fallback to module status if available
+					if metrics, ok := moduleStatus["hydrator_metrics"].(map[string]interface{}); ok {
+						hydratorMetrics = metrics
 					}
 				}
 				hydratorMetrics["is_running"] = hydratorRunning

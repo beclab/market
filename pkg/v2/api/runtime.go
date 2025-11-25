@@ -691,6 +691,12 @@ func generateDashboardHTML(snapshotJSON string) string {
                                 <tbody id="hydratorTableBody"></tbody>
                             </table>
                         </div>
+                        <!-- Active Tasks Section -->
+                        <div id="hydratorActiveTasks" style="margin-top: 20px;"></div>
+                        <!-- Worker Status Section -->
+                        <div id="hydratorWorkers" style="margin-top: 20px;"></div>
+                        <!-- Task History Section -->
+                        <div id="hydratorHistory" style="margin-top: 20px;"></div>
                     </div>
                     
                     <!-- Cache Statistics Tab Content -->
@@ -1259,22 +1265,65 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             const metrics = syncer.metrics || {};
+            
+            // Format duration
+            function formatDuration(durationStr) {
+                if (!durationStr || durationStr === '0s') return 'N/A';
+                return durationStr;
+            }
+            
+            // Format percentage
+            function formatPercentage(value) {
+                if (value === undefined || value === null) return 'N/A';
+                return value.toFixed(2) + '%';
+            }
+            
+            // Calculate progress if current step is available
+            let progressInfo = 'N/A';
+            if (metrics.current_step && metrics.total_steps > 0 && metrics.current_step_index >= 0) {
+                const progress = ((metrics.current_step_index + 1) / metrics.total_steps * 100).toFixed(1);
+                progressInfo = (metrics.current_step_index + 1) + '/' + metrics.total_steps + ' (' + progress + '%)';
+            }
+            
             const stats = [
                 { label: 'Status', value: getStatusBadge(syncer.status || 'unknown'), isHtml: true },
-                { label: 'Healthy', value: syncer.healthy ? 'Yes' : 'No' },
+                { label: 'Healthy', value: syncer.healthy ? getStatusBadge('healthy') : getStatusBadge('unhealthy'), isHtml: true },
                 { label: 'Is Running', value: metrics.is_running ? 'Yes' : 'No' },
-                { label: 'Enabled', value: metrics.enabled !== undefined ? (metrics.enabled ? 'Yes' : 'No') : 'N/A' },
+                { label: 'Sync Interval', value: metrics.sync_interval || 'N/A' },
+                { label: 'Current Step', value: metrics.current_step || 'N/A' },
+                { label: 'Progress', value: progressInfo },
+                { label: 'Current Source', value: metrics.current_source || 'N/A' },
+                { label: 'Last Sync Time', value: metrics.last_sync_time ? formatTimestamp(new Date(metrics.last_sync_time)) : 'Never' },
+                { label: 'Last Sync Success', value: metrics.last_sync_success ? formatTimestamp(new Date(metrics.last_sync_success)) : 'Never' },
+                { label: 'Last Sync Duration', value: formatDuration(metrics.last_sync_duration) },
+                { label: 'Last Synced Apps', value: metrics.last_synced_app_count !== undefined ? metrics.last_synced_app_count : 'N/A' },
+                { label: 'Next Sync Time', value: metrics.next_sync_time ? formatTimestamp(new Date(metrics.next_sync_time)) : 'N/A' },
+                { label: 'Total Syncs', value: metrics.total_syncs !== undefined ? metrics.total_syncs : 0 },
+                { label: 'Success Count', value: metrics.success_count !== undefined ? metrics.success_count : 0 },
+                { label: 'Failure Count', value: metrics.failure_count !== undefined ? metrics.failure_count : 0 },
+                { label: 'Consecutive Failures', value: metrics.consecutive_failures !== undefined ? metrics.consecutive_failures : 0 },
+                { label: 'Success Rate', value: formatPercentage(metrics.success_rate) },
                 { label: 'Step Count', value: metrics.step_count || 0 },
                 { label: 'Steps', value: Array.isArray(metrics.steps) ? metrics.steps.join(', ') : 'N/A' },
+                { label: 'Last Sync Error', value: metrics.last_sync_error || 'None', style: metrics.last_sync_error ? 'color: #dc2626;' : '' },
                 { label: 'Last Check', value: formatTimestamp(syncer.last_check) },
             ];
             
             stats.forEach(stat => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' +
+                const valueCell = stat.style ? 
+                    '<td style="' + stat.style + '">' + (stat.isHtml ? stat.value : stat.value) + '</td>' :
                     '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
+                row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' + valueCell;
                 tbody.appendChild(row);
             });
+            
+            // Add status message if available
+            if (syncer.message) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="2" style="color: #dc2626; padding-top: 8px;"><strong>Note:</strong> ' + syncer.message + '</td>';
+                tbody.appendChild(row);
+            }
         }
         
         function renderHydrator() {
@@ -1290,18 +1339,33 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             const metrics = hydrator.metrics || {};
+            
+            // Calculate success rate
+            let successRate = 'N/A';
+            if (metrics.total_tasks_processed > 0) {
+                successRate = ((metrics.total_tasks_succeeded / metrics.total_tasks_processed) * 100).toFixed(2) + '%';
+            }
+            
+            // Calculate failure rate
+            let failureRate = 'N/A';
+            if (metrics.total_tasks_processed > 0) {
+                failureRate = ((metrics.total_tasks_failed / metrics.total_tasks_processed) * 100).toFixed(2) + '%';
+            }
+            
             const stats = [
                 { label: 'Status', value: getStatusBadge(hydrator.status || 'unknown'), isHtml: true },
-                { label: 'Healthy', value: hydrator.healthy ? 'Yes' : 'No' },
+                { label: 'Healthy', value: hydrator.healthy ? getStatusBadge('healthy') : getStatusBadge('unhealthy'), isHtml: true },
                 { label: 'Is Running', value: metrics.is_running ? 'Yes' : 'No' },
                 { label: 'Enabled', value: metrics.enabled !== undefined ? (metrics.enabled ? 'Yes' : 'No') : 'N/A' },
-                { label: 'Queue Length', value: metrics.queue_length || 0 },
-                { label: 'Active Tasks', value: metrics.active_tasks_count || 0 },
-                { label: 'Total Processed', value: metrics.total_tasks_processed || 0 },
-                { label: 'Total Succeeded', value: metrics.total_tasks_succeeded || 0 },
-                { label: 'Total Failed', value: metrics.total_tasks_failed || 0 },
-                { label: 'Completed Tasks', value: metrics.completed_tasks_count || 0 },
-                { label: 'Failed Tasks', value: metrics.failed_tasks_count || 0 },
+                { label: 'Queue Length', value: metrics.queue_length !== undefined ? metrics.queue_length : 0 },
+                { label: 'Active Tasks', value: metrics.active_tasks_count !== undefined ? metrics.active_tasks_count : 0 },
+                { label: 'Total Processed', value: metrics.total_tasks_processed !== undefined ? metrics.total_tasks_processed : 0 },
+                { label: 'Total Succeeded', value: metrics.total_tasks_succeeded !== undefined ? metrics.total_tasks_succeeded : 0 },
+                { label: 'Total Failed', value: metrics.total_tasks_failed !== undefined ? metrics.total_tasks_failed : 0 },
+                { label: 'Success Rate', value: successRate },
+                { label: 'Failure Rate', value: failureRate },
+                { label: 'Completed Tasks', value: metrics.completed_tasks_count !== undefined ? metrics.completed_tasks_count : 0 },
+                { label: 'Failed Tasks', value: metrics.failed_tasks_count !== undefined ? metrics.failed_tasks_count : 0 },
                 { label: 'Last Check', value: formatTimestamp(hydrator.last_check) },
             ];
             
@@ -1311,6 +1375,183 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
                 tbody.appendChild(row);
             });
+            
+            // Add status message if available
+            if (hydrator.message) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="2" style="color: #dc2626; padding-top: 8px;"><strong>Note:</strong> ' + hydrator.message + '</td>';
+                tbody.appendChild(row);
+            }
+            
+            // Render active tasks
+            renderHydratorActiveTasks(metrics.active_tasks);
+            
+            // Render worker status
+            renderHydratorWorkers(metrics.workers);
+            
+            // Render task history
+            renderHydratorHistory(metrics.recent_completed_tasks, metrics.recent_failed_tasks);
+        }
+        
+        function renderHydratorActiveTasks(activeTasks) {
+            const container = document.getElementById('hydratorActiveTasks');
+            if (!container) return;
+            
+            if (!activeTasks || activeTasks.length === 0) {
+                container.innerHTML = '<h3>Active Tasks</h3><p class="empty-state">No active tasks</p>';
+                return;
+            }
+            
+            let html = '<h3>Active Tasks (' + activeTasks.length + ')</h3>';
+            html += '<div class="table-container" style="max-height: 300px; overflow-y: auto;">';
+            html += '<table style="font-size: 12px;"><thead><tr>';
+            html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Source ID</th>';
+            html += '<th>Current Step</th><th>Progress</th><th>Status</th><th>Started At</th>';
+            html += '</tr></thead><tbody>';
+            
+            activeTasks.forEach(task => {
+                const progress = task.progress ? task.progress.toFixed(1) + '%' : 'N/A';
+                const stepInfo = task.current_step ? task.current_step + ' (' + (task.step_index + 1) + '/' + task.total_steps + ')' : 'N/A';
+                html += '<tr>';
+                html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
+                html += '<td>' + (task.app_id || 'N/A') + '</td>';
+                html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                html += '<td>' + (task.user_id || 'N/A') + '</td>';
+                html += '<td>' + (task.source_id || 'N/A') + '</td>';
+                html += '<td>' + stepInfo + '</td>';
+                html += '<td>' + progress + '</td>';
+                html += '<td>' + getStatusBadge(task.status || 'running') + '</td>';
+                html += '<td>' + (task.started_at ? formatTimestamp(new Date(task.started_at)) : 'N/A') + '</td>';
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+        
+        function renderHydratorWorkers(workers) {
+            const container = document.getElementById('hydratorWorkers');
+            if (!container) return;
+            
+            if (!workers || workers.length === 0) {
+                container.innerHTML = '<h3>Workers</h3><p class="empty-state">No worker information</p>';
+                return;
+            }
+            
+            let html = '<h3>Workers (' + workers.length + ')</h3>';
+            html += '<div class="table-container" style="max-height: 300px; overflow-y: auto;">';
+            html += '<table style="font-size: 12px;"><thead><tr>';
+            html += '<th>Worker ID</th><th>Status</th><th>Current Task</th><th>App ID</th><th>Step</th><th>Progress</th><th>Last Activity</th>';
+            html += '</tr></thead><tbody>';
+            
+            workers.forEach(worker => {
+                const statusBadge = worker.is_idle ? getStatusBadge('idle') : getStatusBadge('busy');
+                const task = worker.current_task;
+                html += '<tr>';
+                html += '<td>' + worker.worker_id + '</td>';
+                html += '<td>' + statusBadge + '</td>';
+                if (task) {
+                    const progress = task.progress ? task.progress.toFixed(1) + '%' : 'N/A';
+                    html += '<td>' + (task.task_id || 'N/A').substring(0, 15) + '...' + '</td>';
+                    html += '<td>' + (task.app_id || 'N/A') + '</td>';
+                    html += '<td>' + (task.current_step || 'N/A') + '</td>';
+                    html += '<td>' + progress + '</td>';
+                } else {
+                    html += '<td colspan="4" class="empty-state">Idle</td>';
+                }
+                html += '<td>' + (worker.last_activity ? formatTimestamp(new Date(worker.last_activity)) : 'N/A') + '</td>';
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+        
+        function renderHydratorHistory(completedTasks, failedTasks) {
+            const container = document.getElementById('hydratorHistory');
+            if (!container) return;
+            
+            const hasCompleted = completedTasks && completedTasks.length > 0;
+            const hasFailed = failedTasks && failedTasks.length > 0;
+            
+            if (!hasCompleted && !hasFailed) {
+                container.innerHTML = '<h3>Task History</h3><p class="empty-state">No task history</p>';
+                return;
+            }
+            
+            let html = '<h3>Task History</h3>';
+            
+            // Recent completed tasks
+            if (hasCompleted) {
+                html += '<h4 style="margin-top: 16px; color: #059669;">Recent Completed Tasks (' + completedTasks.length + ')</h4>';
+                html += '<div class="table-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 20px;">';
+                html += '<table style="font-size: 12px;"><thead><tr>';
+                html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Duration</th><th>Completed At</th>';
+                html += '</tr></thead><tbody>';
+                
+                completedTasks.slice(0, 10).forEach(task => {
+                    const duration = task.duration ? formatDuration(task.duration) : 'N/A';
+                    html += '<tr>';
+                    html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
+                    html += '<td>' + (task.app_id || 'N/A') + '</td>';
+                    html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                    html += '<td>' + (task.user_id || 'N/A') + '</td>';
+                    html += '<td>' + duration + '</td>';
+                    html += '<td>' + (task.completed_at ? formatTimestamp(new Date(task.completed_at)) : 'N/A') + '</td>';
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table></div>';
+            }
+            
+            // Recent failed tasks
+            if (hasFailed) {
+                html += '<h4 style="margin-top: 16px; color: #dc2626;">Recent Failed Tasks (' + failedTasks.length + ')</h4>';
+                html += '<div class="table-container" style="max-height: 200px; overflow-y: auto;">';
+                html += '<table style="font-size: 12px;"><thead><tr>';
+                html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Failed Step</th><th>Error</th><th>Failed At</th>';
+                html += '</tr></thead><tbody>';
+                
+                failedTasks.slice(0, 10).forEach(task => {
+                    html += '<tr>';
+                    html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
+                    html += '<td>' + (task.app_id || 'N/A') + '</td>';
+                    html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                    html += '<td>' + (task.user_id || 'N/A') + '</td>';
+                    html += '<td>' + (task.failed_step || 'N/A') + '</td>';
+                    html += '<td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + (task.error_msg || '') + '">';
+                    html += (task.error_msg || 'N/A') + '</td>';
+                    html += '<td>' + (task.completed_at ? formatTimestamp(new Date(task.completed_at)) : 'N/A') + '</td>';
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table></div>';
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        function formatDuration(durationStr) {
+            if (!durationStr) return 'N/A';
+            // Try to parse duration string like "1h30m45s" or number in seconds
+            if (typeof durationStr === 'string') {
+                return durationStr;
+            }
+            // If it's a number, assume it's nanoseconds and convert
+            if (typeof durationStr === 'number') {
+                const seconds = Math.floor(durationStr / 1e9);
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                if (hours > 0) {
+                    return hours + 'h' + minutes + 'm' + secs + 's';
+                } else if (minutes > 0) {
+                    return minutes + 'm' + secs + 's';
+                } else {
+                    return secs + 's';
+                }
+            }
+            return 'N/A';
         }
         
         function renderCacheStats() {

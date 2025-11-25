@@ -26,11 +26,27 @@ type Syncer struct {
 	isRunning       atomic.Bool               // Use atomic.Bool for thread-safe boolean operations
 	mutex           sync.RWMutex              // Keep mutex for steps slice operations
 	settingsManager *settings.SettingsManager // Settings manager for data source information
+
+	// Status tracking fields
+	lastSyncTime        atomic.Value // time.Time
+	lastSyncSuccess     atomic.Value // time.Time
+	lastSyncError       atomic.Value // error (stored as string)
+	currentStep         atomic.Value // string
+	currentStepIndex    atomic.Int32 // int32
+	totalSteps          atomic.Int32 // int32
+	syncCount           atomic.Int64
+	successCount        atomic.Int64
+	failureCount        atomic.Int64
+	consecutiveFailures atomic.Int64
+	lastSyncDuration    atomic.Value // time.Duration
+	currentSource       atomic.Value // string
+	lastSyncedAppCount  atomic.Int64
+	statusMutex         sync.RWMutex // Mutex for complex status updates
 }
 
 // NewSyncer creates a new syncer with the given steps
 func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *settings.SettingsManager) *Syncer {
-	return &Syncer{
+	s := &Syncer{
 		steps:           make([]syncerfn.SyncStep, 0),
 		cache:           cache,
 		cacheManager:    atomic.Pointer[CacheManager]{}, // Initialize with nil
@@ -39,18 +55,31 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 		isRunning:       atomic.Bool{}, // Initialize with false
 		settingsManager: settingsManager,
 	}
+	// Initialize atomic values
+	s.lastSyncTime.Store(time.Time{})
+	s.lastSyncSuccess.Store(time.Time{})
+	s.lastSyncError.Store("")
+	s.currentStep.Store("")
+	s.lastSyncDuration.Store(time.Duration(0))
+	s.currentSource.Store("")
+	return s
 }
 
 // AddStep adds a step to the syncer
 func (s *Syncer) AddStep(step syncerfn.SyncStep) {
-	s.mutex.Lock()
+	if !s.mutex.TryLock() {
+		log.Printf("Failed to acquire lock for AddStep, skipping")
+		return
+	}
 	defer s.mutex.Unlock()
 	s.steps = append(s.steps, step)
 }
 
 // RemoveStep removes a step by index
 func (s *Syncer) RemoveStep(index int) error {
-	s.mutex.Lock()
+	if !s.mutex.TryLock() {
+		return fmt.Errorf("failed to acquire lock for RemoveStep")
+	}
 	defer s.mutex.Unlock()
 
 	if index < 0 || index >= len(s.steps) {
@@ -63,7 +92,10 @@ func (s *Syncer) RemoveStep(index int) error {
 
 // GetSteps returns a copy of all steps
 func (s *Syncer) GetSteps() []syncerfn.SyncStep {
-	s.mutex.RLock()
+	if !s.mutex.TryRLock() {
+		log.Printf("Failed to acquire read lock for GetSteps, returning empty slice")
+		return make([]syncerfn.SyncStep, 0)
+	}
 	defer s.mutex.RUnlock()
 
 	steps := make([]syncerfn.SyncStep, len(s.steps))
@@ -73,7 +105,9 @@ func (s *Syncer) GetSteps() []syncerfn.SyncStep {
 
 // Start begins the synchronization process
 func (s *Syncer) Start(ctx context.Context) error {
-	s.mutex.Lock()
+	if !s.mutex.TryLock() {
+		return fmt.Errorf("failed to acquire lock for Start")
+	}
 	if s.isRunning.Load() {
 		s.mutex.Unlock()
 		return fmt.Errorf("syncer is already running")
@@ -89,7 +123,10 @@ func (s *Syncer) Start(ctx context.Context) error {
 
 // Stop stops the synchronization process
 func (s *Syncer) Stop() {
-	s.mutex.Lock()
+	if !s.mutex.TryLock() {
+		log.Printf("Failed to acquire lock for Stop, skipping")
+		return
+	}
 	defer s.mutex.Unlock()
 
 	if !s.isRunning.Load() {
@@ -109,9 +146,11 @@ func (s *Syncer) IsRunning() bool {
 // syncLoop runs the main synchronization loop
 func (s *Syncer) syncLoop(ctx context.Context) {
 	defer func() {
-		s.mutex.Lock()
-		s.isRunning.Store(false)
-		s.mutex.Unlock()
+		// Use TryLock for cleanup to avoid blocking
+		if s.mutex.TryLock() {
+			s.isRunning.Store(false)
+			s.mutex.Unlock()
+		}
 		log.Println("Syncer stopped")
 	}()
 
@@ -158,11 +197,17 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	log.Println("Starting sync cycle")
 	startTime := time.Now()
 
+	// Update status: mark sync cycle started
+	s.lastSyncTime.Store(time.Now())
+	s.syncCount.Add(1)
+
 	// Get available data sources
 	activeSources := s.settingsManager.GetActiveMarketSources()
 	if len(activeSources) == 0 {
 		log.Println("==================== SYNC CYCLE FAILED ====================")
-		return fmt.Errorf("no active market sources available")
+		err := fmt.Errorf("no active market sources available")
+		s.updateSyncFailure(err, startTime)
+		return err
 	}
 
 	log.Printf("Found %d active market sources", len(activeSources))
@@ -170,6 +215,7 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	// Try each source in priority order until one succeeds
 	var lastError error
 	for _, source := range activeSources {
+		s.currentSource.Store(source.ID)
 		log.Printf("Trying market source: %s (%s)", source.ID, source.BaseURL)
 
 		if err := s.executeSyncCycleWithSource(ctx, source); err != nil {
@@ -181,13 +227,54 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		// Success with this source
 		duration := time.Since(startTime)
 		log.Printf("Sync cycle completed successfully with source %s in %v", source.ID, duration)
-
+		s.updateSyncSuccess(duration, startTime)
+		log.Println("==================== SYNC CYCLE COMPLETED ====================")
+		return nil
 	}
-	log.Println("==================== SYNC CYCLE COMPLETED ====================")
 
 	// All sources failed
 	log.Println("==================== SYNC CYCLE FAILED ====================")
-	return fmt.Errorf("all market sources failed, last error: %w", lastError)
+	err := fmt.Errorf("all market sources failed, last error: %w", lastError)
+	s.updateSyncFailure(err, startTime)
+	return err
+}
+
+// updateSyncSuccess updates status after a successful sync
+func (s *Syncer) updateSyncSuccess(duration time.Duration, startTime time.Time) {
+	if !s.statusMutex.TryLock() {
+		log.Printf("Failed to acquire lock for updateSyncSuccess, skipping status update")
+		return
+	}
+	defer s.statusMutex.Unlock()
+
+	s.lastSyncSuccess.Store(time.Now())
+	s.lastSyncDuration.Store(duration)
+	s.lastSyncError.Store("")
+	s.consecutiveFailures.Store(0)
+	s.successCount.Add(1)
+	s.currentStep.Store("")
+	s.currentStepIndex.Store(0)
+	s.totalSteps.Store(0)
+}
+
+// updateSyncFailure updates status after a failed sync
+func (s *Syncer) updateSyncFailure(err error, startTime time.Time) {
+	if !s.statusMutex.TryLock() {
+		log.Printf("Failed to acquire lock for updateSyncFailure, skipping status update")
+		return
+	}
+	defer s.statusMutex.Unlock()
+
+	duration := time.Since(startTime)
+	s.lastSyncDuration.Store(duration)
+	if err != nil {
+		s.lastSyncError.Store(err.Error())
+	}
+	s.consecutiveFailures.Add(1)
+	s.failureCount.Add(1)
+	s.currentStep.Store("")
+	s.currentStepIndex.Store(0)
+	s.totalSteps.Store(0)
 }
 
 // executeSyncCycleWithSource executes sync cycle with a specific market source
@@ -221,14 +308,22 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 	defer cancel()
 
 	steps := s.GetSteps()
+	s.totalSteps.Store(int32(len(steps)))
+
 	for i, step := range steps {
-		log.Printf("======== SYNC STEP %d/%d STARTED: %s ========", i+1, len(steps), step.GetStepName())
+		stepName := step.GetStepName()
+		log.Printf("======== SYNC STEP %d/%d STARTED: %s ========", i+1, len(steps), stepName)
+
+		// Update current step status
+		s.currentStep.Store(stepName)
+		s.currentStepIndex.Store(int32(i))
+
 		stepStartTime := time.Now()
 
 		// Check if step can be skipped
 		if step.CanSkip(syncCtx, syncContext) {
-			log.Printf("Skipping step %d: %s", i+1, step.GetStepName())
-			log.Printf("======== SYNC STEP %d/%d SKIPPED: %s ========", i+1, len(steps), step.GetStepName())
+			log.Printf("Skipping step %d: %s", i+1, stepName)
+			log.Printf("======== SYNC STEP %d/%d SKIPPED: %s ========", i+1, len(steps), stepName)
 			continue
 		}
 
@@ -283,6 +378,13 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		log.Printf("Storing complete data to app-info-latest-pending for all users")
 		log.Printf("Sync context status - HashMatches: %t, RemoteHash: %s, LocalHash: %s",
 			syncContext.HashMatches, syncContext.RemoteHash, syncContext.LocalHash)
+
+		// Count apps synced
+		var appCount int64
+		if apps := syncContext.LatestData.Data.Apps; apps != nil {
+			appCount = int64(len(apps))
+		}
+		s.lastSyncedAppCount.Store(appCount)
 
 		// Convert LatestData to the format expected by cache
 		completeData := map[string]interface{}{
@@ -724,7 +826,137 @@ func DefaultSyncerConfig() SyncerConfig {
 
 // SetCacheManager sets the cache manager for hydration notifications
 func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
-	s.mutex.Lock()
+	if !s.mutex.TryLock() {
+		log.Printf("Failed to acquire lock for SetCacheManager, skipping")
+		return
+	}
 	defer s.mutex.Unlock()
 	s.cacheManager.Store(cacheManager) // Use atomic.Store to set the pointer
+}
+
+// SyncerMetrics contains metrics for the syncer
+type SyncerMetrics struct {
+	IsRunning           bool          `json:"is_running"`
+	SyncInterval        time.Duration `json:"sync_interval"`
+	LastSyncTime        time.Time     `json:"last_sync_time"`
+	LastSyncSuccess     time.Time     `json:"last_sync_success"`
+	LastSyncError       string        `json:"last_sync_error,omitempty"`
+	CurrentStep         string        `json:"current_step,omitempty"`
+	CurrentStepIndex    int32         `json:"current_step_index"`
+	TotalSteps          int32         `json:"total_steps"`
+	CurrentSource       string        `json:"current_source,omitempty"`
+	TotalSyncs          int64         `json:"total_syncs"`
+	SuccessCount        int64         `json:"success_count"`
+	FailureCount        int64         `json:"failure_count"`
+	ConsecutiveFailures int64         `json:"consecutive_failures"`
+	LastSyncDuration    time.Duration `json:"last_sync_duration"`
+	LastSyncedAppCount  int64         `json:"last_synced_app_count"`
+	SuccessRate         float64       `json:"success_rate"` // 0-100
+	NextSyncTime        time.Time     `json:"next_sync_time,omitempty"`
+}
+
+// GetMetrics returns syncer metrics
+func (s *Syncer) GetMetrics() SyncerMetrics {
+	lastSyncTime := s.lastSyncTime.Load()
+	lastSyncSuccess := s.lastSyncSuccess.Load()
+	lastSyncError := s.lastSyncError.Load()
+	currentStep := s.currentStep.Load()
+	lastSyncDuration := s.lastSyncDuration.Load()
+	currentSource := s.currentSource.Load()
+
+	var lastSyncTimeVal time.Time
+	var lastSyncSuccessVal time.Time
+	var lastSyncErrorVal string
+	var currentStepVal string
+	var lastSyncDurationVal time.Duration
+	var currentSourceVal string
+
+	if t, ok := lastSyncTime.(time.Time); ok {
+		lastSyncTimeVal = t
+	}
+	if t, ok := lastSyncSuccess.(time.Time); ok {
+		lastSyncSuccessVal = t
+	}
+	if err, ok := lastSyncError.(string); ok {
+		lastSyncErrorVal = err
+	}
+	if step, ok := currentStep.(string); ok {
+		currentStepVal = step
+	}
+	if d, ok := lastSyncDuration.(time.Duration); ok {
+		lastSyncDurationVal = d
+	}
+	if src, ok := currentSource.(string); ok {
+		currentSourceVal = src
+	}
+
+	totalSyncs := s.syncCount.Load()
+	successCount := s.successCount.Load()
+	failureCount := s.failureCount.Load()
+
+	// Calculate success rate
+	var successRate float64
+	if totalSyncs > 0 {
+		successRate = float64(successCount) * 100.0 / float64(totalSyncs)
+	}
+
+	// Calculate next sync time
+	var nextSyncTime time.Time
+	if s.isRunning.Load() && !lastSyncTimeVal.IsZero() {
+		nextSyncTime = lastSyncTimeVal.Add(s.syncInterval)
+	} else if !lastSyncSuccessVal.IsZero() {
+		nextSyncTime = lastSyncSuccessVal.Add(s.syncInterval)
+	}
+
+	return SyncerMetrics{
+		IsRunning:           s.isRunning.Load(),
+		SyncInterval:        s.syncInterval,
+		LastSyncTime:        lastSyncTimeVal,
+		LastSyncSuccess:     lastSyncSuccessVal,
+		LastSyncError:       lastSyncErrorVal,
+		CurrentStep:         currentStepVal,
+		CurrentStepIndex:    s.currentStepIndex.Load(),
+		TotalSteps:          s.totalSteps.Load(),
+		CurrentSource:       currentSourceVal,
+		TotalSyncs:          totalSyncs,
+		SuccessCount:        successCount,
+		FailureCount:        failureCount,
+		ConsecutiveFailures: s.consecutiveFailures.Load(),
+		LastSyncDuration:    lastSyncDurationVal,
+		LastSyncedAppCount:  s.lastSyncedAppCount.Load(),
+		SuccessRate:         successRate,
+		NextSyncTime:        nextSyncTime,
+	}
+}
+
+// IsHealthy returns whether the syncer is healthy
+func (s *Syncer) IsHealthy() bool {
+	if !s.isRunning.Load() {
+		return false
+	}
+
+	// Check for too many consecutive failures
+	if s.consecutiveFailures.Load() >= 3 {
+		return false
+	}
+
+	// Check if last sync was too long ago
+	lastSuccess := s.lastSyncSuccess.Load()
+	if t, ok := lastSuccess.(time.Time); ok && !t.IsZero() {
+		// If last success was more than 3 sync intervals ago, consider unhealthy
+		if time.Since(t) > s.syncInterval*3 {
+			return false
+		}
+	} else {
+		// If never had a successful sync, check if we've been running for a while
+		lastSync := s.lastSyncTime.Load()
+		if t, ok := lastSync.(time.Time); ok && !t.IsZero() {
+			// If running but never succeeded and it's been more than 3 intervals, unhealthy
+			if time.Since(t) > s.syncInterval*3 && s.syncCount.Load() > 0 {
+				return false
+			}
+		}
+	}
+
+	return true
 }
