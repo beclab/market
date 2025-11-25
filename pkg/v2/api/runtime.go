@@ -1588,21 +1588,43 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         function showMainTab(tabName, element) {
-            // Hide all main tabs
-            document.querySelectorAll('.main-tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.querySelectorAll('.main-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
+            // Find the parent panel to scope the tab switching
+            const panel = element ? element.closest('.panel') : null;
+            if (!panel) {
+                // Fallback: find panel by checking which panel contains this tab
+                const tabElement = document.getElementById(tabName);
+                if (tabElement) {
+                    const parentPanel = tabElement.closest('.panel');
+                    if (parentPanel) {
+                        // Hide only main tabs within this panel
+                        parentPanel.querySelectorAll('.main-tab-content').forEach(content => {
+                            content.classList.remove('active');
+                        });
+                        parentPanel.querySelectorAll('.main-tab').forEach(tab => {
+                            tab.classList.remove('active');
+                        });
+                    }
+                }
+            } else {
+                // Hide only main tabs within this panel
+                panel.querySelectorAll('.main-tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                panel.querySelectorAll('.main-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+            }
             
             // Show selected main tab
-            document.getElementById(tabName).classList.add('active');
+            const tabContent = document.getElementById(tabName);
+            if (tabContent) {
+                tabContent.classList.add('active');
+            }
             if (element) {
                 element.classList.add('active');
             }
             
-            // Reset sub-tabs to show 'all' by default
+            // Reset sub-tabs to show first sub-tab by default
             const subTabs = document.querySelectorAll('#' + tabName + ' .sub-tab');
             const subTabContents = document.querySelectorAll('#' + tabName + ' .sub-tab-content');
             subTabs.forEach(tab => tab.classList.remove('active'));
@@ -1666,7 +1688,20 @@ func generateDashboardHTML(snapshotJSON string) string {
                 }
             } else if (mainTabName.startsWith('chartRepo')) {
                 if (mainTabName === 'chartRepoImageAnalyzer') {
-                    renderChartRepo();
+                    // Re-render Image Analyzer data when switching sub-tabs
+                    const chartRepo = snapshotData.chart_repo || {};
+                    const imageAnalyzer = chartRepo.tasks && chartRepo.tasks.image_analyzer;
+                    if (subTabName === 'overview') {
+                        renderImageAnalyzerOverview('chartRepoImageAnalyzerOverviewBody', imageAnalyzer);
+                    } else if (subTabName === 'queued') {
+                        renderImageAnalyzerTasks('chartRepoImageAnalyzerQueuedBody', imageAnalyzer ? (imageAnalyzer.queued_tasks || []) : []);
+                    } else if (subTabName === 'processing') {
+                        renderImageAnalyzerTasks('chartRepoImageAnalyzerProcessingBody', imageAnalyzer ? (imageAnalyzer.processing_tasks || []) : []);
+                    } else if (subTabName === 'completed') {
+                        renderImageAnalyzerTasks('chartRepoImageAnalyzerCompletedBody', imageAnalyzer ? (imageAnalyzer.recent_completed || []) : []);
+                    } else if (subTabName === 'failed') {
+                        renderImageAnalyzerTasks('chartRepoImageAnalyzerFailedBody', imageAnalyzer ? (imageAnalyzer.recent_failed || []) : []);
+                    }
                 } else {
                     renderChartRepo();
                 }
@@ -1688,13 +1723,22 @@ func generateDashboardHTML(snapshotJSON string) string {
             renderAppsTable('chartRepoAppsCompletedBody', appsCompleted);
             renderAppsTableWithError('chartRepoAppsFailedBody', appsFailed);
             
-            // Render Image Analyzer
+            // Render Image Analyzer - always render all tabs to ensure data is available
             const imageAnalyzer = chartRepo.tasks && chartRepo.tasks.image_analyzer;
-            renderImageAnalyzerOverview('chartRepoImageAnalyzerOverviewBody', imageAnalyzer);
-            renderImageAnalyzerTasks('chartRepoImageAnalyzerQueuedBody', imageAnalyzer ? (imageAnalyzer.queued_tasks || []) : []);
-            renderImageAnalyzerTasks('chartRepoImageAnalyzerProcessingBody', imageAnalyzer ? (imageAnalyzer.processing_tasks || []) : []);
-            renderImageAnalyzerTasks('chartRepoImageAnalyzerCompletedBody', imageAnalyzer ? (imageAnalyzer.recent_completed || []) : []);
-            renderImageAnalyzerTasks('chartRepoImageAnalyzerFailedBody', imageAnalyzer ? (imageAnalyzer.recent_failed || []) : []);
+            if (imageAnalyzer) {
+                renderImageAnalyzerOverview('chartRepoImageAnalyzerOverviewBody', imageAnalyzer);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerQueuedBody', imageAnalyzer.queued_tasks || []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerProcessingBody', imageAnalyzer.processing_tasks || []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerCompletedBody', imageAnalyzer.recent_completed || []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerFailedBody', imageAnalyzer.recent_failed || []);
+            } else {
+                // Clear all Image Analyzer tabs if no data
+                renderImageAnalyzerOverview('chartRepoImageAnalyzerOverviewBody', null);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerQueuedBody', []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerProcessingBody', []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerCompletedBody', []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerFailedBody', []);
+            }
             
             // Render Tasks
             const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
@@ -1893,20 +1937,54 @@ func generateDashboardHTML(snapshotJSON string) string {
                 // Context-specific cells based on tbodyId
                 if (tbodyId.includes('Queued')) {
                     cells += '<td>' + (task.images_count || 0) + '</td>';
-                    cells += '<td style="font-size: 11px;">' + formatTimestamp(task.created_at) + '</td>';
+                    const createdAt = task.created_at;
+                    if (createdAt) {
+                        const createdAtDate = typeof createdAt === 'string' ? new Date(createdAt) : createdAt;
+                        cells += '<td style="font-size: 11px;">' + formatTimestamp(createdAtDate) + '</td>';
+                    } else {
+                        cells += '<td style="font-size: 11px;">-</td>';
+                    }
                 } else if (tbodyId.includes('Processing')) {
-                    cells += '<td>' + (task.worker_id ? task.worker_id : '-') + '</td>';
+                    cells += '<td>' + (task.worker_id !== undefined && task.worker_id !== null ? task.worker_id : '-') + '</td>';
                     const progress = task.images_count > 0 ? ((task.analyzed_count || 0) / task.images_count * 100).toFixed(1) : '0';
                     cells += '<td>' + (task.analyzed_count || 0) + '/' + (task.images_count || 0) + ' (' + progress + '%)</td>';
-                    cells += '<td style="font-size: 11px;">' + (task.started_at ? formatTimestamp(task.started_at) : '-') + '</td>';
+                    const startedAt = task.started_at;
+                    if (startedAt) {
+                        const startedAtDate = typeof startedAt === 'string' ? new Date(startedAt) : startedAt;
+                        cells += '<td style="font-size: 11px;">' + formatTimestamp(startedAtDate) + '</td>';
+                    } else {
+                        cells += '<td style="font-size: 11px;">-</td>';
+                    }
                 } else if (tbodyId.includes('Completed')) {
-                    const duration = task.duration ? (task.duration / 1000000000).toFixed(2) + 's' : '-';
+                    let duration = '-';
+                    if (task.duration) {
+                        if (typeof task.duration === 'string') {
+                            duration = task.duration;
+                        } else if (typeof task.duration === 'number') {
+                            // Assume nanoseconds
+                            duration = (task.duration / 1000000000).toFixed(2) + 's';
+                        }
+                    }
                     cells += '<td>' + duration + '</td>';
-                    cells += '<td style="font-size: 11px;">' + (task.completed_at ? formatTimestamp(task.completed_at) : '-') + '</td>';
+                    const completedAt = task.completed_at;
+                    if (completedAt) {
+                        const completedAtDate = typeof completedAt === 'string' ? new Date(completedAt) : completedAt;
+                        cells += '<td style="font-size: 11px;">' + formatTimestamp(completedAtDate) + '</td>';
+                    } else {
+                        cells += '<td style="font-size: 11px;">-</td>';
+                    }
                 } else if (tbodyId.includes('Failed')) {
                     cells += '<td style="font-size: 11px; color: #991b1b;">' + (task.error || '-') + '</td>';
                     cells += '<td>' + (task.error_step || '-') + '</td>';
-                    cells += '<td style="font-size: 11px;">' + (task.completed_at ? formatTimestamp(task.completed_at) : (task.started_at ? formatTimestamp(task.started_at) : formatTimestamp(task.created_at))) + '</td>';
+                    let failedAt = null;
+                    if (task.completed_at) {
+                        failedAt = typeof task.completed_at === 'string' ? new Date(task.completed_at) : task.completed_at;
+                    } else if (task.started_at) {
+                        failedAt = typeof task.started_at === 'string' ? new Date(task.started_at) : task.started_at;
+                    } else if (task.created_at) {
+                        failedAt = typeof task.created_at === 'string' ? new Date(task.created_at) : task.created_at;
+                    }
+                    cells += '<td style="font-size: 11px;">' + (failedAt ? formatTimestamp(failedAt) : '-') + '</td>';
                 }
                 
                 row.innerHTML = cells;
