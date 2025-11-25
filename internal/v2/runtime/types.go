@@ -188,10 +188,40 @@ type ChartRepoHydratorStatus struct {
 
 // ChartRepoImageAnalyzerStatus represents image analyzer status
 type ChartRepoImageAnalyzerStatus struct {
-	QueueLength    int `json:"queue_length"`
-	ActiveWorkers  int `json:"active_workers"`
-	CachedImages   int `json:"cached_images"`
-	AnalyzingCount int `json:"analyzing_count"`
+	IsRunning           bool                                `json:"is_running"`
+	HealthStatus        string                              `json:"health_status"` // healthy, degraded, unhealthy, stopped
+	LastCheck           time.Time                           `json:"last_check"`
+	QueueLength         int                                 `json:"queue_length"`
+	ActiveWorkers       int                                 `json:"active_workers"`
+	CachedImages        int                                 `json:"cached_images"`
+	AnalyzingCount      int                                 `json:"analyzing_count"`
+	QueuedTasks         []*ChartRepoImageAnalysisTaskDetail `json:"queued_tasks,omitempty"`
+	ProcessingTasks     []*ChartRepoImageAnalysisTaskDetail `json:"processing_tasks,omitempty"`
+	RecentCompleted     []*ChartRepoImageAnalysisTaskDetail `json:"recent_completed,omitempty"`
+	RecentFailed        []*ChartRepoImageAnalysisTaskDetail `json:"recent_failed,omitempty"`
+	TotalAnalyzed       int64                               `json:"total_analyzed"`
+	SuccessfulAnalyzed  int64                               `json:"successful_analyzed"`
+	FailedAnalyzed      int64                               `json:"failed_analyzed"`
+	AverageAnalysisTime time.Duration                       `json:"average_analysis_time"`
+	ErrorMessage        string                              `json:"error_message,omitempty"`
+}
+
+// ChartRepoImageAnalysisTaskDetail represents detailed information about an image analysis task
+type ChartRepoImageAnalysisTaskDetail struct {
+	TaskID        string         `json:"task_id"`
+	AppName       string         `json:"app_name"`
+	AppDir        string         `json:"app_dir"`
+	Status        string         `json:"status"` // pending, processing, completed, failed
+	CreatedAt     time.Time      `json:"created_at"`
+	StartedAt     *time.Time     `json:"started_at,omitempty"`
+	CompletedAt   *time.Time     `json:"completed_at,omitempty"`
+	WorkerID      *int           `json:"worker_id,omitempty"`
+	Duration      *time.Duration `json:"duration,omitempty"`
+	ImagesCount   int            `json:"images_count"`
+	AnalyzedCount int            `json:"analyzed_count,omitempty"`
+	Error         string         `json:"error,omitempty"`
+	ErrorStep     string         `json:"error_step,omitempty"` // extract, analyze, save
+	Images        []string       `json:"images,omitempty"`
 }
 
 // RuntimeSnapshot represents a complete snapshot of the system runtime state

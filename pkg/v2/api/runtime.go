@@ -719,7 +719,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 <!-- Main Tabs for Applications, Images, Tasks -->
                 <div class="main-tabs">
                     <button class="main-tab active" onclick="showMainTab('chartRepoApps', this)">Applications</button>
-                    <button class="main-tab" onclick="showMainTab('chartRepoImages', this)">Images</button>
+                    <button class="main-tab" onclick="showMainTab('chartRepoImageAnalyzer', this)">Image Analyzer</button>
                     <button class="main-tab" onclick="showMainTab('chartRepoTasks', this)">Tasks</button>
                 </div>
                 
@@ -798,104 +798,102 @@ func generateDashboardHTML(snapshotJSON string) string {
                     </div>
                 </div>
                 
-                <!-- Images Tab Content -->
-                <div id="chartRepoImages" class="main-tab-content">
-                    <!-- Sub-tabs for Images by status -->
+                <!-- Image Analyzer Tab Content -->
+                <div id="chartRepoImageAnalyzer" class="main-tab-content">
+                    <!-- Sub-tabs for Image Analyzer -->
                     <div class="sub-tabs">
-                        <button class="sub-tab active" onclick="showSubTab('chartRepoImages', 'all', this)">All</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'queued', this)">Queued</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'not_downloaded', this)">Not Downloaded</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'downloading', this)">Downloading</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'downloaded', this)">Downloaded</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'failed', this)">Failed</button>
+                        <button class="sub-tab active" onclick="showSubTab('chartRepoImageAnalyzer', 'overview', this)">Overview</button>
+                        <button class="sub-tab" onclick="showSubTab('chartRepoImageAnalyzer', 'queued', this)">Queued Tasks</button>
+                        <button class="sub-tab" onclick="showSubTab('chartRepoImageAnalyzer', 'processing', this)">Processing</button>
+                        <button class="sub-tab" onclick="showSubTab('chartRepoImageAnalyzer', 'completed', this)">Completed</button>
+                        <button class="sub-tab" onclick="showSubTab('chartRepoImageAnalyzer', 'failed', this)">Failed</button>
                     </div>
-                    <div class="sub-tab-content active" id="chartRepoImages-all">
-                        <div class="table-container">
-                            <table id="chartRepoImagesTable">
-                                <thead>
-                                    <tr>
-                                        <th>Image Name</th>
-                                        <th>App Name</th>
-                                        <th>Status</th>
-                                        <th>Progress</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="chartRepoImagesTableBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="chartRepoImages-queued">
+                    
+                    <!-- Overview Tab Content -->
+                    <div class="sub-tab-content active" id="chartRepoImageAnalyzer-overview">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Queue Info</th>
+                                        <th>Property</th>
                                         <th>Value</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesQueuedBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerOverviewBody"></tbody>
                             </table>
                         </div>
-                        <div style="margin-top: 16px; padding: 12px; background: #f9fafb; border-radius: 6px; font-size: 13px; color: #666;">
-                            <strong>Note:</strong> The chart repo API provides queue length information but may not provide the specific list of images in the queue. Images with status "not_downloaded" that are not currently downloading may be in the queue.
-                        </div>
                     </div>
-                    <div class="sub-tab-content" id="chartRepoImages-not_downloaded">
+                    
+                    <!-- Queued Tasks Tab Content -->
+                    <div class="sub-tab-content" id="chartRepoImageAnalyzer-queued">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Image Name</th>
+                                        <th>Task ID</th>
                                         <th>App Name</th>
                                         <th>Status</th>
+                                        <th>Images Count</th>
+                                        <th>Created At</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesNotDownloadedBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerQueuedBody"></tbody>
                             </table>
                         </div>
                     </div>
-                    <div class="sub-tab-content" id="chartRepoImages-downloading">
+                    
+                    <!-- Processing Tasks Tab Content -->
+                    <div class="sub-tab-content" id="chartRepoImageAnalyzer-processing">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Image Name</th>
+                                        <th>Task ID</th>
                                         <th>App Name</th>
                                         <th>Status</th>
+                                        <th>Worker ID</th>
                                         <th>Progress</th>
+                                        <th>Started At</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesDownloadingBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerProcessingBody"></tbody>
                             </table>
                         </div>
                     </div>
-                    <div class="sub-tab-content" id="chartRepoImages-downloaded">
+                    
+                    <!-- Completed Tasks Tab Content -->
+                    <div class="sub-tab-content" id="chartRepoImageAnalyzer-completed">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Image Name</th>
+                                        <th>Task ID</th>
                                         <th>App Name</th>
                                         <th>Status</th>
-                                        <th>Size</th>
+                                        <th>Duration</th>
+                                        <th>Completed At</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesDownloadedBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerCompletedBody"></tbody>
                             </table>
                         </div>
                     </div>
-                    <div class="sub-tab-content" id="chartRepoImages-failed">
+                    
+                    <!-- Failed Tasks Tab Content -->
+                    <div class="sub-tab-content" id="chartRepoImageAnalyzer-failed">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Image Name</th>
+                                        <th>Task ID</th>
                                         <th>App Name</th>
                                         <th>Status</th>
                                         <th>Error</th>
+                                        <th>Error Step</th>
+                                        <th>Failed At</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesFailedBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerFailedBody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -1426,7 +1424,11 @@ func generateDashboardHTML(snapshotJSON string) string {
                     }
                 }
             } else if (mainTabName.startsWith('chartRepo')) {
-                renderChartRepo();
+                if (mainTabName === 'chartRepoImageAnalyzer') {
+                    renderChartRepo();
+                } else {
+                    renderChartRepo();
+                }
             }
         }
         
@@ -1445,32 +1447,13 @@ func generateDashboardHTML(snapshotJSON string) string {
             renderAppsTable('chartRepoAppsCompletedBody', appsCompleted);
             renderAppsTableWithError('chartRepoAppsFailedBody', appsFailed);
             
-            // Render Images
-            const images = chartRepo.images || [];
-            const imagesAll = images;
-            const imagesNotDownloaded = images.filter(img => (img.status || '').toLowerCase().includes('not_downloaded'));
-            const imagesDownloading = images.filter(img => {
-                const status = (img.status || '').toLowerCase();
-                return status.includes('downloading') || status.includes('partially') || (img.download_progress > 0 && img.download_progress < 100);
-            });
-            const imagesDownloaded = images.filter(img => {
-                const status = (img.status || '').toLowerCase();
-                return status.includes('downloaded') || status.includes('fully') || (img.download_progress >= 100);
-            });
-            const imagesFailed = images.filter(img => {
-                const status = (img.status || '').toLowerCase();
-                return status.includes('failed') || status.includes('error') || img.error_message;
-            });
-            
-            // Render queue information
+            // Render Image Analyzer
             const imageAnalyzer = chartRepo.tasks && chartRepo.tasks.image_analyzer;
-            renderImagesQueueInfo('chartRepoImagesQueuedBody', imageAnalyzer, imagesNotDownloaded.length);
-            
-            renderImagesTable('chartRepoImagesTableBody', imagesAll);
-            renderImagesTableSimple('chartRepoImagesNotDownloadedBody', imagesNotDownloaded);
-            renderImagesTable('chartRepoImagesDownloadingBody', imagesDownloading);
-            renderImagesTableWithSize('chartRepoImagesDownloadedBody', imagesDownloaded);
-            renderImagesTableWithError('chartRepoImagesFailedBody', imagesFailed);
+            renderImageAnalyzerOverview('chartRepoImageAnalyzerOverviewBody', imageAnalyzer);
+            renderImageAnalyzerTasks('chartRepoImageAnalyzerQueuedBody', imageAnalyzer ? (imageAnalyzer.queued_tasks || []) : []);
+            renderImageAnalyzerTasks('chartRepoImageAnalyzerProcessingBody', imageAnalyzer ? (imageAnalyzer.processing_tasks || []) : []);
+            renderImageAnalyzerTasks('chartRepoImageAnalyzerCompletedBody', imageAnalyzer ? (imageAnalyzer.recent_completed || []) : []);
+            renderImageAnalyzerTasks('chartRepoImageAnalyzerFailedBody', imageAnalyzer ? (imageAnalyzer.recent_failed || []) : []);
             
             // Render Tasks
             const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
@@ -1598,28 +1581,94 @@ func generateDashboardHTML(snapshotJSON string) string {
             });
         }
         
-        function renderImagesQueueInfo(tbodyId, imageAnalyzer, notDownloadedCount) {
+        function renderImageAnalyzerOverview(tbodyId, imageAnalyzer) {
             const tbody = document.getElementById(tbodyId);
             if (!tbody) return;
             tbody.innerHTML = '';
             
-            const queueLength = imageAnalyzer ? (imageAnalyzer.queue_length || 0) : 0;
-            const activeWorkers = imageAnalyzer ? (imageAnalyzer.active_workers || 0) : 0;
-            const analyzingCount = imageAnalyzer ? (imageAnalyzer.analyzing_count || 0) : 0;
-            const cachedImages = imageAnalyzer ? (imageAnalyzer.cached_images || 0) : 0;
+            if (!imageAnalyzer) {
+                tbody.innerHTML = '<tr><td colspan="2" class="empty-state">No Image Analyzer data</td></tr>';
+                return;
+            }
+            
+            const formatDuration = (ms) => {
+                if (!ms) return 'N/A';
+                const seconds = Math.floor(ms / 1000);
+                if (seconds < 60) return seconds + 's';
+                const minutes = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return minutes + 'm ' + secs + 's';
+            };
             
             const stats = [
-                { label: 'Queue Length', value: queueLength },
-                { label: 'Active Workers', value: activeWorkers },
-                { label: 'Currently Analyzing', value: analyzingCount },
-                { label: 'Cached Images', value: cachedImages },
-                { label: 'Not Downloaded Images', value: notDownloadedCount },
+                { label: 'Is Running', value: imageAnalyzer.is_running ? 'Yes' : 'No' },
+                { label: 'Health Status', value: getStatusBadge(imageAnalyzer.health_status || 'unknown'), isHtml: true },
+                { label: 'Last Check', value: formatTimestamp(imageAnalyzer.last_check) },
+                { label: 'Queue Length', value: imageAnalyzer.queue_length || 0 },
+                { label: 'Active Workers', value: imageAnalyzer.active_workers || 0 },
+                { label: 'Cached Images', value: imageAnalyzer.cached_images || 0 },
+                { label: 'Analyzing Count', value: imageAnalyzer.analyzing_count || 0 },
+                { label: 'Total Analyzed', value: imageAnalyzer.total_analyzed || 0 },
+                { label: 'Successful Analyzed', value: imageAnalyzer.successful_analyzed || 0 },
+                { label: 'Failed Analyzed', value: imageAnalyzer.failed_analyzed || 0 },
+                { label: 'Average Analysis Time', value: imageAnalyzer.average_analysis_time ? formatDuration(imageAnalyzer.average_analysis_time) : 'N/A' },
+                { label: 'Queued Tasks', value: (imageAnalyzer.queued_tasks || []).length },
+                { label: 'Processing Tasks', value: (imageAnalyzer.processing_tasks || []).length },
+                { label: 'Recent Completed', value: (imageAnalyzer.recent_completed || []).length },
+                { label: 'Recent Failed', value: (imageAnalyzer.recent_failed || []).length },
             ];
+            
+            if (imageAnalyzer.error_message) {
+                stats.push({ label: 'Error Message', value: imageAnalyzer.error_message });
+            }
             
             stats.forEach(stat => {
                 const row = document.createElement('tr');
                 row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' +
-                    '<td>' + stat.value + '</td>';
+                    '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function renderImageAnalyzerTasks(tbodyId, tasks) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No tasks</td></tr>';
+                return;
+            }
+            
+            tasks.forEach(task => {
+                const row = document.createElement('tr');
+                let cells = '';
+                
+                // Common cells
+                cells += '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>';
+                cells += '<td>' + (task.app_name || 'N/A') + '</td>';
+                cells += '<td>' + getStatusBadge(task.status || 'unknown') + '</td>';
+                
+                // Context-specific cells based on tbodyId
+                if (tbodyId.includes('Queued')) {
+                    cells += '<td>' + (task.images_count || 0) + '</td>';
+                    cells += '<td style="font-size: 11px;">' + formatTimestamp(task.created_at) + '</td>';
+                } else if (tbodyId.includes('Processing')) {
+                    cells += '<td>' + (task.worker_id ? task.worker_id : '-') + '</td>';
+                    const progress = task.images_count > 0 ? ((task.analyzed_count || 0) / task.images_count * 100).toFixed(1) : '0';
+                    cells += '<td>' + (task.analyzed_count || 0) + '/' + (task.images_count || 0) + ' (' + progress + '%)</td>';
+                    cells += '<td style="font-size: 11px;">' + (task.started_at ? formatTimestamp(task.started_at) : '-') + '</td>';
+                } else if (tbodyId.includes('Completed')) {
+                    const duration = task.duration ? (task.duration / 1000000000).toFixed(2) + 's' : '-';
+                    cells += '<td>' + duration + '</td>';
+                    cells += '<td style="font-size: 11px;">' + (task.completed_at ? formatTimestamp(task.completed_at) : '-') + '</td>';
+                } else if (tbodyId.includes('Failed')) {
+                    cells += '<td style="font-size: 11px; color: #991b1b;">' + (task.error || '-') + '</td>';
+                    cells += '<td>' + (task.error_step || '-') + '</td>';
+                    cells += '<td style="font-size: 11px;">' + (task.completed_at ? formatTimestamp(task.completed_at) : (task.started_at ? formatTimestamp(task.started_at) : formatTimestamp(task.created_at))) + '</td>';
+                }
+                
+                row.innerHTML = cells;
                 tbody.appendChild(row);
             });
         }
