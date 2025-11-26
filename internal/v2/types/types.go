@@ -157,6 +157,7 @@ type AppStateLatestData struct {
 	Status  struct {
 		Name               string `json:"name"`
 		RawAppName         string `json:"rawAppName"`
+		Title              string `json:"title"`
 		State              string `json:"state"`
 		UpdateTime         string `json:"updateTime"`
 		StatusTime         string `json:"statusTime"`
@@ -648,7 +649,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 // NewAppStateLatestData creates a new app state latest data structure
 func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
 	// Extract status information from data
-	var name, rawAppName, state, updateTime, statusTime, lastTransitionTime, progress string
+	var name, rawAppName, title, state, updateTime, statusTime, lastTransitionTime, progress string
 	var entranceStatuses []struct {
 		ID         string `json:"id"`
 		Name       string `json:"name"`
@@ -695,6 +696,10 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	// Extract rawAppName from data
 	if rawAppNameVal, ok := data["rawAppName"].(string); ok {
 		rawAppName = rawAppNameVal
+	}
+	// Extract title from data
+	if titleVal, ok := data["title"].(string); ok {
+		title = titleVal
 	}
 
 	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
@@ -832,6 +837,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		Status: struct {
 			Name               string `json:"name"`
 			RawAppName         string `json:"rawAppName"`
+			Title              string `json:"title"`
 			State              string `json:"state"`
 			UpdateTime         string `json:"updateTime"`
 			StatusTime         string `json:"statusTime"`
@@ -849,6 +855,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		}{
 			Name:               name,
 			RawAppName:         rawAppName,
+			Title:              title,
 			State:              state,
 			UpdateTime:         updateTime,
 			StatusTime:         statusTime,

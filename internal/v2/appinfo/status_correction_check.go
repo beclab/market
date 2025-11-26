@@ -949,19 +949,26 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 
 	// Try to get rawAppName from cache if available
 	rawAppName := ""
+	title := app.Spec.Title
 	if scc.cacheManager != nil && userID != "" && app.Spec.Name != "" {
 		userData := scc.cacheManager.GetUserData(userID)
 		if userData != nil {
 			for _, sourceData := range userData.Sources {
 				for _, cachedAppState := range sourceData.AppStateLatest {
 					if cachedAppState != nil && cachedAppState.Status.Name == app.Spec.Name {
-						rawAppName = cachedAppState.Status.RawAppName
-						if rawAppName != "" {
+						if rawAppName == "" {
+							rawAppName = cachedAppState.Status.RawAppName
+						}
+						// Preserve title from cache if new title is empty
+						if title == "" && cachedAppState.Status.Title != "" {
+							title = cachedAppState.Status.Title
+						}
+						if rawAppName != "" && title != "" {
 							break
 						}
 					}
 				}
-				if rawAppName != "" {
+				if rawAppName != "" && title != "" {
 					break
 				}
 			}
@@ -974,6 +981,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 		Status: struct {
 			Name               string `json:"name"`
 			RawAppName         string `json:"rawAppName"`
+			Title              string `json:"title"`
 			State              string `json:"state"`
 			UpdateTime         string `json:"updateTime"`
 			StatusTime         string `json:"statusTime"`
@@ -991,6 +999,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 		}{
 			Name:               app.Spec.Name,
 			RawAppName:         rawAppName,
+			Title:              title,
 			State:              app.Status.State,
 			UpdateTime:         app.Status.UpdateTime,
 			StatusTime:         app.Status.StatusTime,
@@ -1016,6 +1025,11 @@ func (scc *StatusCorrectionChecker) createStateDataFromAppStateData(appStateData
 	rawAppName := appStateData.Status.RawAppName
 	// Add rawAppName to stateData
 	stateData["rawAppName"] = rawAppName
+
+	// Get title from AppStateLatestData
+	title := appStateData.Status.Title
+	// Add title to stateData
+	stateData["title"] = title
 
 	// Convert entrance statuses to interface{} slice
 	entranceStatuses := make([]interface{}, len(appStateData.Status.EntranceStatuses))
