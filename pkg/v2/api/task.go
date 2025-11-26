@@ -29,11 +29,12 @@ type InstallAppRequest struct {
 
 // CloneAppRequest represents the request body for app clone
 type CloneAppRequest struct {
-	Source  string           `json:"source"`
-	AppName string           `json:"app_name"`
-	Title   string           `json:"title"` // Title for cloned app (used for display purposes)
-	Sync    bool             `json:"sync"`  // Whether this is a synchronous request
-	Envs    []task.AppEnvVar `json:"envs,omitempty"`
+	Source    string             `json:"source"`
+	AppName   string             `json:"app_name"`
+	Title     string             `json:"title"` // Title for cloned app (used for display purposes)
+	Sync      bool               `json:"sync"`  // Whether this is a synchronous request
+	Envs      []task.AppEnvVar   `json:"envs,omitempty"`
+	Entrances []task.AppEntrance `json:"entrances,omitempty"`
 }
 
 // CancelInstallRequest represents the request body for cancel installation
@@ -477,8 +478,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":    cfgType,
 		"images":     images,
 		"envs":       request.Envs,
-		"rawAppName": rawAppName, // Pass rawAppName in metadata
-		"envsHash":   envsHash,   // Pass envsHash in metadata
+		"entrances":  request.Entrances,
+		"rawAppName": rawAppName,    // Pass rawAppName in metadata
+		"envsHash":   envsHash,      // Pass envsHash in metadata
 		"title":      request.Title, // Pass title in metadata (for display purposes)
 	}
 

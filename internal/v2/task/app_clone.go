@@ -11,21 +11,28 @@ import (
 	"market/internal/v2/settings"
 )
 
+// AppEntrance represents an entrance configuration for cloned app
+type AppEntrance struct {
+	Name  string `json:"name"`
+	Title string `json:"title"`
+}
+
 // CloneOptions represents the options for app clone installation
 type CloneOptions struct {
-	App          string      `json:"appName,omitempty"`
-	Dev          bool        `json:"devMode,omitempty"`
-	RepoUrl      string      `json:"repoUrl,omitempty"`
-	CfgUrl       string      `json:"cfgUrl,omitempty"`
-	Version      string      `json:"version,omitempty"`
-	Source       string      `json:"source,omitempty"`
-	User         string      `json:"x_market_user,omitempty"`
-	MarketSource string      `json:"x_market_source,omitempty"`
-	Images       []Image     `json:"images,omitempty"`
-	Envs         []AppEnvVar `json:"envs"`
-	RawAppName   string      `json:"rawAppName,omitempty"` // Raw app name for clone operations
-	EnvsHash     string      `json:"envsHash,omitempty"`   // Hash of envs (first 6 chars) for clone operations
-	Title        string      `json:"title,omitempty"`      // Title for clone operations (for display purposes)
+	App          string        `json:"appName,omitempty"`
+	Dev          bool          `json:"devMode,omitempty"`
+	RepoUrl      string        `json:"repoUrl,omitempty"`
+	CfgUrl       string        `json:"cfgUrl,omitempty"`
+	Version      string        `json:"version,omitempty"`
+	Source       string        `json:"source,omitempty"`
+	User         string        `json:"x_market_user,omitempty"`
+	MarketSource string        `json:"x_market_source,omitempty"`
+	Images       []Image       `json:"images,omitempty"`
+	Envs         []AppEnvVar   `json:"envs"`
+	Entrances    []AppEntrance `json:"entrances,omitempty"`
+	RawAppName   string        `json:"rawAppName,omitempty"` // Raw app name for clone operations
+	EnvsHash     string        `json:"envsHash,omitempty"`   // Hash of envs (first 6 chars) for clone operations
+	Title        string        `json:"title,omitempty"`      // Title for clone operations (for display purposes)
 }
 
 // AppClone clones an application using the app service
@@ -126,6 +133,15 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		log.Printf("Retrieved %d environment variables for task: %s", len(envs), task.ID)
 	}
 
+	// Get entrances from metadata
+	var entrances []AppEntrance
+	if entrancesData, ok := task.Metadata["entrances"]; ok && entrancesData != nil {
+		if entrancesSlice, ok := entrancesData.([]AppEntrance); ok {
+			entrances = entrancesSlice
+		}
+		log.Printf("Retrieved %d entrances for task: %s", len(entrances), task.ID)
+	}
+
 	// Get VC from purchase receipt using rawAppName and inject into environment variables
 	var settingsManager *settings.SettingsManager
 	if tm.mu.TryRLock() {
@@ -179,6 +195,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		MarketSource: appSource,
 		Images:       images,
 		Envs:         envs,
+		Entrances:    entrances,
 		RawAppName:   rawAppName, // Pass rawAppName
 		EnvsHash:     envsHash,   // Pass envsHash
 		Title:        title,      // Pass title (for display purposes)
@@ -215,7 +232,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 			"url":        urlStr,
 			"rawAppName": rawAppName,
 			"envsHash":   envsHash,
-			"title":     title,
+			"title":      title,
 			"error":      err.Error(),
 			"status":     "failed",
 		}
@@ -240,7 +257,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 			"url":          urlStr,
 			"rawAppName":   rawAppName,
 			"envsHash":     envsHash,
-			"title":       title,
+			"title":        title,
 			"raw_response": response,
 			"error":        fmt.Sprintf("Failed to parse response JSON: %v", err),
 			"status":       "failed",
@@ -268,7 +285,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 					"url":              urlStr,
 					"rawAppName":       rawAppName,
 					"envsHash":         envsHash,
-					"title":           title,
+					"title":            title,
 					"backend_response": responseData,
 					"error":            "opID not found in response data",
 					"status":           "failed",
@@ -328,7 +345,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		"url":              urlStr,
 		"rawAppName":       rawAppName,
 		"envsHash":         envsHash,
-		"title":           title,
+		"title":            title,
 		"backend_response": responseData,
 		"opID":             task.OpID,
 		"status":           "success",
