@@ -52,6 +52,53 @@ type Hydrator struct {
 	// Memory monitoring
 	lastMemoryCheck     time.Time
 	memoryCheckInterval time.Duration
+
+	// Worker status tracking
+	workerStatus      map[int]*WorkerStatus // Worker ID -> WorkerStatus
+	workerStatusMutex sync.RWMutex
+
+	// Task history (keep recent completed/failed tasks)
+	recentCompletedTasks []*TaskHistoryEntry // Most recent completed tasks
+	recentFailedTasks    []*TaskHistoryEntry // Most recent failed tasks
+	maxHistorySize       int                 // Maximum number of tasks to keep in history
+}
+
+// WorkerStatus represents the status of a worker
+type WorkerStatus struct {
+	WorkerID     int       `json:"worker_id"`
+	IsIdle       bool      `json:"is_idle"`
+	CurrentTask  *TaskInfo `json:"current_task,omitempty"`
+	LastActivity time.Time `json:"last_activity"`
+}
+
+// TaskInfo represents simplified task information for status display
+type TaskInfo struct {
+	TaskID      string    `json:"task_id"`
+	AppID       string    `json:"app_id"`
+	AppName     string    `json:"app_name"`
+	UserID      string    `json:"user_id"`
+	SourceID    string    `json:"source_id"`
+	CurrentStep string    `json:"current_step"`
+	StepIndex   int       `json:"step_index"`
+	TotalSteps  int       `json:"total_steps"`
+	Progress    float64   `json:"progress"` // 0-100
+	StartedAt   time.Time `json:"started_at"`
+	Status      string    `json:"status"`
+}
+
+// TaskHistoryEntry represents a task in history
+type TaskHistoryEntry struct {
+	TaskID      string        `json:"task_id"`
+	AppID       string        `json:"app_id"`
+	AppName     string        `json:"app_name"`
+	UserID      string        `json:"user_id"`
+	SourceID    string        `json:"source_id"`
+	Status      string        `json:"status"` // completed, failed
+	FailedStep  string        `json:"failed_step,omitempty"`
+	ErrorMsg    string        `json:"error_msg,omitempty"`
+	StartedAt   time.Time     `json:"started_at"`
+	CompletedAt time.Time     `json:"completed_at"`
+	Duration    time.Duration `json:"duration"`
 }
 
 // NewHydrator creates a new hydrator with the given configuration
@@ -76,6 +123,10 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 		syncInterval:         30 * time.Second,       // Default sync interval
 		memoryCheckInterval:  5 * time.Minute,
 		lastMemoryCheck:      time.Now(),
+		workerStatus:         make(map[int]*WorkerStatus),
+		recentCompletedTasks: make([]*TaskHistoryEntry, 0),
+		recentFailedTasks:    make([]*TaskHistoryEntry, 0),
+		maxHistorySize:       50, // Keep last 50 completed and 50 failed tasks
 	}
 
 	// Add default steps
@@ -178,7 +229,15 @@ func (h *Hydrator) EnqueueTask(task *hydrationfn.HydrationTask) error {
 // worker processes tasks from the queue
 func (h *Hydrator) worker(ctx context.Context, workerID int) {
 	log.Printf("Hydration worker %d started", workerID)
-	defer log.Printf("Hydration worker %d stopped", workerID)
+
+	// Initialize worker status
+	h.updateWorkerStatus(workerID, nil, true)
+
+	defer func() {
+		// Mark worker as idle when stopping
+		h.updateWorkerStatus(workerID, nil, true)
+		log.Printf("Hydration worker %d stopped", workerID)
+	}()
 
 	for {
 		select {
@@ -202,6 +261,13 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 	log.Printf("==================== HYDRATION TASK STARTED ====================")
 	log.Printf("Worker %d processing task: %s for app: %s", workerID, task.ID, task.AppID)
+
+	// Update worker status to indicate it's processing this task
+	h.updateWorkerStatus(workerID, task, false)
+	taskStartTime := time.Now()
+
+	// Ensure worker status is cleared when task completes or fails
+	defer h.updateWorkerStatus(workerID, nil, true)
 
 	// Check if task is in cooldown period
 	if task.LastFailureTime != nil && time.Since(*task.LastFailureTime) < 5*time.Minute {
@@ -228,6 +294,9 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 		log.Printf("-------- HYDRATION STEP %d/%d STARTED: %s --------", i+1, len(h.steps), step.GetStepName())
 		log.Printf("Executing step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
+
+		// Update worker status with current step
+		h.updateWorkerStatus(workerID, task, false)
 
 		// Log task data before step execution
 		h.logTaskDataBeforeStep(task, i+1, step.GetStepName())
@@ -258,7 +327,7 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 						time.Sleep(5 * time.Minute) // Wait for cooldown period
 						if err := h.EnqueueTask(task); err != nil {
 							log.Printf("Failed to re-enqueue task for retry: %s, error: %v", task.ID, err)
-							h.markTaskFailed(task)
+							h.markTaskFailed(task, time.Now(), 0, "retry", err.Error())
 						}
 					}()
 					log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY AFTER COOLDOWN ====================")
@@ -266,7 +335,7 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 				} else {
 					// Max retries exceeded
 					log.Printf("Task failed after max retries: %s", task.ID)
-					h.markTaskFailed(task)
+					h.markTaskFailed(task, time.Now(), 0, "max_retries", "max retries exceeded")
 					log.Printf("==================== HYDRATION TASK FAILED ====================")
 					return
 				}
@@ -279,8 +348,9 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			log.Printf("Task %s failed at step %s, moving to render failed list with reason: %s",
 				task.ID, failureStep, failureReason)
 
+			duration := time.Since(taskStartTime)
 			h.moveTaskToRenderFailed(task, failureReason, failureStep)
-			h.markTaskFailed(task)
+			h.markTaskFailed(task, taskStartTime, duration, failureStep, failureReason)
 
 			log.Printf("==================== HYDRATION TASK MOVED TO RENDER FAILED LIST ====================")
 			return
@@ -296,10 +366,37 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 	// All steps completed successfully
 	task.SetStatus(hydrationfn.TaskStatusCompleted)
-	h.markTaskCompleted(task)
+	duration := time.Since(taskStartTime)
+	h.markTaskCompleted(task, taskStartTime, duration)
 
 	log.Printf("Task completed successfully: %s for app: %s", task.ID, task.AppID)
 	log.Printf("==================== HYDRATION TASK COMPLETED ====================")
+}
+
+// updateWorkerStatus updates the status of a worker
+func (h *Hydrator) updateWorkerStatus(workerID int, task *hydrationfn.HydrationTask, isIdle bool) {
+	if !h.workerStatusMutex.TryLock() {
+		return // Skip if can't acquire lock
+	}
+	defer h.workerStatusMutex.Unlock()
+
+	if isIdle {
+		delete(h.workerStatus, workerID)
+		return
+	}
+
+	// Worker is processing a task
+	var taskInfo *TaskInfo
+	if task != nil {
+		taskInfo = h.taskToTaskInfo(task)
+	}
+
+	h.workerStatus[workerID] = &WorkerStatus{
+		WorkerID:     workerID,
+		IsIdle:       false,
+		CurrentTask:  taskInfo,
+		LastActivity: time.Now(),
+	}
 }
 
 // logTaskDataBeforeStep logs task data before step execution to help debug JSON cycle issues
@@ -797,7 +894,10 @@ func (h *Hydrator) deepCopyValue(value interface{}, visited map[uintptr]bool) in
 
 // hasActiveTaskForApp checks if there's already an active task for the given app
 func (h *Hydrator) hasActiveTaskForApp(userID, sourceID, appID string) bool {
-	h.taskMutex.RLock()
+	if !h.taskMutex.TryRLock() {
+		log.Printf("Failed to acquire read lock for hasActiveTaskForApp, returning false")
+		return false
+	}
 	defer h.taskMutex.RUnlock()
 
 	log.Printf("DEBUG: Checking active tasks for app: %s (user: %s, source: %s), total active tasks: %d", appID, userID, sourceID, len(h.activeTasks))
@@ -814,20 +914,26 @@ func (h *Hydrator) hasActiveTaskForApp(userID, sourceID, appID string) bool {
 
 // trackTask adds task to active tasks tracking
 func (h *Hydrator) trackTask(task *hydrationfn.HydrationTask) {
-	h.taskMutex.Lock()
+	if !h.taskMutex.TryLock() {
+		log.Printf("Failed to acquire lock for trackTask, skipping task tracking")
+		return
+	}
 	defer h.taskMutex.Unlock()
 	h.activeTasks[task.ID] = task
 }
 
 // markTaskCompleted moves task from active to completed
-func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
+func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration) {
 	// Extract file path for cleanup before the lock
 	var sourceChartPath string
 	if path, ok := task.ChartData["source_chart_path"].(string); ok {
 		sourceChartPath = path
 	}
 
-	h.taskMutex.Lock()
+	if !h.taskMutex.TryLock() {
+		log.Printf("Failed to acquire lock for markTaskCompleted, skipping status update")
+		return
+	}
 	delete(h.activeTasks, task.ID)
 
 	// Clean up in-memory data under lock
@@ -840,6 +946,9 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
 	h.totalTasksProcessed++
 	h.totalTasksSucceeded++
 	h.taskMutex.Unlock() // Unlock before channel send and I/O
+
+	// Add to task history
+	h.addToCompletedHistory(task, startedAt, duration)
 
 	// Add to batch completion queue for processing
 	select {
@@ -859,14 +968,17 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask) {
 }
 
 // markTaskFailed moves task from active to failed
-func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
+func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration, failedStep string, errorMsg string) {
 	// Extract file path for cleanup before the lock
 	var sourceChartPath string
 	if path, ok := task.ChartData["source_chart_path"].(string); ok {
 		sourceChartPath = path
 	}
 
-	h.taskMutex.Lock()
+	if !h.taskMutex.TryLock() {
+		log.Printf("Failed to acquire lock for markTaskFailed, skipping status update")
+		return
+	}
 
 	task.SetStatus(hydrationfn.TaskStatusFailed)
 	delete(h.activeTasks, task.ID)
@@ -899,11 +1011,70 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask) {
 	h.totalTasksFailed++
 	h.taskMutex.Unlock() // Unlock before I/O
 
+	// Add to task history
+	h.addToFailedHistory(task, startedAt, duration, failedStep, errorMsg)
+
 	// Clean up file resources after releasing the lock
 	if sourceChartPath != "" {
 		if err := os.Remove(sourceChartPath); err != nil {
 			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
 		}
+	}
+}
+
+// addToCompletedHistory adds a task to the completed tasks history
+func (h *Hydrator) addToCompletedHistory(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration) {
+	if !h.workerStatusMutex.TryLock() {
+		log.Printf("Failed to acquire lock for addToCompletedHistory, skipping")
+		return
+	}
+	defer h.workerStatusMutex.Unlock()
+
+	entry := &TaskHistoryEntry{
+		TaskID:      task.ID,
+		AppID:       task.AppID,
+		AppName:     task.AppName,
+		UserID:      task.UserID,
+		SourceID:    task.SourceID,
+		Status:      "completed",
+		StartedAt:   startedAt,
+		CompletedAt: time.Now(),
+		Duration:    duration,
+	}
+
+	// Append and limit size
+	h.recentCompletedTasks = append([]*TaskHistoryEntry{entry}, h.recentCompletedTasks...)
+	if len(h.recentCompletedTasks) > h.maxHistorySize {
+		h.recentCompletedTasks = h.recentCompletedTasks[:h.maxHistorySize]
+	}
+}
+
+// addToFailedHistory adds a task to the failed tasks history
+func (h *Hydrator) addToFailedHistory(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration, failedStep string, errorMsg string) {
+	if !h.workerStatusMutex.TryLock() {
+		log.Printf("Failed to acquire lock for addToFailedHistory, skipping")
+		return
+	}
+	defer h.workerStatusMutex.Unlock()
+
+	entry := &TaskHistoryEntry{
+		TaskID:      task.ID,
+		AppID:       task.AppID,
+		AppName:     task.AppName,
+		UserID:      task.UserID,
+		SourceID:    task.SourceID,
+		Status:      "failed",
+		FailedStep:  failedStep,
+		ErrorMsg:    errorMsg,
+		StartedAt:   startedAt,
+		CompletedAt: time.Now(),
+		Duration:    duration,
+	}
+
+	// Append and limit size
+	h.recentFailedTasks = append([]*TaskHistoryEntry{entry}, h.recentFailedTasks...)
+	if len(h.recentFailedTasks) > h.maxHistorySize {
+		h.recentFailedTasks = h.recentFailedTasks[:h.maxHistorySize]
 	}
 }
 
@@ -1009,20 +1180,12 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
 	}
 
 	// 2) Try to acquire short write-lock and apply removal with new slice; skip if contended
-	// 使用超时机制避免无限期阻塞
-	done := make(chan bool, 1)
-	go func() {
-		h.cacheManager.Lock()
-		done <- true
-	}()
-
-	select {
-	case <-done:
-		defer h.cacheManager.Unlock()
-	case <-time.After(100 * time.Millisecond):
-		log.Printf("DEBUG: removeFromPendingList skipped (lock timeout) for user=%s source=%s app=%s", userID, sourceID, appID)
+	// Use TryLock to avoid blocking
+	if !h.cacheManager.mutex.TryLock() {
+		log.Printf("DEBUG: removeFromPendingList skipped (lock not available) for user=%s source=%s app=%s", userID, sourceID, appID)
 		return
 	}
+	defer h.cacheManager.mutex.Unlock()
 
 	// Re-validate pointers under write-lock
 	if userData2, ok := h.cache.Users[userID]; ok {
@@ -1048,29 +1211,155 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
 
 // GetMetrics returns hydrator metrics
 func (h *Hydrator) GetMetrics() HydratorMetrics {
-	h.taskMutex.RLock()
-	defer h.taskMutex.RUnlock()
+	if !h.taskMutex.TryRLock() {
+		log.Printf("Failed to acquire read lock for GetMetrics, returning zero metrics")
+		// Try to get worker status even if we can't get task lock
+		var workers []*WorkerStatus
+		if h.workerStatusMutex.TryRLock() {
+			workers = h.getWorkerStatusList()
+			h.workerStatusMutex.RUnlock()
+		}
+		return HydratorMetrics{
+			TotalTasksProcessed:  h.totalTasksProcessed,
+			TotalTasksSucceeded:  h.totalTasksSucceeded,
+			TotalTasksFailed:     h.totalTasksFailed,
+			ActiveTasksCount:     0,
+			CompletedTasksCount:  0,
+			FailedTasksCount:     0,
+			QueueLength:          int64(len(h.taskQueue)),
+			ActiveTasks:          []*TaskInfo{},
+			RecentCompletedTasks: h.getRecentCompletedTasks(),
+			RecentFailedTasks:    h.getRecentFailedTasks(),
+			Workers:              workers,
+		}
+	}
+
+	// Get active tasks info
+	activeTasksList := make([]*TaskInfo, 0, len(h.activeTasks))
+	for _, task := range h.activeTasks {
+		if task != nil {
+			activeTasksList = append(activeTasksList, h.taskToTaskInfo(task))
+		}
+	}
+
+	h.taskMutex.RUnlock()
+
+	// Get worker status
+	var workers []*WorkerStatus
+	if h.workerStatusMutex.TryRLock() {
+		workers = h.getWorkerStatusList()
+		h.workerStatusMutex.RUnlock()
+	}
 
 	return HydratorMetrics{
-		TotalTasksProcessed: h.totalTasksProcessed,
-		TotalTasksSucceeded: h.totalTasksSucceeded,
-		TotalTasksFailed:    h.totalTasksFailed,
-		ActiveTasksCount:    int64(len(h.activeTasks)),
-		CompletedTasksCount: int64(len(h.completedTasks)),
-		FailedTasksCount:    int64(len(h.failedTasks)),
-		QueueLength:         int64(len(h.taskQueue)),
+		TotalTasksProcessed:  h.totalTasksProcessed,
+		TotalTasksSucceeded:  h.totalTasksSucceeded,
+		TotalTasksFailed:     h.totalTasksFailed,
+		ActiveTasksCount:     int64(len(h.activeTasks)),
+		CompletedTasksCount:  int64(len(h.completedTasks)),
+		FailedTasksCount:     int64(len(h.failedTasks)),
+		QueueLength:          int64(len(h.taskQueue)),
+		ActiveTasks:          activeTasksList,
+		RecentCompletedTasks: h.getRecentCompletedTasks(),
+		RecentFailedTasks:    h.getRecentFailedTasks(),
+		Workers:              workers,
 	}
+}
+
+// taskToTaskInfo converts a HydrationTask to TaskInfo
+func (h *Hydrator) taskToTaskInfo(task *hydrationfn.HydrationTask) *TaskInfo {
+	totalSteps := len(h.steps)
+	if totalSteps == 0 {
+		totalSteps = task.TotalSteps
+	}
+
+	var progress float64
+	if totalSteps > 0 && task.CurrentStep >= 0 {
+		progress = float64(task.CurrentStep) / float64(totalSteps) * 100.0
+		if progress > 100.0 {
+			progress = 100.0
+		}
+	}
+
+	currentStepName := ""
+	if task.CurrentStep >= 0 && task.CurrentStep < len(h.steps) {
+		currentStepName = h.steps[task.CurrentStep].GetStepName()
+	}
+
+	return &TaskInfo{
+		TaskID:      task.ID,
+		AppID:       task.AppID,
+		AppName:     task.AppName,
+		UserID:      task.UserID,
+		SourceID:    task.SourceID,
+		CurrentStep: currentStepName,
+		StepIndex:   task.CurrentStep,
+		TotalSteps:  totalSteps,
+		Progress:    progress,
+		StartedAt:   task.CreatedAt,
+		Status:      string(task.GetStatus()),
+	}
+}
+
+// getWorkerStatusList returns a list of all worker statuses
+func (h *Hydrator) getWorkerStatusList() []*WorkerStatus {
+	workers := make([]*WorkerStatus, 0, len(h.workerStatus))
+	for i := 0; i < h.workerCount; i++ {
+		if status, ok := h.workerStatus[i]; ok {
+			workers = append(workers, status)
+		} else {
+			// Worker not in map means it's idle
+			workers = append(workers, &WorkerStatus{
+				WorkerID:     i,
+				IsIdle:       true,
+				LastActivity: time.Now(),
+			})
+		}
+	}
+	return workers
+}
+
+// getRecentCompletedTasks returns recent completed tasks (thread-safe)
+func (h *Hydrator) getRecentCompletedTasks() []*TaskHistoryEntry {
+	// Return a copy to avoid race conditions
+	if !h.workerStatusMutex.TryRLock() {
+		return make([]*TaskHistoryEntry, 0)
+	}
+	defer h.workerStatusMutex.RUnlock()
+
+	// Return a copy
+	result := make([]*TaskHistoryEntry, len(h.recentCompletedTasks))
+	copy(result, h.recentCompletedTasks)
+	return result
+}
+
+// getRecentFailedTasks returns recent failed tasks (thread-safe)
+func (h *Hydrator) getRecentFailedTasks() []*TaskHistoryEntry {
+	// Return a copy to avoid race conditions
+	if !h.workerStatusMutex.TryRLock() {
+		return make([]*TaskHistoryEntry, 0)
+	}
+	defer h.workerStatusMutex.RUnlock()
+
+	// Return a copy
+	result := make([]*TaskHistoryEntry, len(h.recentFailedTasks))
+	copy(result, h.recentFailedTasks)
+	return result
 }
 
 // HydratorMetrics contains metrics for the hydrator
 type HydratorMetrics struct {
-	TotalTasksProcessed int64 `json:"total_tasks_processed"`
-	TotalTasksSucceeded int64 `json:"total_tasks_succeeded"`
-	TotalTasksFailed    int64 `json:"total_tasks_failed"`
-	ActiveTasksCount    int64 `json:"active_tasks_count"`
-	CompletedTasksCount int64 `json:"completed_tasks_count"`
-	FailedTasksCount    int64 `json:"failed_tasks_count"`
-	QueueLength         int64 `json:"queue_length"`
+	TotalTasksProcessed  int64               `json:"total_tasks_processed"`
+	TotalTasksSucceeded  int64               `json:"total_tasks_succeeded"`
+	TotalTasksFailed     int64               `json:"total_tasks_failed"`
+	ActiveTasksCount     int64               `json:"active_tasks_count"`
+	CompletedTasksCount  int64               `json:"completed_tasks_count"`
+	FailedTasksCount     int64               `json:"failed_tasks_count"`
+	QueueLength          int64               `json:"queue_length"`
+	ActiveTasks          []*TaskInfo         `json:"active_tasks,omitempty"`           // Current processing tasks
+	RecentCompletedTasks []*TaskHistoryEntry `json:"recent_completed_tasks,omitempty"` // Recent completed tasks
+	RecentFailedTasks    []*TaskHistoryEntry `json:"recent_failed_tasks,omitempty"`    // Recent failed tasks
+	Workers              []*WorkerStatus     `json:"workers,omitempty"`                // Worker status list
 }
 
 // CreateDefaultHydrator creates a hydrator with default configuration
@@ -1329,7 +1618,10 @@ func (h *Hydrator) databaseSyncMonitor(ctx context.Context) {
 
 // processCompletedTask processes a single completed task
 func (h *Hydrator) processCompletedTask(taskID string) {
-	h.taskMutex.RLock()
+	if !h.taskMutex.TryRLock() {
+		log.Printf("Failed to acquire read lock for processCompletedTask, skipping")
+		return
+	}
 	task, exists := h.completedTasks[taskID]
 	h.taskMutex.RUnlock()
 
@@ -1344,7 +1636,10 @@ func (h *Hydrator) processCompletedTask(taskID string) {
 
 // processBatchCompletions processes completed tasks in batches
 func (h *Hydrator) processBatchCompletions() {
-	h.taskMutex.RLock()
+	if !h.taskMutex.TryRLock() {
+		log.Printf("Failed to acquire read lock for processBatchCompletions, skipping")
+		return
+	}
 	currentCompleted := h.totalTasksSucceeded
 	h.taskMutex.RUnlock()
 
@@ -1365,7 +1660,10 @@ func (h *Hydrator) checkAndSyncToDatabase() {
 	}
 
 	// Check if there are completed tasks that need syncing
-	h.taskMutex.RLock()
+	if !h.taskMutex.TryRLock() {
+		log.Printf("Failed to acquire read lock for checkAndSyncToDatabase, skipping")
+		return
+	}
 	completedCount := len(h.completedTasks)
 	h.taskMutex.RUnlock()
 
@@ -1403,7 +1701,10 @@ func (h *Hydrator) triggerDatabaseSync() {
 
 // cleanupOldCompletedTasks removes old completed tasks from memory
 func (h *Hydrator) cleanupOldCompletedTasks() {
-	h.taskMutex.Lock()
+	if !h.taskMutex.TryLock() {
+		log.Printf("Failed to acquire lock for cleanupOldCompletedTasks, skipping")
+		return
+	}
 	defer h.taskMutex.Unlock()
 
 	// Keep only the most recent 100 completed tasks
@@ -1440,7 +1741,10 @@ func (h *Hydrator) monitorMemoryUsage() {
 
 	h.lastMemoryCheck = time.Now()
 
-	h.taskMutex.RLock()
+	if !h.taskMutex.TryRLock() {
+		log.Printf("Failed to acquire read lock for monitorMemoryUsage, skipping")
+		return
+	}
 	activeCount := len(h.activeTasks)
 	completedCount := len(h.completedTasks)
 	failedCount := len(h.failedTasks)
@@ -1459,7 +1763,10 @@ func (h *Hydrator) monitorMemoryUsage() {
 
 // cleanupOldTasks cleans up old tasks from all task maps
 func (h *Hydrator) cleanupOldTasks() {
-	h.taskMutex.Lock()
+	if !h.taskMutex.TryLock() {
+		log.Printf("Failed to acquire lock for cleanupOldTasks, skipping")
+		return
+	}
 	defer h.taskMutex.Unlock()
 
 	now := time.Now()

@@ -691,6 +691,12 @@ func generateDashboardHTML(snapshotJSON string) string {
                                 <tbody id="hydratorTableBody"></tbody>
                             </table>
                         </div>
+                        <!-- Active Tasks Section -->
+                        <div id="hydratorActiveTasks" style="margin-top: 20px;"></div>
+                        <!-- Worker Status Section -->
+                        <div id="hydratorWorkers" style="margin-top: 20px;"></div>
+                        <!-- Task History Section -->
+                        <div id="hydratorHistory" style="margin-top: 20px;"></div>
                     </div>
                     
                     <!-- Cache Statistics Tab Content -->
@@ -719,7 +725,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 <!-- Main Tabs for Applications, Images, Tasks -->
                 <div class="main-tabs">
                     <button class="main-tab active" onclick="showMainTab('chartRepoApps', this)">Applications</button>
-                    <button class="main-tab" onclick="showMainTab('chartRepoImages', this)">Images</button>
+                    <button class="main-tab" onclick="showMainTab('chartRepoImageAnalyzer', this)">Image Analyzer</button>
                     <button class="main-tab" onclick="showMainTab('chartRepoTasks', this)">Tasks</button>
                 </div>
                 
@@ -798,104 +804,102 @@ func generateDashboardHTML(snapshotJSON string) string {
                     </div>
                 </div>
                 
-                <!-- Images Tab Content -->
-                <div id="chartRepoImages" class="main-tab-content">
-                    <!-- Sub-tabs for Images by status -->
+                <!-- Image Analyzer Tab Content -->
+                <div id="chartRepoImageAnalyzer" class="main-tab-content">
+                    <!-- Sub-tabs for Image Analyzer -->
                     <div class="sub-tabs">
-                        <button class="sub-tab active" onclick="showSubTab('chartRepoImages', 'all', this)">All</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'queued', this)">Queued</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'not_downloaded', this)">Not Downloaded</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'downloading', this)">Downloading</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'downloaded', this)">Downloaded</button>
-                        <button class="sub-tab" onclick="showSubTab('chartRepoImages', 'failed', this)">Failed</button>
+                        <button class="sub-tab active" onclick="showSubTab('chartRepoImageAnalyzer', 'overview', this)">Overview</button>
+                        <button class="sub-tab" onclick="showSubTab('chartRepoImageAnalyzer', 'queued', this)">Queued Tasks</button>
+                        <button class="sub-tab" onclick="showSubTab('chartRepoImageAnalyzer', 'processing', this)">Processing</button>
+                        <button class="sub-tab" onclick="showSubTab('chartRepoImageAnalyzer', 'completed', this)">Completed</button>
+                        <button class="sub-tab" onclick="showSubTab('chartRepoImageAnalyzer', 'failed', this)">Failed</button>
                     </div>
-                    <div class="sub-tab-content active" id="chartRepoImages-all">
-                        <div class="table-container">
-                            <table id="chartRepoImagesTable">
-                                <thead>
-                                    <tr>
-                                        <th>Image Name</th>
-                                        <th>App Name</th>
-                                        <th>Status</th>
-                                        <th>Progress</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="chartRepoImagesTableBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="chartRepoImages-queued">
+                    
+                    <!-- Overview Tab Content -->
+                    <div class="sub-tab-content active" id="chartRepoImageAnalyzer-overview">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Queue Info</th>
+                                        <th>Property</th>
                                         <th>Value</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesQueuedBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerOverviewBody"></tbody>
                             </table>
                         </div>
-                        <div style="margin-top: 16px; padding: 12px; background: #f9fafb; border-radius: 6px; font-size: 13px; color: #666;">
-                            <strong>Note:</strong> The chart repo API provides queue length information but may not provide the specific list of images in the queue. Images with status "not_downloaded" that are not currently downloading may be in the queue.
-                        </div>
                     </div>
-                    <div class="sub-tab-content" id="chartRepoImages-not_downloaded">
+                    
+                    <!-- Queued Tasks Tab Content -->
+                    <div class="sub-tab-content" id="chartRepoImageAnalyzer-queued">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Image Name</th>
+                                        <th>Task ID</th>
                                         <th>App Name</th>
                                         <th>Status</th>
+                                        <th>Images Count</th>
+                                        <th>Created At</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesNotDownloadedBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerQueuedBody"></tbody>
                             </table>
                         </div>
                     </div>
-                    <div class="sub-tab-content" id="chartRepoImages-downloading">
+                    
+                    <!-- Processing Tasks Tab Content -->
+                    <div class="sub-tab-content" id="chartRepoImageAnalyzer-processing">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Image Name</th>
+                                        <th>Task ID</th>
                                         <th>App Name</th>
                                         <th>Status</th>
+                                        <th>Worker ID</th>
                                         <th>Progress</th>
+                                        <th>Started At</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesDownloadingBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerProcessingBody"></tbody>
                             </table>
                         </div>
                     </div>
-                    <div class="sub-tab-content" id="chartRepoImages-downloaded">
+                    
+                    <!-- Completed Tasks Tab Content -->
+                    <div class="sub-tab-content" id="chartRepoImageAnalyzer-completed">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Image Name</th>
+                                        <th>Task ID</th>
                                         <th>App Name</th>
                                         <th>Status</th>
-                                        <th>Size</th>
+                                        <th>Duration</th>
+                                        <th>Completed At</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesDownloadedBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerCompletedBody"></tbody>
                             </table>
                         </div>
                     </div>
-                    <div class="sub-tab-content" id="chartRepoImages-failed">
+                    
+                    <!-- Failed Tasks Tab Content -->
+                    <div class="sub-tab-content" id="chartRepoImageAnalyzer-failed">
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Image Name</th>
+                                        <th>Task ID</th>
                                         <th>App Name</th>
                                         <th>Status</th>
                                         <th>Error</th>
+                                        <th>Error Step</th>
+                                        <th>Failed At</th>
                                     </tr>
                                 </thead>
-                                <tbody id="chartRepoImagesFailedBody"></tbody>
+                                <tbody id="chartRepoImageAnalyzerFailedBody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -1261,22 +1265,65 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             const metrics = syncer.metrics || {};
+            
+            // Format duration
+            function formatDuration(durationStr) {
+                if (!durationStr || durationStr === '0s') return 'N/A';
+                return durationStr;
+            }
+            
+            // Format percentage
+            function formatPercentage(value) {
+                if (value === undefined || value === null) return 'N/A';
+                return value.toFixed(2) + '%';
+            }
+            
+            // Calculate progress if current step is available
+            let progressInfo = 'N/A';
+            if (metrics.current_step && metrics.total_steps > 0 && metrics.current_step_index >= 0) {
+                const progress = ((metrics.current_step_index + 1) / metrics.total_steps * 100).toFixed(1);
+                progressInfo = (metrics.current_step_index + 1) + '/' + metrics.total_steps + ' (' + progress + '%)';
+            }
+            
             const stats = [
                 { label: 'Status', value: getStatusBadge(syncer.status || 'unknown'), isHtml: true },
-                { label: 'Healthy', value: syncer.healthy ? 'Yes' : 'No' },
+                { label: 'Healthy', value: syncer.healthy ? getStatusBadge('healthy') : getStatusBadge('unhealthy'), isHtml: true },
                 { label: 'Is Running', value: metrics.is_running ? 'Yes' : 'No' },
-                { label: 'Enabled', value: metrics.enabled !== undefined ? (metrics.enabled ? 'Yes' : 'No') : 'N/A' },
+                { label: 'Sync Interval', value: metrics.sync_interval || 'N/A' },
+                { label: 'Current Step', value: metrics.current_step || 'N/A' },
+                { label: 'Progress', value: progressInfo },
+                { label: 'Current Source', value: metrics.current_source || 'N/A' },
+                { label: 'Last Sync Time', value: metrics.last_sync_time ? formatTimestamp(new Date(metrics.last_sync_time)) : 'Never' },
+                { label: 'Last Sync Success', value: metrics.last_sync_success ? formatTimestamp(new Date(metrics.last_sync_success)) : 'Never' },
+                { label: 'Last Sync Duration', value: formatDuration(metrics.last_sync_duration) },
+                { label: 'Last Synced Apps', value: metrics.last_synced_app_count !== undefined ? metrics.last_synced_app_count : 'N/A' },
+                { label: 'Next Sync Time', value: metrics.next_sync_time ? formatTimestamp(new Date(metrics.next_sync_time)) : 'N/A' },
+                { label: 'Total Syncs', value: metrics.total_syncs !== undefined ? metrics.total_syncs : 0 },
+                { label: 'Success Count', value: metrics.success_count !== undefined ? metrics.success_count : 0 },
+                { label: 'Failure Count', value: metrics.failure_count !== undefined ? metrics.failure_count : 0 },
+                { label: 'Consecutive Failures', value: metrics.consecutive_failures !== undefined ? metrics.consecutive_failures : 0 },
+                { label: 'Success Rate', value: formatPercentage(metrics.success_rate) },
                 { label: 'Step Count', value: metrics.step_count || 0 },
                 { label: 'Steps', value: Array.isArray(metrics.steps) ? metrics.steps.join(', ') : 'N/A' },
+                { label: 'Last Sync Error', value: metrics.last_sync_error || 'None', style: metrics.last_sync_error ? 'color: #dc2626;' : '' },
                 { label: 'Last Check', value: formatTimestamp(syncer.last_check) },
             ];
             
             stats.forEach(stat => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' +
+                const valueCell = stat.style ? 
+                    '<td style="' + stat.style + '">' + (stat.isHtml ? stat.value : stat.value) + '</td>' :
                     '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
+                row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' + valueCell;
                 tbody.appendChild(row);
             });
+            
+            // Add status message if available
+            if (syncer.message) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="2" style="color: #dc2626; padding-top: 8px;"><strong>Note:</strong> ' + syncer.message + '</td>';
+                tbody.appendChild(row);
+            }
         }
         
         function renderHydrator() {
@@ -1292,18 +1339,33 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             const metrics = hydrator.metrics || {};
+            
+            // Calculate success rate
+            let successRate = 'N/A';
+            if (metrics.total_tasks_processed > 0) {
+                successRate = ((metrics.total_tasks_succeeded / metrics.total_tasks_processed) * 100).toFixed(2) + '%';
+            }
+            
+            // Calculate failure rate
+            let failureRate = 'N/A';
+            if (metrics.total_tasks_processed > 0) {
+                failureRate = ((metrics.total_tasks_failed / metrics.total_tasks_processed) * 100).toFixed(2) + '%';
+            }
+            
             const stats = [
                 { label: 'Status', value: getStatusBadge(hydrator.status || 'unknown'), isHtml: true },
-                { label: 'Healthy', value: hydrator.healthy ? 'Yes' : 'No' },
+                { label: 'Healthy', value: hydrator.healthy ? getStatusBadge('healthy') : getStatusBadge('unhealthy'), isHtml: true },
                 { label: 'Is Running', value: metrics.is_running ? 'Yes' : 'No' },
                 { label: 'Enabled', value: metrics.enabled !== undefined ? (metrics.enabled ? 'Yes' : 'No') : 'N/A' },
-                { label: 'Queue Length', value: metrics.queue_length || 0 },
-                { label: 'Active Tasks', value: metrics.active_tasks_count || 0 },
-                { label: 'Total Processed', value: metrics.total_tasks_processed || 0 },
-                { label: 'Total Succeeded', value: metrics.total_tasks_succeeded || 0 },
-                { label: 'Total Failed', value: metrics.total_tasks_failed || 0 },
-                { label: 'Completed Tasks', value: metrics.completed_tasks_count || 0 },
-                { label: 'Failed Tasks', value: metrics.failed_tasks_count || 0 },
+                { label: 'Queue Length', value: metrics.queue_length !== undefined ? metrics.queue_length : 0 },
+                { label: 'Active Tasks', value: metrics.active_tasks_count !== undefined ? metrics.active_tasks_count : 0 },
+                { label: 'Total Processed', value: metrics.total_tasks_processed !== undefined ? metrics.total_tasks_processed : 0 },
+                { label: 'Total Succeeded', value: metrics.total_tasks_succeeded !== undefined ? metrics.total_tasks_succeeded : 0 },
+                { label: 'Total Failed', value: metrics.total_tasks_failed !== undefined ? metrics.total_tasks_failed : 0 },
+                { label: 'Success Rate', value: successRate },
+                { label: 'Failure Rate', value: failureRate },
+                { label: 'Completed Tasks', value: metrics.completed_tasks_count !== undefined ? metrics.completed_tasks_count : 0 },
+                { label: 'Failed Tasks', value: metrics.failed_tasks_count !== undefined ? metrics.failed_tasks_count : 0 },
                 { label: 'Last Check', value: formatTimestamp(hydrator.last_check) },
             ];
             
@@ -1313,6 +1375,183 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
                 tbody.appendChild(row);
             });
+            
+            // Add status message if available
+            if (hydrator.message) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="2" style="color: #dc2626; padding-top: 8px;"><strong>Note:</strong> ' + hydrator.message + '</td>';
+                tbody.appendChild(row);
+            }
+            
+            // Render active tasks
+            renderHydratorActiveTasks(metrics.active_tasks);
+            
+            // Render worker status
+            renderHydratorWorkers(metrics.workers);
+            
+            // Render task history
+            renderHydratorHistory(metrics.recent_completed_tasks, metrics.recent_failed_tasks);
+        }
+        
+        function renderHydratorActiveTasks(activeTasks) {
+            const container = document.getElementById('hydratorActiveTasks');
+            if (!container) return;
+            
+            if (!activeTasks || activeTasks.length === 0) {
+                container.innerHTML = '<h3>Active Tasks</h3><p class="empty-state">No active tasks</p>';
+                return;
+            }
+            
+            let html = '<h3>Active Tasks (' + activeTasks.length + ')</h3>';
+            html += '<div class="table-container" style="max-height: 300px; overflow-y: auto;">';
+            html += '<table style="font-size: 12px;"><thead><tr>';
+            html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Source ID</th>';
+            html += '<th>Current Step</th><th>Progress</th><th>Status</th><th>Started At</th>';
+            html += '</tr></thead><tbody>';
+            
+            activeTasks.forEach(task => {
+                const progress = task.progress ? task.progress.toFixed(1) + '%' : 'N/A';
+                const stepInfo = task.current_step ? task.current_step + ' (' + (task.step_index + 1) + '/' + task.total_steps + ')' : 'N/A';
+                html += '<tr>';
+                html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
+                html += '<td>' + (task.app_id || 'N/A') + '</td>';
+                html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                html += '<td>' + (task.user_id || 'N/A') + '</td>';
+                html += '<td>' + (task.source_id || 'N/A') + '</td>';
+                html += '<td>' + stepInfo + '</td>';
+                html += '<td>' + progress + '</td>';
+                html += '<td>' + getStatusBadge(task.status || 'running') + '</td>';
+                html += '<td>' + (task.started_at ? formatTimestamp(new Date(task.started_at)) : 'N/A') + '</td>';
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+        
+        function renderHydratorWorkers(workers) {
+            const container = document.getElementById('hydratorWorkers');
+            if (!container) return;
+            
+            if (!workers || workers.length === 0) {
+                container.innerHTML = '<h3>Workers</h3><p class="empty-state">No worker information</p>';
+                return;
+            }
+            
+            let html = '<h3>Workers (' + workers.length + ')</h3>';
+            html += '<div class="table-container" style="max-height: 300px; overflow-y: auto;">';
+            html += '<table style="font-size: 12px;"><thead><tr>';
+            html += '<th>Worker ID</th><th>Status</th><th>Current Task</th><th>App ID</th><th>Step</th><th>Progress</th><th>Last Activity</th>';
+            html += '</tr></thead><tbody>';
+            
+            workers.forEach(worker => {
+                const statusBadge = worker.is_idle ? getStatusBadge('idle') : getStatusBadge('busy');
+                const task = worker.current_task;
+                html += '<tr>';
+                html += '<td>' + worker.worker_id + '</td>';
+                html += '<td>' + statusBadge + '</td>';
+                if (task) {
+                    const progress = task.progress ? task.progress.toFixed(1) + '%' : 'N/A';
+                    html += '<td>' + (task.task_id || 'N/A').substring(0, 15) + '...' + '</td>';
+                    html += '<td>' + (task.app_id || 'N/A') + '</td>';
+                    html += '<td>' + (task.current_step || 'N/A') + '</td>';
+                    html += '<td>' + progress + '</td>';
+                } else {
+                    html += '<td colspan="4" class="empty-state">Idle</td>';
+                }
+                html += '<td>' + (worker.last_activity ? formatTimestamp(new Date(worker.last_activity)) : 'N/A') + '</td>';
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+        
+        function renderHydratorHistory(completedTasks, failedTasks) {
+            const container = document.getElementById('hydratorHistory');
+            if (!container) return;
+            
+            const hasCompleted = completedTasks && completedTasks.length > 0;
+            const hasFailed = failedTasks && failedTasks.length > 0;
+            
+            if (!hasCompleted && !hasFailed) {
+                container.innerHTML = '<h3>Task History</h3><p class="empty-state">No task history</p>';
+                return;
+            }
+            
+            let html = '<h3>Task History</h3>';
+            
+            // Recent completed tasks
+            if (hasCompleted) {
+                html += '<h4 style="margin-top: 16px; color: #059669;">Recent Completed Tasks (' + completedTasks.length + ')</h4>';
+                html += '<div class="table-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 20px;">';
+                html += '<table style="font-size: 12px;"><thead><tr>';
+                html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Duration</th><th>Completed At</th>';
+                html += '</tr></thead><tbody>';
+                
+                completedTasks.slice(0, 10).forEach(task => {
+                    const duration = task.duration ? formatDuration(task.duration) : 'N/A';
+                    html += '<tr>';
+                    html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
+                    html += '<td>' + (task.app_id || 'N/A') + '</td>';
+                    html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                    html += '<td>' + (task.user_id || 'N/A') + '</td>';
+                    html += '<td>' + duration + '</td>';
+                    html += '<td>' + (task.completed_at ? formatTimestamp(new Date(task.completed_at)) : 'N/A') + '</td>';
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table></div>';
+            }
+            
+            // Recent failed tasks
+            if (hasFailed) {
+                html += '<h4 style="margin-top: 16px; color: #dc2626;">Recent Failed Tasks (' + failedTasks.length + ')</h4>';
+                html += '<div class="table-container" style="max-height: 200px; overflow-y: auto;">';
+                html += '<table style="font-size: 12px;"><thead><tr>';
+                html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Failed Step</th><th>Error</th><th>Failed At</th>';
+                html += '</tr></thead><tbody>';
+                
+                failedTasks.slice(0, 10).forEach(task => {
+                    html += '<tr>';
+                    html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
+                    html += '<td>' + (task.app_id || 'N/A') + '</td>';
+                    html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                    html += '<td>' + (task.user_id || 'N/A') + '</td>';
+                    html += '<td>' + (task.failed_step || 'N/A') + '</td>';
+                    html += '<td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + (task.error_msg || '') + '">';
+                    html += (task.error_msg || 'N/A') + '</td>';
+                    html += '<td>' + (task.completed_at ? formatTimestamp(new Date(task.completed_at)) : 'N/A') + '</td>';
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table></div>';
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        function formatDuration(durationStr) {
+            if (!durationStr) return 'N/A';
+            // Try to parse duration string like "1h30m45s" or number in seconds
+            if (typeof durationStr === 'string') {
+                return durationStr;
+            }
+            // If it's a number, assume it's nanoseconds and convert
+            if (typeof durationStr === 'number') {
+                const seconds = Math.floor(durationStr / 1e9);
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                if (hours > 0) {
+                    return hours + 'h' + minutes + 'm' + secs + 's';
+                } else if (minutes > 0) {
+                    return minutes + 'm' + secs + 's';
+                } else {
+                    return secs + 's';
+                }
+            }
+            return 'N/A';
         }
         
         function renderCacheStats() {
@@ -1349,21 +1588,43 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         function showMainTab(tabName, element) {
-            // Hide all main tabs
-            document.querySelectorAll('.main-tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.querySelectorAll('.main-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
+            // Find the parent panel to scope the tab switching
+            const panel = element ? element.closest('.panel') : null;
+            if (!panel) {
+                // Fallback: find panel by checking which panel contains this tab
+                const tabElement = document.getElementById(tabName);
+                if (tabElement) {
+                    const parentPanel = tabElement.closest('.panel');
+                    if (parentPanel) {
+                        // Hide only main tabs within this panel
+                        parentPanel.querySelectorAll('.main-tab-content').forEach(content => {
+                            content.classList.remove('active');
+                        });
+                        parentPanel.querySelectorAll('.main-tab').forEach(tab => {
+                            tab.classList.remove('active');
+                        });
+                    }
+                }
+            } else {
+                // Hide only main tabs within this panel
+                panel.querySelectorAll('.main-tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                panel.querySelectorAll('.main-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+            }
             
             // Show selected main tab
-            document.getElementById(tabName).classList.add('active');
+            const tabContent = document.getElementById(tabName);
+            if (tabContent) {
+                tabContent.classList.add('active');
+            }
             if (element) {
                 element.classList.add('active');
             }
             
-            // Reset sub-tabs to show 'all' by default
+            // Reset sub-tabs to show first sub-tab by default
             const subTabs = document.querySelectorAll('#' + tabName + ' .sub-tab');
             const subTabContents = document.querySelectorAll('#' + tabName + ' .sub-tab-content');
             subTabs.forEach(tab => tab.classList.remove('active'));
@@ -1426,7 +1687,24 @@ func generateDashboardHTML(snapshotJSON string) string {
                     }
                 }
             } else if (mainTabName.startsWith('chartRepo')) {
-                renderChartRepo();
+                if (mainTabName === 'chartRepoImageAnalyzer') {
+                    // Re-render Image Analyzer data when switching sub-tabs
+                    const chartRepo = snapshotData.chart_repo || {};
+                    const imageAnalyzer = chartRepo.tasks && chartRepo.tasks.image_analyzer;
+                    if (subTabName === 'overview') {
+                        renderImageAnalyzerOverview('chartRepoImageAnalyzerOverviewBody', imageAnalyzer);
+                    } else if (subTabName === 'queued') {
+                        renderImageAnalyzerTasks('chartRepoImageAnalyzerQueuedBody', imageAnalyzer ? (imageAnalyzer.queued_tasks || []) : []);
+                    } else if (subTabName === 'processing') {
+                        renderImageAnalyzerTasks('chartRepoImageAnalyzerProcessingBody', imageAnalyzer ? (imageAnalyzer.processing_tasks || []) : []);
+                    } else if (subTabName === 'completed') {
+                        renderImageAnalyzerTasks('chartRepoImageAnalyzerCompletedBody', imageAnalyzer ? (imageAnalyzer.recent_completed || []) : []);
+                    } else if (subTabName === 'failed') {
+                        renderImageAnalyzerTasks('chartRepoImageAnalyzerFailedBody', imageAnalyzer ? (imageAnalyzer.recent_failed || []) : []);
+                    }
+                } else {
+                    renderChartRepo();
+                }
             }
         }
         
@@ -1445,32 +1723,22 @@ func generateDashboardHTML(snapshotJSON string) string {
             renderAppsTable('chartRepoAppsCompletedBody', appsCompleted);
             renderAppsTableWithError('chartRepoAppsFailedBody', appsFailed);
             
-            // Render Images
-            const images = chartRepo.images || [];
-            const imagesAll = images;
-            const imagesNotDownloaded = images.filter(img => (img.status || '').toLowerCase().includes('not_downloaded'));
-            const imagesDownloading = images.filter(img => {
-                const status = (img.status || '').toLowerCase();
-                return status.includes('downloading') || status.includes('partially') || (img.download_progress > 0 && img.download_progress < 100);
-            });
-            const imagesDownloaded = images.filter(img => {
-                const status = (img.status || '').toLowerCase();
-                return status.includes('downloaded') || status.includes('fully') || (img.download_progress >= 100);
-            });
-            const imagesFailed = images.filter(img => {
-                const status = (img.status || '').toLowerCase();
-                return status.includes('failed') || status.includes('error') || img.error_message;
-            });
-            
-            // Render queue information
+            // Render Image Analyzer - always render all tabs to ensure data is available
             const imageAnalyzer = chartRepo.tasks && chartRepo.tasks.image_analyzer;
-            renderImagesQueueInfo('chartRepoImagesQueuedBody', imageAnalyzer, imagesNotDownloaded.length);
-            
-            renderImagesTable('chartRepoImagesTableBody', imagesAll);
-            renderImagesTableSimple('chartRepoImagesNotDownloadedBody', imagesNotDownloaded);
-            renderImagesTable('chartRepoImagesDownloadingBody', imagesDownloading);
-            renderImagesTableWithSize('chartRepoImagesDownloadedBody', imagesDownloaded);
-            renderImagesTableWithError('chartRepoImagesFailedBody', imagesFailed);
+            if (imageAnalyzer) {
+                renderImageAnalyzerOverview('chartRepoImageAnalyzerOverviewBody', imageAnalyzer);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerQueuedBody', imageAnalyzer.queued_tasks || []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerProcessingBody', imageAnalyzer.processing_tasks || []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerCompletedBody', imageAnalyzer.recent_completed || []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerFailedBody', imageAnalyzer.recent_failed || []);
+            } else {
+                // Clear all Image Analyzer tabs if no data
+                renderImageAnalyzerOverview('chartRepoImageAnalyzerOverviewBody', null);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerQueuedBody', []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerProcessingBody', []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerCompletedBody', []);
+                renderImageAnalyzerTasks('chartRepoImageAnalyzerFailedBody', []);
+            }
             
             // Render Tasks
             const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
@@ -1598,28 +1866,128 @@ func generateDashboardHTML(snapshotJSON string) string {
             });
         }
         
-        function renderImagesQueueInfo(tbodyId, imageAnalyzer, notDownloadedCount) {
+        function renderImageAnalyzerOverview(tbodyId, imageAnalyzer) {
             const tbody = document.getElementById(tbodyId);
             if (!tbody) return;
             tbody.innerHTML = '';
             
-            const queueLength = imageAnalyzer ? (imageAnalyzer.queue_length || 0) : 0;
-            const activeWorkers = imageAnalyzer ? (imageAnalyzer.active_workers || 0) : 0;
-            const analyzingCount = imageAnalyzer ? (imageAnalyzer.analyzing_count || 0) : 0;
-            const cachedImages = imageAnalyzer ? (imageAnalyzer.cached_images || 0) : 0;
+            if (!imageAnalyzer) {
+                tbody.innerHTML = '<tr><td colspan="2" class="empty-state">No Image Analyzer data</td></tr>';
+                return;
+            }
+            
+            const formatDuration = (ms) => {
+                if (!ms) return 'N/A';
+                const seconds = Math.floor(ms / 1000);
+                if (seconds < 60) return seconds + 's';
+                const minutes = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return minutes + 'm ' + secs + 's';
+            };
             
             const stats = [
-                { label: 'Queue Length', value: queueLength },
-                { label: 'Active Workers', value: activeWorkers },
-                { label: 'Currently Analyzing', value: analyzingCount },
-                { label: 'Cached Images', value: cachedImages },
-                { label: 'Not Downloaded Images', value: notDownloadedCount },
+                { label: 'Is Running', value: imageAnalyzer.is_running ? 'Yes' : 'No' },
+                { label: 'Health Status', value: getStatusBadge(imageAnalyzer.health_status || 'unknown'), isHtml: true },
+                { label: 'Last Check', value: formatTimestamp(imageAnalyzer.last_check) },
+                { label: 'Queue Length', value: imageAnalyzer.queue_length || 0 },
+                { label: 'Active Workers', value: imageAnalyzer.active_workers || 0 },
+                { label: 'Cached Images', value: imageAnalyzer.cached_images || 0 },
+                { label: 'Analyzing Count', value: imageAnalyzer.analyzing_count || 0 },
+                { label: 'Total Analyzed', value: imageAnalyzer.total_analyzed || 0 },
+                { label: 'Successful Analyzed', value: imageAnalyzer.successful_analyzed || 0 },
+                { label: 'Failed Analyzed', value: imageAnalyzer.failed_analyzed || 0 },
+                { label: 'Average Analysis Time', value: imageAnalyzer.average_analysis_time ? formatDuration(imageAnalyzer.average_analysis_time) : 'N/A' },
+                { label: 'Queued Tasks', value: (imageAnalyzer.queued_tasks || []).length },
+                { label: 'Processing Tasks', value: (imageAnalyzer.processing_tasks || []).length },
+                { label: 'Recent Completed', value: (imageAnalyzer.recent_completed || []).length },
+                { label: 'Recent Failed', value: (imageAnalyzer.recent_failed || []).length },
             ];
+            
+            if (imageAnalyzer.error_message) {
+                stats.push({ label: 'Error Message', value: imageAnalyzer.error_message });
+            }
             
             stats.forEach(stat => {
                 const row = document.createElement('tr');
                 row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' +
-                    '<td>' + stat.value + '</td>';
+                    '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function renderImageAnalyzerTasks(tbodyId, tasks) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No tasks</td></tr>';
+                return;
+            }
+            
+            tasks.forEach(task => {
+                const row = document.createElement('tr');
+                let cells = '';
+                
+                // Common cells
+                cells += '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>';
+                cells += '<td>' + (task.app_name || 'N/A') + '</td>';
+                cells += '<td>' + getStatusBadge(task.status || 'unknown') + '</td>';
+                
+                // Context-specific cells based on tbodyId
+                if (tbodyId.includes('Queued')) {
+                    cells += '<td>' + (task.images_count || 0) + '</td>';
+                    const createdAt = task.created_at;
+                    if (createdAt) {
+                        const createdAtDate = typeof createdAt === 'string' ? new Date(createdAt) : createdAt;
+                        cells += '<td style="font-size: 11px;">' + formatTimestamp(createdAtDate) + '</td>';
+                    } else {
+                        cells += '<td style="font-size: 11px;">-</td>';
+                    }
+                } else if (tbodyId.includes('Processing')) {
+                    cells += '<td>' + (task.worker_id !== undefined && task.worker_id !== null ? task.worker_id : '-') + '</td>';
+                    const progress = task.images_count > 0 ? ((task.analyzed_count || 0) / task.images_count * 100).toFixed(1) : '0';
+                    cells += '<td>' + (task.analyzed_count || 0) + '/' + (task.images_count || 0) + ' (' + progress + '%)</td>';
+                    const startedAt = task.started_at;
+                    if (startedAt) {
+                        const startedAtDate = typeof startedAt === 'string' ? new Date(startedAt) : startedAt;
+                        cells += '<td style="font-size: 11px;">' + formatTimestamp(startedAtDate) + '</td>';
+                    } else {
+                        cells += '<td style="font-size: 11px;">-</td>';
+                    }
+                } else if (tbodyId.includes('Completed')) {
+                    let duration = '-';
+                    if (task.duration) {
+                        if (typeof task.duration === 'string') {
+                            duration = task.duration;
+                        } else if (typeof task.duration === 'number') {
+                            // Assume nanoseconds
+                            duration = (task.duration / 1000000000).toFixed(2) + 's';
+                        }
+                    }
+                    cells += '<td>' + duration + '</td>';
+                    const completedAt = task.completed_at;
+                    if (completedAt) {
+                        const completedAtDate = typeof completedAt === 'string' ? new Date(completedAt) : completedAt;
+                        cells += '<td style="font-size: 11px;">' + formatTimestamp(completedAtDate) + '</td>';
+                    } else {
+                        cells += '<td style="font-size: 11px;">-</td>';
+                    }
+                } else if (tbodyId.includes('Failed')) {
+                    cells += '<td style="font-size: 11px; color: #991b1b;">' + (task.error || '-') + '</td>';
+                    cells += '<td>' + (task.error_step || '-') + '</td>';
+                    let failedAt = null;
+                    if (task.completed_at) {
+                        failedAt = typeof task.completed_at === 'string' ? new Date(task.completed_at) : task.completed_at;
+                    } else if (task.started_at) {
+                        failedAt = typeof task.started_at === 'string' ? new Date(task.started_at) : task.started_at;
+                    } else if (task.created_at) {
+                        failedAt = typeof task.created_at === 'string' ? new Date(task.created_at) : task.created_at;
+                    }
+                    cells += '<td style="font-size: 11px;">' + (failedAt ? formatTimestamp(failedAt) : '-') + '</td>';
+                }
+                
+                row.innerHTML = cells;
                 tbody.appendChild(row);
             });
         }

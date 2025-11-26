@@ -432,18 +432,46 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 
 			// Collect Syncer status separately with detailed information
 			if syncerRunning, ok := moduleStatus["syncer_running"].(bool); ok {
+				// Get health status from module status if available
 				syncerHealthy := syncerRunning
+				if healthy, ok := moduleStatus["syncer_healthy"].(bool); ok {
+					syncerHealthy = healthy
+				}
+
 				syncerStatus := "running"
 				if !syncerRunning {
 					syncerStatus = "stopped"
+				} else if !syncerHealthy {
+					syncerStatus = "degraded"
 				}
 
 				syncerMetrics := make(map[string]interface{})
-				syncerMetrics["is_running"] = syncerRunning
 
-				// Get detailed syncer information
+				// Get detailed syncer information directly from syncer
 				syncer := aim.GetSyncer()
 				if syncer != nil {
+					metrics := syncer.GetMetrics()
+					syncerMetrics = map[string]interface{}{
+						"is_running":            metrics.IsRunning,
+						"sync_interval":         metrics.SyncInterval.String(),
+						"last_sync_time":        metrics.LastSyncTime,
+						"last_sync_success":     metrics.LastSyncSuccess,
+						"last_sync_error":       metrics.LastSyncError,
+						"current_step":          metrics.CurrentStep,
+						"current_step_index":    metrics.CurrentStepIndex,
+						"total_steps":           metrics.TotalSteps,
+						"current_source":        metrics.CurrentSource,
+						"total_syncs":           metrics.TotalSyncs,
+						"success_count":         metrics.SuccessCount,
+						"failure_count":         metrics.FailureCount,
+						"consecutive_failures":  metrics.ConsecutiveFailures,
+						"last_sync_duration":    metrics.LastSyncDuration.String(),
+						"last_synced_app_count": metrics.LastSyncedAppCount,
+						"success_rate":          metrics.SuccessRate,
+						"next_sync_time":        metrics.NextSyncTime,
+					}
+
+					// Add step information
 					steps := syncer.GetSteps()
 					syncerMetrics["step_count"] = len(steps)
 
@@ -460,6 +488,21 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 					if enableSync, ok := moduleStatus["enable_sync"].(bool); ok {
 						syncerMetrics["enabled"] = enableSync
 					}
+				} else {
+					// Fallback to basic metrics if syncer is nil
+					syncerMetrics["is_running"] = syncerRunning
+				}
+
+				// Build status message if there are errors
+				statusMessage := ""
+				if errMsg, ok := syncerMetrics["last_sync_error"].(string); ok && errMsg != "" {
+					statusMessage = fmt.Sprintf("Last error: %s", errMsg)
+				}
+				if failures, ok := syncerMetrics["consecutive_failures"].(int64); ok && failures > 0 {
+					if statusMessage != "" {
+						statusMessage += "; "
+					}
+					statusMessage += fmt.Sprintf("%d consecutive failures", failures)
 				}
 
 				syncerComponent := &ComponentStatus{
@@ -467,7 +510,7 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 					Healthy:   syncerHealthy,
 					Status:    syncerStatus,
 					LastCheck: time.Now(),
-					Message:   "",
+					Message:   statusMessage,
 					Metrics:   syncerMetrics,
 				}
 				c.store.UpdateComponent(syncerComponent)
@@ -481,23 +524,28 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 					hydratorStatus = "stopped"
 				}
 				hydratorMetrics := make(map[string]interface{})
-				if metrics, ok := moduleStatus["hydrator_metrics"].(map[string]interface{}); ok {
-					hydratorMetrics = metrics
+
+				// Get metrics directly from hydrator
+				hydrator := aim.GetHydrator()
+				if hydrator != nil {
+					metricsStruct := hydrator.GetMetrics()
+					hydratorMetrics = map[string]interface{}{
+						"total_tasks_processed":  metricsStruct.TotalTasksProcessed,
+						"total_tasks_succeeded":  metricsStruct.TotalTasksSucceeded,
+						"total_tasks_failed":     metricsStruct.TotalTasksFailed,
+						"active_tasks_count":     metricsStruct.ActiveTasksCount,
+						"completed_tasks_count":  metricsStruct.CompletedTasksCount,
+						"failed_tasks_count":     metricsStruct.FailedTasksCount,
+						"queue_length":           metricsStruct.QueueLength,
+						"active_tasks":           metricsStruct.ActiveTasks,
+						"recent_completed_tasks": metricsStruct.RecentCompletedTasks,
+						"recent_failed_tasks":    metricsStruct.RecentFailedTasks,
+						"workers":                metricsStruct.Workers,
+					}
 				} else {
-					// Try to convert from struct if it's returned as struct
-					// This handles the case where GetMetrics returns a struct
-					hydrator := aim.GetHydrator()
-					if hydrator != nil {
-						metricsStruct := hydrator.GetMetrics()
-						hydratorMetrics = map[string]interface{}{
-							"total_tasks_processed": metricsStruct.TotalTasksProcessed,
-							"total_tasks_succeeded": metricsStruct.TotalTasksSucceeded,
-							"total_tasks_failed":    metricsStruct.TotalTasksFailed,
-							"active_tasks_count":    metricsStruct.ActiveTasksCount,
-							"completed_tasks_count": metricsStruct.CompletedTasksCount,
-							"failed_tasks_count":    metricsStruct.FailedTasksCount,
-							"queue_length":          metricsStruct.QueueLength,
-						}
+					// Fallback to module status if available
+					if metrics, ok := moduleStatus["hydrator_metrics"].(map[string]interface{}); ok {
+						hydratorMetrics = metrics
 					}
 				}
 				hydratorMetrics["is_running"] = hydratorRunning
@@ -1136,8 +1184,21 @@ func (c *StateCollector) convertChartRepoTaskState(data map[string]interface{}) 
 
 // convertChartRepoImageAnalyzerStatus converts image analyzer status from API response
 func (c *StateCollector) convertChartRepoImageAnalyzerStatus(data map[string]interface{}) *ChartRepoImageAnalyzerStatus {
-	status := &ChartRepoImageAnalyzerStatus{}
+	status := &ChartRepoImageAnalyzerStatus{
+		LastCheck: time.Now(),
+	}
 
+	if isRunning, ok := data["is_running"].(bool); ok {
+		status.IsRunning = isRunning
+	}
+	if healthStatus, ok := data["health_status"].(string); ok {
+		status.HealthStatus = healthStatus
+	}
+	if lastCheck, ok := data["last_check"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, lastCheck); err == nil {
+			status.LastCheck = t
+		}
+	}
 	if queueLength, ok := data["queue_length"].(float64); ok {
 		status.QueueLength = int(queueLength)
 	}
@@ -1150,6 +1211,121 @@ func (c *StateCollector) convertChartRepoImageAnalyzerStatus(data map[string]int
 	if analyzingCount, ok := data["analyzing_count"].(float64); ok {
 		status.AnalyzingCount = int(analyzingCount)
 	}
+	if totalAnalyzed, ok := data["total_analyzed"].(float64); ok {
+		status.TotalAnalyzed = int64(totalAnalyzed)
+	}
+	if successfulAnalyzed, ok := data["successful_analyzed"].(float64); ok {
+		status.SuccessfulAnalyzed = int64(successfulAnalyzed)
+	}
+	if failedAnalyzed, ok := data["failed_analyzed"].(float64); ok {
+		status.FailedAnalyzed = int64(failedAnalyzed)
+	}
+	if avgTime, ok := data["average_analysis_time"].(string); ok {
+		if d, err := time.ParseDuration(avgTime); err == nil {
+			status.AverageAnalysisTime = d
+		}
+	} else if avgTimeMs, ok := data["average_analysis_time"].(float64); ok {
+		// Handle numeric duration in milliseconds
+		status.AverageAnalysisTime = time.Duration(avgTimeMs) * time.Millisecond
+	}
+	if errorMsg, ok := data["error_message"].(string); ok {
+		status.ErrorMessage = errorMsg
+	}
+
+	// Parse task lists
+	if queuedTasks, ok := data["queued_tasks"].([]interface{}); ok {
+		status.QueuedTasks = c.convertImageAnalysisTaskDetails(queuedTasks)
+	}
+	if processingTasks, ok := data["processing_tasks"].([]interface{}); ok {
+		status.ProcessingTasks = c.convertImageAnalysisTaskDetails(processingTasks)
+	}
+	if recentCompleted, ok := data["recent_completed"].([]interface{}); ok {
+		status.RecentCompleted = c.convertImageAnalysisTaskDetails(recentCompleted)
+	}
+	if recentFailed, ok := data["recent_failed"].([]interface{}); ok {
+		status.RecentFailed = c.convertImageAnalysisTaskDetails(recentFailed)
+	}
 
 	return status
+}
+
+// convertImageAnalysisTaskDetails converts a list of image analysis task details
+func (c *StateCollector) convertImageAnalysisTaskDetails(tasks []interface{}) []*ChartRepoImageAnalysisTaskDetail {
+	result := make([]*ChartRepoImageAnalysisTaskDetail, 0, len(tasks))
+	for _, taskData := range tasks {
+		if taskMap, ok := taskData.(map[string]interface{}); ok {
+			task := c.convertImageAnalysisTaskDetail(taskMap)
+			if task != nil {
+				result = append(result, task)
+			}
+		}
+	}
+	return result
+}
+
+// convertImageAnalysisTaskDetail converts a single image analysis task detail
+func (c *StateCollector) convertImageAnalysisTaskDetail(data map[string]interface{}) *ChartRepoImageAnalysisTaskDetail {
+	task := &ChartRepoImageAnalysisTaskDetail{}
+
+	if taskID, ok := data["task_id"].(string); ok {
+		task.TaskID = taskID
+	}
+	if appName, ok := data["app_name"].(string); ok {
+		task.AppName = appName
+	}
+	if appDir, ok := data["app_dir"].(string); ok {
+		task.AppDir = appDir
+	}
+	if status, ok := data["status"].(string); ok {
+		task.Status = status
+	}
+	if createdAt, ok := data["created_at"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			task.CreatedAt = t
+		}
+	}
+	if startedAt, ok := data["started_at"].(string); ok && startedAt != "" {
+		if t, err := time.Parse(time.RFC3339, startedAt); err == nil {
+			task.StartedAt = &t
+		}
+	}
+	if completedAt, ok := data["completed_at"].(string); ok && completedAt != "" {
+		if t, err := time.Parse(time.RFC3339, completedAt); err == nil {
+			task.CompletedAt = &t
+		}
+	}
+	if workerID, ok := data["worker_id"].(float64); ok {
+		id := int(workerID)
+		task.WorkerID = &id
+	}
+	if duration, ok := data["duration"].(string); ok && duration != "" {
+		if d, err := time.ParseDuration(duration); err == nil {
+			task.Duration = &d
+		}
+	} else if durationMs, ok := data["duration"].(float64); ok {
+		d := time.Duration(durationMs) * time.Millisecond
+		task.Duration = &d
+	}
+	if imagesCount, ok := data["images_count"].(float64); ok {
+		task.ImagesCount = int(imagesCount)
+	}
+	if analyzedCount, ok := data["analyzed_count"].(float64); ok {
+		task.AnalyzedCount = int(analyzedCount)
+	}
+	if error, ok := data["error"].(string); ok {
+		task.Error = error
+	}
+	if errorStep, ok := data["error_step"].(string); ok {
+		task.ErrorStep = errorStep
+	}
+	if images, ok := data["images"].([]interface{}); ok {
+		task.Images = make([]string, 0, len(images))
+		for _, img := range images {
+			if imgStr, ok := img.(string); ok {
+				task.Images = append(task.Images, imgStr)
+			}
+		}
+	}
+
+	return task
 }

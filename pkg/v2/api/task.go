@@ -29,10 +29,12 @@ type InstallAppRequest struct {
 
 // CloneAppRequest represents the request body for app clone
 type CloneAppRequest struct {
-	Source  string           `json:"source"`
-	AppName string           `json:"app_name"`
-	Sync    bool             `json:"sync"` // Whether this is a synchronous request
-	Envs    []task.AppEnvVar `json:"envs,omitempty"`
+	Source    string             `json:"source"`
+	AppName   string             `json:"app_name"`
+	Title     string             `json:"title"` // Title for cloned app (used for display purposes)
+	Sync      bool               `json:"sync"`  // Whether this is a synchronous request
+	Envs      []task.AppEnvVar   `json:"envs,omitempty"`
+	Entrances []task.AppEntrance `json:"entrances,omitempty"`
 }
 
 // CancelInstallRequest represents the request body for cancel installation
@@ -440,7 +442,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appVersion = stateVersion
-	log.Printf("Cloning app: rawAppName=%s, envsHash=%s, newAppName=%s, version=%s (from installed original app)", rawAppName, envsHash, newAppName, appVersion)
+	log.Printf("Cloning app: rawAppName=%s, envsHash=%s, title=%s, newAppName=%s, version=%s (from installed original app)", rawAppName, envsHash, request.Title, newAppName, appVersion)
 
 	// Step 10: Verify chart package exists (use version from targetApp)
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, appVersion)
@@ -476,8 +478,10 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":    cfgType,
 		"images":     images,
 		"envs":       request.Envs,
-		"rawAppName": rawAppName, // Pass rawAppName in metadata
-		"envsHash":   envsHash,   // Pass envsHash in metadata
+		"entrances":  request.Entrances,
+		"rawAppName": rawAppName,    // Pass rawAppName in metadata
+		"envsHash":   envsHash,      // Pass envsHash in metadata
+		"title":      request.Title, // Pass title in metadata (for display purposes)
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -502,7 +506,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, envsHash=%s)", task.ID, newAppName, rawAppName, envsHash)
+		log.Printf("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, envsHash=%s, title=%s)", task.ID, newAppName, rawAppName, envsHash, request.Title)
 
 		// Wait for task completion
 		<-done
@@ -547,7 +551,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created asynchronous clone installation task: ID=%s for app: %s (rawAppName=%s, envsHash=%s)", task.ID, newAppName, rawAppName, envsHash)
+	log.Printf("Created asynchronous clone installation task: ID=%s for app: %s (rawAppName=%s, envsHash=%s, title=%s)", task.ID, newAppName, rawAppName, envsHash, request.Title)
 
 	// Return immediately for asynchronous requests
 	s.sendResponse(w, http.StatusOK, true, "App clone installation started successfully", map[string]interface{}{
