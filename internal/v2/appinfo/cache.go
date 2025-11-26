@@ -473,6 +473,12 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 				newAppState.Status.RawAppName = existingAppState.Status.RawAppName
 			}
 
+			// Preserve title from existing state if new state doesn't have it
+			if newAppState.Status.Title == "" && existingAppState.Status.Title != "" {
+				glog.Infof("New app state for %s has empty Title, preserving old Title: %s", newAppState.Status.Name, existingAppState.Status.Title)
+				newAppState.Status.Title = existingAppState.Status.Title
+			}
+
 			// If new app state has empty EntranceStatuses, preserve the old ones
 			if len(newAppState.Status.EntranceStatuses) == 0 && len(existingAppState.Status.EntranceStatuses) > 0 {
 				glog.Infof("New app state for %s has empty EntranceStatuses, preserving old entrance statuses", newAppState.Status.Name)

@@ -568,6 +568,7 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*types.AppStateLatestData, string) {
 	data := map[string]interface{}{
 		"name":               app.Spec.Name,
+		"title":              app.Spec.Title,
 		"state":              app.Status.State,
 		"updateTime":         app.Status.UpdateTime,
 		"statusTime":         app.Status.StatusTime,

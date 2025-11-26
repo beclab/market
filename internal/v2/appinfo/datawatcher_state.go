@@ -34,6 +34,7 @@ type AppStateMessage struct {
 	CreateTime       string           `json:"createTime"`
 	Name             string           `json:"name"`
 	RawAppName       string           `json:"rawAppName"`
+	Title            string           `json:"title"`
 	OpID             string           `json:"opID"`
 	OpType           string           `json:"opType"`
 	State            string           `json:"state"`
@@ -473,6 +474,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		"entranceStatuses":   entranceStatuses,
 		"name":               msg.Name,       // Add app name for state monitoring
 		"rawAppName":         msg.RawAppName, // Add raw app name for clone app support
+		"title":              msg.Title,      // Add title from message
 	}
 
 	// Add debug logging for stateData
@@ -581,6 +583,7 @@ func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	log.Printf("Create Time: %s", msg.CreateTime)
 	log.Printf("Name: %s", msg.Name)
 	log.Printf("Raw App Name: %s", msg.RawAppName)
+	log.Printf("Title: %s", msg.Title)
 	log.Printf("State: %s", msg.State)
 	log.Printf("Progress: %s", msg.Progress)
 	log.Printf("Operation Type: %s", msg.OpType)
