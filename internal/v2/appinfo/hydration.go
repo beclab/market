@@ -771,8 +771,11 @@ func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfo
 		"target":             entry.Target,
 		"permission":         entry.Permission,
 		"entrances":          entry.Entrances,
+		"ports":              entry.Ports,
+		"tailscale":          entry.Tailscale,
 		"middleware":         entry.Middleware,
 		"options":            entry.Options,
+		"subCharts":          entry.SubCharts,
 
 		"submitter":     entry.Submitter,
 		"doc":           entry.Doc,
@@ -798,7 +801,6 @@ func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfo
 		"updated_at":  entry.UpdatedAt,
 
 		"versionHistory": entry.VersionHistory,
-		"subCharts":      entry.SubCharts,
 	}
 
 	// Safely copy metadata without potential circular references

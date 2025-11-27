@@ -438,6 +438,8 @@ func createSafeApplicationInfoEntryCopy(entry *types.ApplicationInfoEntry) map[s
 		"metadata":       convertToStringMapDW(entry.Metadata),
 		"count":          entry.Count,
 		"entrances":      entry.Entrances,
+		"ports":          entry.Ports,
+		"tailscale":      entry.Tailscale,
 		"envs":           entry.Envs,
 		"license":        entry.License,
 		"legal":          entry.Legal,
