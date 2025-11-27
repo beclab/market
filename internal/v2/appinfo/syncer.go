@@ -212,8 +212,13 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 
 	log.Printf("Found %d active market sources", len(activeSources))
 
-	// Try each source in priority order until one succeeds
+	// Process all sources in priority order - each source is synced independently
 	var lastError error
+	successCount := 0
+	failureCount := 0
+	var successSources []string
+	var failedSources []string
+
 	for _, source := range activeSources {
 		s.currentSource.Store(source.ID)
 		log.Printf("Trying market source: %s (%s)", source.ID, source.BaseURL)
@@ -221,14 +226,36 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		if err := s.executeSyncCycleWithSource(ctx, source); err != nil {
 			log.Printf("Failed to sync with source %s: %v", source.ID, err)
 			lastError = err
+			failureCount++
+			failedSources = append(failedSources, source.ID)
 			continue
 		}
 
-		// Success with this source
-		duration := time.Since(startTime)
-		log.Printf("Sync cycle completed successfully with source %s in %v", source.ID, duration)
+		// Success with this source - continue to next source
+		successCount++
+		successSources = append(successSources, source.ID)
+		log.Printf("Sync cycle completed successfully with source %s", source.ID)
+	}
+
+	// Summary of sync cycle
+	duration := time.Since(startTime)
+	log.Printf("Sync cycle summary: %d/%d sources succeeded, %d failed in %v",
+		successCount, len(activeSources), failureCount, duration)
+	if len(successSources) > 0 {
+		log.Printf("Successfully synced sources: %v", successSources)
+	}
+	if len(failedSources) > 0 {
+		log.Printf("Failed to sync sources: %v", failedSources)
+	}
+
+	// Check if at least one source succeeded
+	if successCount > 0 {
 		s.updateSyncSuccess(duration, startTime)
 		log.Println("==================== SYNC CYCLE COMPLETED ====================")
+		// If some sources failed, log a warning but still return success
+		if failureCount > 0 {
+			log.Printf("WARNING: %d source(s) failed, but %d source(s) succeeded", failureCount, successCount)
+		}
 		return nil
 	}
 
