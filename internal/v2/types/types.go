@@ -214,7 +214,7 @@ type ApplicationInfoEntry struct {
 	AppID       string            `json:"appID"`
 	Title       map[string]string `json:"title"` // Changed to support multi-language
 	Version     string            `json:"version"`
-	ApiVersion  string            `json:"apiVersion,omitempty"`
+	ApiVersion  string            `json:"apiVersion"` // API version for the application
 	Categories  []string          `json:"categories"`
 	VersionName string            `json:"versionName"`
 
@@ -233,11 +233,14 @@ type ApplicationInfoEntry struct {
 	RequiredCPU        string                   `json:"requiredCPU"`
 	Rating             float32                  `json:"rating"`
 	Target             string                   `json:"target"`
-	Permission         map[string]interface{}   `json:"permission"`     // Using interface{} for flexibility
-	Entrances          []map[string]interface{} `json:"entrances"`      // Using interface{} for flexibility
-	Middleware         map[string]interface{}   `json:"middleware"`     // Using interface{} for flexibility
-	Options            map[string]interface{}   `json:"options"`        // Using interface{} for flexibility
-	Envs               []map[string]interface{} `json:"envs,omitempty"` // Environment variable configurations
+	Permission         map[string]interface{}   `json:"permission"`          // Using interface{} for flexibility
+	Entrances          []map[string]interface{} `json:"entrances"`           // Using interface{} for flexibility
+	Ports              []map[string]interface{} `json:"ports,omitempty"`     // Port configurations
+	Tailscale          map[string]interface{}   `json:"tailscale,omitempty"` // Tailscale configuration
+	Middleware         map[string]interface{}   `json:"middleware"`          // Using interface{} for flexibility
+	Options            map[string]interface{}   `json:"options"`             // Using interface{} for flexibility
+	SubCharts          []*SubChart              `json:"subCharts"`           // Array of sub-chart configurations
+	Envs               []map[string]interface{} `json:"envs,omitempty"`      // Array of environment variable configurations
 
 	Submitter     string                   `json:"submitter"`
 	Doc           string                   `json:"doc"`
@@ -261,9 +264,6 @@ type ApplicationInfoEntry struct {
 
 	// Version history information
 	VersionHistory []*VersionInfo `json:"versionHistory,omitempty"`
-
-	// Sub-charts information
-	SubCharts []*SubChart `json:"subCharts,omitempty"`
 
 	// Legacy fields for backward compatibility
 	Screenshots []string               `json:"screenshots"`
@@ -1724,6 +1724,25 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 		for i, entrance := range val {
 			if entranceMap, ok := entrance.(map[string]interface{}); ok {
 				entry.Entrances[i] = entranceMap
+			}
+		}
+	}
+	if val, ok := sourceData["ports"].([]interface{}); ok {
+		entry.Ports = make([]map[string]interface{}, len(val))
+		for i, port := range val {
+			if portMap, ok := port.(map[string]interface{}); ok {
+				entry.Ports[i] = portMap
+			}
+		}
+	}
+	if val, ok := sourceData["tailscale"].(map[string]interface{}); ok {
+		entry.Tailscale = val
+	}
+	if val, ok := sourceData["envs"].([]interface{}); ok {
+		entry.Envs = make([]map[string]interface{}, len(val))
+		for i, env := range val {
+			if envMap, ok := env.(map[string]interface{}); ok {
+				entry.Envs[i] = envMap
 			}
 		}
 	}

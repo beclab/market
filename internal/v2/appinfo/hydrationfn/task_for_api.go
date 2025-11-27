@@ -99,8 +99,8 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		return fmt.Errorf("failed to parse response JSON: %w", err)
 	}
 
-	// 6. Print complete response except app_data
-	s.logResponseWithoutAppData(apiResponse)
+	// 6. Print complete response including app_data
+	s.logCompleteResponse(apiResponse)
 
 	// 7. Handle app_data if present
 	if apiResponse.Success && apiResponse.Data != nil {
@@ -121,27 +121,17 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 	return nil
 }
 
-// logResponseWithoutAppData logs the complete response except app_data field
-func (s *TaskForApiStep) logResponseWithoutAppData(response Response) {
-	// Create a copy of data without app_data for logging
-	var logData interface{}
-	if response.Data != nil {
-		if dataMap, ok := response.Data.(map[string]interface{}); ok {
-			// Create a copy without app_data
-			logDataMap := make(map[string]interface{})
-			for k, v := range dataMap {
-				if k != "app_data" {
-					logDataMap[k] = v
-				}
-			}
-			logData = logDataMap
-		} else {
-			logData = response.Data
-		}
+// logCompleteResponse logs the complete response including app_data field
+func (s *TaskForApiStep) logCompleteResponse(response Response) {
+	// Marshal the complete response to JSON for full logging
+	responseJSON, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		log.Printf("Chart repo sync-app response - Failed to marshal response: %v", err)
+		log.Printf("Chart repo sync-app response - Success: %v, Message: %s, Data: %+v",
+			response.Success, response.Message, response.Data)
+	} else {
+		log.Printf("Chart repo sync-app complete response:\n%s", string(responseJSON))
 	}
-
-	log.Printf("Chart repo sync-app response - Success: %v, Message: %s, Data: %+v",
-		response.Success, response.Message, logData)
 }
 
 // writeAppDataToCache writes AppInfoLatestData to cache by updating the corresponding AppInfoLatestPendingData

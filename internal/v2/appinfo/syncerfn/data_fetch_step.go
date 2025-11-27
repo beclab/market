@@ -94,57 +94,62 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 
 // CanSkip determines if this step can be skipped
 func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
-	// Check if we have any existing data in cache
+	// Get current market source - only check data for this specific source
+	marketSource := data.GetMarketSource()
+	if marketSource == nil {
+		log.Printf("Executing %s - no market source available in sync context", d.GetStepName())
+		return false
+	}
+
+	sourceID := marketSource.ID
+
+	// Check if we have existing data in cache for THIS specific source only
 	hasExistingData := false
 	if data.Cache != nil {
 		// Use CacheManager's lock for unified lock strategy
 		if data.CacheManager != nil {
 			data.CacheManager.RLock()
-			for _, userData := range data.Cache.Users {
-				for _, sourceData := range userData.Sources {
+			for userID, userData := range data.Cache.Users {
+				// Only check data for the current market source
+				if sourceData, exists := userData.Sources[sourceID]; exists {
 					if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
 						hasExistingData = true
-					}
-					if hasExistingData {
+						log.Printf("Found existing data for source:%s user:%s (pending:%d latest:%d)",
+							sourceID, userID, len(sourceData.AppInfoLatestPending), len(sourceData.AppInfoLatest))
 						break
 					}
-				}
-				if hasExistingData {
-					break
 				}
 			}
 			data.CacheManager.RUnlock()
 		} else {
 			// Fallback to SyncContext's mutex if CacheManager is not available
 			data.mutex.RLock()
-			for _, userData := range data.Cache.Users {
-				for _, sourceData := range userData.Sources {
+			for userID, userData := range data.Cache.Users {
+				// Only check data for the current market source
+				if sourceData, exists := userData.Sources[sourceID]; exists {
 					if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
 						hasExistingData = true
-					}
-					if hasExistingData {
+						log.Printf("Found existing data for source:%s user:%s (pending:%d latest:%d)",
+							sourceID, userID, len(sourceData.AppInfoLatestPending), len(sourceData.AppInfoLatest))
 						break
 					}
-				}
-				if hasExistingData {
-					break
 				}
 			}
 			data.mutex.RUnlock()
 		}
 	}
 
-	// Skip only if hashes match AND we have existing data
+	// Skip only if hashes match AND we have existing data for THIS specific source
 	if data.HashMatches && hasExistingData {
-		log.Printf("Skipping %s - hashes match and existing data found, no sync required", d.GetStepName())
+		log.Printf("Skipping %s for source %s - hashes match and existing data found, no sync required", d.GetStepName(), sourceID)
 		return true
 	}
 
-	// Force execution if no existing data, even if hashes match
+	// Force execution if no existing data for this source, even if hashes match
 	if !hasExistingData {
-		log.Printf("Executing %s - no existing data found, forcing data fetch", d.GetStepName())
+		log.Printf("Executing %s for source %s - no existing data found for this source, forcing data fetch", d.GetStepName(), sourceID)
 	} else if !data.HashMatches {
-		log.Printf("Executing %s - hashes don't match, sync required", d.GetStepName())
+		log.Printf("Executing %s for source %s - hashes don't match, sync required", d.GetStepName(), sourceID)
 	}
 
 	return false
