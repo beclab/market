@@ -278,6 +278,7 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 						// If state is empty but app is in AppStateLatest, it's installed and running
 						stage = StageRunning
 						health = "healthy"
+						log.Printf("[DEBUG] App %s (user: %s, source: %s): State is empty, setting to running", appName, userID, sourceID)
 					} else if strings.Contains(appStateStr, "failed") ||
 						strings.Contains(appStateStr, "error") ||
 						strings.Contains(appStateStr, "canceled") ||
@@ -285,24 +286,30 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 						// Check failed/canceled states first (including downloadingCanceled)
 						stage = StageFailed
 						health = "unhealthy"
+						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains failed/canceled, setting to failed", appName, userID, sourceID, appState.Status.State)
 					} else if strings.Contains(appStateStr, "stopped") {
 						stage = StageStopped
 						health = "unhealthy"
+						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains stopped, setting to stopped", appName, userID, sourceID, appState.Status.State)
 					} else if strings.Contains(appStateStr, "running") {
 						stage = StageRunning
 						health = "healthy"
+						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains running, setting to running", appName, userID, sourceID, appState.Status.State)
 					} else if strings.Contains(appStateStr, "downloading") ||
 						strings.Contains(appStateStr, "fetching") ||
 						strings.Contains(appStateStr, "syncing") {
 						stage = StageFetching
 						health = "unknown"
+						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains downloading/fetching/syncing, setting to fetching", appName, userID, sourceID, appState.Status.State)
 					} else if strings.Contains(appStateStr, "installing") {
 						stage = StageInstalling
 						health = "unknown"
+						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains installing, setting to installing", appName, userID, sourceID, appState.Status.State)
 					} else {
 						// Default to running if state is not recognized (app is installed)
 						stage = StageRunning
 						health = "healthy"
+						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' not recognized, defaulting to running", appName, userID, sourceID, appState.Status.State)
 					}
 
 					// First, check if there's pending data (downloading/syncing)
@@ -319,9 +326,10 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 								}
 								if pendingAppName == appName {
 									// App has pending data, likely downloading or syncing
-									if stage == StageUnknown || stage == StageRunning {
+									if stage == StageRunning {
 										stage = StageFetching
 										health = "unknown"
+										log.Printf("[DEBUG] App %s (user: %s, source: %s): Has pending data, changing stage from running to fetching", appName, userID, sourceID)
 									}
 									break
 								}
@@ -331,13 +339,14 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 
 					// Check progress field for downloading indicators
 					progressStr := appState.Status.Progress
-					if progressStr != "" && (stage == StageUnknown || stage == StageRunning) {
+					if progressStr != "" && stage == StageRunning {
 						progressLower := strings.ToLower(progressStr)
 						if strings.Contains(progressLower, "downloading") ||
 							strings.Contains(progressLower, "fetching") ||
 							strings.Contains(progressLower, "syncing") {
 							stage = StageFetching
 							health = "unknown"
+							log.Printf("[DEBUG] App %s (user: %s, source: %s): Progress field indicates downloading, changing stage to fetching", appName, userID, sourceID)
 						}
 					}
 
@@ -414,6 +423,7 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 						},
 					}
 
+					log.Printf("[DEBUG] App %s (user: %s, source: %s): Final stage=%s, health=%s, version=%s", appName, userID, sourceID, stage, health, version)
 					c.store.UpdateAppState(appFlowState)
 				}
 			}
