@@ -1116,20 +1116,39 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         function getStatusBadge(status) {
-            // Debug: log status value when it's unknown or missing
-            if (!status || status === 'unknown' || status === '') {
-                console.log('[DEBUG] getStatusBadge received:', status, 'type:', typeof status, 'stack:', new Error().stack);
-            }
+            // Complete debug log for all calls
+            const statusType = typeof status;
+            const statusIsUndefined = status === undefined;
+            const statusIsNull = status === null;
+            const statusIsEmpty = status === '';
+            const statusIsUnknown = status === 'unknown';
+            
+            console.log('[DEBUG] getStatusBadge called:', {
+                status: status,
+                type: statusType,
+                isUndefined: statusIsUndefined,
+                isNull: statusIsNull,
+                isEmpty: statusIsEmpty,
+                isUnknown: statusIsUnknown,
+                stack: new Error().stack.split('\\n').slice(0, 5).join('\\n')
+            });
             
             const statusLower = (status || '').toLowerCase();
+            let badgeClass = 'badge-info';
+            let badgeText = status || 'unknown';
+            
             if (statusLower.includes('running') || statusLower.includes('healthy') || statusLower === 'completed') {
-                return '<span class="badge badge-success">' + (status || 'unknown') + '</span>';
+                badgeClass = 'badge-success';
             } else if (statusLower.includes('pending') || statusLower.includes('processing')) {
-                return '<span class="badge badge-warning">' + (status || 'unknown') + '</span>';
+                badgeClass = 'badge-warning';
             } else if (statusLower.includes('failed') || statusLower.includes('unhealthy') || statusLower.includes('error')) {
-                return '<span class="badge badge-danger">' + (status || 'unknown') + '</span>';
+                badgeClass = 'badge-danger';
             }
-            return '<span class="badge badge-info">' + (status || 'unknown') + '</span>';
+            
+            const result = '<span class="badge ' + badgeClass + '">' + badgeText + '</span>';
+            console.log('[DEBUG] getStatusBadge returning:', result);
+            
+            return result;
         }
         
         function renderMarketStats() {
@@ -1181,10 +1200,21 @@ func generateDashboardHTML(snapshotJSON string) string {
             const apps = snapshotData.app_states || {};
             const appList = Object.values(apps);
             
-            // Debug: log all apps to check stage field
+            // Debug: log all apps with complete information
+            console.log('[DEBUG] ========== renderApps START ==========');
             console.log('[DEBUG] Total apps:', appList.length);
             appList.forEach((app, index) => {
-                console.log('[DEBUG] App ' + index + ':', app.app_name, 'stage:', app.stage, 'type:', typeof app.stage, 'health:', app.health);
+                console.log('[DEBUG] App ' + index + ':', {
+                    app_name: app.app_name,
+                    stage: app.stage,
+                    stageType: typeof app.stage,
+                    health: app.health,
+                    healthType: typeof app.health,
+                    user_id: app.user_id,
+                    source_id: app.source_id,
+                    version: app.version,
+                    fullApp: app
+                });
             });
             
             // Filter apps by stage
@@ -1195,51 +1225,77 @@ func generateDashboardHTML(snapshotJSON string) string {
             const appsUpgrading = appList.filter(app => (app.stage || '').toLowerCase() === 'upgrading');
             const appsFailed = appList.filter(app => (app.stage || '').toLowerCase() === 'failed');
             
+            // Debug: log filtered results
+            console.log('[DEBUG] Filtered apps:', {
+                all: appsAll.length,
+                fetching: appsFetching.length,
+                installing: appsInstalling.length,
+                running: appsRunning.length,
+                upgrading: appsUpgrading.length,
+                failed: appsFailed.length
+            });
+            
             renderAppsTable('appsTableBody', appsAll);
             renderAppsTable('appsFetchingBody', appsFetching);
             renderAppsTable('appsInstallingBody', appsInstalling);
             renderAppsTable('appsRunningBody', appsRunning);
             renderAppsTable('appsUpgradingBody', appsUpgrading);
             renderAppsTable('appsFailedBody', appsFailed);
+            
+            console.log('[DEBUG] ========== renderApps END ==========');
         }
         
         function renderAppsTable(tbodyId, apps) {
+            console.log('[DEBUG] ========== renderAppsTable START:', tbodyId, '==========');
+            
             const tbody = document.getElementById(tbodyId);
             if (!tbody) {
-                console.log('[DEBUG] renderAppsTable: tbody not found for', tbodyId);
+                console.log('[DEBUG] ERROR: renderAppsTable: tbody not found for', tbodyId);
                 return;
             }
             tbody.innerHTML = '';
             
             if (apps.length === 0) {
+                console.log('[DEBUG] renderAppsTable:', tbodyId, 'has no apps, showing empty state');
                 tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No applications</td></tr>';
+                console.log('[DEBUG] ========== renderAppsTable END:', tbodyId, '(empty) ==========');
                 return;
             }
             
-            console.log('[DEBUG] renderAppsTable:', tbodyId, 'apps count:', apps.length);
+            console.log('[DEBUG] renderAppsTable:', tbodyId, 'rendering', apps.length, 'apps');
             
             apps.forEach((app, index) => {
-                // Debug: log each app's stage and health values
                 const stageValue = app.stage;
                 const healthValue = app.health;
                 
-                // Debug: log BEFORE calling getStatusBadge to see what values we have
-                console.log('[DEBUG] renderAppsTable:', tbodyId, 'App', index, ':', app.app_name, 
-                    'stage:', stageValue, 'stageType:', typeof stageValue,
-                    'health:', healthValue, 'healthType:', typeof healthValue,
-                    'healthIsUndefined:', healthValue === undefined,
-                    'healthIsNull:', healthValue === null,
-                    'healthIsEmpty:', healthValue === '');
+                // Complete debug log for each app
+                console.log('[DEBUG] renderAppsTable:', tbodyId, 'App', index + '/' + apps.length, ':', {
+                    app_name: app.app_name,
+                    user_id: app.user_id,
+                    source_id: app.source_id,
+                    stage: stageValue,
+                    stageType: typeof stageValue,
+                    stageIsUndefined: stageValue === undefined,
+                    stageIsNull: stageValue === null,
+                    stageIsEmpty: stageValue === '',
+                    health: healthValue,
+                    healthType: typeof healthValue,
+                    healthIsUndefined: healthValue === undefined,
+                    healthIsNull: healthValue === null,
+                    healthIsEmpty: healthValue === '',
+                    version: app.version,
+                    fullAppObject: app
+                });
                 
-                const badgeHTML = getStatusBadge(stageValue || 'unknown');
+                // Call getStatusBadge for stage
+                const stageForBadge = stageValue || 'unknown';
+                console.log('[DEBUG] Calling getStatusBadge for STAGE:', stageForBadge, 'from app:', app.app_name);
+                const badgeHTML = getStatusBadge(stageForBadge);
                 
-                // Debug: log if health is missing BEFORE calling getStatusBadge for health
-                if (!healthValue || healthValue === 'unknown' || healthValue === '') {
-                    console.log('[DEBUG] WARNING: App with missing/unknown health BEFORE getStatusBadge:', 
-                        app.app_name, 'health:', healthValue, 'full app:', JSON.stringify(app));
-                }
-                
-                const healthBadgeHTML = getStatusBadge(healthValue || 'unknown');
+                // Call getStatusBadge for health
+                const healthForBadge = healthValue || 'unknown';
+                console.log('[DEBUG] Calling getStatusBadge for HEALTH:', healthForBadge, 'from app:', app.app_name);
+                const healthBadgeHTML = getStatusBadge(healthForBadge);
                 
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
@@ -1250,6 +1306,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
             });
+            
+            console.log('[DEBUG] ========== renderAppsTable END:', tbodyId, '==========');
         }
         
         function renderTasks() {
