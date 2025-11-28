@@ -1104,6 +1104,18 @@ func generateDashboardHTML(snapshotJSON string) string {
             const apps = snapshotData.app_states || {};
             const appList = Object.values(apps);
             
+            // Debug: log first app to check stage field
+            if (appList.length > 0) {
+                const firstApp = appList[0];
+                console.log('[DEBUG] First app in renderApps:', {
+                    app_name: firstApp.app_name,
+                    stage: firstApp.stage,
+                    stageType: typeof firstApp.stage,
+                    hasStage: 'stage' in firstApp,
+                    allKeys: Object.keys(firstApp)
+                });
+            }
+            
             renderAppsTable('appsTableBody', appList);
         }
         
@@ -1118,9 +1130,33 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             apps.forEach(app => {
-                // Display raw stage value as string, no conversion
-                const stageValue = app.stage || '';
+                // Get stage value - use raw state from metadata if stage is empty or unknown
+                let stageValue = app.stage || '';
+                
+                // If stage is empty or unknown, try to get original state from metadata
+                if (!stageValue || stageValue === 'unknown') {
+                    if (app.metadata && app.metadata.status && app.metadata.status.state) {
+                        stageValue = app.metadata.status.state;
+                    }
+                }
+                
+                // If still empty, use N/A
+                if (!stageValue) {
+                    stageValue = 'N/A';
+                }
+                
                 const healthValue = app.health || '';
+                
+                // Debug: log if stage is still empty or unknown
+                if (!stageValue || stageValue === 'unknown' || stageValue === 'N/A') {
+                    console.log('[DEBUG] App with empty/unknown stage:', {
+                        app_name: app.app_name,
+                        stage: app.stage,
+                        metadata_status_state: app.metadata && app.metadata.status ? app.metadata.status.state : 'N/A',
+                        final_stageValue: stageValue,
+                        fullApp: app
+                    });
+                }
                 
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
