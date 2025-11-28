@@ -71,13 +71,15 @@ func (s *Server) getRuntimeDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Debug: log first app state to verify stage field
+	// Debug: log all app states to verify stage field
 	if snapshot != nil && len(snapshot.AppStates) > 0 {
+		log.Printf("[DEBUG] Dashboard - Total apps: %d", len(snapshot.AppStates))
 		for key, appState := range snapshot.AppStates {
 			if appState != nil {
 				log.Printf("[DEBUG] Dashboard - App key: %s, AppName: %s, Stage: %s (type: %T), Health: %s",
 					key, appState.AppName, appState.Stage, appState.Stage, appState.Health)
-				break // Just log first one
+			} else {
+				log.Printf("[DEBUG] Dashboard - App key: %s, AppState is nil", key)
 			}
 		}
 	}
@@ -1174,11 +1176,11 @@ func generateDashboardHTML(snapshotJSON string) string {
             const apps = snapshotData.app_states || {};
             const appList = Object.values(apps);
             
-            // Debug: log first app to check stage field
-            if (appList.length > 0) {
-                console.log('[DEBUG] First app in list:', appList[0]);
-                console.log('[DEBUG] First app stage:', appList[0].stage, 'type:', typeof appList[0].stage);
-            }
+            // Debug: log all apps to check stage field
+            console.log('[DEBUG] Total apps:', appList.length);
+            appList.forEach((app, index) => {
+                console.log('[DEBUG] App ' + index + ':', app.app_name, 'stage:', app.stage, 'type:', typeof app.stage, 'health:', app.health);
+            });
             
             // Filter apps by stage
             const appsAll = appList;
@@ -1207,11 +1209,17 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             apps.forEach(app => {
+                // Debug: log each app's stage value
+                const stageValue = app.stage;
+                if (!stageValue || stageValue === 'unknown') {
+                    console.log('[DEBUG] App with unknown/missing stage:', app.app_name, 'stage:', stageValue, 'full app:', app);
+                }
+                
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
-                    '<td>' + getStatusBadge(app.stage || 'unknown') + '</td>' +
+                    '<td>' + getStatusBadge(stageValue || 'unknown') + '</td>' +
                     '<td>' + getStatusBadge(app.health || 'unknown') + '</td>' +
                     '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
