@@ -506,8 +506,6 @@ func generateDashboardHTML(snapshotJSON string) string {
                                     <th>App Name</th>
                                     <th>User ID</th>
                                     <th>Source ID</th>
-                                    <th>Stage</th>
-                                    <th>Health</th>
                                     <th>Version</th>
                                 </tr>
                             </thead>
@@ -1125,39 +1123,15 @@ func generateDashboardHTML(snapshotJSON string) string {
             tbody.innerHTML = '';
             
             if (apps.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No applications</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No applications</td></tr>';
                 return;
             }
             
             apps.forEach(app => {
-                // Get stage value - prefer metadata.status.state, fallback to stage field
-                let stageValue = '';
-                
-                // Try to get from metadata first
-                if (app.metadata) {
-                    if (app.metadata.status && app.metadata.status.state) {
-                        stageValue = app.metadata.status.state;
-                    }
-                }
-                
-                // If not found in metadata, use stage field
-                if (!stageValue && app.stage) {
-                    stageValue = app.stage;
-                }
-                
-                // If still empty, use N/A
-                if (!stageValue) {
-                    stageValue = 'N/A';
-                }
-                
-                const healthValue = app.health || '';
-                
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
-                    '<td>' + stageValue + '</td>' +
-                    '<td>' + getStatusBadge(healthValue || 'unknown') + '</td>' +
                     '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
             });
