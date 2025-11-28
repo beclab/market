@@ -273,10 +273,21 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 					appStateStr := strings.ToLower(appState.Status.State)
 
 					// Determine stage from app state
+					// Check failed/canceled states first before checking downloading
 					if appStateStr == "" {
 						// If state is empty but app is in AppStateLatest, it's installed and running
 						stage = StageRunning
 						health = "healthy"
+					} else if strings.Contains(appStateStr, "failed") ||
+						strings.Contains(appStateStr, "error") ||
+						strings.Contains(appStateStr, "canceled") ||
+						strings.Contains(appStateStr, "cancelled") {
+						// Check failed/canceled states first (including downloadingCanceled)
+						stage = StageFailed
+						health = "unhealthy"
+					} else if strings.Contains(appStateStr, "stopped") {
+						stage = StageStopped
+						health = "unhealthy"
 					} else if strings.Contains(appStateStr, "running") {
 						stage = StageRunning
 						health = "healthy"
@@ -288,13 +299,6 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 					} else if strings.Contains(appStateStr, "installing") {
 						stage = StageInstalling
 						health = "unknown"
-					} else if strings.Contains(appStateStr, "failed") ||
-						strings.Contains(appStateStr, "error") {
-						stage = StageFailed
-						health = "unhealthy"
-					} else if strings.Contains(appStateStr, "stopped") {
-						stage = StageStopped
-						health = "unhealthy"
 					} else {
 						// Default to running if state is not recognized (app is installed)
 						stage = StageRunning
