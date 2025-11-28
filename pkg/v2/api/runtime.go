@@ -1102,22 +1102,10 @@ func generateDashboardHTML(snapshotJSON string) string {
             const apps = snapshotData.app_states || {};
             const appList = Object.values(apps);
             
-            // Debug: log first app to check stage field
-            if (appList.length > 0) {
-                const firstApp = appList[0];
-                console.log('[DEBUG] First app in renderApps:', {
-                    app_name: firstApp.app_name,
-                    stage: firstApp.stage,
-                    stageType: typeof firstApp.stage,
-                    hasStage: 'stage' in firstApp,
-                    allKeys: Object.keys(firstApp)
-                });
-            }
-            
-            renderAppsTable('appsTableBody', appList);
+            renderMarketAppsTable('appsTableBody', appList);
         }
         
-        function renderAppsTable(tbodyId, apps) {
+        function renderMarketAppsTable(tbodyId, apps) {
             const tbody = document.getElementById(tbodyId);
             if (!tbody) return;
             tbody.innerHTML = '';
