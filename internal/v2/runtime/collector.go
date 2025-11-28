@@ -266,9 +266,37 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 						continue
 					}
 
-					// Determine stage based on app state
-					stage := StageRunning
-					health := "healthy"
+					// Determine stage and health based on app state
+					stage := StageUnknown
+					health := "unknown"
+					appStateStr := strings.ToLower(appState.Status.State)
+
+					// Determine stage from app state
+					if appStateStr == "" {
+						stage = StageUnknown
+					} else if strings.Contains(appStateStr, "running") {
+						stage = StageRunning
+						health = "healthy"
+					} else if strings.Contains(appStateStr, "downloading") ||
+						strings.Contains(appStateStr, "fetching") ||
+						strings.Contains(appStateStr, "syncing") {
+						stage = StageFetching
+						health = "unknown"
+					} else if strings.Contains(appStateStr, "installing") {
+						stage = StageInstalling
+						health = "unknown"
+					} else if strings.Contains(appStateStr, "failed") ||
+						strings.Contains(appStateStr, "error") {
+						stage = StageFailed
+						health = "unhealthy"
+					} else if strings.Contains(appStateStr, "stopped") {
+						stage = StageStopped
+						health = "unhealthy"
+					} else {
+						// Default to running if state is not recognized
+						stage = StageRunning
+						health = "unknown"
+					}
 
 					// First, check if there's pending data (downloading/syncing)
 					if sourceData.AppInfoLatestPending != nil {
@@ -284,43 +312,25 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 								}
 								if pendingAppName == appName {
 									// App has pending data, likely downloading or syncing
-									stage = StageFetching
-									health = "unknown"
+									if stage == StageUnknown || stage == StageRunning {
+										stage = StageFetching
+										health = "unknown"
+									}
 									break
 								}
 							}
 						}
 					}
 
-					// Check app state status for downloading/installing indicators
-					if stage == StageRunning {
-						appStateStr := appState.Status.State
-						progressStr := appState.Status.Progress
-
-						// Check if state indicates downloading or installing
-						if appStateStr != "" {
-							stateLower := strings.ToLower(appStateStr)
-							if strings.Contains(stateLower, "downloading") ||
-								strings.Contains(stateLower, "fetching") ||
-								strings.Contains(stateLower, "syncing") ||
-								strings.Contains(stateLower, "pending") {
-								stage = StageFetching
-								health = "unknown"
-							} else if strings.Contains(stateLower, "installing") {
-								stage = StageInstalling
-								health = "unknown"
-							}
-						}
-
-						// Check progress field for downloading indicators
-						if progressStr != "" && stage == StageRunning {
-							progressLower := strings.ToLower(progressStr)
-							if strings.Contains(progressLower, "downloading") ||
-								strings.Contains(progressLower, "fetching") ||
-								strings.Contains(progressLower, "syncing") {
-								stage = StageFetching
-								health = "unknown"
-							}
+					// Check progress field for downloading indicators
+					progressStr := appState.Status.Progress
+					if progressStr != "" && (stage == StageUnknown || stage == StageRunning) {
+						progressLower := strings.ToLower(progressStr)
+						if strings.Contains(progressLower, "downloading") ||
+							strings.Contains(progressLower, "fetching") ||
+							strings.Contains(progressLower, "syncing") {
+							stage = StageFetching
+							health = "unknown"
 						}
 					}
 

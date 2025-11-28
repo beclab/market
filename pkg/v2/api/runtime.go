@@ -389,6 +389,63 @@ func generateDashboardHTML(snapshotJSON string) string {
             display: block;
         }
         
+        .error-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        
+        .error-modal-content {
+            background-color: #ffffff;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        
+        .error-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .error-modal-header h3 {
+            margin: 0;
+            color: #1a1a1a;
+        }
+        
+        .error-modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666666;
+        }
+        
+        .error-modal-close:hover {
+            color: #1a1a1a;
+        }
+        
+        .error-modal-body {
+            color: #1a1a1a;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
         @media (max-width: 1200px) {
             .main-layout {
                 grid-template-columns: 1fr;
@@ -998,6 +1055,17 @@ func generateDashboardHTML(snapshotJSON string) string {
         </div>
     </div>
     
+    <!-- Error Modal -->
+    <div id="errorModal" class="error-modal">
+        <div class="error-modal-content">
+            <div class="error-modal-header">
+                <h3>Error Details</h3>
+                <button class="error-modal-close" onclick="closeErrorModal()">&times;</button>
+            </div>
+            <div class="error-modal-body" id="errorModalBody"></div>
+        </div>
+    </div>
+    
     <script>
         let snapshotData = {};
         let autoRefreshInterval = null;
@@ -1040,20 +1108,20 @@ func generateDashboardHTML(snapshotJSON string) string {
             const statsGrid = document.getElementById('marketStatsGrid');
             statsGrid.innerHTML = 
                 '<div class="stat-card">' +
-                    '<div class="label">Total Apps</div>' +
+                    '<div class="label">Installed Apps</div>' +
                     '<div class="value">' + (summary.total_apps || 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Total Tasks</div>' +
+                    '<div class="label">Total Tasks <span style="font-size: 10px; color: #666;">(Recent 100)</span></div>' +
                     '<div class="value">' + (summary.total_tasks || 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Running Tasks</div>' +
-                    '<div class="value">' + (summary.running_tasks || 0) + '</div>' +
+                    '<div class="label">Completed Tasks</div>' +
+                    '<div class="value">' + (summary.completed_tasks || 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Pending Tasks</div>' +
-                    '<div class="value">' + (summary.pending_tasks || 0) + '</div>' +
+                    '<div class="label">Failed Tasks</div>' +
+                    '<div class="value">' + (summary.failed_tasks || 0) + '</div>' +
                 '</div>';
         }
         
@@ -1126,6 +1194,16 @@ func generateDashboardHTML(snapshotJSON string) string {
             const tasks = snapshotData.tasks || {};
             const taskList = Object.values(tasks);
             
+            // Sort tasks by Created At or Updated At (descending)
+            taskList.sort((a, b) => {
+                const timeA = a.completed_at || a.started_at || a.created_at;
+                const timeB = b.completed_at || b.started_at || b.created_at;
+                if (!timeA && !timeB) return 0;
+                if (!timeA) return 1;
+                if (!timeB) return -1;
+                return new Date(timeB) - new Date(timeA);
+            });
+            
             // Filter tasks by status
             const tasksAll = taskList;
             const tasksPending = taskList.filter(task => (task.status || '').toLowerCase() === 'pending');
@@ -1136,7 +1214,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             renderTasksTableFull('tasksTableBody', tasksAll);
             renderTasksTableSimple('tasksPendingBody', tasksPending, 'created_at');
             renderTasksTableSimple('tasksRunningBody', tasksRunning, 'started_at');
-            renderTasksTableSimple('tasksCompletedBody', tasksCompleted, 'completed_at');
+            renderTasksTableCompleted('tasksCompletedBody', tasksCompleted);
             renderTasksTableFailed('tasksFailedBody', tasksFailed);
         }
         
@@ -1198,6 +1276,27 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.app_name || 'N/A') + '</td>' +
                     '<td style="font-size: 11px;">' + formatTimestamp(timeValue) + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function renderTasksTableCompleted(tbodyId, tasks) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tasks</td></tr>';
+                return;
+            }
+            
+            tasks.forEach(task => {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
+                    '<td>' + (task.type || 'N/A') + '</td>' +
+                    '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
+                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + formatTimestamp(task.completed_at || task.started_at || task.created_at) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -1296,11 +1395,11 @@ func generateDashboardHTML(snapshotJSON string) string {
                 { label: 'Last Sync Time', value: metrics.last_sync_time ? formatTimestamp(new Date(metrics.last_sync_time)) : 'Never' },
                 { label: 'Last Sync Success', value: metrics.last_sync_success ? formatTimestamp(new Date(metrics.last_sync_success)) : 'Never' },
                 { label: 'Last Sync Duration', value: formatDuration(metrics.last_sync_duration) },
-                { label: 'Last Synced Apps', value: metrics.last_synced_app_count !== undefined ? metrics.last_synced_app_count : 'N/A' },
+                { label: 'Last Synced Apps (Source: ' + (metrics.current_source || 'N/A') + ')', value: metrics.last_synced_app_count !== undefined ? metrics.last_synced_app_count : 'N/A' },
                 { label: 'Next Sync Time', value: metrics.next_sync_time ? formatTimestamp(new Date(metrics.next_sync_time)) : 'N/A' },
-                { label: 'Total Syncs', value: metrics.total_syncs !== undefined ? metrics.total_syncs : 0 },
-                { label: 'Success Count', value: metrics.success_count !== undefined ? metrics.success_count : 0 },
-                { label: 'Failure Count', value: metrics.failure_count !== undefined ? metrics.failure_count : 0 },
+                { label: 'Total App Detail Syncs', value: metrics.total_syncs !== undefined ? metrics.total_syncs : 0 },
+                { label: 'Success Count (App Detail Syncs)', value: metrics.success_count !== undefined ? metrics.success_count : 0 },
+                { label: 'Failure Count (App Detail Syncs)', value: metrics.failure_count !== undefined ? metrics.failure_count : 0 },
                 { label: 'Consecutive Failures', value: metrics.consecutive_failures !== undefined ? metrics.consecutive_failures : 0 },
                 { label: 'Success Rate', value: formatPercentage(metrics.success_rate) },
                 { label: 'Step Count', value: metrics.step_count || 0 },
@@ -1364,7 +1463,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 { label: 'Total Failed', value: metrics.total_tasks_failed !== undefined ? metrics.total_tasks_failed : 0 },
                 { label: 'Success Rate', value: successRate },
                 { label: 'Failure Rate', value: failureRate },
-                { label: 'Completed Tasks', value: metrics.completed_tasks_count !== undefined ? metrics.completed_tasks_count : 0 },
+                { label: 'Completed Tasks (Recent)', value: metrics.completed_tasks_count !== undefined ? metrics.completed_tasks_count : 0 },
                 { label: 'Failed Tasks', value: metrics.failed_tasks_count !== undefined ? metrics.failed_tasks_count : 0 },
                 { label: 'Last Check', value: formatTimestamp(hydrator.last_check) },
             ];
@@ -1406,11 +1505,10 @@ func generateDashboardHTML(snapshotJSON string) string {
             html += '<div class="table-container" style="max-height: 300px; overflow-y: auto;">';
             html += '<table style="font-size: 12px;"><thead><tr>';
             html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Source ID</th>';
-            html += '<th>Current Step</th><th>Progress</th><th>Status</th><th>Started At</th>';
+            html += '<th>Current Step</th><th>Status</th><th>Started At</th>';
             html += '</tr></thead><tbody>';
             
             activeTasks.forEach(task => {
-                const progress = task.progress ? task.progress.toFixed(1) + '%' : 'N/A';
                 const stepInfo = task.current_step ? task.current_step + ' (' + (task.step_index + 1) + '/' + task.total_steps + ')' : 'N/A';
                 html += '<tr>';
                 html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
@@ -1419,7 +1517,6 @@ func generateDashboardHTML(snapshotJSON string) string {
                 html += '<td>' + (task.user_id || 'N/A') + '</td>';
                 html += '<td>' + (task.source_id || 'N/A') + '</td>';
                 html += '<td>' + stepInfo + '</td>';
-                html += '<td>' + progress + '</td>';
                 html += '<td>' + getStatusBadge(task.status || 'running') + '</td>';
                 html += '<td>' + (task.started_at ? formatTimestamp(new Date(task.started_at)) : 'N/A') + '</td>';
                 html += '</tr>';
@@ -1479,7 +1576,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 return;
             }
             
-            let html = '<h3>Task History</h3>';
+            let html = '<h3>Task History (Recent 50 Tasks)</h3>';
             
             // Recent completed tasks
             if (hasCompleted) {
@@ -1513,14 +1610,18 @@ func generateDashboardHTML(snapshotJSON string) string {
                 html += '</tr></thead><tbody>';
                 
                 failedTasks.slice(0, 10).forEach(task => {
+                    const errorMsg = task.error_msg || 'N/A';
+                    const errorId = 'error-' + (task.task_id || Math.random().toString(36).substr(2, 9));
                     html += '<tr>';
                     html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
                     html += '<td>' + (task.app_id || 'N/A') + '</td>';
                     html += '<td>' + (task.app_name || 'N/A') + '</td>';
                     html += '<td>' + (task.user_id || 'N/A') + '</td>';
                     html += '<td>' + (task.failed_step || 'N/A') + '</td>';
-                    html += '<td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + (task.error_msg || '') + '">';
-                    html += (task.error_msg || 'N/A') + '</td>';
+                    html += '<td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">';
+                    html += '<span id="' + errorId + '-short" style="cursor: pointer; color: #dc2626;" onclick="showErrorModal(\'' + errorId + '\', \'' + errorMsg.replace(/'/g, "\\'").replace(/"/g, '&quot;') + '\')">';
+                    html += (errorMsg.length > 50 ? errorMsg.substring(0, 50) + '...' : errorMsg) + '</span>';
+                    html += '</td>';
                     html += '<td>' + (task.completed_at ? formatTimestamp(new Date(task.completed_at)) : 'N/A') + '</td>';
                     html += '</tr>';
                 });
@@ -2084,6 +2185,26 @@ func generateDashboardHTML(snapshotJSON string) string {
                     clearInterval(autoRefreshInterval);
                     autoRefreshInterval = null;
                 }
+            }
+        }
+        
+        function showErrorModal(errorId, errorMsg) {
+            const modal = document.getElementById('errorModal');
+            const modalBody = document.getElementById('errorModalBody');
+            modalBody.textContent = errorMsg;
+            modal.style.display = 'block';
+        }
+        
+        function closeErrorModal() {
+            const modal = document.getElementById('errorModal');
+            modal.style.display = 'none';
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('errorModal');
+            if (event.target == modal) {
+                closeErrorModal();
             }
         }
         
