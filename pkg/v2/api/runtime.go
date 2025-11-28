@@ -1116,15 +1116,20 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         function getStatusBadge(status) {
+            // Debug: log status value
+            if (!status || status === 'unknown') {
+                console.log('[DEBUG] getStatusBadge received:', status, 'type:', typeof status);
+            }
+            
             const statusLower = (status || '').toLowerCase();
             if (statusLower.includes('running') || statusLower.includes('healthy') || statusLower === 'completed') {
-                return '<span class="badge badge-success">' + status + '</span>';
+                return '<span class="badge badge-success">' + (status || 'unknown') + '</span>';
             } else if (statusLower.includes('pending') || statusLower.includes('processing')) {
-                return '<span class="badge badge-warning">' + status + '</span>';
+                return '<span class="badge badge-warning">' + (status || 'unknown') + '</span>';
             } else if (statusLower.includes('failed') || statusLower.includes('unhealthy') || statusLower.includes('error')) {
-                return '<span class="badge badge-danger">' + status + '</span>';
+                return '<span class="badge badge-danger">' + (status || 'unknown') + '</span>';
             }
-            return '<span class="badge badge-info">' + status + '</span>';
+            return '<span class="badge badge-info">' + (status || 'unknown') + '</span>';
         }
         
         function renderMarketStats() {
@@ -1211,15 +1216,18 @@ func generateDashboardHTML(snapshotJSON string) string {
             apps.forEach(app => {
                 // Debug: log each app's stage value
                 const stageValue = app.stage;
+                const badgeHTML = getStatusBadge(stageValue || 'unknown');
+                
+                // Debug: log badge generation
                 if (!stageValue || stageValue === 'unknown') {
-                    console.log('[DEBUG] App with unknown/missing stage:', app.app_name, 'stage:', stageValue, 'full app:', app);
+                    console.log('[DEBUG] App with unknown/missing stage:', app.app_name, 'stage:', stageValue, 'badge HTML:', badgeHTML);
                 }
                 
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
-                    '<td>' + getStatusBadge(stageValue || 'unknown') + '</td>' +
+                    '<td>' + badgeHTML + '</td>' +
                     '<td>' + getStatusBadge(app.health || 'unknown') + '</td>' +
                     '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
