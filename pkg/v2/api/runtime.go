@@ -71,6 +71,17 @@ func (s *Server) getRuntimeDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Debug: log first app state to verify stage field
+	if snapshot != nil && len(snapshot.AppStates) > 0 {
+		for key, appState := range snapshot.AppStates {
+			if appState != nil {
+				log.Printf("[DEBUG] Dashboard - App key: %s, AppName: %s, Stage: %s (type: %T), Health: %s",
+					key, appState.AppName, appState.Stage, appState.Stage, appState.Health)
+				break // Just log first one
+			}
+		}
+	}
+
 	// Generate HTML page
 	html := generateDashboardHTML(string(snapshotJSON))
 
@@ -1072,6 +1083,17 @@ func generateDashboardHTML(snapshotJSON string) string {
         
         try {
             snapshotData = JSON.parse('%s');
+            // Debug: log app_states to check stage field
+            if (snapshotData.app_states) {
+                const appKeys = Object.keys(snapshotData.app_states);
+                if (appKeys.length > 0) {
+                    const firstKey = appKeys[0];
+                    const firstApp = snapshotData.app_states[firstKey];
+                    console.log('[DEBUG] First app key:', firstKey);
+                    console.log('[DEBUG] First app data:', firstApp);
+                    console.log('[DEBUG] First app stage:', firstApp ? firstApp.stage : 'undefined', 'type:', typeof (firstApp ? firstApp.stage : 'undefined'));
+                }
+            }
         } catch (e) {
             console.error('Failed to parse snapshot data:', e);
             snapshotData = {};
@@ -1151,6 +1173,12 @@ func generateDashboardHTML(snapshotJSON string) string {
         function renderApps() {
             const apps = snapshotData.app_states || {};
             const appList = Object.values(apps);
+            
+            // Debug: log first app to check stage field
+            if (appList.length > 0) {
+                console.log('[DEBUG] First app in list:', appList[0]);
+                console.log('[DEBUG] First app stage:', appList[0].stage, 'type:', typeof appList[0].stage);
+            }
             
             // Filter apps by stage
             const appsAll = appList;
