@@ -1222,22 +1222,31 @@ func generateDashboardHTML(snapshotJSON string) string {
                 // Debug: log each app's stage and health values
                 const stageValue = app.stage;
                 const healthValue = app.health;
+                
+                // Debug: log BEFORE calling getStatusBadge to see what values we have
+                console.log('[DEBUG] renderAppsTable:', tbodyId, 'App', index, ':', app.app_name, 
+                    'stage:', stageValue, 'stageType:', typeof stageValue,
+                    'health:', healthValue, 'healthType:', typeof healthValue,
+                    'healthIsUndefined:', healthValue === undefined,
+                    'healthIsNull:', healthValue === null,
+                    'healthIsEmpty:', healthValue === '');
+                
                 const badgeHTML = getStatusBadge(stageValue || 'unknown');
                 
-                // Debug: log badge generation for all apps in this table
-                console.log('[DEBUG] renderAppsTable:', tbodyId, 'App', index, ':', app.app_name, 'stage:', stageValue, 'type:', typeof stageValue, 'health:', healthValue, 'type:', typeof healthValue);
-                
-                // Debug: log if health is missing
+                // Debug: log if health is missing BEFORE calling getStatusBadge for health
                 if (!healthValue || healthValue === 'unknown' || healthValue === '') {
-                    console.log('[DEBUG] App with missing/unknown health:', app.app_name, 'health:', healthValue, 'full app:', app);
+                    console.log('[DEBUG] WARNING: App with missing/unknown health BEFORE getStatusBadge:', 
+                        app.app_name, 'health:', healthValue, 'full app:', JSON.stringify(app));
                 }
+                
+                const healthBadgeHTML = getStatusBadge(healthValue || 'unknown');
                 
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
                     '<td>' + badgeHTML + '</td>' +
-                    '<td>' + getStatusBadge(healthValue || 'unknown') + '</td>' +
+                    '<td>' + healthBadgeHTML + '</td>' +
                     '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
             });
