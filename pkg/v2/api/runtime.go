@@ -1116,9 +1116,9 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         function getStatusBadge(status) {
-            // Debug: log status value
-            if (!status || status === 'unknown') {
-                console.log('[DEBUG] getStatusBadge received:', status, 'type:', typeof status);
+            // Debug: log status value when it's unknown or missing
+            if (!status || status === 'unknown' || status === '') {
+                console.log('[DEBUG] getStatusBadge received:', status, 'type:', typeof status, 'stack:', new Error().stack);
             }
             
             const statusLower = (status || '').toLowerCase();
@@ -1205,7 +1205,10 @@ func generateDashboardHTML(snapshotJSON string) string {
         
         function renderAppsTable(tbodyId, apps) {
             const tbody = document.getElementById(tbodyId);
-            if (!tbody) return;
+            if (!tbody) {
+                console.log('[DEBUG] renderAppsTable: tbody not found for', tbodyId);
+                return;
+            }
             tbody.innerHTML = '';
             
             if (apps.length === 0) {
@@ -1213,15 +1216,15 @@ func generateDashboardHTML(snapshotJSON string) string {
                 return;
             }
             
-            apps.forEach(app => {
+            console.log('[DEBUG] renderAppsTable:', tbodyId, 'apps count:', apps.length);
+            
+            apps.forEach((app, index) => {
                 // Debug: log each app's stage value
                 const stageValue = app.stage;
                 const badgeHTML = getStatusBadge(stageValue || 'unknown');
                 
-                // Debug: log badge generation
-                if (!stageValue || stageValue === 'unknown') {
-                    console.log('[DEBUG] App with unknown/missing stage:', app.app_name, 'stage:', stageValue, 'badge HTML:', badgeHTML);
-                }
+                // Debug: log badge generation for all apps in this table
+                console.log('[DEBUG] renderAppsTable:', tbodyId, 'App', index, ':', app.app_name, 'stage:', stageValue, 'type:', typeof stageValue, 'badge HTML:', badgeHTML);
                 
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
