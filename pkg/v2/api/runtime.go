@@ -499,116 +499,20 @@ func generateDashboardHTML(snapshotJSON string) string {
                 
                 <!-- Applications Tab Content -->
                 <div id="marketApps" class="main-tab-content active">
-                    <!-- Sub-tabs for Applications by stage -->
-                    <div class="sub-tabs">
-                        <button class="sub-tab active" onclick="showSubTab('marketApps', 'all', this)">All</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'fetching', this)">Fetching</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'installing', this)">Installing</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'running', this)">Running</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'upgrading', this)">Upgrading</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'failed', this)">Failed</button>
-                    </div>
-                    <div class="sub-tab-content active" id="marketApps-all">
-                        <div class="table-container">
-                            <table id="appsTable">
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsTableBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-fetching">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsFetchingBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-installing">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsInstallingBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-running">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsRunningBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-upgrading">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsUpgradingBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-failed">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsFailedBody"></tbody>
-                            </table>
-                        </div>
+                    <div class="table-container">
+                        <table id="appsTable">
+                            <thead>
+                                <tr>
+                                    <th>App Name</th>
+                                    <th>User ID</th>
+                                    <th>Source ID</th>
+                                    <th>Stage</th>
+                                    <th>Health</th>
+                                    <th>Version</th>
+                                </tr>
+                            </thead>
+                            <tbody id="appsTableBody"></tbody>
+                        </table>
                     </div>
                 </div>
                 
@@ -1200,114 +1104,33 @@ func generateDashboardHTML(snapshotJSON string) string {
             const apps = snapshotData.app_states || {};
             const appList = Object.values(apps);
             
-            // Debug: log all apps with complete information
-            console.log('[DEBUG] ========== renderApps START ==========');
-            console.log('[DEBUG] Total apps:', appList.length);
-            appList.forEach((app, index) => {
-                console.log('[DEBUG] App ' + index + ':', {
-                    app_name: app.app_name,
-                    stage: app.stage,
-                    stageType: typeof app.stage,
-                    health: app.health,
-                    healthType: typeof app.health,
-                    user_id: app.user_id,
-                    source_id: app.source_id,
-                    version: app.version,
-                    fullApp: app
-                });
-            });
-            
-            // Filter apps by stage
-            const appsAll = appList;
-            const appsFetching = appList.filter(app => (app.stage || '').toLowerCase() === 'fetching');
-            const appsInstalling = appList.filter(app => (app.stage || '').toLowerCase() === 'installing');
-            const appsRunning = appList.filter(app => (app.stage || '').toLowerCase() === 'running');
-            const appsUpgrading = appList.filter(app => (app.stage || '').toLowerCase() === 'upgrading');
-            const appsFailed = appList.filter(app => (app.stage || '').toLowerCase() === 'failed');
-            
-            // Debug: log filtered results
-            console.log('[DEBUG] Filtered apps:', {
-                all: appsAll.length,
-                fetching: appsFetching.length,
-                installing: appsInstalling.length,
-                running: appsRunning.length,
-                upgrading: appsUpgrading.length,
-                failed: appsFailed.length
-            });
-            
-            renderAppsTable('appsTableBody', appsAll);
-            renderAppsTable('appsFetchingBody', appsFetching);
-            renderAppsTable('appsInstallingBody', appsInstalling);
-            renderAppsTable('appsRunningBody', appsRunning);
-            renderAppsTable('appsUpgradingBody', appsUpgrading);
-            renderAppsTable('appsFailedBody', appsFailed);
-            
-            console.log('[DEBUG] ========== renderApps END ==========');
+            renderAppsTable('appsTableBody', appList);
         }
         
         function renderAppsTable(tbodyId, apps) {
-            console.log('[DEBUG] ========== renderAppsTable START:', tbodyId, '==========');
-            
             const tbody = document.getElementById(tbodyId);
-            if (!tbody) {
-                console.log('[DEBUG] ERROR: renderAppsTable: tbody not found for', tbodyId);
-                return;
-            }
+            if (!tbody) return;
             tbody.innerHTML = '';
             
             if (apps.length === 0) {
-                console.log('[DEBUG] renderAppsTable:', tbodyId, 'has no apps, showing empty state');
                 tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No applications</td></tr>';
-                console.log('[DEBUG] ========== renderAppsTable END:', tbodyId, '(empty) ==========');
                 return;
             }
             
-            console.log('[DEBUG] renderAppsTable:', tbodyId, 'rendering', apps.length, 'apps');
-            
-            apps.forEach((app, index) => {
-                const stageValue = app.stage;
-                const healthValue = app.health;
-                
-                // Complete debug log for each app
-                console.log('[DEBUG] renderAppsTable:', tbodyId, 'App', index + '/' + apps.length, ':', {
-                    app_name: app.app_name,
-                    user_id: app.user_id,
-                    source_id: app.source_id,
-                    stage: stageValue,
-                    stageType: typeof stageValue,
-                    stageIsUndefined: stageValue === undefined,
-                    stageIsNull: stageValue === null,
-                    stageIsEmpty: stageValue === '',
-                    health: healthValue,
-                    healthType: typeof healthValue,
-                    healthIsUndefined: healthValue === undefined,
-                    healthIsNull: healthValue === null,
-                    healthIsEmpty: healthValue === '',
-                    version: app.version,
-                    fullAppObject: app
-                });
-                
-                // Call getStatusBadge for stage
-                const stageForBadge = stageValue || 'unknown';
-                console.log('[DEBUG] Calling getStatusBadge for STAGE:', stageForBadge, 'from app:', app.app_name);
-                const badgeHTML = getStatusBadge(stageForBadge);
-                
-                // Call getStatusBadge for health
-                const healthForBadge = healthValue || 'unknown';
-                console.log('[DEBUG] Calling getStatusBadge for HEALTH:', healthForBadge, 'from app:', app.app_name);
-                const healthBadgeHTML = getStatusBadge(healthForBadge);
+            apps.forEach(app => {
+                // Display raw stage value as string, no conversion
+                const stageValue = app.stage || '';
+                const healthValue = app.health || '';
                 
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
-                    '<td>' + badgeHTML + '</td>' +
-                    '<td>' + healthBadgeHTML + '</td>' +
+                    '<td>' + stageValue + '</td>' +
+                    '<td>' + getStatusBadge(healthValue || 'unknown') + '</td>' +
                     '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
             });
-            
-            console.log('[DEBUG] ========== renderAppsTable END:', tbodyId, '==========');
         }
         
         function renderTasks() {
