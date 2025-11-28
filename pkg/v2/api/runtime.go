@@ -1130,14 +1130,19 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             
             apps.forEach(app => {
-                // Get stage value - use raw state from metadata if stage is empty or unknown
-                let stageValue = app.stage || '';
+                // Get stage value - prefer metadata.status.state, fallback to stage field
+                let stageValue = '';
                 
-                // If stage is empty or unknown, try to get original state from metadata
-                if (!stageValue || stageValue === 'unknown') {
-                    if (app.metadata && app.metadata.status && app.metadata.status.state) {
+                // Try to get from metadata first
+                if (app.metadata) {
+                    if (app.metadata.status && app.metadata.status.state) {
                         stageValue = app.metadata.status.state;
                     }
+                }
+                
+                // If not found in metadata, use stage field
+                if (!stageValue && app.stage) {
+                    stageValue = app.stage;
                 }
                 
                 // If still empty, use N/A
@@ -1146,17 +1151,6 @@ func generateDashboardHTML(snapshotJSON string) string {
                 }
                 
                 const healthValue = app.health || '';
-                
-                // Debug: log if stage is still empty or unknown
-                if (!stageValue || stageValue === 'unknown' || stageValue === 'N/A') {
-                    console.log('[DEBUG] App with empty/unknown stage:', {
-                        app_name: app.app_name,
-                        stage: app.stage,
-                        metadata_status_state: app.metadata && app.metadata.status ? app.metadata.status.state : 'N/A',
-                        final_stageValue: stageValue,
-                        fullApp: app
-                    });
-                }
                 
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
