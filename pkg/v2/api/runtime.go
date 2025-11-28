@@ -1219,19 +1219,25 @@ func generateDashboardHTML(snapshotJSON string) string {
             console.log('[DEBUG] renderAppsTable:', tbodyId, 'apps count:', apps.length);
             
             apps.forEach((app, index) => {
-                // Debug: log each app's stage value
+                // Debug: log each app's stage and health values
                 const stageValue = app.stage;
+                const healthValue = app.health;
                 const badgeHTML = getStatusBadge(stageValue || 'unknown');
                 
                 // Debug: log badge generation for all apps in this table
-                console.log('[DEBUG] renderAppsTable:', tbodyId, 'App', index, ':', app.app_name, 'stage:', stageValue, 'type:', typeof stageValue, 'badge HTML:', badgeHTML);
+                console.log('[DEBUG] renderAppsTable:', tbodyId, 'App', index, ':', app.app_name, 'stage:', stageValue, 'type:', typeof stageValue, 'health:', healthValue, 'type:', typeof healthValue);
+                
+                // Debug: log if health is missing
+                if (!healthValue || healthValue === 'unknown' || healthValue === '') {
+                    console.log('[DEBUG] App with missing/unknown health:', app.app_name, 'health:', healthValue, 'full app:', app);
+                }
                 
                 const row = document.createElement('tr');
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
                     '<td>' + badgeHTML + '</td>' +
-                    '<td>' + getStatusBadge(app.health || 'unknown') + '</td>' +
+                    '<td>' + getStatusBadge(healthValue || 'unknown') + '</td>' +
                     '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
             });
