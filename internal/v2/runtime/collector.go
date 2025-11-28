@@ -267,13 +267,16 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 					}
 
 					// Determine stage and health based on app state
-					stage := StageUnknown
-					health := "unknown"
+					// If app is in AppStateLatest, it's installed, default to running
+					stage := StageRunning
+					health := "healthy"
 					appStateStr := strings.ToLower(appState.Status.State)
 
 					// Determine stage from app state
 					if appStateStr == "" {
-						stage = StageUnknown
+						// If state is empty but app is in AppStateLatest, it's installed and running
+						stage = StageRunning
+						health = "healthy"
 					} else if strings.Contains(appStateStr, "running") {
 						stage = StageRunning
 						health = "healthy"
@@ -293,9 +296,9 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 						stage = StageStopped
 						health = "unhealthy"
 					} else {
-						// Default to running if state is not recognized
+						// Default to running if state is not recognized (app is installed)
 						stage = StageRunning
-						health = "unknown"
+						health = "healthy"
 					}
 
 					// First, check if there's pending data (downloading/syncing)
@@ -479,6 +482,11 @@ func (c *StateCollector) collectComponentStatuses(tm *task.TaskModule, aim *appi
 						"last_synced_app_count": metrics.LastSyncedAppCount,
 						"success_rate":          metrics.SuccessRate,
 						"next_sync_time":        metrics.NextSyncTime,
+					}
+
+					// Add last sync details if available
+					if metrics.LastSyncDetails != nil {
+						syncerMetrics["last_sync_details"] = metrics.LastSyncDetails
 					}
 
 					// Add step information

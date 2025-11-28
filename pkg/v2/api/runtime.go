@@ -1417,6 +1417,43 @@ func generateDashboardHTML(snapshotJSON string) string {
                 tbody.appendChild(row);
             });
             
+            // Add last sync details if available
+            if (metrics.last_sync_details) {
+                const details = metrics.last_sync_details;
+                const detailsRow = document.createElement('tr');
+                detailsRow.innerHTML = '<td colspan="2" style="padding-top: 16px;"><strong>Last Sync Details</strong></td>';
+                tbody.appendChild(detailsRow);
+                
+                // Add sync time
+                if (details.sync_time) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td style="padding-left: 20px;">Sync Time</td><td>' + formatTimestamp(new Date(details.sync_time)) + '</td>';
+                    tbody.appendChild(row);
+                }
+                
+                // Add succeeded apps
+                if (details.succeeded_apps && details.succeeded_apps.length > 0) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td style="padding-left: 20px;">Succeeded Apps (' + details.succeeded_apps.length + ')</td><td>' + details.succeeded_apps.join(', ') + '</td>';
+                    tbody.appendChild(row);
+                }
+                
+                // Add failed apps
+                if (details.failed_apps && details.failed_apps.length > 0) {
+                    const row = document.createElement('tr');
+                    let failedAppsHtml = '<div style="max-height: 200px; overflow-y: auto;">';
+                    details.failed_apps.forEach((failedApp, index) => {
+                        failedAppsHtml += '<div style="margin-bottom: 8px;">';
+                        failedAppsHtml += '<strong>' + (failedApp.app_name || failedApp.app_id) + '</strong>: ';
+                        failedAppsHtml += '<span style="color: #dc2626;">' + (failedApp.reason || 'Unknown error') + '</span>';
+                        failedAppsHtml += '</div>';
+                    });
+                    failedAppsHtml += '</div>';
+                    row.innerHTML = '<td style="padding-left: 20px;">Failed Apps (' + details.failed_apps.length + ')</td><td>' + failedAppsHtml + '</td>';
+                    tbody.appendChild(row);
+                }
+            }
+            
             // Add status message if available
             if (syncer.message) {
                 const row = document.createElement('tr');

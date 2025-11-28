@@ -41,6 +41,7 @@ type Syncer struct {
 	lastSyncDuration    atomic.Value // time.Duration
 	currentSource       atomic.Value // string
 	lastSyncedAppCount  atomic.Int64
+	lastSyncDetails     atomic.Value // *SyncDetails
 	statusMutex         sync.RWMutex // Mutex for complex status updates
 }
 
@@ -861,6 +862,24 @@ func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
 	s.cacheManager.Store(cacheManager) // Use atomic.Store to set the pointer
 }
 
+// SyncDetails contains detailed information about a sync operation
+type SyncDetails struct {
+	SourceID      string          `json:"source_id"`
+	SyncTime      time.Time       `json:"sync_time"`
+	SucceededApps []string        `json:"succeeded_apps"` // List of app IDs/names that succeeded
+	FailedApps    []FailedAppInfo `json:"failed_apps"`    // List of apps that failed with reasons
+	TotalApps     int             `json:"total_apps"`
+	SuccessCount  int             `json:"success_count"`
+	FailureCount  int             `json:"failure_count"`
+}
+
+// FailedAppInfo contains information about a failed app sync
+type FailedAppInfo struct {
+	AppID   string `json:"app_id"`
+	AppName string `json:"app_name,omitempty"`
+	Reason  string `json:"reason"`
+}
+
 // SyncerMetrics contains metrics for the syncer
 type SyncerMetrics struct {
 	IsRunning           bool          `json:"is_running"`
@@ -880,6 +899,7 @@ type SyncerMetrics struct {
 	LastSyncedAppCount  int64         `json:"last_synced_app_count"`
 	SuccessRate         float64       `json:"success_rate"` // 0-100
 	NextSyncTime        time.Time     `json:"next_sync_time,omitempty"`
+	LastSyncDetails     *SyncDetails  `json:"last_sync_details,omitempty"`
 }
 
 // GetMetrics returns syncer metrics
@@ -935,6 +955,13 @@ func (s *Syncer) GetMetrics() SyncerMetrics {
 		nextSyncTime = lastSyncSuccessVal.Add(s.syncInterval)
 	}
 
+	var lastSyncDetails *SyncDetails
+	if details := s.lastSyncDetails.Load(); details != nil {
+		if d, ok := details.(*SyncDetails); ok {
+			lastSyncDetails = d
+		}
+	}
+
 	return SyncerMetrics{
 		IsRunning:           s.isRunning.Load(),
 		SyncInterval:        s.syncInterval,
@@ -953,6 +980,14 @@ func (s *Syncer) GetMetrics() SyncerMetrics {
 		LastSyncedAppCount:  s.lastSyncedAppCount.Load(),
 		SuccessRate:         successRate,
 		NextSyncTime:        nextSyncTime,
+		LastSyncDetails:     lastSyncDetails,
+	}
+}
+
+// RecordSyncDetails records detailed information about a sync operation
+func (s *Syncer) RecordSyncDetails(details *SyncDetails) {
+	if details != nil {
+		s.lastSyncDetails.Store(details)
 	}
 }
 
