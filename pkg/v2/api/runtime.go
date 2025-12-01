@@ -1815,7 +1815,28 @@ func generateDashboardHTML(snapshotJSON string) string {
             
             // Render Applications
             const apps = chartRepo.apps || [];
-            const sortedApps = [...apps].sort((a, b) => getChartRepoAppUpdatedAtValue(b) - getChartRepoAppUpdatedAtValue(a));
+            
+            // Deduplicate apps by user_id:source_id:app_id (keep the one with latest updated_at)
+            const appMap = new Map();
+            apps.forEach(app => {
+                const appKey = (app.user_id || '') + ':' + (app.source_id || '') + ':' + (app.app_id || app.app_name || '');
+                if (!appKey || appKey === '::') return;
+                
+                const existing = appMap.get(appKey);
+                if (!existing) {
+                    appMap.set(appKey, app);
+                } else {
+                    // Keep the one with latest updated_at
+                    const existingTime = getChartRepoAppUpdatedAtValue(existing);
+                    const currentTime = getChartRepoAppUpdatedAtValue(app);
+                    if (currentTime > existingTime) {
+                        appMap.set(appKey, app);
+                    }
+                }
+            });
+            const uniqueApps = Array.from(appMap.values());
+            
+            const sortedApps = [...uniqueApps].sort((a, b) => getChartRepoAppUpdatedAtValue(b) - getChartRepoAppUpdatedAtValue(a));
             const appsProcessing = sortedApps.filter(app => (app.state || '').toLowerCase().includes('processing'));
             const appsCompleted = sortedApps.filter(app => (app.state || '').toLowerCase() === 'completed');
             const appsFailed = sortedApps.filter(app => (app.state || '').toLowerCase() === 'failed' || app.error);
@@ -1845,7 +1866,28 @@ func generateDashboardHTML(snapshotJSON string) string {
             // Render Tasks
             const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
             const tasks = hydrator ? (hydrator.tasks || []) : [];
-            const sortedTasks = [...tasks].sort((a, b) => getChartRepoTaskUpdatedAtValue(b) - getChartRepoTaskUpdatedAtValue(a));
+            
+            // Deduplicate tasks by task_id (keep the one with latest updated_at)
+            const taskMap = new Map();
+            tasks.forEach(task => {
+                const taskId = task.task_id;
+                if (!taskId) return;
+                
+                const existing = taskMap.get(taskId);
+                if (!existing) {
+                    taskMap.set(taskId, task);
+                } else {
+                    // Keep the one with latest updated_at
+                    const existingTime = getChartRepoTaskUpdatedAtValue(existing);
+                    const currentTime = getChartRepoTaskUpdatedAtValue(task);
+                    if (currentTime > existingTime) {
+                        taskMap.set(taskId, task);
+                    }
+                }
+            });
+            const uniqueTasks = Array.from(taskMap.values());
+            
+            const sortedTasks = [...uniqueTasks].sort((a, b) => getChartRepoTaskUpdatedAtValue(b) - getChartRepoTaskUpdatedAtValue(a));
             const tasksPending = sortedTasks.filter(task => (task.status || '').toLowerCase() === 'pending');
             const tasksRunning = sortedTasks.filter(task => (task.status || '').toLowerCase() === 'running');
             const tasksCompleted = sortedTasks.filter(task => (task.status || '').toLowerCase() === 'completed');
