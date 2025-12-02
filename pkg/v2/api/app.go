@@ -1975,7 +1975,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 
 			if matchesApp {
 				// Treat installFailed same as uninstalled so deletion can proceed
-				if appState.Status.State != "uninstalled" && appState.Status.State != "installFailed" && appState.Status.State != "downloadFailed" {
+				if appState.Status.State != "uninstalled" && appState.Status.State != "installFailed" && appState.Status.State != "downloadFailed" && appState.Status.State != "installingCanceled" {
 					appInstalled = true
 					log.Printf("App %s (or its clone %s) is still installed in upload source with state: %s",
 						request.AppName, installedAppName, appState.Status.State)
