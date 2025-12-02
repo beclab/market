@@ -2904,24 +2904,204 @@ func generateDashboardAppHTML(snapshotJSON string) string {
             return 'pending';
         }
         
+        function getAllProcessingApps() {
+            const appMap = new Map(); // key: userID:sourceID:appName -> app info
+            
+            // 1. Get apps from app_states (installed apps)
+            const appStates = snapshotData.app_states || {};
+            Object.entries(appStates).forEach(([key, appState]) => {
+                if (appState) {
+                    appMap.set(key, {
+                        key: key,
+                        app_name: appState.app_name || '',
+                        user_id: appState.user_id || '',
+                        source_id: appState.source_id || '',
+                        version: appState.version || '',
+                        last_update: appState.last_update || null,
+                        from: 'app_states'
+                    });
+                }
+            });
+            
+            // 2. Get apps from syncer last_sync_details
+            const components = snapshotData.components || {};
+            const syncer = components.syncer;
+            if (syncer && syncer.metrics && syncer.metrics.last_sync_details) {
+                const syncDetails = syncer.metrics.last_sync_details;
+                const sourceID = syncDetails.source_id || '';
+                
+                // Add succeeded apps
+                if (syncDetails.succeeded_apps && Array.isArray(syncDetails.succeeded_apps)) {
+                    syncDetails.succeeded_apps.forEach(appID => {
+                        const key = ':' + sourceID + ':' + appID;
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: appID,
+                                user_id: '',
+                                source_id: sourceID,
+                                version: '',
+                                last_update: syncDetails.sync_time || null,
+                                from: 'syncer_succeeded'
+                            });
+                        }
+                    });
+                }
+                
+                // Add failed apps
+                if (syncDetails.failed_apps && Array.isArray(syncDetails.failed_apps)) {
+                    syncDetails.failed_apps.forEach(failedApp => {
+                        const appID = failedApp.app_id || failedApp.app_name || '';
+                        const key = ':' + sourceID + ':' + appID;
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: failedApp.app_name || appID,
+                                user_id: '',
+                                source_id: sourceID,
+                                version: '',
+                                last_update: syncDetails.sync_time || null,
+                                from: 'syncer_failed'
+                            });
+                        }
+                    });
+                }
+            }
+            
+            // 3. Get apps from hydrator active_tasks
+            const hydrator = components.hydrator;
+            if (hydrator && hydrator.metrics) {
+                const activeTasks = hydrator.metrics.active_tasks || [];
+                activeTasks.forEach(task => {
+                    if (task) {
+                        const key = (task.user_id || '') + ':' + (task.source_id || '') + ':' + (task.app_id || task.app_name || '');
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: task.app_name || task.app_id || '',
+                                user_id: task.user_id || '',
+                                source_id: task.source_id || '',
+                                version: '',
+                                last_update: task.started_at || null,
+                                from: 'hydrator_active'
+                            });
+                        }
+                    }
+                });
+                
+                // Get apps from hydrator recent_completed_tasks
+                const completedTasks = hydrator.metrics.recent_completed_tasks || [];
+                completedTasks.forEach(task => {
+                    if (task) {
+                        const key = (task.user_id || '') + ':' + (task.source_id || '') + ':' + (task.app_id || task.app_name || '');
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: task.app_name || task.app_id || '',
+                                user_id: task.user_id || '',
+                                source_id: task.source_id || '',
+                                version: '',
+                                last_update: task.completed_at || null,
+                                from: 'hydrator_completed'
+                            });
+                        }
+                    }
+                });
+                
+                // Get apps from hydrator recent_failed_tasks
+                const failedTasks = hydrator.metrics.recent_failed_tasks || [];
+                failedTasks.forEach(task => {
+                    if (task) {
+                        const key = (task.user_id || '') + ':' + (task.source_id || '') + ':' + (task.app_id || task.app_name || '');
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: task.app_name || task.app_id || '',
+                                user_id: task.user_id || '',
+                                source_id: task.source_id || '',
+                                version: '',
+                                last_update: task.completed_at || null,
+                                from: 'hydrator_failed'
+                            });
+                        }
+                    }
+                });
+            }
+            
+            // 4. Get apps from chart_repo.apps
+            const chartRepo = snapshotData.chart_repo || {};
+            const chartRepoApps = chartRepo.apps || [];
+            chartRepoApps.forEach(app => {
+                if (app) {
+                    const key = (app.user_id || '') + ':' + (app.source_id || '') + ':' + (app.app_id || app.app_name || '');
+                    if (!appMap.has(key)) {
+                        appMap.set(key, {
+                            key: key,
+                            app_name: app.app_name || app.app_id || '',
+                            user_id: app.user_id || '',
+                            source_id: app.source_id || '',
+                            version: '',
+                            last_update: app.last_update || (app.timestamps && app.timestamps.last_updated_at) || null,
+                            from: 'chart_repo_apps'
+                        });
+                    }
+                }
+            });
+            
+            // 5. Get apps from chart_repo.tasks.hydrator.tasks
+            const chartRepoHydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
+            if (chartRepoHydrator && chartRepoHydrator.tasks) {
+                chartRepoHydrator.tasks.forEach(task => {
+                    if (task) {
+                        const key = (task.user_id || '') + ':' + (task.source_id || '') + ':' + (task.app_id || task.app_name || '');
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: task.app_name || task.app_id || '',
+                                user_id: task.user_id || '',
+                                source_id: task.source_id || '',
+                                version: '',
+                                last_update: task.updated_at || task.created_at || null,
+                                from: 'chart_repo_tasks'
+                            });
+                        }
+                    }
+                });
+            }
+            
+            return Array.from(appMap.values());
+        }
+        
         function renderApps() {
             const tbody = document.getElementById('appsTableBody');
             if (!tbody) return;
             
-            const appStates = snapshotData.app_states || {};
+            // Get all processing apps from multiple sources
+            const allApps = getAllProcessingApps();
+            
             const chartRepo = snapshotData.chart_repo || {};
             const chartRepoApps = chartRepo.apps || [];
             const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
             const chartRepoHydratorTasks = hydrator ? (hydrator.tasks || []) : [];
             
-            const apps = Object.entries(appStates).map(([key, appState]) => {
-                const flowSteps = getAppProcessingFlow(key, appState, chartRepoApps, chartRepoHydratorTasks);
+            const apps = allApps.map(appInfo => {
+                // Create a minimal appState for compatibility
+                const appState = {
+                    app_name: appInfo.app_name,
+                    user_id: appInfo.user_id,
+                    source_id: appInfo.source_id,
+                    version: appInfo.version,
+                    last_update: appInfo.last_update
+                };
+                
+                const flowSteps = getAppProcessingFlow(appInfo.key, appState, chartRepoApps, chartRepoHydratorTasks);
                 return {
-                    key: key,
+                    key: appInfo.key,
                     appState: appState,
                     flowSteps: flowSteps,
                     currentStep: getCurrentStepName(flowSteps),
-                    overallStatus: getOverallStatus(flowSteps)
+                    overallStatus: getOverallStatus(flowSteps),
+                    from: appInfo.from
                 };
             });
             
