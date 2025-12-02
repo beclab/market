@@ -2723,73 +2723,126 @@ func generateDashboardAppHTML(snapshotJSON string) string {
             const chartRepoApp = findChartRepoApp(appKey, chartRepoApps);
             const chartRepoTask = findChartRepoTask(appKey, chartRepoHydratorTasks);
             
-            if (chartRepoApp || chartRepoTask) {
-                // Use chart repo app state if available, otherwise use task state
-                let currentStep = null;
-                let stepIndex = -1;
+            // Map step name to index (consistent with dynamic-chart-repository)
+            const stepNameToIndex = {
+                'SourceChartStep': 0,
+                'RenderedChartStep': 1,
+                'CustomParamsUpdateStep': 2,
+                'ImageAnalysisStep': 3,
+                'DatabaseUpdateStep': 4
+            };
+            
+            const chartRepoSteps = [
+                { name: 'SourceChartStep', index: 0 },
+                { name: 'RenderedChartStep', index: 1 },
+                { name: 'CustomParamsUpdateStep', index: 2 },
+                { name: 'ImageAnalysisStep', index: 3 },
+                { name: 'DatabaseUpdateStep', index: 4 }
+            ];
+            
+            // Determine chart repo app overall state
+            let appStateValue = null;
+            let currentStepInfo = null;
+            let currentStepIndex = -1;
+            
+            // Priority: chartRepoApp > chartRepoTask
+            if (chartRepoApp) {
+                // Use app state: pending, processing, completed, failed
+                appStateValue = (chartRepoApp.state || '').toLowerCase();
                 
-                if (chartRepoApp && chartRepoApp.current_step) {
-                    currentStep = chartRepoApp.current_step;
-                    stepIndex = currentStep.index;
-                } else if (chartRepoTask) {
-                    // Map step name to index
-                    const stepNameToIndex = {
-                        'SourceChartStep': 0,
-                        'RenderedChartStep': 1,
-                        'CustomParamsUpdateStep': 2,
-                        'ImageAnalysisStep': 3,
-                        'DatabaseUpdateStep': 4
-                    };
-                    const stepName = chartRepoTask.step_name || '';
-                    stepIndex = stepNameToIndex[stepName] !== undefined ? stepNameToIndex[stepName] : -1;
+                // Use current_step if available
+                if (chartRepoApp.current_step) {
+                    currentStepInfo = chartRepoApp.current_step;
+                    currentStepIndex = currentStepInfo.index !== undefined ? currentStepInfo.index : -1;
                     
-                    if (chartRepoTask.status === 'running') {
-                        currentStep = { status: 'running' };
-                    } else if (chartRepoTask.status === 'completed') {
-                        currentStep = { status: 'completed' };
-                    } else if (chartRepoTask.status === 'failed') {
-                        currentStep = { status: 'failed' };
+                    // Map step status: running -> running, completed -> completed, failed -> failed
+                    const stepStatus = (currentStepInfo.status || '').toLowerCase();
+                    if (stepStatus === 'running' || stepStatus === 'pending') {
+                        currentStepInfo.status = 'running';
+                    } else if (stepStatus === 'completed') {
+                        currentStepInfo.status = 'completed';
+                    } else if (stepStatus === 'failed') {
+                        currentStepInfo.status = 'failed';
                     }
                 }
+            } else if (chartRepoTask) {
+                // Use task status: pending, running, completed, failed
+                const taskStatus = (chartRepoTask.status || '').toLowerCase();
                 
-                const chartRepoSteps = [
-                    { name: 'SourceChartStep', index: 0 },
-                    { name: 'RenderedChartStep', index: 1 },
-                    { name: 'CustomParamsUpdateStep', index: 2 },
-                    { name: 'ImageAnalysisStep', index: 3 },
-                    { name: 'DatabaseUpdateStep', index: 4 }
-                ];
+                // Map task status to app state
+                if (taskStatus === 'running' || taskStatus === 'pending') {
+                    appStateValue = 'processing';
+                } else if (taskStatus === 'completed') {
+                    appStateValue = 'completed';
+                } else if (taskStatus === 'failed') {
+                    appStateValue = 'failed';
+                }
                 
-                chartRepoSteps.forEach((step) => {
-                    let status = 'pending';
-                    if (stepIndex > step.index) {
-                        status = 'completed';
-                    } else if (stepIndex === step.index && currentStep) {
-                        status = currentStep.status.toLowerCase();
-                    }
-                    steps.push({
-                        name: step.name,
-                        status: status,
-                        key: step.name.toLowerCase().replace('step', '_step')
-                    });
-                });
-            } else {
-                // No chart repo app or task found, all steps pending
-                const chartRepoSteps = [
-                    'SourceChartStep',
-                    'RenderedChartStep',
-                    'CustomParamsUpdateStep',
-                    'ImageAnalysisStep',
-                    'DatabaseUpdateStep'
-                ];
-                chartRepoSteps.forEach(stepName => {
-                    steps.push({
-                        name: stepName,
-                        status: 'pending',
-                        key: stepName.toLowerCase().replace('step', '_step')
-                    });
-                });
+                // Get step index from step_name
+                const stepName = chartRepoTask.step_name || '';
+                if (stepName && stepNameToIndex[stepName] !== undefined) {
+                    currentStepIndex = stepNameToIndex[stepName];
+                    currentStepInfo = {
+                        status: taskStatus === 'running' ? 'running' : (taskStatus === 'failed' ? 'failed' : 'completed'),
+                        index: currentStepIndex
+                    };
+                }
             }
+            
+            // Render chart repo steps based on app state and current step
+            chartRepoSteps.forEach((step) => {
+                let status = 'pending';
+                
+                if (appStateValue === 'failed') {
+                    // If app failed, mark current step as failed, previous steps as completed
+                    if (currentStepIndex >= 0) {
+                        if (step.index < currentStepIndex) {
+                            status = 'completed';
+                        } else if (step.index === currentStepIndex) {
+                            status = 'failed';
+                        } else {
+                            status = 'pending';
+                        }
+                    } else {
+                        // If failed but no step info, mark all as pending (unknown failure point)
+                        status = 'pending';
+                    }
+                } else if (appStateValue === 'completed') {
+                    // If app completed, all steps are completed
+                    status = 'completed';
+                } else if (appStateValue === 'processing') {
+                    // If app is processing, determine step status
+                    if (currentStepIndex >= 0 && currentStepInfo) {
+                        if (step.index < currentStepIndex) {
+                            status = 'completed';
+                        } else if (step.index === currentStepIndex) {
+                            // Use current step status: running, completed, or failed
+                            status = (currentStepInfo.status || 'running').toLowerCase();
+                        } else {
+                            status = 'pending';
+                        }
+                    } else {
+                        // Processing but no step info, mark first step as running
+                        if (step.index === 0) {
+                            status = 'running';
+                        } else {
+                            status = 'pending';
+                        }
+                    }
+                } else if (appStateValue === 'pending') {
+                    // App is pending, all steps pending
+                    status = 'pending';
+                } else {
+                    // No app state info, all steps pending
+                    status = 'pending';
+                }
+                
+                steps.push({
+                    name: step.name,
+                    status: status,
+                    key: step.name.toLowerCase().replace('step', '_step')
+                });
+            });
             
             return steps;
         }
@@ -2885,22 +2938,35 @@ func generateDashboardAppHTML(snapshotJSON string) string {
         }
         
         function getCurrentStepName(steps) {
-            const runningStep = steps.find(step => step.status === 'running');
+            // Find running/processing step first
+            const runningStep = steps.find(step => step.status === 'running' || step.status === 'processing');
             if (runningStep) return runningStep.name;
+            
+            // Find failed step
             const failedStep = steps.find(step => step.status === 'failed');
             if (failedStep) return failedStep.name + ' (Failed)';
+            
+            // Find last completed step
             const lastCompleted = steps.filter(step => step.status === 'completed').pop();
             if (lastCompleted) return lastCompleted.name + ' (Completed)';
+            
             return 'Not Started';
         }
         
         function getOverallStatus(steps) {
+            // Check for failed status first (highest priority)
             const hasFailed = steps.some(step => step.status === 'failed');
             if (hasFailed) return 'failed';
-            const hasRunning = steps.some(step => step.status === 'running');
-            if (hasRunning) return 'running';
+            
+            // Check for running/processing status
+            const hasRunning = steps.some(step => step.status === 'running' || step.status === 'processing');
+            if (hasRunning) return 'processing';
+            
+            // Check if all steps are completed
             const allCompleted = steps.every(step => step.status === 'completed');
             if (allCompleted) return 'completed';
+            
+            // Default to pending
             return 'pending';
         }
         
