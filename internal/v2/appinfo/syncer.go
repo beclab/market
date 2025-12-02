@@ -41,6 +41,7 @@ type Syncer struct {
 	lastSyncDuration    atomic.Value // time.Duration
 	currentSource       atomic.Value // string
 	lastSyncedAppCount  atomic.Int64
+	lastSyncDetails     atomic.Value // *SyncDetails
 	statusMutex         sync.RWMutex // Mutex for complex status updates
 }
 
@@ -210,16 +211,33 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		return err
 	}
 
-	log.Printf("Found %d active market sources", len(activeSources))
+	// Filter to only remote sources - syncer only processes remote sources
+	var remoteSources []*settings.MarketSource
+	for _, source := range activeSources {
+		if source.Type == "remote" {
+			remoteSources = append(remoteSources, source)
+		} else {
+			log.Printf("Skipping local source: %s (type: %s)", source.ID, source.Type)
+		}
+	}
 
-	// Process all sources in priority order - each source is synced independently
+	if len(remoteSources) == 0 {
+		log.Println("==================== SYNC CYCLE SKIPPED ====================")
+		log.Println("No remote market sources available for syncing")
+		s.updateSyncSuccess(time.Since(startTime), startTime)
+		return nil
+	}
+
+	log.Printf("Found %d active market sources (%d remote, %d local)", len(activeSources), len(remoteSources), len(activeSources)-len(remoteSources))
+
+	// Process all remote sources in priority order - each source is synced independently
 	var lastError error
 	successCount := 0
 	failureCount := 0
 	var successSources []string
 	var failedSources []string
 
-	for _, source := range activeSources {
+	for _, source := range remoteSources {
 		s.currentSource.Store(source.ID)
 		log.Printf("Trying market source: %s (%s)", source.ID, source.BaseURL)
 
@@ -239,8 +257,8 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 
 	// Summary of sync cycle
 	duration := time.Since(startTime)
-	log.Printf("Sync cycle summary: %d/%d sources succeeded, %d failed in %v",
-		successCount, len(activeSources), failureCount, duration)
+	log.Printf("Sync cycle summary: %d/%d remote sources succeeded, %d failed in %v",
+		successCount, len(remoteSources), failureCount, duration)
 	if len(successSources) > 0 {
 		log.Printf("Successfully synced sources: %v", successSources)
 	}
@@ -259,9 +277,9 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		return nil
 	}
 
-	// All sources failed
+	// All remote sources failed
 	log.Println("==================== SYNC CYCLE FAILED ====================")
-	err := fmt.Errorf("all market sources failed, last error: %w", lastError)
+	err := fmt.Errorf("all remote market sources failed, last error: %w", lastError)
 	s.updateSyncFailure(err, startTime)
 	return err
 }
@@ -363,10 +381,17 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		// Wait for step completion or timeout with progress monitoring
 		stepTimeout := 15 * time.Minute // 15 minute timeout per step
 		stepTimer := time.NewTimer(stepTimeout)
-		defer stepTimer.Stop()
 
 		select {
 		case err := <-stepErr:
+			// Stop timer immediately when step completes to prevent resource leak
+			if !stepTimer.Stop() {
+				// If timer already fired, drain the channel
+				select {
+				case <-stepTimer.C:
+				default:
+				}
+			}
 			if err != nil {
 				log.Printf("Step %d (%s) failed: %v", i+1, step.GetStepName(), err)
 				log.Printf("======== SYNC STEP %d/%d FAILED: %s ========", i+1, len(steps), step.GetStepName())
@@ -379,6 +404,13 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.ID)
 			return fmt.Errorf("step %d timed out after %v", i+1, stepTimeout)
 		case <-syncCtx.Done():
+			// Stop timer when context is cancelled
+			if !stepTimer.Stop() {
+				select {
+				case <-stepTimer.C:
+				default:
+				}
+			}
 			log.Printf("Step %d (%s) timed out or context cancelled", i+1, step.GetStepName())
 			log.Printf("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())
 			log.Printf("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.ID)
@@ -861,6 +893,24 @@ func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
 	s.cacheManager.Store(cacheManager) // Use atomic.Store to set the pointer
 }
 
+// SyncDetails contains detailed information about a sync operation
+type SyncDetails struct {
+	SourceID      string          `json:"source_id"`
+	SyncTime      time.Time       `json:"sync_time"`
+	SucceededApps []string        `json:"succeeded_apps"` // List of app IDs/names that succeeded
+	FailedApps    []FailedAppInfo `json:"failed_apps"`    // List of apps that failed with reasons
+	TotalApps     int             `json:"total_apps"`
+	SuccessCount  int             `json:"success_count"`
+	FailureCount  int             `json:"failure_count"`
+}
+
+// FailedAppInfo contains information about a failed app sync
+type FailedAppInfo struct {
+	AppID   string `json:"app_id"`
+	AppName string `json:"app_name,omitempty"`
+	Reason  string `json:"reason"`
+}
+
 // SyncerMetrics contains metrics for the syncer
 type SyncerMetrics struct {
 	IsRunning           bool          `json:"is_running"`
@@ -880,6 +930,7 @@ type SyncerMetrics struct {
 	LastSyncedAppCount  int64         `json:"last_synced_app_count"`
 	SuccessRate         float64       `json:"success_rate"` // 0-100
 	NextSyncTime        time.Time     `json:"next_sync_time,omitempty"`
+	LastSyncDetails     *SyncDetails  `json:"last_sync_details,omitempty"`
 }
 
 // GetMetrics returns syncer metrics
@@ -935,6 +986,13 @@ func (s *Syncer) GetMetrics() SyncerMetrics {
 		nextSyncTime = lastSyncSuccessVal.Add(s.syncInterval)
 	}
 
+	var lastSyncDetails *SyncDetails
+	if details := s.lastSyncDetails.Load(); details != nil {
+		if d, ok := details.(*SyncDetails); ok {
+			lastSyncDetails = d
+		}
+	}
+
 	return SyncerMetrics{
 		IsRunning:           s.isRunning.Load(),
 		SyncInterval:        s.syncInterval,
@@ -953,6 +1011,14 @@ func (s *Syncer) GetMetrics() SyncerMetrics {
 		LastSyncedAppCount:  s.lastSyncedAppCount.Load(),
 		SuccessRate:         successRate,
 		NextSyncTime:        nextSyncTime,
+		LastSyncDetails:     lastSyncDetails,
+	}
+}
+
+// RecordSyncDetails records detailed information about a sync operation
+func (s *Syncer) RecordSyncDetails(details *SyncDetails) {
+	if details != nil {
+		s.lastSyncDetails.Store(details)
 	}
 }
 

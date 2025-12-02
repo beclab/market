@@ -71,6 +71,19 @@ func (s *Server) getRuntimeDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Debug: log all app states to verify stage field
+	if snapshot != nil && len(snapshot.AppStates) > 0 {
+		log.Printf("[DEBUG] Dashboard - Total apps: %d", len(snapshot.AppStates))
+		for key, appState := range snapshot.AppStates {
+			if appState != nil {
+				log.Printf("[DEBUG] Dashboard - App key: %s, AppName: %s, Stage: %s (type: %T), Health: %s",
+					key, appState.AppName, appState.Stage, appState.Stage, appState.Health)
+			} else {
+				log.Printf("[DEBUG] Dashboard - App key: %s, AppState is nil", key)
+			}
+		}
+	}
+
 	// Generate HTML page
 	html := generateDashboardHTML(string(snapshotJSON))
 
@@ -389,6 +402,63 @@ func generateDashboardHTML(snapshotJSON string) string {
             display: block;
         }
         
+        .error-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        
+        .error-modal-content {
+            background-color: #ffffff;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        
+        .error-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .error-modal-header h3 {
+            margin: 0;
+            color: #1a1a1a;
+        }
+        
+        .error-modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666666;
+        }
+        
+        .error-modal-close:hover {
+            color: #1a1a1a;
+        }
+        
+        .error-modal-body {
+            color: #1a1a1a;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
         @media (max-width: 1200px) {
             .main-layout {
                 grid-template-columns: 1fr;
@@ -429,116 +499,18 @@ func generateDashboardHTML(snapshotJSON string) string {
                 
                 <!-- Applications Tab Content -->
                 <div id="marketApps" class="main-tab-content active">
-                    <!-- Sub-tabs for Applications by stage -->
-                    <div class="sub-tabs">
-                        <button class="sub-tab active" onclick="showSubTab('marketApps', 'all', this)">All</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'fetching', this)">Fetching</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'installing', this)">Installing</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'running', this)">Running</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'upgrading', this)">Upgrading</button>
-                        <button class="sub-tab" onclick="showSubTab('marketApps', 'failed', this)">Failed</button>
-                    </div>
-                    <div class="sub-tab-content active" id="marketApps-all">
-                        <div class="table-container">
-                            <table id="appsTable">
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsTableBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-fetching">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsFetchingBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-installing">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsInstallingBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-running">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsRunningBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-upgrading">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsUpgradingBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="sub-tab-content" id="marketApps-failed">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>App Name</th>
-                                        <th>User ID</th>
-                                        <th>Source ID</th>
-                                        <th>Stage</th>
-                                        <th>Health</th>
-                                        <th>Version</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="appsFailedBody"></tbody>
-                            </table>
-                        </div>
+                    <div class="table-container">
+                        <table id="appsTable">
+                            <thead>
+                                <tr>
+                                    <th>App Name</th>
+                                    <th>User ID</th>
+                                    <th>Source ID</th>
+                                    <th>Version</th>
+                                </tr>
+                            </thead>
+                            <tbody id="appsTableBody"></tbody>
+                        </table>
                     </div>
                 </div>
                 
@@ -748,6 +720,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>Source ID</th>
                                         <th>State</th>
                                         <th>Current Step</th>
+                                        <th>Updated At</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoAppsTableBody"></tbody>
@@ -764,6 +738,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>Source ID</th>
                                         <th>State</th>
                                         <th>Current Step</th>
+                                        <th>Updated At</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoAppsProcessingBody"></tbody>
@@ -780,6 +756,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>Source ID</th>
                                         <th>State</th>
                                         <th>Current Step</th>
+                                        <th>Updated At</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoAppsCompletedBody"></tbody>
@@ -796,6 +774,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>Source ID</th>
                                         <th>State</th>
                                         <th>Error</th>
+                                        <th>Updated At</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoAppsFailedBody"></tbody>
@@ -925,6 +905,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>Status</th>
                                         <th>Step</th>
                                         <th>Retry</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoTasksTableBody"></tbody>
@@ -940,6 +921,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>App Name</th>
                                         <th>Status</th>
                                         <th>Step</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoTasksPendingBody"></tbody>
@@ -956,6 +938,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>Status</th>
                                         <th>Step</th>
                                         <th>Retry</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoTasksRunningBody"></tbody>
@@ -971,6 +954,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>App Name</th>
                                         <th>Status</th>
                                         <th>Step</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoTasksCompletedBody"></tbody>
@@ -987,6 +971,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                                         <th>Status</th>
                                         <th>Step</th>
                                         <th>Error</th>
+                                        <th>Updated At</th>
                                     </tr>
                                 </thead>
                                 <tbody id="chartRepoTasksFailedBody"></tbody>
@@ -998,12 +983,34 @@ func generateDashboardHTML(snapshotJSON string) string {
         </div>
     </div>
     
+    <!-- Error Modal -->
+    <div id="errorModal" class="error-modal">
+        <div class="error-modal-content">
+            <div class="error-modal-header">
+                <h3>Error Details</h3>
+                <button class="error-modal-close" onclick="closeErrorModal()">&times;</button>
+            </div>
+            <div class="error-modal-body" id="errorModalBody"></div>
+        </div>
+    </div>
+    
     <script>
         let snapshotData = {};
         let autoRefreshInterval = null;
         
         try {
             snapshotData = JSON.parse('%s');
+            // Debug: log app_states to check stage field
+            if (snapshotData.app_states) {
+                const appKeys = Object.keys(snapshotData.app_states);
+                if (appKeys.length > 0) {
+                    const firstKey = appKeys[0];
+                    const firstApp = snapshotData.app_states[firstKey];
+                    console.log('[DEBUG] First app key:', firstKey);
+                    console.log('[DEBUG] First app data:', firstApp);
+                    console.log('[DEBUG] First app stage:', firstApp ? firstApp.stage : 'undefined', 'type:', typeof (firstApp ? firstApp.stage : 'undefined'));
+                }
+            }
         } catch (e) {
             console.error('Failed to parse snapshot data:', e);
             snapshotData = {};
@@ -1024,15 +1031,39 @@ func generateDashboardHTML(snapshotJSON string) string {
         }
         
         function getStatusBadge(status) {
+            // Complete debug log for all calls
+            const statusType = typeof status;
+            const statusIsUndefined = status === undefined;
+            const statusIsNull = status === null;
+            const statusIsEmpty = status === '';
+            const statusIsUnknown = status === 'unknown';
+            
+            console.log('[DEBUG] getStatusBadge called:', {
+                status: status,
+                type: statusType,
+                isUndefined: statusIsUndefined,
+                isNull: statusIsNull,
+                isEmpty: statusIsEmpty,
+                isUnknown: statusIsUnknown,
+                stack: new Error().stack.split('\\n').slice(0, 5).join('\\n')
+            });
+            
             const statusLower = (status || '').toLowerCase();
+            let badgeClass = 'badge-info';
+            let badgeText = status || 'unknown';
+            
             if (statusLower.includes('running') || statusLower.includes('healthy') || statusLower === 'completed') {
-                return '<span class="badge badge-success">' + status + '</span>';
+                badgeClass = 'badge-success';
             } else if (statusLower.includes('pending') || statusLower.includes('processing')) {
-                return '<span class="badge badge-warning">' + status + '</span>';
+                badgeClass = 'badge-warning';
             } else if (statusLower.includes('failed') || statusLower.includes('unhealthy') || statusLower.includes('error')) {
-                return '<span class="badge badge-danger">' + status + '</span>';
+                badgeClass = 'badge-danger';
             }
-            return '<span class="badge badge-info">' + status + '</span>';
+            
+            const result = '<span class="badge ' + badgeClass + '">' + badgeText + '</span>';
+            console.log('[DEBUG] getStatusBadge returning:', result);
+            
+            return result;
         }
         
         function renderMarketStats() {
@@ -1040,26 +1071,36 @@ func generateDashboardHTML(snapshotJSON string) string {
             const statsGrid = document.getElementById('marketStatsGrid');
             statsGrid.innerHTML = 
                 '<div class="stat-card">' +
-                    '<div class="label">Total Apps</div>' +
+                    '<div class="label">Installed Apps</div>' +
                     '<div class="value">' + (summary.total_apps || 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Total Tasks</div>' +
+                    '<div class="label">Total Tasks <span style="font-size: 10px; color: #666;">(Recent 100)</span></div>' +
                     '<div class="value">' + (summary.total_tasks || 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Running Tasks</div>' +
-                    '<div class="value">' + (summary.running_tasks || 0) + '</div>' +
+                    '<div class="label">Completed Tasks</div>' +
+                    '<div class="value">' + (summary.completed_tasks || 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
-                    '<div class="label">Pending Tasks</div>' +
-                    '<div class="value">' + (summary.pending_tasks || 0) + '</div>' +
+                    '<div class="label">Failed Tasks</div>' +
+                    '<div class="value">' + (summary.failed_tasks || 0) + '</div>' +
                 '</div>';
         }
         
         function renderChartRepoStats() {
             const chartRepo = snapshotData.chart_repo || {};
             const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
+            const imageAnalyzer = chartRepo.tasks && chartRepo.tasks.image_analyzer;
+            const hydratorTasks = hydrator ? (hydrator.tasks || []) : [];
+            const hydratorPendingCount = hydratorTasks.filter(task => (task.status || '').toLowerCase() === 'pending').length;
+            const hydratorRunningCount = hydratorTasks.filter(task => (task.status || '').toLowerCase() === 'running').length;
+            const hydratorQueueLength = hydrator
+                ? (hydrator.queue_length !== undefined ? hydrator.queue_length : (hydratorPendingCount + hydratorRunningCount))
+                : 0;
+            const hydratorActiveTasks = hydrator
+                ? (hydrator.active_tasks !== undefined ? hydrator.active_tasks : hydratorRunningCount)
+                : 0;
             const statsGrid = document.getElementById('chartRepoStatsGrid');
             statsGrid.innerHTML = 
                 '<div class="stat-card">' +
@@ -1068,15 +1109,15 @@ func generateDashboardHTML(snapshotJSON string) string {
                 '</div>' +
                 '<div class="stat-card">' +
                     '<div class="label">Total Images</div>' +
-                    '<div class="value">' + ((chartRepo.images && chartRepo.images.length) || 0) + '</div>' +
+                    '<div class="value">' + (imageAnalyzer ? (imageAnalyzer.total_analyzed || 0) : 0) + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
                     '<div class="label">Active Tasks</div>' +
-                    '<div class="value">' + (hydrator ? (hydrator.active_tasks || 0) : 0) + '</div>' +
+                    '<div class="value">' + hydratorActiveTasks + '</div>' +
                 '</div>' +
                 '<div class="stat-card">' +
                     '<div class="label">Queue Length</div>' +
-                    '<div class="value">' + (hydrator ? (hydrator.queue_length || 0) : 0) + '</div>' +
+                    '<div class="value">' + hydratorQueueLength + '</div>' +
                 '</div>';
         }
         
@@ -1084,29 +1125,16 @@ func generateDashboardHTML(snapshotJSON string) string {
             const apps = snapshotData.app_states || {};
             const appList = Object.values(apps);
             
-            // Filter apps by stage
-            const appsAll = appList;
-            const appsFetching = appList.filter(app => (app.stage || '').toLowerCase() === 'fetching');
-            const appsInstalling = appList.filter(app => (app.stage || '').toLowerCase() === 'installing');
-            const appsRunning = appList.filter(app => (app.stage || '').toLowerCase() === 'running');
-            const appsUpgrading = appList.filter(app => (app.stage || '').toLowerCase() === 'upgrading');
-            const appsFailed = appList.filter(app => (app.stage || '').toLowerCase() === 'failed');
-            
-            renderAppsTable('appsTableBody', appsAll);
-            renderAppsTable('appsFetchingBody', appsFetching);
-            renderAppsTable('appsInstallingBody', appsInstalling);
-            renderAppsTable('appsRunningBody', appsRunning);
-            renderAppsTable('appsUpgradingBody', appsUpgrading);
-            renderAppsTable('appsFailedBody', appsFailed);
+            renderMarketAppsTable('appsTableBody', appList);
         }
         
-        function renderAppsTable(tbodyId, apps) {
+        function renderMarketAppsTable(tbodyId, apps) {
             const tbody = document.getElementById(tbodyId);
             if (!tbody) return;
             tbody.innerHTML = '';
             
             if (apps.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No applications</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No applications</td></tr>';
                 return;
             }
             
@@ -1115,8 +1143,6 @@ func generateDashboardHTML(snapshotJSON string) string {
                 row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
-                    '<td>' + getStatusBadge(app.stage || 'unknown') + '</td>' +
-                    '<td>' + getStatusBadge(app.health || 'unknown') + '</td>' +
                     '<td>' + (app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
             });
@@ -1125,6 +1151,16 @@ func generateDashboardHTML(snapshotJSON string) string {
         function renderTasks() {
             const tasks = snapshotData.tasks || {};
             const taskList = Object.values(tasks);
+            
+            // Sort tasks by Created At or Updated At (descending)
+            taskList.sort((a, b) => {
+                const timeA = a.completed_at || a.started_at || a.created_at;
+                const timeB = b.completed_at || b.started_at || b.created_at;
+                if (!timeA && !timeB) return 0;
+                if (!timeA) return 1;
+                if (!timeB) return -1;
+                return new Date(timeB) - new Date(timeA);
+            });
             
             // Filter tasks by status
             const tasksAll = taskList;
@@ -1136,7 +1172,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             renderTasksTableFull('tasksTableBody', tasksAll);
             renderTasksTableSimple('tasksPendingBody', tasksPending, 'created_at');
             renderTasksTableSimple('tasksRunningBody', tasksRunning, 'started_at');
-            renderTasksTableSimple('tasksCompletedBody', tasksCompleted, 'completed_at');
+            renderTasksTableCompleted('tasksCompletedBody', tasksCompleted);
             renderTasksTableFailed('tasksFailedBody', tasksFailed);
         }
         
@@ -1198,6 +1234,27 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.app_name || 'N/A') + '</td>' +
                     '<td style="font-size: 11px;">' + formatTimestamp(timeValue) + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function renderTasksTableCompleted(tbodyId, tasks) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tasks</td></tr>';
+                return;
+            }
+            
+            tasks.forEach(task => {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
+                    '<td>' + (task.type || 'N/A') + '</td>' +
+                    '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
+                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + formatTimestamp(task.completed_at || task.started_at || task.created_at) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -1296,11 +1353,11 @@ func generateDashboardHTML(snapshotJSON string) string {
                 { label: 'Last Sync Time', value: metrics.last_sync_time ? formatTimestamp(new Date(metrics.last_sync_time)) : 'Never' },
                 { label: 'Last Sync Success', value: metrics.last_sync_success ? formatTimestamp(new Date(metrics.last_sync_success)) : 'Never' },
                 { label: 'Last Sync Duration', value: formatDuration(metrics.last_sync_duration) },
-                { label: 'Last Synced Apps', value: metrics.last_synced_app_count !== undefined ? metrics.last_synced_app_count : 'N/A' },
+                { label: 'Last Synced Apps (Source: ' + (metrics.current_source || 'N/A') + ')', value: metrics.last_synced_app_count !== undefined ? metrics.last_synced_app_count : 'N/A' },
                 { label: 'Next Sync Time', value: metrics.next_sync_time ? formatTimestamp(new Date(metrics.next_sync_time)) : 'N/A' },
-                { label: 'Total Syncs', value: metrics.total_syncs !== undefined ? metrics.total_syncs : 0 },
-                { label: 'Success Count', value: metrics.success_count !== undefined ? metrics.success_count : 0 },
-                { label: 'Failure Count', value: metrics.failure_count !== undefined ? metrics.failure_count : 0 },
+                { label: 'Total App Detail Syncs', value: metrics.total_syncs !== undefined ? metrics.total_syncs : 0 },
+                { label: 'Success Count (App Detail Syncs)', value: metrics.success_count !== undefined ? metrics.success_count : 0 },
+                { label: 'Failure Count (App Detail Syncs)', value: metrics.failure_count !== undefined ? metrics.failure_count : 0 },
                 { label: 'Consecutive Failures', value: metrics.consecutive_failures !== undefined ? metrics.consecutive_failures : 0 },
                 { label: 'Success Rate', value: formatPercentage(metrics.success_rate) },
                 { label: 'Step Count', value: metrics.step_count || 0 },
@@ -1317,6 +1374,43 @@ func generateDashboardHTML(snapshotJSON string) string {
                 row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' + valueCell;
                 tbody.appendChild(row);
             });
+            
+            // Add last sync details if available
+            if (metrics.last_sync_details) {
+                const details = metrics.last_sync_details;
+                const detailsRow = document.createElement('tr');
+                detailsRow.innerHTML = '<td colspan="2" style="padding-top: 16px;"><strong>Last Sync Details</strong></td>';
+                tbody.appendChild(detailsRow);
+                
+                // Add sync time
+                if (details.sync_time) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td style="padding-left: 20px;">Sync Time</td><td>' + formatTimestamp(new Date(details.sync_time)) + '</td>';
+                    tbody.appendChild(row);
+                }
+                
+                // Add succeeded apps
+                if (details.succeeded_apps && details.succeeded_apps.length > 0) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td style="padding-left: 20px;">Succeeded Apps (' + details.succeeded_apps.length + ')</td><td>' + details.succeeded_apps.join(', ') + '</td>';
+                    tbody.appendChild(row);
+                }
+                
+                // Add failed apps
+                if (details.failed_apps && details.failed_apps.length > 0) {
+                    const row = document.createElement('tr');
+                    let failedAppsHtml = '<div style="max-height: 200px; overflow-y: auto;">';
+                    details.failed_apps.forEach((failedApp, index) => {
+                        failedAppsHtml += '<div style="margin-bottom: 8px;">';
+                        failedAppsHtml += '<strong>' + (failedApp.app_name || failedApp.app_id) + '</strong>: ';
+                        failedAppsHtml += '<span style="color: #dc2626;">' + (failedApp.reason || 'Unknown error') + '</span>';
+                        failedAppsHtml += '</div>';
+                    });
+                    failedAppsHtml += '</div>';
+                    row.innerHTML = '<td style="padding-left: 20px;">Failed Apps (' + details.failed_apps.length + ')</td><td>' + failedAppsHtml + '</td>';
+                    tbody.appendChild(row);
+                }
+            }
             
             // Add status message if available
             if (syncer.message) {
@@ -1364,7 +1458,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 { label: 'Total Failed', value: metrics.total_tasks_failed !== undefined ? metrics.total_tasks_failed : 0 },
                 { label: 'Success Rate', value: successRate },
                 { label: 'Failure Rate', value: failureRate },
-                { label: 'Completed Tasks', value: metrics.completed_tasks_count !== undefined ? metrics.completed_tasks_count : 0 },
+                { label: 'Completed Tasks (Recent)', value: metrics.completed_tasks_count !== undefined ? metrics.completed_tasks_count : 0 },
                 { label: 'Failed Tasks', value: metrics.failed_tasks_count !== undefined ? metrics.failed_tasks_count : 0 },
                 { label: 'Last Check', value: formatTimestamp(hydrator.last_check) },
             ];
@@ -1406,11 +1500,10 @@ func generateDashboardHTML(snapshotJSON string) string {
             html += '<div class="table-container" style="max-height: 300px; overflow-y: auto;">';
             html += '<table style="font-size: 12px;"><thead><tr>';
             html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Source ID</th>';
-            html += '<th>Current Step</th><th>Progress</th><th>Status</th><th>Started At</th>';
+            html += '<th>Current Step</th><th>Status</th><th>Started At</th>';
             html += '</tr></thead><tbody>';
             
             activeTasks.forEach(task => {
-                const progress = task.progress ? task.progress.toFixed(1) + '%' : 'N/A';
                 const stepInfo = task.current_step ? task.current_step + ' (' + (task.step_index + 1) + '/' + task.total_steps + ')' : 'N/A';
                 html += '<tr>';
                 html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
@@ -1419,7 +1512,6 @@ func generateDashboardHTML(snapshotJSON string) string {
                 html += '<td>' + (task.user_id || 'N/A') + '</td>';
                 html += '<td>' + (task.source_id || 'N/A') + '</td>';
                 html += '<td>' + stepInfo + '</td>';
-                html += '<td>' + progress + '</td>';
                 html += '<td>' + getStatusBadge(task.status || 'running') + '</td>';
                 html += '<td>' + (task.started_at ? formatTimestamp(new Date(task.started_at)) : 'N/A') + '</td>';
                 html += '</tr>';
@@ -1471,28 +1563,34 @@ func generateDashboardHTML(snapshotJSON string) string {
             const container = document.getElementById('hydratorHistory');
             if (!container) return;
             
-            const hasCompleted = completedTasks && completedTasks.length > 0;
-            const hasFailed = failedTasks && failedTasks.length > 0;
+            // Ensure we have arrays, not undefined/null
+            const completed = Array.isArray(completedTasks) ? completedTasks : [];
+            const failed = Array.isArray(failedTasks) ? failedTasks : [];
+            
+            const hasCompleted = completed.length > 0;
+            const hasFailed = failed.length > 0;
             
             if (!hasCompleted && !hasFailed) {
                 container.innerHTML = '<h3>Task History</h3><p class="empty-state">No task history</p>';
                 return;
             }
             
-            let html = '<h3>Task History</h3>';
+            let html = '<h3>Task History (Recent 50 Tasks)</h3>';
             
             // Recent completed tasks
             if (hasCompleted) {
-                html += '<h4 style="margin-top: 16px; color: #059669;">Recent Completed Tasks (' + completedTasks.length + ')</h4>';
+                html += '<h4 style="margin-top: 16px; color: #059669;">Recent Completed Tasks (' + completed.length + ')</h4>';
                 html += '<div class="table-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 20px;">';
                 html += '<table style="font-size: 12px;"><thead><tr>';
                 html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Duration</th><th>Completed At</th>';
                 html += '</tr></thead><tbody>';
                 
-                completedTasks.slice(0, 10).forEach(task => {
+                completed.slice(0, 10).forEach(task => {
                     const duration = task.duration ? formatDuration(task.duration) : 'N/A';
+                    const taskId = task.task_id || 'N/A';
+                    const taskIdDisplay = taskId.length > 20 ? taskId.substring(0, 20) + '...' : taskId;
                     html += '<tr>';
-                    html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
+                    html += '<td>' + taskIdDisplay + '</td>';
                     html += '<td>' + (task.app_id || 'N/A') + '</td>';
                     html += '<td>' + (task.app_name || 'N/A') + '</td>';
                     html += '<td>' + (task.user_id || 'N/A') + '</td>';
@@ -1506,21 +1604,25 @@ func generateDashboardHTML(snapshotJSON string) string {
             
             // Recent failed tasks
             if (hasFailed) {
-                html += '<h4 style="margin-top: 16px; color: #dc2626;">Recent Failed Tasks (' + failedTasks.length + ')</h4>';
+                html += '<h4 style="margin-top: 16px; color: #dc2626;">Recent Failed Tasks (' + failed.length + ')</h4>';
                 html += '<div class="table-container" style="max-height: 200px; overflow-y: auto;">';
                 html += '<table style="font-size: 12px;"><thead><tr>';
                 html += '<th>Task ID</th><th>App ID</th><th>App Name</th><th>User ID</th><th>Failed Step</th><th>Error</th><th>Failed At</th>';
                 html += '</tr></thead><tbody>';
                 
-                failedTasks.slice(0, 10).forEach(task => {
+                failed.slice(0, 10).forEach(task => {
+                    const errorMsg = task.error_msg || 'N/A';
+                    const errorId = 'error-' + (task.task_id || Math.random().toString(36).substr(2, 9));
                     html += '<tr>';
                     html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
                     html += '<td>' + (task.app_id || 'N/A') + '</td>';
                     html += '<td>' + (task.app_name || 'N/A') + '</td>';
                     html += '<td>' + (task.user_id || 'N/A') + '</td>';
                     html += '<td>' + (task.failed_step || 'N/A') + '</td>';
-                    html += '<td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + (task.error_msg || '') + '">';
-                    html += (task.error_msg || 'N/A') + '</td>';
+                    html += '<td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">';
+                    html += '<span id="' + errorId + '-short" style="cursor: pointer; color: #dc2626;" onclick="showErrorModal(\'' + errorId + '\', \'' + errorMsg.replace(/'/g, "\\'").replace(/"/g, '&quot;') + '\')">';
+                    html += (errorMsg.length > 50 ? errorMsg.substring(0, 50) + '...' : errorMsg) + '</span>';
+                    html += '</td>';
                     html += '<td>' + (task.completed_at ? formatTimestamp(new Date(task.completed_at)) : 'N/A') + '</td>';
                     html += '</tr>';
                 });
@@ -1713,12 +1815,33 @@ func generateDashboardHTML(snapshotJSON string) string {
             
             // Render Applications
             const apps = chartRepo.apps || [];
-            const appsAll = apps;
-            const appsProcessing = apps.filter(app => (app.state || '').toLowerCase().includes('processing'));
-            const appsCompleted = apps.filter(app => (app.state || '').toLowerCase() === 'completed');
-            const appsFailed = apps.filter(app => (app.state || '').toLowerCase() === 'failed' || app.error);
             
-            renderAppsTable('chartRepoAppsTableBody', appsAll);
+            // Deduplicate apps by user_id:source_id:app_id (keep the one with latest updated_at)
+            const appMap = new Map();
+            apps.forEach(app => {
+                const appKey = (app.user_id || '') + ':' + (app.source_id || '') + ':' + (app.app_id || app.app_name || '');
+                if (!appKey || appKey === '::') return;
+                
+                const existing = appMap.get(appKey);
+                if (!existing) {
+                    appMap.set(appKey, app);
+                } else {
+                    // Keep the one with latest updated_at
+                    const existingTime = getChartRepoAppUpdatedAtValue(existing);
+                    const currentTime = getChartRepoAppUpdatedAtValue(app);
+                    if (currentTime > existingTime) {
+                        appMap.set(appKey, app);
+                    }
+                }
+            });
+            const uniqueApps = Array.from(appMap.values());
+            
+            const sortedApps = [...uniqueApps].sort((a, b) => getChartRepoAppUpdatedAtValue(b) - getChartRepoAppUpdatedAtValue(a));
+            const appsProcessing = sortedApps.filter(app => (app.state || '').toLowerCase().includes('processing'));
+            const appsCompleted = sortedApps.filter(app => (app.state || '').toLowerCase() === 'completed');
+            const appsFailed = sortedApps.filter(app => (app.state || '').toLowerCase() === 'failed' || app.error);
+            
+            renderAppsTable('chartRepoAppsTableBody', sortedApps);
             renderAppsTable('chartRepoAppsProcessingBody', appsProcessing);
             renderAppsTable('chartRepoAppsCompletedBody', appsCompleted);
             renderAppsTableWithError('chartRepoAppsFailedBody', appsFailed);
@@ -1743,17 +1866,91 @@ func generateDashboardHTML(snapshotJSON string) string {
             // Render Tasks
             const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
             const tasks = hydrator ? (hydrator.tasks || []) : [];
-            const tasksAll = tasks;
-            const tasksPending = tasks.filter(task => (task.status || '').toLowerCase() === 'pending');
-            const tasksRunning = tasks.filter(task => (task.status || '').toLowerCase() === 'running');
-            const tasksCompleted = tasks.filter(task => (task.status || '').toLowerCase() === 'completed');
-            const tasksFailed = tasks.filter(task => (task.status || '').toLowerCase() === 'failed' || task.last_error);
             
-            renderTasksTable('chartRepoTasksTableBody', tasksAll);
+            // Deduplicate tasks by task_id (keep the one with latest updated_at)
+            const taskMap = new Map();
+            tasks.forEach(task => {
+                const taskId = task.task_id;
+                if (!taskId) return;
+                
+                const existing = taskMap.get(taskId);
+                if (!existing) {
+                    taskMap.set(taskId, task);
+                } else {
+                    // Keep the one with latest updated_at
+                    const existingTime = getChartRepoTaskUpdatedAtValue(existing);
+                    const currentTime = getChartRepoTaskUpdatedAtValue(task);
+                    if (currentTime > existingTime) {
+                        taskMap.set(taskId, task);
+                    }
+                }
+            });
+            const uniqueTasks = Array.from(taskMap.values());
+            
+            const sortedTasks = [...uniqueTasks].sort((a, b) => getChartRepoTaskUpdatedAtValue(b) - getChartRepoTaskUpdatedAtValue(a));
+            const tasksPending = sortedTasks.filter(task => (task.status || '').toLowerCase() === 'pending');
+            const tasksRunning = sortedTasks.filter(task => (task.status || '').toLowerCase() === 'running');
+            const tasksCompleted = sortedTasks.filter(task => (task.status || '').toLowerCase() === 'completed');
+            const tasksFailed = sortedTasks.filter(task => (task.status || '').toLowerCase() === 'failed' || task.last_error);
+            
+            renderTasksTable('chartRepoTasksTableBody', sortedTasks);
             renderTasksTableSimple('chartRepoTasksPendingBody', tasksPending);
             renderTasksTable('chartRepoTasksRunningBody', tasksRunning);
             renderTasksTableSimple('chartRepoTasksCompletedBody', tasksCompleted);
             renderTasksTableWithError('chartRepoTasksFailedBody', tasksFailed);
+        }
+        
+        function getChartRepoAppUpdatedAt(app) {
+            if (!app) return null;
+            if (app.timestamps && app.timestamps.last_updated_at) {
+                return app.timestamps.last_updated_at;
+            }
+            if (app.last_update) {
+                return app.last_update;
+            }
+            if (app.current_step && app.current_step.updated_at) {
+                return app.current_step.updated_at;
+            }
+            return null;
+        }
+        
+        function getChartRepoAppUpdatedAtValue(app) {
+            const ts = getChartRepoAppUpdatedAt(app);
+            if (!ts) return 0;
+            const date = new Date(ts);
+            const time = date.getTime();
+            return isNaN(time) ? 0 : time;
+        }
+        
+        function getChartRepoAppUpdatedAtLabel(app) {
+            const ts = getChartRepoAppUpdatedAt(app);
+            if (!ts) return 'N/A';
+            return formatTimestamp(ts);
+        }
+        
+        function getChartRepoTaskUpdatedAt(task) {
+            if (!task) return null;
+            if (task.updated_at) {
+                return task.updated_at;
+            }
+            if (task.created_at) {
+                return task.created_at;
+            }
+            return null;
+        }
+        
+        function getChartRepoTaskUpdatedAtValue(task) {
+            const ts = getChartRepoTaskUpdatedAt(task);
+            if (!ts) return 0;
+            const date = new Date(ts);
+            const time = date.getTime();
+            return isNaN(time) ? 0 : time;
+        }
+        
+        function getChartRepoTaskUpdatedAtLabel(task) {
+            const ts = getChartRepoTaskUpdatedAt(task);
+            if (!ts) return 'N/A';
+            return formatTimestamp(ts);
         }
         
         function renderAppsTable(tbodyId, apps) {
@@ -1761,7 +1958,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             if (!tbody) return;
             tbody.innerHTML = '';
             if (apps.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No applications</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No applications</td></tr>';
                 return;
             }
             apps.forEach(app => {
@@ -1770,7 +1967,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(app.state || 'unknown') + '</td>' +
-                    '<td>' + (app.current_step ? app.current_step.name : '-') + '</td>';
+                    '<td>' + (app.current_step ? app.current_step.name : '-') + '</td>' +
+                    '<td>' + getChartRepoAppUpdatedAtLabel(app) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -1780,7 +1978,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             if (!tbody) return;
             tbody.innerHTML = '';
             if (apps.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No applications</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No applications</td></tr>';
                 return;
             }
             apps.forEach(app => {
@@ -1789,7 +1987,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + (app.user_id || 'N/A') + '</td>' +
                     '<td>' + (app.source_id || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(app.state || 'unknown') + '</td>' +
-                    '<td>' + (app.error ? app.error.message : '-') + '</td>';
+                    '<td>' + (app.error ? app.error.message : '-') + '</td>' +
+                    '<td>' + getChartRepoAppUpdatedAtLabel(app) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -1997,7 +2196,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             if (!tbody) return;
             tbody.innerHTML = '';
             if (tasks.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tasks</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No tasks</td></tr>';
                 return;
             }
             tasks.forEach(task => {
@@ -2006,7 +2205,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + (task.app_name || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.step_name || '-') + '</td>' +
-                    '<td>' + (task.retry_count || 0) + '</td>';
+                    '<td>' + (task.retry_count || 0) + '</td>' +
+                    '<td>' + getChartRepoTaskUpdatedAtLabel(task) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -2016,24 +2216,6 @@ func generateDashboardHTML(snapshotJSON string) string {
             if (!tbody) return;
             tbody.innerHTML = '';
             if (tasks.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No tasks</td></tr>';
-                return;
-            }
-            tasks.forEach(task => {
-                const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
-                    '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
-                    '<td>' + (task.step_name || '-') + '</td>';
-                tbody.appendChild(row);
-            });
-        }
-        
-        function renderTasksTableWithError(tbodyId, tasks) {
-            const tbody = document.getElementById(tbodyId);
-            if (!tbody) return;
-            tbody.innerHTML = '';
-            if (tasks.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tasks</td></tr>';
                 return;
             }
@@ -2043,7 +2225,27 @@ func generateDashboardHTML(snapshotJSON string) string {
                     '<td>' + (task.app_name || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.step_name || '-') + '</td>' +
-                    '<td style="font-size: 11px;">' + (task.last_error || '-') + '</td>';
+                    '<td>' + getChartRepoTaskUpdatedAtLabel(task) + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function renderTasksTableWithError(tbodyId, tasks) {
+            const tbody = document.getElementById(tbodyId);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No tasks</td></tr>';
+                return;
+            }
+            tasks.forEach(task => {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
+                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                    '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
+                    '<td>' + (task.step_name || '-') + '</td>' +
+                    '<td style="font-size: 11px;">' + (task.last_error || '-') + '</td>' +
+                    '<td>' + getChartRepoTaskUpdatedAtLabel(task) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -2073,6 +2275,960 @@ func generateDashboardHTML(snapshotJSON string) string {
             renderHydrator();
             renderCacheStats();
             renderChartRepo();
+        }
+        
+        function toggleAutoRefresh() {
+            const checkbox = document.getElementById('autoRefresh');
+            if (checkbox.checked) {
+                autoRefreshInterval = setInterval(refreshData, 5000);
+            } else {
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+        
+        function showErrorModal(errorId, errorMsg) {
+            const modal = document.getElementById('errorModal');
+            const modalBody = document.getElementById('errorModalBody');
+            modalBody.textContent = errorMsg;
+            modal.style.display = 'block';
+        }
+        
+        function closeErrorModal() {
+            const modal = document.getElementById('errorModal');
+            modal.style.display = 'none';
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('errorModal');
+            if (event.target == modal) {
+                closeErrorModal();
+            }
+        }
+        
+        updateUI();
+        if (document.getElementById('autoRefresh').checked) {
+            autoRefreshInterval = setInterval(refreshData, 5000);
+        }
+    </script>
+</body>
+</html>`
+
+	// Replace the placeholder with actual JSON data
+	return strings.Replace(htmlTemplate, "%s", escapedJSON, 1)
+}
+
+// getRuntimeDashboardApp handles GET /api/v2/runtime/dashboard-app
+// Returns an HTML page showing app processing flow status
+func (s *Server) getRuntimeDashboardApp(w http.ResponseWriter, r *http.Request) {
+	log.Println("GET /api/v2/runtime/dashboard-app - Getting app processing flow dashboard")
+
+	if s.runtimeStateService == nil {
+		log.Println("Runtime state service not initialized")
+		http.Error(w, "Runtime state service not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Get full snapshot
+	snapshot := s.runtimeStateService.GetSnapshot()
+	if snapshot == nil {
+		http.Error(w, "Failed to get runtime snapshot", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert snapshot to JSON for JavaScript consumption
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		log.Printf("Failed to marshal snapshot: %v", err)
+		http.Error(w, "Failed to serialize snapshot", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate HTML page
+	html := generateDashboardAppHTML(string(snapshotJSON))
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(html))
+}
+
+// generateDashboardAppHTML generates the HTML dashboard page for app processing flow
+func generateDashboardAppHTML(snapshotJSON string) string {
+	// Escape JSON for embedding in HTML
+	escapedJSON := template.JSEscapeString(snapshotJSON)
+
+	htmlTemplate := `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Processing Flow Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            padding: 16px;
+            color: #1a1a1a;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        }
+        
+        .header h1 {
+            color: #1a1a1a;
+            margin-bottom: 12px;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .header .timestamp {
+            color: #666666;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        
+        .header .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .refresh-btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        .refresh-btn:hover {
+            background: #1d4ed8;
+        }
+        
+        .auto-refresh label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            color: #666666;
+            font-size: 14px;
+        }
+        
+        .auto-refresh input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        
+        .panel {
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+            margin-bottom: 16px;
+        }
+        
+        .panel-header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .panel-header h2 {
+            color: #1a1a1a;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        
+        th {
+            background: #f9fafb;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #1a1a1a;
+            border-bottom: 2px solid #e5e7eb;
+            white-space: nowrap;
+        }
+        
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            color: #1a1a1a;
+        }
+        
+        tr:hover {
+            background: #f9fafb;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .badge-danger {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .badge-pending {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .flow-steps {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .flow-step {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .flow-step.completed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .flow-step.running {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .flow-step.pending {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .flow-step.failed {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .flow-step-arrow {
+            color: #9ca3af;
+            font-size: 12px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #9ca3af;
+            font-size: 14px;
+        }
+        
+        .filter-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-input {
+            padding: 8px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+        
+        .filter-input:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>App Processing Flow Dashboard</h1>
+            <div class="timestamp">Last Updated: <span id="timestamp"></span></div>
+            <div class="controls">
+                <button class="refresh-btn" onclick="refreshData()">Refresh</button>
+                <div class="auto-refresh">
+                    <label>
+                        <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()" checked>
+                        Auto Refresh (5s)
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Application Processing Status</h2>
+            </div>
+            <div class="filter-controls">
+                <input type="text" class="filter-input" id="filterAppName" placeholder="Filter by App Name" onkeyup="filterApps()">
+                <input type="text" class="filter-input" id="filterUserID" placeholder="Filter by User ID" onkeyup="filterApps()">
+                <input type="text" class="filter-input" id="filterSourceID" placeholder="Filter by Source ID" onkeyup="filterApps()">
+            </div>
+            <div class="table-container">
+                <table id="appsTable">
+                    <thead>
+                        <tr>
+                            <th>App Name</th>
+                            <th>User ID</th>
+                            <th>Source ID</th>
+                            <th>Version</th>
+                            <th>Processing Flow</th>
+                            <th>Current Step</th>
+                            <th>Status</th>
+                            <th>Last Update</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let snapshotData = {};
+        try {
+            snapshotData = JSON.parse('%s');
+            // Debug: log data structure
+            console.log('[DEBUG] Snapshot data loaded:', snapshotData);
+            console.log('[DEBUG] App states count:', snapshotData.app_states ? Object.keys(snapshotData.app_states).length : 0);
+            console.log('[DEBUG] Components:', snapshotData.components ? Object.keys(snapshotData.components) : []);
+            console.log('[DEBUG] Chart repo:', snapshotData.chart_repo ? 'present' : 'missing');
+        } catch (e) {
+            console.error('Failed to parse snapshot data:', e);
+            snapshotData = {};
+        }
+        let autoRefreshInterval = null;
+        
+        // Processing flow steps definition
+        const PROCESSING_STEPS = [
+            { name: 'Syncer', key: 'syncer' },
+            { name: 'Market Hydration', key: 'market_hydration' },
+            { name: 'SourceChartStep', key: 'source_chart_step' },
+            { name: 'RenderedChartStep', key: 'rendered_chart_step' },
+            { name: 'CustomParamsUpdateStep', key: 'custom_params_update_step' },
+            { name: 'ImageAnalysisStep', key: 'image_analysis_step' },
+            { name: 'DatabaseUpdateStep', key: 'database_update_step' }
+        ];
+        
+        function getStatusBadge(status) {
+            if (!status) return '<span class="badge badge-pending">Unknown</span>';
+            const lower = status.toLowerCase();
+            if (lower === 'completed' || lower === 'success' || lower === 'healthy') {
+                return '<span class="badge badge-success">' + status + '</span>';
+            } else if (lower === 'running' || lower === 'processing' || lower === 'active') {
+                return '<span class="badge badge-info">' + status + '</span>';
+            } else if (lower === 'failed' || lower === 'error' || lower === 'unhealthy') {
+                return '<span class="badge badge-danger">' + status + '</span>';
+            } else if (lower === 'pending' || lower === 'waiting') {
+                return '<span class="badge badge-warning">' + status + '</span>';
+            }
+            return '<span class="badge badge-pending">' + status + '</span>';
+        }
+        
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return 'N/A';
+            const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+            if (isNaN(date.getTime())) return 'N/A';
+            return date.toLocaleString('zh-CN', { 
+                year: 'numeric', 
+                month: '2-digit', 
+                day: '2-digit', 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            });
+        }
+        
+        function getAppProcessingFlow(appKey, appState, chartRepoApps, chartRepoHydratorTasks) {
+            const steps = [];
+            
+            // Step 1: Syncer
+            const syncerStatus = getSyncerStatus();
+            steps.push({
+                name: 'Syncer',
+                status: syncerStatus,
+                key: 'syncer'
+            });
+            
+            // Step 2: Market Hydration
+            const marketHydrationStatus = getMarketHydrationStatus(appKey);
+            steps.push({
+                name: 'Market Hydration',
+                status: marketHydrationStatus,
+                key: 'market_hydration'
+            });
+            
+            // Step 3-7: ChartRepo Hydration Steps
+            const chartRepoApp = findChartRepoApp(appKey, chartRepoApps);
+            const chartRepoTask = findChartRepoTask(appKey, chartRepoHydratorTasks);
+            
+            // Map step name to index (consistent with dynamic-chart-repository)
+            const stepNameToIndex = {
+                'SourceChartStep': 0,
+                'RenderedChartStep': 1,
+                'CustomParamsUpdateStep': 2,
+                'ImageAnalysisStep': 3,
+                'DatabaseUpdateStep': 4
+            };
+            
+            const chartRepoSteps = [
+                { name: 'SourceChartStep', index: 0 },
+                { name: 'RenderedChartStep', index: 1 },
+                { name: 'CustomParamsUpdateStep', index: 2 },
+                { name: 'ImageAnalysisStep', index: 3 },
+                { name: 'DatabaseUpdateStep', index: 4 }
+            ];
+            
+            // Determine chart repo app overall state
+            let appStateValue = null;
+            let currentStepInfo = null;
+            let currentStepIndex = -1;
+            
+            // Priority: chartRepoApp > chartRepoTask
+            if (chartRepoApp) {
+                // Use app state: pending, processing, completed, failed
+                appStateValue = (chartRepoApp.state || '').toLowerCase();
+                
+                // Use current_step if available
+                if (chartRepoApp.current_step) {
+                    currentStepInfo = chartRepoApp.current_step;
+                    currentStepIndex = currentStepInfo.index !== undefined ? currentStepInfo.index : -1;
+                    
+                    // Map step status: running -> running, completed -> completed, failed -> failed
+                    const stepStatus = (currentStepInfo.status || '').toLowerCase();
+                    if (stepStatus === 'running' || stepStatus === 'pending') {
+                        currentStepInfo.status = 'running';
+                    } else if (stepStatus === 'completed') {
+                        currentStepInfo.status = 'completed';
+                    } else if (stepStatus === 'failed') {
+                        currentStepInfo.status = 'failed';
+                    }
+                }
+            } else if (chartRepoTask) {
+                // Use task status: pending, running, completed, failed
+                const taskStatus = (chartRepoTask.status || '').toLowerCase();
+                
+                // Map task status to app state
+                if (taskStatus === 'running' || taskStatus === 'pending') {
+                    appStateValue = 'processing';
+                } else if (taskStatus === 'completed') {
+                    appStateValue = 'completed';
+                } else if (taskStatus === 'failed') {
+                    appStateValue = 'failed';
+                }
+                
+                // Get step index from step_name
+                const stepName = chartRepoTask.step_name || '';
+                if (stepName && stepNameToIndex[stepName] !== undefined) {
+                    currentStepIndex = stepNameToIndex[stepName];
+                    currentStepInfo = {
+                        status: taskStatus === 'running' ? 'running' : (taskStatus === 'failed' ? 'failed' : 'completed'),
+                        index: currentStepIndex
+                    };
+                }
+            }
+            
+            // Render chart repo steps based on app state and current step
+            chartRepoSteps.forEach((step) => {
+                let status = 'pending';
+                
+                if (appStateValue === 'failed') {
+                    // If app failed, mark current step as failed, previous steps as completed
+                    if (currentStepIndex >= 0) {
+                        if (step.index < currentStepIndex) {
+                            status = 'completed';
+                        } else if (step.index === currentStepIndex) {
+                            status = 'failed';
+                        } else {
+                            status = 'pending';
+                        }
+                    } else {
+                        // If failed but no step info, mark all as pending (unknown failure point)
+                        status = 'pending';
+                    }
+                } else if (appStateValue === 'completed') {
+                    // If app completed, all steps are completed
+                    status = 'completed';
+                } else if (appStateValue === 'processing') {
+                    // If app is processing, determine step status
+                    if (currentStepIndex >= 0 && currentStepInfo) {
+                        if (step.index < currentStepIndex) {
+                            status = 'completed';
+                        } else if (step.index === currentStepIndex) {
+                            // Use current step status: running, completed, or failed
+                            status = (currentStepInfo.status || 'running').toLowerCase();
+                        } else {
+                            status = 'pending';
+                        }
+                    } else {
+                        // Processing but no step info, mark first step as running
+                        if (step.index === 0) {
+                            status = 'running';
+                        } else {
+                            status = 'pending';
+                        }
+                    }
+                } else if (appStateValue === 'pending') {
+                    // App is pending, all steps pending
+                    status = 'pending';
+                } else {
+                    // No app state info, all steps pending
+                    status = 'pending';
+                }
+                
+                steps.push({
+                    name: step.name,
+                    status: status,
+                    key: step.name.toLowerCase().replace('step', '_step')
+                });
+            });
+            
+            return steps;
+        }
+        
+        function getSyncerStatus() {
+            const components = snapshotData.components || {};
+            const syncer = components.syncer;
+            if (!syncer) return 'unknown';
+            if (!syncer.healthy) return 'failed';
+            if (syncer.status === 'running') return 'running';
+            return syncer.status || 'unknown';
+        }
+        
+        function getMarketHydrationStatus(appKey) {
+            const components = snapshotData.components || {};
+            const hydrator = components.hydrator;
+            if (!hydrator || !hydrator.metrics) return 'pending';
+            
+            const activeTasks = hydrator.metrics.active_tasks || [];
+            const [userID, sourceID, appName] = appKey.split(':');
+            
+            // Find active task for this app
+            const activeTask = activeTasks.find(task => {
+                return task.user_id === userID && 
+                       task.source_id === sourceID && 
+                       (task.app_id === appName || task.app_name === appName);
+            });
+            
+            if (activeTask) {
+                return 'running';
+            }
+            
+            // Check completed tasks
+            const completedTasks = hydrator.metrics.recent_completed_tasks || [];
+            const completedTask = completedTasks.find(task => {
+                return task.user_id === userID && 
+                       task.source_id === sourceID && 
+                       (task.app_id === appName || task.app_name === appName);
+            });
+            
+            if (completedTask) {
+                return 'completed';
+            }
+            
+            // Check failed tasks
+            const failedTasks = hydrator.metrics.recent_failed_tasks || [];
+            const failedTask = failedTasks.find(task => {
+                return task.user_id === userID && 
+                       task.source_id === sourceID && 
+                       (task.app_id === appName || task.app_name === appName);
+            });
+            
+            if (failedTask) {
+                return 'failed';
+            }
+            
+            return 'pending';
+        }
+        
+        function findChartRepoApp(appKey, chartRepoApps) {
+            if (!chartRepoApps || !Array.isArray(chartRepoApps)) return null;
+            const [userID, sourceID, appName] = appKey.split(':');
+            return chartRepoApps.find(app => {
+                return app.user_id === userID && 
+                       app.source_id === sourceID && 
+                       (app.app_id === appName || app.app_name === appName);
+            });
+        }
+        
+        function findChartRepoTask(appKey, chartRepoHydratorTasks) {
+            if (!chartRepoHydratorTasks || !Array.isArray(chartRepoHydratorTasks)) return null;
+            const [userID, sourceID, appName] = appKey.split(':');
+            return chartRepoHydratorTasks.find(task => {
+                return task.user_id === userID && 
+                       task.source_id === sourceID && 
+                       (task.app_id === appName || task.app_name === appName);
+            });
+        }
+        
+        function renderFlowSteps(steps) {
+            let html = '<div class="flow-steps">';
+            steps.forEach((step, index) => {
+                const statusClass = step.status || 'pending';
+                html += '<div class="flow-step ' + statusClass + '">';
+                html += '<span>' + step.name + '</span>';
+                html += '</div>';
+                if (index < steps.length - 1) {
+                    html += '<span class="flow-step-arrow">→</span>';
+                }
+            });
+            html += '</div>';
+            return html;
+        }
+        
+        function getCurrentStepName(steps) {
+            // Find running/processing step first
+            const runningStep = steps.find(step => step.status === 'running' || step.status === 'processing');
+            if (runningStep) return runningStep.name;
+            
+            // Find failed step
+            const failedStep = steps.find(step => step.status === 'failed');
+            if (failedStep) return failedStep.name + ' (Failed)';
+            
+            // Find last completed step
+            const lastCompleted = steps.filter(step => step.status === 'completed').pop();
+            if (lastCompleted) return lastCompleted.name + ' (Completed)';
+            
+            return 'Not Started';
+        }
+        
+        function getOverallStatus(steps) {
+            // Check for failed status first (highest priority)
+            const hasFailed = steps.some(step => step.status === 'failed');
+            if (hasFailed) return 'failed';
+            
+            // Check for running/processing status
+            const hasRunning = steps.some(step => step.status === 'running' || step.status === 'processing');
+            if (hasRunning) return 'processing';
+            
+            // Check if all steps are completed
+            const allCompleted = steps.every(step => step.status === 'completed');
+            if (allCompleted) return 'completed';
+            
+            // Default to pending
+            return 'pending';
+        }
+        
+        function getAllProcessingApps() {
+            const appMap = new Map(); // key: userID:sourceID:appName -> app info
+            
+            // 1. Get apps from app_states (installed apps)
+            const appStates = snapshotData.app_states || {};
+            Object.entries(appStates).forEach(([key, appState]) => {
+                if (appState) {
+                    appMap.set(key, {
+                        key: key,
+                        app_name: appState.app_name || '',
+                        user_id: appState.user_id || '',
+                        source_id: appState.source_id || '',
+                        version: appState.version || '',
+                        last_update: appState.last_update || null,
+                        from: 'app_states'
+                    });
+                }
+            });
+            
+            // 2. Get apps from syncer last_sync_details
+            const components = snapshotData.components || {};
+            const syncer = components.syncer;
+            if (syncer && syncer.metrics && syncer.metrics.last_sync_details) {
+                const syncDetails = syncer.metrics.last_sync_details;
+                const sourceID = syncDetails.source_id || '';
+                
+                // Add succeeded apps
+                if (syncDetails.succeeded_apps && Array.isArray(syncDetails.succeeded_apps)) {
+                    syncDetails.succeeded_apps.forEach(appID => {
+                        const key = ':' + sourceID + ':' + appID;
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: appID,
+                                user_id: '',
+                                source_id: sourceID,
+                                version: '',
+                                last_update: syncDetails.sync_time || null,
+                                from: 'syncer_succeeded'
+                            });
+                        }
+                    });
+                }
+                
+                // Add failed apps
+                if (syncDetails.failed_apps && Array.isArray(syncDetails.failed_apps)) {
+                    syncDetails.failed_apps.forEach(failedApp => {
+                        const appID = failedApp.app_id || failedApp.app_name || '';
+                        const key = ':' + sourceID + ':' + appID;
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: failedApp.app_name || appID,
+                                user_id: '',
+                                source_id: sourceID,
+                                version: '',
+                                last_update: syncDetails.sync_time || null,
+                                from: 'syncer_failed'
+                            });
+                        }
+                    });
+                }
+            }
+            
+            // 3. Get apps from hydrator active_tasks
+            const hydrator = components.hydrator;
+            if (hydrator && hydrator.metrics) {
+                const activeTasks = hydrator.metrics.active_tasks || [];
+                activeTasks.forEach(task => {
+                    if (task) {
+                        const key = (task.user_id || '') + ':' + (task.source_id || '') + ':' + (task.app_id || task.app_name || '');
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: task.app_name || task.app_id || '',
+                                user_id: task.user_id || '',
+                                source_id: task.source_id || '',
+                                version: '',
+                                last_update: task.started_at || null,
+                                from: 'hydrator_active'
+                            });
+                        }
+                    }
+                });
+                
+                // Get apps from hydrator recent_completed_tasks
+                const completedTasks = hydrator.metrics.recent_completed_tasks || [];
+                completedTasks.forEach(task => {
+                    if (task) {
+                        const key = (task.user_id || '') + ':' + (task.source_id || '') + ':' + (task.app_id || task.app_name || '');
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: task.app_name || task.app_id || '',
+                                user_id: task.user_id || '',
+                                source_id: task.source_id || '',
+                                version: '',
+                                last_update: task.completed_at || null,
+                                from: 'hydrator_completed'
+                            });
+                        }
+                    }
+                });
+                
+                // Get apps from hydrator recent_failed_tasks
+                const failedTasks = hydrator.metrics.recent_failed_tasks || [];
+                failedTasks.forEach(task => {
+                    if (task) {
+                        const key = (task.user_id || '') + ':' + (task.source_id || '') + ':' + (task.app_id || task.app_name || '');
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: task.app_name || task.app_id || '',
+                                user_id: task.user_id || '',
+                                source_id: task.source_id || '',
+                                version: '',
+                                last_update: task.completed_at || null,
+                                from: 'hydrator_failed'
+                            });
+                        }
+                    }
+                });
+            }
+            
+            // 4. Get apps from chart_repo.apps
+            const chartRepo = snapshotData.chart_repo || {};
+            const chartRepoApps = chartRepo.apps || [];
+            chartRepoApps.forEach(app => {
+                if (app) {
+                    const key = (app.user_id || '') + ':' + (app.source_id || '') + ':' + (app.app_id || app.app_name || '');
+                    if (!appMap.has(key)) {
+                        appMap.set(key, {
+                            key: key,
+                            app_name: app.app_name || app.app_id || '',
+                            user_id: app.user_id || '',
+                            source_id: app.source_id || '',
+                            version: '',
+                            last_update: app.last_update || (app.timestamps && app.timestamps.last_updated_at) || null,
+                            from: 'chart_repo_apps'
+                        });
+                    }
+                }
+            });
+            
+            // 5. Get apps from chart_repo.tasks.hydrator.tasks
+            const chartRepoHydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
+            if (chartRepoHydrator && chartRepoHydrator.tasks) {
+                chartRepoHydrator.tasks.forEach(task => {
+                    if (task) {
+                        const key = (task.user_id || '') + ':' + (task.source_id || '') + ':' + (task.app_id || task.app_name || '');
+                        if (!appMap.has(key)) {
+                            appMap.set(key, {
+                                key: key,
+                                app_name: task.app_name || task.app_id || '',
+                                user_id: task.user_id || '',
+                                source_id: task.source_id || '',
+                                version: '',
+                                last_update: task.updated_at || task.created_at || null,
+                                from: 'chart_repo_tasks'
+                            });
+                        }
+                    }
+                });
+            }
+            
+            return Array.from(appMap.values());
+        }
+        
+        function renderApps() {
+            const tbody = document.getElementById('appsTableBody');
+            if (!tbody) return;
+            
+            // Get all processing apps from multiple sources
+            const allApps = getAllProcessingApps();
+            
+            const chartRepo = snapshotData.chart_repo || {};
+            const chartRepoApps = chartRepo.apps || [];
+            const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
+            const chartRepoHydratorTasks = hydrator ? (hydrator.tasks || []) : [];
+            
+            const apps = allApps.map(appInfo => {
+                // Create a minimal appState for compatibility
+                const appState = {
+                    app_name: appInfo.app_name,
+                    user_id: appInfo.user_id,
+                    source_id: appInfo.source_id,
+                    version: appInfo.version,
+                    last_update: appInfo.last_update
+                };
+                
+                const flowSteps = getAppProcessingFlow(appInfo.key, appState, chartRepoApps, chartRepoHydratorTasks);
+                return {
+                    key: appInfo.key,
+                    appState: appState,
+                    flowSteps: flowSteps,
+                    currentStep: getCurrentStepName(flowSteps),
+                    overallStatus: getOverallStatus(flowSteps),
+                    from: appInfo.from
+                };
+            });
+            
+            // Apply filters
+            const filteredApps = apps.filter(app => {
+                const appName = app.appState.app_name || '';
+                const userID = app.appState.user_id || '';
+                const sourceID = app.appState.source_id || '';
+                
+                const filterAppName = document.getElementById('filterAppName').value.toLowerCase();
+                const filterUserID = document.getElementById('filterUserID').value.toLowerCase();
+                const filterSourceID = document.getElementById('filterSourceID').value.toLowerCase();
+                
+                return appName.toLowerCase().includes(filterAppName) &&
+                       userID.toLowerCase().includes(filterUserID) &&
+                       sourceID.toLowerCase().includes(filterSourceID);
+            });
+            
+            tbody.innerHTML = '';
+            
+            if (filteredApps.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No applications found</td></tr>';
+                return;
+            }
+            
+            filteredApps.forEach(app => {
+                const row = document.createElement('tr');
+                row.innerHTML = 
+                    '<td>' + (app.appState.app_name || 'N/A') + '</td>' +
+                    '<td>' + (app.appState.user_id || 'N/A') + '</td>' +
+                    '<td>' + (app.appState.source_id || 'N/A') + '</td>' +
+                    '<td>' + (app.appState.version || 'N/A') + '</td>' +
+                    '<td>' + renderFlowSteps(app.flowSteps) + '</td>' +
+                    '<td>' + app.currentStep + '</td>' +
+                    '<td>' + getStatusBadge(app.overallStatus) + '</td>' +
+                    '<td>' + formatTimestamp(app.appState.last_update) + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function filterApps() {
+            renderApps();
+        }
+        
+        function refreshData() {
+            fetch('/app-store/api/v2/runtime/state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        snapshotData = data.data;
+                        updateUI();
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to refresh data:', error);
+                });
+        }
+        
+        function updateUI() {
+            document.getElementById('timestamp').textContent = formatTimestamp(snapshotData.timestamp);
+            renderApps();
         }
         
         function toggleAutoRefresh() {
