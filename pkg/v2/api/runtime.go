@@ -2320,3 +2320,680 @@ func generateDashboardHTML(snapshotJSON string) string {
 	// Replace the placeholder with actual JSON data
 	return strings.Replace(htmlTemplate, "%s", escapedJSON, 1)
 }
+
+// getRuntimeDashboardApp handles GET /api/v2/runtime/dashboard-app
+// Returns an HTML page showing app processing flow status
+func (s *Server) getRuntimeDashboardApp(w http.ResponseWriter, r *http.Request) {
+	log.Println("GET /api/v2/runtime/dashboard-app - Getting app processing flow dashboard")
+
+	if s.runtimeStateService == nil {
+		log.Println("Runtime state service not initialized")
+		http.Error(w, "Runtime state service not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Get full snapshot
+	snapshot := s.runtimeStateService.GetSnapshot()
+	if snapshot == nil {
+		http.Error(w, "Failed to get runtime snapshot", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert snapshot to JSON for JavaScript consumption
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		log.Printf("Failed to marshal snapshot: %v", err)
+		http.Error(w, "Failed to serialize snapshot", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate HTML page
+	html := generateDashboardAppHTML(string(snapshotJSON))
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(html))
+}
+
+// generateDashboardAppHTML generates the HTML dashboard page for app processing flow
+func generateDashboardAppHTML(snapshotJSON string) string {
+	// Escape JSON for embedding in HTML
+	escapedJSON := template.JSEscapeString(snapshotJSON)
+
+	htmlTemplate := `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Processing Flow Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            padding: 16px;
+            color: #1a1a1a;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        }
+        
+        .header h1 {
+            color: #1a1a1a;
+            margin-bottom: 12px;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .header .timestamp {
+            color: #666666;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        
+        .header .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .refresh-btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        .refresh-btn:hover {
+            background: #1d4ed8;
+        }
+        
+        .auto-refresh label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            color: #666666;
+            font-size: 14px;
+        }
+        
+        .auto-refresh input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        
+        .panel {
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+            margin-bottom: 16px;
+        }
+        
+        .panel-header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .panel-header h2 {
+            color: #1a1a1a;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        
+        th {
+            background: #f9fafb;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #1a1a1a;
+            border-bottom: 2px solid #e5e7eb;
+            white-space: nowrap;
+        }
+        
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            color: #1a1a1a;
+        }
+        
+        tr:hover {
+            background: #f9fafb;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .badge-danger {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .badge-pending {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .flow-steps {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .flow-step {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .flow-step.completed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .flow-step.running {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .flow-step.pending {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .flow-step.failed {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .flow-step-arrow {
+            color: #9ca3af;
+            font-size: 12px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #9ca3af;
+            font-size: 14px;
+        }
+        
+        .filter-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-input {
+            padding: 8px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+        
+        .filter-input:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>App Processing Flow Dashboard</h1>
+            <div class="timestamp">Last Updated: <span id="timestamp"></span></div>
+            <div class="controls">
+                <button class="refresh-btn" onclick="refreshData()">Refresh</button>
+                <div class="auto-refresh">
+                    <label>
+                        <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()" checked>
+                        Auto Refresh (5s)
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Application Processing Status</h2>
+            </div>
+            <div class="filter-controls">
+                <input type="text" class="filter-input" id="filterAppName" placeholder="Filter by App Name" onkeyup="filterApps()">
+                <input type="text" class="filter-input" id="filterUserID" placeholder="Filter by User ID" onkeyup="filterApps()">
+                <input type="text" class="filter-input" id="filterSourceID" placeholder="Filter by Source ID" onkeyup="filterApps()">
+            </div>
+            <div class="table-container">
+                <table id="appsTable">
+                    <thead>
+                        <tr>
+                            <th>App Name</th>
+                            <th>User ID</th>
+                            <th>Source ID</th>
+                            <th>Version</th>
+                            <th>Processing Flow</th>
+                            <th>Current Step</th>
+                            <th>Status</th>
+                            <th>Last Update</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let snapshotData = %s;
+        let autoRefreshInterval = null;
+        
+        // Processing flow steps definition
+        const PROCESSING_STEPS = [
+            { name: 'Syncer', key: 'syncer' },
+            { name: 'Market Hydration', key: 'market_hydration' },
+            { name: 'SourceChartStep', key: 'source_chart_step' },
+            { name: 'RenderedChartStep', key: 'rendered_chart_step' },
+            { name: 'CustomParamsUpdateStep', key: 'custom_params_update_step' },
+            { name: 'ImageAnalysisStep', key: 'image_analysis_step' },
+            { name: 'DatabaseUpdateStep', key: 'database_update_step' }
+        ];
+        
+        function getStatusBadge(status) {
+            if (!status) return '<span class="badge badge-pending">Unknown</span>';
+            const lower = status.toLowerCase();
+            if (lower === 'completed' || lower === 'success' || lower === 'healthy') {
+                return '<span class="badge badge-success">' + status + '</span>';
+            } else if (lower === 'running' || lower === 'processing' || lower === 'active') {
+                return '<span class="badge badge-info">' + status + '</span>';
+            } else if (lower === 'failed' || lower === 'error' || lower === 'unhealthy') {
+                return '<span class="badge badge-danger">' + status + '</span>';
+            } else if (lower === 'pending' || lower === 'waiting') {
+                return '<span class="badge badge-warning">' + status + '</span>';
+            }
+            return '<span class="badge badge-pending">' + status + '</span>';
+        }
+        
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return 'N/A';
+            const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+            if (isNaN(date.getTime())) return 'N/A';
+            return date.toLocaleString('zh-CN', { 
+                year: 'numeric', 
+                month: '2-digit', 
+                day: '2-digit', 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            });
+        }
+        
+        function getAppProcessingFlow(appKey, appState, chartRepoApps, chartRepoHydratorTasks) {
+            const steps = [];
+            
+            // Step 1: Syncer
+            const syncerStatus = getSyncerStatus();
+            steps.push({
+                name: 'Syncer',
+                status: syncerStatus,
+                key: 'syncer'
+            });
+            
+            // Step 2: Market Hydration
+            const marketHydrationStatus = getMarketHydrationStatus(appKey);
+            steps.push({
+                name: 'Market Hydration',
+                status: marketHydrationStatus,
+                key: 'market_hydration'
+            });
+            
+            // Step 3-7: ChartRepo Hydration Steps
+            const chartRepoApp = findChartRepoApp(appKey, chartRepoApps);
+            const chartRepoTask = findChartRepoTask(appKey, chartRepoHydratorTasks);
+            
+            if (chartRepoApp || chartRepoTask) {
+                // Use chart repo app state if available, otherwise use task state
+                let currentStep = null;
+                let stepIndex = -1;
+                
+                if (chartRepoApp && chartRepoApp.current_step) {
+                    currentStep = chartRepoApp.current_step;
+                    stepIndex = currentStep.index;
+                } else if (chartRepoTask) {
+                    // Map step name to index
+                    const stepNameToIndex = {
+                        'SourceChartStep': 0,
+                        'RenderedChartStep': 1,
+                        'CustomParamsUpdateStep': 2,
+                        'ImageAnalysisStep': 3,
+                        'DatabaseUpdateStep': 4
+                    };
+                    const stepName = chartRepoTask.step_name || '';
+                    stepIndex = stepNameToIndex[stepName] !== undefined ? stepNameToIndex[stepName] : -1;
+                    
+                    if (chartRepoTask.status === 'running') {
+                        currentStep = { status: 'running' };
+                    } else if (chartRepoTask.status === 'completed') {
+                        currentStep = { status: 'completed' };
+                    } else if (chartRepoTask.status === 'failed') {
+                        currentStep = { status: 'failed' };
+                    }
+                }
+                
+                const chartRepoSteps = [
+                    { name: 'SourceChartStep', index: 0 },
+                    { name: 'RenderedChartStep', index: 1 },
+                    { name: 'CustomParamsUpdateStep', index: 2 },
+                    { name: 'ImageAnalysisStep', index: 3 },
+                    { name: 'DatabaseUpdateStep', index: 4 }
+                ];
+                
+                chartRepoSteps.forEach((step) => {
+                    let status = 'pending';
+                    if (stepIndex > step.index) {
+                        status = 'completed';
+                    } else if (stepIndex === step.index && currentStep) {
+                        status = currentStep.status.toLowerCase();
+                    }
+                    steps.push({
+                        name: step.name,
+                        status: status,
+                        key: step.name.toLowerCase().replace('step', '_step')
+                    });
+                });
+            } else {
+                // No chart repo app or task found, all steps pending
+                const chartRepoSteps = [
+                    'SourceChartStep',
+                    'RenderedChartStep',
+                    'CustomParamsUpdateStep',
+                    'ImageAnalysisStep',
+                    'DatabaseUpdateStep'
+                ];
+                chartRepoSteps.forEach(stepName => {
+                    steps.push({
+                        name: stepName,
+                        status: 'pending',
+                        key: stepName.toLowerCase().replace('step', '_step')
+                    });
+                });
+            }
+            
+            return steps;
+        }
+        
+        function getSyncerStatus() {
+            const components = snapshotData.components || {};
+            const syncer = components.syncer;
+            if (!syncer) return 'unknown';
+            if (!syncer.healthy) return 'failed';
+            if (syncer.status === 'running') return 'running';
+            return syncer.status || 'unknown';
+        }
+        
+        function getMarketHydrationStatus(appKey) {
+            const components = snapshotData.components || {};
+            const hydrator = components.hydrator;
+            if (!hydrator || !hydrator.metrics) return 'pending';
+            
+            const activeTasks = hydrator.metrics.active_tasks || [];
+            const [userID, sourceID, appName] = appKey.split(':');
+            
+            // Find active task for this app
+            const activeTask = activeTasks.find(task => {
+                return task.user_id === userID && 
+                       task.source_id === sourceID && 
+                       (task.app_id === appName || task.app_name === appName);
+            });
+            
+            if (activeTask) {
+                return 'running';
+            }
+            
+            // Check completed tasks
+            const completedTasks = hydrator.metrics.recent_completed_tasks || [];
+            const completedTask = completedTasks.find(task => {
+                return task.user_id === userID && 
+                       task.source_id === sourceID && 
+                       (task.app_id === appName || task.app_name === appName);
+            });
+            
+            if (completedTask) {
+                return 'completed';
+            }
+            
+            // Check failed tasks
+            const failedTasks = hydrator.metrics.recent_failed_tasks || [];
+            const failedTask = failedTasks.find(task => {
+                return task.user_id === userID && 
+                       task.source_id === sourceID && 
+                       (task.app_id === appName || task.app_name === appName);
+            });
+            
+            if (failedTask) {
+                return 'failed';
+            }
+            
+            return 'pending';
+        }
+        
+        function findChartRepoApp(appKey, chartRepoApps) {
+            if (!chartRepoApps || !Array.isArray(chartRepoApps)) return null;
+            const [userID, sourceID, appName] = appKey.split(':');
+            return chartRepoApps.find(app => {
+                return app.user_id === userID && 
+                       app.source_id === sourceID && 
+                       (app.app_id === appName || app.app_name === appName);
+            });
+        }
+        
+        function findChartRepoTask(appKey, chartRepoHydratorTasks) {
+            if (!chartRepoHydratorTasks || !Array.isArray(chartRepoHydratorTasks)) return null;
+            const [userID, sourceID, appName] = appKey.split(':');
+            return chartRepoHydratorTasks.find(task => {
+                return task.user_id === userID && 
+                       task.source_id === sourceID && 
+                       (task.app_id === appName || task.app_name === appName);
+            });
+        }
+        
+        function renderFlowSteps(steps) {
+            let html = '<div class="flow-steps">';
+            steps.forEach((step, index) => {
+                const statusClass = step.status || 'pending';
+                html += '<div class="flow-step ' + statusClass + '">';
+                html += '<span>' + step.name + '</span>';
+                html += '</div>';
+                if (index < steps.length - 1) {
+                    html += '<span class="flow-step-arrow">→</span>';
+                }
+            });
+            html += '</div>';
+            return html;
+        }
+        
+        function getCurrentStepName(steps) {
+            const runningStep = steps.find(step => step.status === 'running');
+            if (runningStep) return runningStep.name;
+            const failedStep = steps.find(step => step.status === 'failed');
+            if (failedStep) return failedStep.name + ' (Failed)';
+            const lastCompleted = steps.filter(step => step.status === 'completed').pop();
+            if (lastCompleted) return lastCompleted.name + ' (Completed)';
+            return 'Not Started';
+        }
+        
+        function getOverallStatus(steps) {
+            const hasFailed = steps.some(step => step.status === 'failed');
+            if (hasFailed) return 'failed';
+            const hasRunning = steps.some(step => step.status === 'running');
+            if (hasRunning) return 'running';
+            const allCompleted = steps.every(step => step.status === 'completed');
+            if (allCompleted) return 'completed';
+            return 'pending';
+        }
+        
+        function renderApps() {
+            const tbody = document.getElementById('appsTableBody');
+            if (!tbody) return;
+            
+            const appStates = snapshotData.app_states || {};
+            const chartRepo = snapshotData.chart_repo || {};
+            const chartRepoApps = chartRepo.apps || [];
+            const hydrator = chartRepo.tasks && chartRepo.tasks.hydrator;
+            const chartRepoHydratorTasks = hydrator ? (hydrator.tasks || []) : [];
+            
+            const apps = Object.entries(appStates).map(([key, appState]) => {
+                const flowSteps = getAppProcessingFlow(key, appState, chartRepoApps, chartRepoHydratorTasks);
+                return {
+                    key: key,
+                    appState: appState,
+                    flowSteps: flowSteps,
+                    currentStep: getCurrentStepName(flowSteps),
+                    overallStatus: getOverallStatus(flowSteps)
+                };
+            });
+            
+            // Apply filters
+            const filteredApps = apps.filter(app => {
+                const appName = app.appState.app_name || '';
+                const userID = app.appState.user_id || '';
+                const sourceID = app.appState.source_id || '';
+                
+                const filterAppName = document.getElementById('filterAppName').value.toLowerCase();
+                const filterUserID = document.getElementById('filterUserID').value.toLowerCase();
+                const filterSourceID = document.getElementById('filterSourceID').value.toLowerCase();
+                
+                return appName.toLowerCase().includes(filterAppName) &&
+                       userID.toLowerCase().includes(filterUserID) &&
+                       sourceID.toLowerCase().includes(filterSourceID);
+            });
+            
+            tbody.innerHTML = '';
+            
+            if (filteredApps.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No applications found</td></tr>';
+                return;
+            }
+            
+            filteredApps.forEach(app => {
+                const row = document.createElement('tr');
+                row.innerHTML = 
+                    '<td>' + (app.appState.app_name || 'N/A') + '</td>' +
+                    '<td>' + (app.appState.user_id || 'N/A') + '</td>' +
+                    '<td>' + (app.appState.source_id || 'N/A') + '</td>' +
+                    '<td>' + (app.appState.version || 'N/A') + '</td>' +
+                    '<td>' + renderFlowSteps(app.flowSteps) + '</td>' +
+                    '<td>' + app.currentStep + '</td>' +
+                    '<td>' + getStatusBadge(app.overallStatus) + '</td>' +
+                    '<td>' + formatTimestamp(app.appState.last_update) + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
+        function filterApps() {
+            renderApps();
+        }
+        
+        function refreshData() {
+            fetch('/app-store/api/v2/runtime/state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        snapshotData = data.data;
+                        updateUI();
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to refresh data:', error);
+                });
+        }
+        
+        function updateUI() {
+            document.getElementById('timestamp').textContent = formatTimestamp(snapshotData.timestamp);
+            renderApps();
+        }
+        
+        function toggleAutoRefresh() {
+            const checkbox = document.getElementById('autoRefresh');
+            if (checkbox.checked) {
+                autoRefreshInterval = setInterval(refreshData, 5000);
+            } else {
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+        
+        updateUI();
+        if (document.getElementById('autoRefresh').checked) {
+            autoRefreshInterval = setInterval(refreshData, 5000);
+        }
+    </script>
+</body>
+</html>`
+
+	// Replace the placeholder with actual JSON data
+	return strings.Replace(htmlTemplate, "%s", escapedJSON, 1)
+}
