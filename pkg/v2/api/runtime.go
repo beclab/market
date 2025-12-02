@@ -2646,7 +2646,18 @@ func generateDashboardAppHTML(snapshotJSON string) string {
     </div>
     
     <script>
-        let snapshotData = %s;
+        let snapshotData = {};
+        try {
+            snapshotData = JSON.parse('%s');
+            // Debug: log data structure
+            console.log('[DEBUG] Snapshot data loaded:', snapshotData);
+            console.log('[DEBUG] App states count:', snapshotData.app_states ? Object.keys(snapshotData.app_states).length : 0);
+            console.log('[DEBUG] Components:', snapshotData.components ? Object.keys(snapshotData.components) : []);
+            console.log('[DEBUG] Chart repo:', snapshotData.chart_repo ? 'present' : 'missing');
+        } catch (e) {
+            console.error('Failed to parse snapshot data:', e);
+            snapshotData = {};
+        }
         let autoRefreshInterval = null;
         
         // Processing flow steps definition
