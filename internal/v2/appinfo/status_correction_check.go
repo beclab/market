@@ -466,6 +466,38 @@ func (scc *StatusCorrectionChecker) getCachedStatus() map[string]*types.AppState
 	return cachedStatus
 }
 
+// getExistingEntranceInvisibleMap collects cached invisible flags for the specified app.
+// This is similar to DataWatcherState.getExistingEntranceInvisibleMap but for StatusCorrectionChecker.
+func (scc *StatusCorrectionChecker) getExistingEntranceInvisibleMap(userID, appName string) map[string]bool {
+	result := make(map[string]bool)
+	if scc == nil || scc.cacheManager == nil || userID == "" || appName == "" {
+		return result
+	}
+
+	userData := scc.cacheManager.GetUserData(userID)
+	if userData == nil {
+		return result
+	}
+
+	for _, srcData := range userData.Sources {
+		if srcData == nil {
+			continue
+		}
+		for _, appState := range srcData.AppStateLatest {
+			if appState == nil || appState.Status.Name != appName {
+				continue
+			}
+
+			for _, entrance := range appState.Status.EntranceStatuses {
+				result[entrance.Name] = entrance.Invisible
+			}
+			return result
+		}
+	}
+
+	return result
+}
+
 // compareStatus compares latest status with cached status and returns changes
 func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServiceResponse, cachedStatus map[string]*types.AppStateLatestData) []StatusChange {
 	var changes []StatusChange
@@ -898,6 +930,9 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 
 // createAppStateDataFromResponse creates AppStateLatestData from AppServiceResponse
 func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.AppServiceResponse, userID string) (*types.AppStateLatestData, string) {
+	// Get existing invisible flags from cache to preserve them when spec.entrances doesn't have the value
+	existingInvisible := scc.getExistingEntranceInvisibleMap(userID, app.Spec.Name)
+
 	// Create entrance statuses
 	entranceStatuses := make([]struct {
 		ID         string `json:"id"`
@@ -910,6 +945,31 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 	}, len(app.Status.EntranceStatuses))
 
 	for i, entrance := range app.Status.EntranceStatuses {
+		// Default to false, but will be updated from spec.entrances or cache
+		invisible := false
+
+		// Try to get invisible flag from spec.entrances first
+		foundInSpec := false
+		for _, specEntrance := range app.Spec.Entrances {
+			if specEntrance.Name == entrance.Name {
+				invisible = specEntrance.Invisible
+				foundInSpec = true
+				break
+			}
+		}
+
+		// If not found in spec.entrances, try to get from cache
+		if !foundInSpec {
+			if cachedInvisible, ok := existingInvisible[entrance.Name]; ok {
+				invisible = cachedInvisible
+				glog.Infof("StatusCorrectionChecker: Using cached invisible=%t for entrance %s (app=%s, user=%s) - not found in spec.entrances",
+					invisible, entrance.Name, app.Spec.Name, userID)
+			} else {
+				glog.Infof("StatusCorrectionChecker: Using default invisible=false for entrance %s (app=%s, user=%s) - not found in spec.entrances or cache",
+					entrance.Name, app.Spec.Name, userID)
+			}
+		}
+
 		entranceStatuses[i] = struct {
 			ID         string `json:"id"`
 			Name       string `json:"name"`
@@ -925,15 +985,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			StatusTime: entrance.StatusTime,
 			Reason:     entrance.Reason,
 			Url:        entrance.Url,
-			Invisible:  false, // Default value, will be updated from spec.entrances if available
-		}
-
-		// Try to get invisible flag from spec.entrances
-		for _, specEntrance := range app.Spec.Entrances {
-			if specEntrance.Name == entrance.Name {
-				entranceStatuses[i].Invisible = specEntrance.Invisible
-				break
-			}
+			Invisible:  invisible,
 		}
 	}
 

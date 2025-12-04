@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"market/internal/v2/history" // Import history module with correct path
@@ -59,6 +62,9 @@ type DataWatcherState struct {
 	cacheManager  *CacheManager          // Add cache manager reference
 	taskModule    *task.TaskModule       // Add task module reference
 	dataWatcher   *DataWatcher           // Add data watcher reference for hash calculation
+	// Cache for app-service API responses to avoid repeated calls
+	appServiceCache      map[string]map[string]bool // key: "userID:appName", value: map[entranceName]invisible
+	appServiceCacheMutex sync.RWMutex
 }
 
 // getExistingEntranceInvisibleMap collects cached invisible flags for the specified app.
@@ -93,7 +99,8 @@ func (dw *DataWatcherState) getExistingEntranceInvisibleMap(userID, appName stri
 }
 
 // resolveInvisibleFlag returns upstream value when available, otherwise falls back to cached data.
-func resolveInvisibleFlag(raw *bool, entranceName string, existing map[string]bool) bool {
+// If neither upstream nor cache has the value, it will try to fetch from app-service API.
+func (dw *DataWatcherState) resolveInvisibleFlag(raw *bool, entranceName, appName, userID string, existing map[string]bool) bool {
 	if raw != nil {
 		return *raw
 	}
@@ -102,7 +109,110 @@ func resolveInvisibleFlag(raw *bool, entranceName string, existing map[string]bo
 		return val
 	}
 
+	// If not found in cache, try to fetch from app-service API (only once per entrance to avoid performance issues)
+	// This matches the behavior during startup where we get invisible from spec.entrances
+	if dw != nil && appName != "" && userID != "" {
+		if specInvisible, err := dw.fetchInvisibleFromAppService(appName, userID, entranceName); err == nil {
+			log.Printf("DEBUG: resolveInvisibleFlag - fetched invisible=%t for entrance %s (app=%s, user=%s) from app-service API",
+				specInvisible, entranceName, appName, userID)
+			return specInvisible
+		} else {
+			log.Printf("DEBUG: resolveInvisibleFlag - failed to fetch invisible for entrance %s (app=%s, user=%s) from app-service: %v",
+				entranceName, appName, userID, err)
+		}
+	}
+
 	return false
+}
+
+// fetchInvisibleFromAppService fetches invisible flag from app-service API's spec.entrances
+// Uses caching to avoid repeated API calls for the same app
+func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entranceName string) (bool, error) {
+	// Check cache first (using TryRLock to avoid blocking)
+	cacheKey := fmt.Sprintf("%s:%s", userID, appName)
+	if dw.appServiceCacheMutex.TryRLock() {
+		if appCache, exists := dw.appServiceCache[cacheKey]; exists {
+			if invisible, found := appCache[entranceName]; found {
+				dw.appServiceCacheMutex.RUnlock()
+				log.Printf("DEBUG: fetchInvisibleFromAppService - using cached invisible=%t for entrance %s (app=%s, user=%s)",
+					invisible, entranceName, appName, userID)
+				return invisible, nil
+			}
+		}
+		dw.appServiceCacheMutex.RUnlock()
+	} else {
+		log.Printf("DEBUG: fetchInvisibleFromAppService - read lock not available, skipping cache check for entrance %s (app=%s, user=%s)",
+			entranceName, appName, userID)
+	}
+
+	// Fetch from API
+	host := getEnvOrDefault("APP_SERVICE_SERVICE_HOST", "localhost")
+	port := getEnvOrDefault("APP_SERVICE_SERVICE_PORT", "80")
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
+
+	client := &http.Client{
+		Timeout: 5 * time.Second, // Short timeout to avoid blocking
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch from app-service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("app-service returned status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var apps []utils.AppServiceResponse
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return false, fmt.Errorf("failed to parse app-service response: %v", err)
+	}
+
+	// Find the app matching appName and userID
+	for _, app := range apps {
+		if app.Spec.Name == appName && app.Spec.Owner == userID {
+			// Find the entrance in spec.entrances first
+			var foundInvisible bool
+			var invisibleValue bool
+			for _, specEntrance := range app.Spec.Entrances {
+				if specEntrance.Name == entranceName {
+					foundInvisible = true
+					invisibleValue = specEntrance.Invisible
+					break
+				}
+			}
+
+			if !foundInvisible {
+				return false, fmt.Errorf("entrance %s not found in spec.entrances for app %s", entranceName, appName)
+			}
+
+			// Cache all entrances for this app to avoid future API calls (using TryLock to avoid blocking)
+			if dw.appServiceCacheMutex.TryLock() {
+				if dw.appServiceCache[cacheKey] == nil {
+					dw.appServiceCache[cacheKey] = make(map[string]bool)
+				}
+				for _, specEntrance := range app.Spec.Entrances {
+					dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
+				}
+				dw.appServiceCacheMutex.Unlock()
+				log.Printf("DEBUG: fetchInvisibleFromAppService - fetched and cached invisible=%t for entrance %s (app=%s, user=%s)",
+					invisibleValue, entranceName, appName, userID)
+			} else {
+				log.Printf("DEBUG: fetchInvisibleFromAppService - write lock not available, skipping cache update for entrance %s (app=%s, user=%s)",
+					entranceName, appName, userID)
+			}
+
+			return invisibleValue, nil
+		}
+	}
+
+	return false, fmt.Errorf("app %s not found for user %s", appName, userID)
 }
 
 // NewDataWatcherState creates a new DataWatcherState instance
@@ -110,18 +220,19 @@ func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dw := &DataWatcherState{
-		ctx:           ctx,
-		cancel:        cancel,
-		isDev:         isDevEnvironment(),
-		natsHost:      getEnvOrDefault("NATS_HOST", "localhost"),
-		natsPort:      getEnvOrDefault("NATS_PORT", "4222"),
-		natsUser:      getEnvOrDefault("NATS_USERNAME", ""),
-		natsPass:      getEnvOrDefault("NATS_PASSWORD", ""),
-		subject:       getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
-		historyModule: historyModule,
-		cacheManager:  cacheManager, // Set cache manager reference
-		taskModule:    taskModule,   // Set task module reference
-		dataWatcher:   dataWatcher,  // Set data watcher reference
+		ctx:             ctx,
+		cancel:          cancel,
+		isDev:           isDevEnvironment(),
+		natsHost:        getEnvOrDefault("NATS_HOST", "localhost"),
+		natsPort:        getEnvOrDefault("NATS_PORT", "4222"),
+		natsUser:        getEnvOrDefault("NATS_USERNAME", ""),
+		natsPass:        getEnvOrDefault("NATS_PASSWORD", ""),
+		subject:         getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
+		historyModule:   historyModule,
+		cacheManager:    cacheManager, // Set cache manager reference
+		taskModule:      taskModule,   // Set task module reference
+		dataWatcher:     dataWatcher,  // Set data watcher reference
+		appServiceCache: make(map[string]map[string]bool),
 	}
 
 	return dw
@@ -442,18 +553,32 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 
 	// Preload existing invisible flags to avoid overwriting when upstream omits the field.
 	existingInvisible := dw.getExistingEntranceInvisibleMap(userID, msg.Name)
+	if len(existingInvisible) > 0 {
+		log.Printf("DEBUG: storeStateToCache - found %d existing invisible flags in cache for app %s (user=%s)",
+			len(existingInvisible), msg.Name, userID)
+		for name, val := range existingInvisible {
+			log.Printf("DEBUG: storeStateToCache - cached invisible[%s]=%t", name, val)
+		}
+	} else {
+		log.Printf("DEBUG: storeStateToCache - no existing invisible flags found in cache for app %s (user=%s)",
+			msg.Name, userID)
+	}
 
 	// Add debug logging for entranceStatuses
 	log.Printf("DEBUG: storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
 	for i, entrance := range msg.EntranceStatuses {
-		invisible := resolveInvisibleFlag(entrance.Invisible, entrance.Name, existingInvisible)
-		log.Printf("DEBUG: storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, Invisible=%t",
-			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, invisible)
+		upstreamValue := "nil"
+		if entrance.Invisible != nil {
+			upstreamValue = fmt.Sprintf("%t", *entrance.Invisible)
+		}
+		invisible := dw.resolveInvisibleFlag(entrance.Invisible, entrance.Name, msg.Name, userID, existingInvisible)
+		log.Printf("DEBUG: storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, UpstreamInvisible=%s, ResolvedInvisible=%t",
+			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, upstreamValue, invisible)
 	}
 
 	entranceStatuses := make([]interface{}, len(msg.EntranceStatuses))
 	for i, v := range msg.EntranceStatuses {
-		invisible := resolveInvisibleFlag(v.Invisible, v.Name, existingInvisible)
+		invisible := dw.resolveInvisibleFlag(v.Invisible, v.Name, msg.Name, userID, existingInvisible)
 		entranceStatuses[i] = map[string]interface{}{
 			"id":         v.ID,
 			"name":       v.Name,
