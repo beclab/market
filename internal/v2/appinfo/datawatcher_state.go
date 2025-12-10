@@ -549,6 +549,8 @@ func isFailedOrCanceledState(state string) bool {
 		"downloadCancelFailed",
 		"installCanceled",
 		"installingCanceled",
+		"downloadingCanceled",  // Canceled during downloading phase
+		"downloadingCanceling", // In the process of canceling download
 		"uninstallFailed",
 	}
 	for _, failedState := range failedStates {
@@ -678,6 +680,14 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 
 			// Sort by statusTime in descending order (newest first)
 			if len(candidates) > 0 {
+				// Log all candidates before sorting for debugging
+				if len(candidates) > 1 {
+					log.Printf("Found %d candidate records for app=%s, user=%s:", len(candidates), msg.Name, userID)
+					for i, cand := range candidates {
+						log.Printf("  Candidate[%d]: sourceID=%s, state=%s, statusTime=%s",
+							i, cand.sourceID, cand.appState.Status.State, cand.statusTime.Format(time.RFC3339))
+					}
+				}
 				// Sort candidates by statusTime descending (newest first)
 				sort.Slice(candidates, func(i, j int) bool {
 					return candidates[i].statusTime.After(candidates[j].statusTime)
@@ -685,11 +695,11 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 				// Use the newest record
 				sourceID = candidates[0].sourceID
 				if len(candidates) > 1 {
-					log.Printf("Found sourceID=%s from cache (newest of %d records) for app=%s, user=%s, statusTime=%s",
-						sourceID, len(candidates), msg.Name, userID, candidates[0].statusTime.Format(time.RFC3339))
+					log.Printf("Found sourceID=%s from cache (newest of %d records) for app=%s, user=%s, state=%s, statusTime=%s",
+						sourceID, len(candidates), msg.Name, userID, candidates[0].appState.Status.State, candidates[0].statusTime.Format(time.RFC3339))
 				} else {
-					log.Printf("Found sourceID=%s from cache for app=%s, user=%s, statusTime=%s",
-						sourceID, msg.Name, userID, candidates[0].statusTime.Format(time.RFC3339))
+					log.Printf("Found sourceID=%s from cache for app=%s, user=%s, state=%s, statusTime=%s",
+						sourceID, msg.Name, userID, candidates[0].appState.Status.State, candidates[0].statusTime.Format(time.RFC3339))
 				}
 			}
 		}
