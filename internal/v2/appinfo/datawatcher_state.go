@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -637,6 +638,14 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	if !skipCacheLookup {
 		userData := dw.cacheManager.GetUserData(userID)
 		if userData != nil {
+			// Collect all matching app states from all sources
+			type candidateRecord struct {
+				sourceID   string
+				appState   *AppStateLatestData
+				statusTime time.Time
+			}
+			var candidates []candidateRecord
+
 			for srcID, srcData := range userData.Sources {
 				if srcData == nil || srcData.AppStateLatest == nil {
 					continue
@@ -647,12 +656,40 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 						appState.Status.State != "uninstalled" &&
 						!isFailedOrCanceledState(appState.Status.State) &&
 						appState.Status.Name == msg.Name {
-						sourceID = srcID
-						break
+						// Parse statusTime for sorting
+						var statusTime time.Time
+						if appState.Status.StatusTime != "" {
+							if parsedTime, err := time.Parse("2006-01-02T15:04:05.000000000Z", appState.Status.StatusTime); err == nil {
+								statusTime = parsedTime
+							} else {
+								// If parsing fails, use zero time (will be sorted to the end)
+								log.Printf("Failed to parse StatusTime for app %s in source %s: %v", msg.Name, srcID, err)
+								statusTime = time.Time{}
+							}
+						}
+						candidates = append(candidates, candidateRecord{
+							sourceID:   srcID,
+							appState:   appState,
+							statusTime: statusTime,
+						})
 					}
 				}
-				if sourceID != "" {
-					break
+			}
+
+			// Sort by statusTime in descending order (newest first)
+			if len(candidates) > 0 {
+				// Sort candidates by statusTime descending (newest first)
+				sort.Slice(candidates, func(i, j int) bool {
+					return candidates[i].statusTime.After(candidates[j].statusTime)
+				})
+				// Use the newest record
+				sourceID = candidates[0].sourceID
+				if len(candidates) > 1 {
+					log.Printf("Found sourceID=%s from cache (newest of %d records) for app=%s, user=%s, statusTime=%s",
+						sourceID, len(candidates), msg.Name, userID, candidates[0].statusTime.Format(time.RFC3339))
+				} else {
+					log.Printf("Found sourceID=%s from cache for app=%s, user=%s, statusTime=%s",
+						sourceID, msg.Name, userID, candidates[0].statusTime.Format(time.RFC3339))
 				}
 			}
 		}
