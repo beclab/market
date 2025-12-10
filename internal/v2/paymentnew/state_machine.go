@@ -1193,8 +1193,9 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 
 	// 2.5) Has JWS and payment notification sent -> return payment data for frontend transfer
 	// This handles cases where signature status might be in error state but JWS exists and payment notification was sent
-	// Note: SignatureErrorNoRecord case is already handled above, so we exclude it here
-	if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent && state.SignatureStatus != SignatureErrorNoRecord {
+	// Note: SignatureErrorNoRecord and SignatureErrorNeedReSign cases are already handled above, so we exclude them here
+	if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent &&
+		state.SignatureStatus != SignatureErrorNoRecord && state.SignatureStatus != SignatureErrorNeedReSign {
 		developerDID := state.Developer.DID
 		userDID, err := getUserDID(userID, xForwardedHost)
 		if err != nil {
