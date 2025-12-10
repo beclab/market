@@ -1087,8 +1087,12 @@ func buildPaymentStatusFromState(state *PaymentState) string {
 		if state.SignatureStatus == SignatureRequiredAndSigned {
 			return "payment_required"
 		}
-		// If JWS exists but signature status is in error, distinguish between error_no_record and other cases
+		// If JWS exists but signature status is in error, check error states first
 		if state.JWS != "" {
+			// Priority: check error states first (error_need_resign should take precedence)
+			if state.SignatureStatus == SignatureErrorNeedReSign {
+				return "signature_need_resign"
+			}
 			// If signature status is error_no_record, return payment_retry_required to distinguish from unpaid state
 			if state.SignatureStatus == SignatureErrorNoRecord {
 				return "payment_retry_required"

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -538,6 +539,28 @@ func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage s
 	}
 }
 
+// isFailedOrCanceledState checks if the state represents a failed or canceled operation
+// These states should not be used to determine sourceID from cache, as they may be stale
+func isFailedOrCanceledState(state string) bool {
+	failedStates := []string{
+		"installFailed",
+		"downloadFailed",
+		"installCancelFailed",
+		"downloadCancelFailed",
+		"installCanceled",
+		"installingCanceled",
+		"downloadingCanceled",  // Canceled during downloading phase
+		"downloadingCanceling", // In the process of canceling download
+		"uninstallFailed",
+	}
+	for _, failedState := range failedStates {
+		if state == failedState {
+			return true
+		}
+	}
+	return false
+}
+
 // storeStateToCache stores the app state message to cache as AppStateLatestData
 func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	if dw.cacheManager == nil {
@@ -600,6 +623,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		"name":               msg.Name,       // Add app name for state monitoring
 		"rawAppName":         msg.RawAppName, // Add raw app name for clone app support
 		"title":              msg.Title,      // Add title from message
+		"opType":             msg.OpType,     // Add operation type from message
 	}
 
 	// Add debug logging for stateData
@@ -610,57 +634,138 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 
 	sourceID := ""
 
-	userData := dw.cacheManager.GetUserData(userID)
-	if userData != nil {
-		for srcID, srcData := range userData.Sources {
-			if srcData == nil || srcData.AppStateLatest == nil {
-				continue
+	// If current message is in failed/canceled state, skip cache lookup to avoid using stale source
+	// and query from task module or database instead
+	skipCacheLookup := isFailedOrCanceledState(msg.State)
+
+	if !skipCacheLookup {
+		userData := dw.cacheManager.GetUserData(userID)
+		if userData != nil {
+			// Collect all matching app states from all sources
+			type candidateRecord struct {
+				sourceID   string
+				appState   *AppStateLatestData
+				statusTime time.Time
 			}
-			for _, appState := range srcData.AppStateLatest {
-				if appState != nil && appState.Status.State != "uninstalled" && appState.Status.Name == msg.Name {
-					sourceID = srcID
-					break
+			var candidates []candidateRecord
+
+			for srcID, srcData := range userData.Sources {
+				if srcData == nil || srcData.AppStateLatest == nil {
+					continue
+				}
+				for _, appState := range srcData.AppStateLatest {
+					// Exclude uninstalled and failed/canceled states when looking up sourceID
+					if appState != nil &&
+						appState.Status.State != "uninstalled" &&
+						!isFailedOrCanceledState(appState.Status.State) &&
+						appState.Status.Name == msg.Name {
+						// Parse statusTime for sorting
+						var statusTime time.Time
+						if appState.Status.StatusTime != "" {
+							if parsedTime, err := time.Parse("2006-01-02T15:04:05.000000000Z", appState.Status.StatusTime); err == nil {
+								statusTime = parsedTime
+							} else {
+								// If parsing fails, use zero time (will be sorted to the end)
+								log.Printf("Failed to parse StatusTime for app %s in source %s: %v", msg.Name, srcID, err)
+								statusTime = time.Time{}
+							}
+						}
+						candidates = append(candidates, candidateRecord{
+							sourceID:   srcID,
+							appState:   appState,
+							statusTime: statusTime,
+						})
+					}
 				}
 			}
-			if sourceID != "" {
-				break
+
+			// Sort by statusTime in descending order (newest first)
+			if len(candidates) > 0 {
+				// Log all candidates before sorting for debugging
+				if len(candidates) > 1 {
+					log.Printf("Found %d candidate records for app=%s, user=%s:", len(candidates), msg.Name, userID)
+					for i, cand := range candidates {
+						log.Printf("  Candidate[%d]: sourceID=%s, state=%s, statusTime=%s",
+							i, cand.sourceID, cand.appState.Status.State, cand.statusTime.Format(time.RFC3339))
+					}
+				}
+				// Sort candidates by statusTime descending (newest first)
+				sort.Slice(candidates, func(i, j int) bool {
+					return candidates[i].statusTime.After(candidates[j].statusTime)
+				})
+				// Use the newest record
+				sourceID = candidates[0].sourceID
+				if len(candidates) > 1 {
+					log.Printf("Found sourceID=%s from cache (newest of %d records) for app=%s, user=%s, state=%s, statusTime=%s",
+						sourceID, len(candidates), msg.Name, userID, candidates[0].appState.Status.State, candidates[0].statusTime.Format(time.RFC3339))
+				} else {
+					log.Printf("Found sourceID=%s from cache for app=%s, user=%s, state=%s, statusTime=%s",
+						sourceID, msg.Name, userID, candidates[0].appState.Status.State, candidates[0].statusTime.Format(time.RFC3339))
+				}
 			}
 		}
+	} else {
+		log.Printf("Skipping cache lookup for sourceID due to failed/canceled state: %s for app=%s, user=%s",
+			msg.State, msg.Name, userID)
 	}
 
 	if sourceID == "" && dw.taskModule != nil {
-		_, src, found, _ := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
-		if found && src != "" {
-			sourceID = src
-			log.Printf("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
+		// First try to find task by OpID (most accurate match for current operation)
+		if msg.OpID != "" {
+			_, src, found, _ := dw.taskModule.GetTaskByOpID(msg.OpID)
+			if found && src != "" {
+				sourceID = src
+				log.Printf("Found task with source=%s by OpID=%s for app=%s, user=%s", src, msg.OpID, msg.Name, userID)
+			}
+		}
+		// If OpID match failed, try to find by appName and user
+		if sourceID == "" {
+			_, src, found, _ := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
+			if found && src != "" {
+				sourceID = src
+				log.Printf("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
+			}
 		}
 	}
 
-	// If still not found, try to query from task store database (for completed tasks)
+	// If still not found, try to query from task store database (all statuses, ordered by time)
 	if sourceID == "" {
 		db, err := utils.GetTaskStoreForQuery()
 		if err == nil && db != nil {
-			// Query for latest completed task (InstallApp or CloneApp)
+			// Query for latest task (InstallApp or CloneApp) with all statuses
+			// Priority: Running (2) > Pending (1) > Completed (3) > Failed (4) > Canceled (5)
+			// Within same priority, order by created_at descending (newest first)
 			query := `
-			SELECT metadata, type
-			FROM task_records
-			WHERE app_name = $1
-				AND user_account = $2
-				AND status = $3
-				AND type IN ($4, $5)
-			ORDER BY completed_at DESC NULLS LAST, created_at DESC
-			LIMIT 1
-			`
-			// Task status: Completed = 3, Task types: InstallApp = 1, CloneApp = 5
+		SELECT metadata, type, status, created_at
+		FROM task_records
+		WHERE app_name = $1
+			AND user_account = $2
+			AND type IN ($3, $4)
+		ORDER BY 
+			CASE status
+				WHEN 2 THEN 1  -- Running: highest priority
+				WHEN 1 THEN 2  -- Pending: second priority
+				WHEN 3 THEN 3  -- Completed: third priority
+				WHEN 4 THEN 4  -- Failed: fourth priority
+				WHEN 5 THEN 5  -- Canceled: lowest priority
+				ELSE 6
+			END,
+			created_at DESC
+		LIMIT 1
+		`
+			// Task types: InstallApp = 1, CloneApp = 5
 			var metadataStr string
 			var taskType int
-			err = db.QueryRow(query, msg.Name, userID, 3, 1, 5).Scan(&metadataStr, &taskType)
+			var taskStatus int
+			var taskCreatedAt time.Time
+			err = db.QueryRow(query, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
 			if err == nil && metadataStr != "" {
 				var metadataMap map[string]interface{}
 				if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
 					if s, ok := metadataMap["source"].(string); ok && s != "" {
 						sourceID = s
-						log.Printf("Found source=%s from completed task database for app=%s, user=%s", sourceID, msg.Name, userID)
+						log.Printf("Found source=%s from task database (status=%d, created_at=%s) for app=%s, user=%s",
+							sourceID, taskStatus, taskCreatedAt.Format(time.RFC3339), msg.Name, userID)
 					}
 				}
 			}

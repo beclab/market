@@ -37,17 +37,14 @@ type MarketSourceRequest struct {
 }
 
 // ResumeAppRequest represents the request body for resuming an application
-// Only supports 'app' type
 type ResumeAppRequest struct {
 	AppName string `json:"appName"`
-	Type    string `json:"type"` // Should be "app"
 }
 
 // StopAppRequest represents the request body for stopping an application
-// Only supports 'app' type
 type StopAppRequest struct {
 	AppName string `json:"appName"`
-	Type    string `json:"type"` // Should be "app"
+	All     bool   `json:"all,omitempty"` // Optional: whether to stop all instances
 }
 
 // SystemStatusResponse
@@ -581,18 +578,6 @@ func (s *Server) resumeApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Type == "" {
-		log.Println("Type is empty")
-		s.sendResponse(w, http.StatusBadRequest, false, "Type cannot be empty", nil)
-		return
-	}
-
-	if req.Type != "app" && req.Type != "middleware" {
-		log.Printf("Unsupported type: %s, only 'app, middleware' type is supported", req.Type)
-		s.sendResponse(w, http.StatusBadRequest, false, "Only 'app, middleware' type is supported", nil)
-		return
-	}
-
 	// Get token from request
 	restfulReq := &restful.Request{Request: r}
 	token := utils.GetTokenFromRequest(restfulReq)
@@ -604,24 +589,23 @@ func (s *Server) resumeApp(w http.ResponseWriter, r *http.Request) {
 
 	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
 
-	// Resume application by type
-	resBody, err := resumeByType(req.AppName, token, req.Type, bflUser)
+	// Resume application
+	resBody, err := resumeByType(req.AppName, token, bflUser)
 	if err != nil {
-		log.Printf("Failed to resume %s type:%s resp:%s, err:%s", req.AppName, req.Type, resBody, err.Error())
+		log.Printf("Failed to resume %s resp:%s, err:%s", req.AppName, resBody, err.Error())
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to resume application", nil)
 		return
 	}
 
-	log.Printf("Application resumed successfully: %s, type: %s", req.AppName, req.Type)
+	log.Printf("Application resumed successfully: %s", req.AppName)
 	s.sendResponse(w, http.StatusOK, true, "Application resumed successfully", map[string]interface{}{
 		"appName": req.AppName,
-		"type":    req.Type,
 		"result":  resBody,
 	})
 }
 
-// resumeByType resumes application by type (copied from handler_suspend.go)
-func resumeByType(name, token, ty, bflUser string) (string, error) {
+// resumeByType resumes application (copied from handler_suspend.go)
+func resumeByType(name, token, bflUser string) (string, error) {
 	// Get app service host and port
 	appServiceHost := "127.0.0.1"
 	appServicePort := "8080"
@@ -630,11 +614,6 @@ func resumeByType(name, token, ty, bflUser string) (string, error) {
 	}
 	if port := os.Getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
 		appServicePort = port
-	}
-
-	// Only support app type
-	if ty != "app" && ty != "middleware" {
-		return "", fmt.Errorf("%s type %s invalid, only 'app, middleware' type is supported", name, ty)
 	}
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/resume", appServiceHost, appServicePort, name)
@@ -648,12 +627,22 @@ func resumeByType(name, token, ty, bflUser string) (string, error) {
 
 // doPostWithToken performs POST request with token
 func doPostWithToken(url, token string) (string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	log.Printf("doPostWithToken: url=%s, token=%s", url, token)
+	return doPostWithTokenAndBody(url, token, nil)
+}
 
-	req, err := http.NewRequest("POST", url, nil)
+// doPostWithTokenAndBody performs POST request with token and request body
+func doPostWithTokenAndBody(url, token string, bodyBytes []byte) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	log.Printf("doPostWithTokenAndBody: url=%s, token=%s, body=%v", url, token, string(bodyBytes))
+
+	var bodyReader io.Reader
+	if bodyBytes != nil {
+		bodyReader = bytes.NewReader(bodyBytes)
+	}
+
+	req, err := http.NewRequest("POST", url, bodyReader)
 	if err != nil {
-		log.Printf("doPostWithToken: failed to create request: %v", err)
+		log.Printf("doPostWithTokenAndBody: failed to create request: %v", err)
 		return "", err
 	}
 
@@ -665,33 +654,43 @@ func doPostWithToken(url, token string) (string, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("doPostWithToken: request failed: %v", err)
+		log.Printf("doPostWithTokenAndBody: request failed: %v", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("doPostWithToken: failed to read response body: %v", err)
+		log.Printf("doPostWithTokenAndBody: failed to read response body: %v", err)
 		return "", err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("doPostWithToken: response status: %d, body: %s", resp.StatusCode, string(body))
+		log.Printf("doPostWithTokenAndBody: response status: %d, body: %s", resp.StatusCode, string(body))
 		return string(body), fmt.Errorf("HTTP status %d: %s", resp.StatusCode, string(body))
 	}
 
 	return string(body), nil
 }
 
-// doPostWithToken performs POST request with token
+// doPostWithBflUser performs POST request with bflUser
 func doPostWithBflUser(url, bflUser string) (string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	log.Printf("doPostWithBflUser: url=%s, bflUser=%s", url, bflUser)
+	return doPostWithBflUserAndBody(url, bflUser, nil)
+}
 
-	req, err := http.NewRequest("POST", url, nil)
+// doPostWithBflUserAndBody performs POST request with bflUser and request body
+func doPostWithBflUserAndBody(url, bflUser string, bodyBytes []byte) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	log.Printf("doPostWithBflUserAndBody: url=%s, bflUser=%s, body=%v", url, bflUser, string(bodyBytes))
+
+	var bodyReader io.Reader
+	if bodyBytes != nil {
+		bodyReader = bytes.NewReader(bodyBytes)
+	}
+
+	req, err := http.NewRequest("POST", url, bodyReader)
 	if err != nil {
-		log.Printf("doPostWithToken: failed to create request: %v", err)
+		log.Printf("doPostWithBflUserAndBody: failed to create request: %v", err)
 		return "", err
 	}
 
@@ -703,19 +702,19 @@ func doPostWithBflUser(url, bflUser string) (string, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("doPostWithToken: request failed: %v", err)
+		log.Printf("doPostWithBflUserAndBody: request failed: %v", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("doPostWithToken: failed to read response body: %v", err)
+		log.Printf("doPostWithBflUserAndBody: failed to read response body: %v", err)
 		return "", err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("doPostWithToken: response status: %d, body: %s", resp.StatusCode, string(body))
+		log.Printf("doPostWithBflUserAndBody: response status: %d, body: %s", resp.StatusCode, string(body))
 		return string(body), fmt.Errorf("HTTP status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -741,18 +740,6 @@ func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Type == "" {
-		log.Println("Type is empty")
-		s.sendResponse(w, http.StatusBadRequest, false, "Type cannot be empty", nil)
-		return
-	}
-
-	if req.Type != "app" && req.Type != "middleware" {
-		log.Printf("Unsupported type: %s, only 'app, middleware' type is supported", req.Type)
-		s.sendResponse(w, http.StatusBadRequest, false, "Only 'app' type is supported", nil)
-		return
-	}
-
 	// Get token from request
 	restfulReq := &restful.Request{Request: r}
 	token := utils.GetTokenFromRequest(restfulReq)
@@ -763,24 +750,23 @@ func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
 	// }
 	bflUser := restfulReq.HeaderParameter("X-Bfl-User")
 
-	// Stop application by type
-	resBody, err := stopByType(req.AppName, token, req.Type, bflUser)
+	// Stop application
+	resBody, err := stopByType(req.AppName, token, bflUser, req.All)
 	if err != nil {
-		log.Printf("Failed to stop %s type:%s resp:%s, err:%s", req.AppName, req.Type, resBody, err.Error())
+		log.Printf("Failed to stop %s resp:%s, err:%s", req.AppName, resBody, err.Error())
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to stop application", nil)
 		return
 	}
 
-	log.Printf("Application stopped successfully: %s, type: %s", req.AppName, req.Type)
+	log.Printf("Application stopped successfully: %s", req.AppName)
 	s.sendResponse(w, http.StatusOK, true, "Application stopped successfully", map[string]interface{}{
 		"appName": req.AppName,
-		"type":    req.Type,
 		"result":  resBody,
 	})
 }
 
-// stopByType stops application by type (copied from handler_suspend.go suspendByType)
-func stopByType(name, token, ty, bflUser string) (string, error) {
+// stopByType stops application (copied from handler_suspend.go suspendByType)
+func stopByType(name, token, bflUser string, all bool) (string, error) {
 	// Get app service host and port
 	appServiceHost := "127.0.0.1"
 	appServicePort := "8080"
@@ -791,17 +777,18 @@ func stopByType(name, token, ty, bflUser string) (string, error) {
 		appServicePort = port
 	}
 
-	// Only support app type
-	if ty != "app" && ty != "middleware" {
-		return "", fmt.Errorf("%s type %s invalid, only 'app, middleware' type is supported", name, ty)
-	}
-
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/suspend", appServiceHost, appServicePort, name)
 
+	// Create request body with all parameter
+	requestBody := map[string]interface{}{
+		"all": all,
+	}
+	requestBodyBytes, _ := json.Marshal(requestBody)
+
 	if utils.IsAccountFromHeader() {
-		return doPostWithBflUser(url, bflUser)
+		return doPostWithBflUserAndBody(url, bflUser, requestBodyBytes)
 	} else {
-		return doPostWithToken(url, token)
+		return doPostWithTokenAndBody(url, token, requestBodyBytes)
 	}
 }
 

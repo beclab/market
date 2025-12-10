@@ -440,8 +440,7 @@ Resume a suspended application.
 **Request Body:**
 ```json
 {
-  "appName": string,
-  "type": "app" | "middleware"
+  "appName": string
 }
 ```
 
@@ -466,9 +465,13 @@ Stop a running application.
 ```json
 {
   "appName": string,
-  "type": "app" | "middleware"
+  "all": boolean
 }
 ```
+
+**Request Body Parameters:**
+- `appName`: Application name (required)
+- `all`: Whether to stop all instances, defaults to false (optional)
 
 **Response:**
 ```json
