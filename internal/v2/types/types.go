@@ -163,6 +163,7 @@ type AppStateLatestData struct {
 		StatusTime         string `json:"statusTime"`
 		LastTransitionTime string `json:"lastTransitionTime"`
 		Progress           string `json:"progress"`
+		OpType             string `json:"opType,omitempty"` // Operation type: install, upgrade, uninstall, etc.
 		EntranceStatuses   []struct {
 			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 			Name       string `json:"name"`
@@ -649,7 +650,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 // NewAppStateLatestData creates a new app state latest data structure
 func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
 	// Extract status information from data
-	var name, rawAppName, title, state, updateTime, statusTime, lastTransitionTime, progress string
+	var name, rawAppName, title, state, updateTime, statusTime, lastTransitionTime, progress, opType string
 	var entranceStatuses []struct {
 		ID         string `json:"id"`
 		Name       string `json:"name"`
@@ -700,6 +701,10 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	// Extract title from data
 	if titleVal, ok := data["title"].(string); ok {
 		title = titleVal
+	}
+	// Extract opType from data
+	if opTypeVal, ok := data["opType"].(string); ok {
+		opType = opTypeVal
 	}
 
 	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
@@ -843,6 +848,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			StatusTime         string `json:"statusTime"`
 			LastTransitionTime string `json:"lastTransitionTime"`
 			Progress           string `json:"progress"`
+			OpType             string `json:"opType,omitempty"`
 			EntranceStatuses   []struct {
 				ID         string `json:"id"`
 				Name       string `json:"name"`
@@ -861,6 +867,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			StatusTime:         statusTime,
 			LastTransitionTime: lastTransitionTime,
 			Progress:           progress,
+			OpType:             opType,
 			EntranceStatuses:   entranceStatuses,
 		},
 	}, source

@@ -623,6 +623,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		"name":               msg.Name,       // Add app name for state monitoring
 		"rawAppName":         msg.RawAppName, // Add raw app name for clone app support
 		"title":              msg.Title,      // Add title from message
+		"opType":             msg.OpType,     // Add operation type from message
 	}
 
 	// Add debug logging for stateData

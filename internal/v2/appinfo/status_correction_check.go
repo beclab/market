@@ -1039,6 +1039,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			StatusTime         string `json:"statusTime"`
 			LastTransitionTime string `json:"lastTransitionTime"`
 			Progress           string `json:"progress"`
+			OpType             string `json:"opType,omitempty"`
 			EntranceStatuses   []struct {
 				ID         string `json:"id"`
 				Name       string `json:"name"`
@@ -1057,6 +1058,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			StatusTime:         app.Status.StatusTime,
 			LastTransitionTime: app.Status.LastTransitionTime,
 			Progress:           "",
+			OpType:             "", // AppServiceResponse doesn't have opType, will be set from NATS messages
 			EntranceStatuses:   entranceStatuses,
 		},
 	}, source
@@ -1082,6 +1084,13 @@ func (scc *StatusCorrectionChecker) createStateDataFromAppStateData(appStateData
 	title := appStateData.Status.Title
 	// Add title to stateData
 	stateData["title"] = title
+
+	// Get opType from AppStateLatestData
+	opType := appStateData.Status.OpType
+	// Add opType to stateData if not empty
+	if opType != "" {
+		stateData["opType"] = opType
+	}
 
 	// Convert entrance statuses to interface{} slice
 	entranceStatuses := make([]interface{}, len(appStateData.Status.EntranceStatuses))
