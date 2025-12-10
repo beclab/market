@@ -1068,6 +1068,45 @@ func (tm *TaskModule) GetLatestTaskByAppNameAndUser(appName, user string) (taskT
 	return typeStr, source, true, false
 }
 
+// GetTaskByOpID returns the task with matching opID from running or pending tasks
+// Returns task type, source, found flag, and completed flag
+func (tm *TaskModule) GetTaskByOpID(opID string) (taskType string, source string, found bool, completed bool) {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	var targetTask *Task
+
+	// Search in running tasks first
+	for _, t := range tm.runningTasks {
+		if t.OpID == opID && (t.Type == InstallApp || t.Type == CloneApp) {
+			if targetTask == nil || t.CreatedAt.After(targetTask.CreatedAt) {
+				targetTask = t
+			}
+		}
+	}
+
+	// Search in pending tasks
+	for _, t := range tm.pendingTasks {
+		if t.OpID == opID && (t.Type == InstallApp || t.Type == CloneApp) {
+			if targetTask == nil || t.CreatedAt.After(targetTask.CreatedAt) {
+				targetTask = t
+			}
+		}
+	}
+
+	if targetTask == nil {
+		return "", "", false, false
+	}
+
+	typeStr := getTaskTypeString(targetTask.Type)
+	source = ""
+	if s, ok := targetTask.Metadata["source"].(string); ok {
+		source = s
+	}
+	// Since we only search pending/running tasks here, the task is not completed
+	return typeStr, source, true, false
+}
+
 // GetInstanceID returns the unique instance identifier
 func (tm *TaskModule) GetInstanceID() string {
 	return tm.instanceID

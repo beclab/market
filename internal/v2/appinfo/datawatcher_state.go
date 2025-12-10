@@ -709,38 +709,62 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	}
 
 	if sourceID == "" && dw.taskModule != nil {
-		_, src, found, _ := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
-		if found && src != "" {
-			sourceID = src
-			log.Printf("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
+		// First try to find task by OpID (most accurate match for current operation)
+		if msg.OpID != "" {
+			_, src, found, _ := dw.taskModule.GetTaskByOpID(msg.OpID)
+			if found && src != "" {
+				sourceID = src
+				log.Printf("Found task with source=%s by OpID=%s for app=%s, user=%s", src, msg.OpID, msg.Name, userID)
+			}
+		}
+		// If OpID match failed, try to find by appName and user
+		if sourceID == "" {
+			_, src, found, _ := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
+			if found && src != "" {
+				sourceID = src
+				log.Printf("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
+			}
 		}
 	}
 
-	// If still not found, try to query from task store database (for completed tasks)
+	// If still not found, try to query from task store database (all statuses, ordered by time)
 	if sourceID == "" {
 		db, err := utils.GetTaskStoreForQuery()
 		if err == nil && db != nil {
-			// Query for latest completed task (InstallApp or CloneApp)
+			// Query for latest task (InstallApp or CloneApp) with all statuses
+			// Priority: Running (2) > Pending (1) > Completed (3) > Failed (4) > Canceled (5)
+			// Within same priority, order by created_at descending (newest first)
 			query := `
-			SELECT metadata, type
-			FROM task_records
-			WHERE app_name = $1
-				AND user_account = $2
-				AND status = $3
-				AND type IN ($4, $5)
-			ORDER BY completed_at DESC NULLS LAST, created_at DESC
-			LIMIT 1
-			`
-			// Task status: Completed = 3, Task types: InstallApp = 1, CloneApp = 5
+		SELECT metadata, type, status, created_at
+		FROM task_records
+		WHERE app_name = $1
+			AND user_account = $2
+			AND type IN ($3, $4)
+		ORDER BY 
+			CASE status
+				WHEN 2 THEN 1  -- Running: highest priority
+				WHEN 1 THEN 2  -- Pending: second priority
+				WHEN 3 THEN 3  -- Completed: third priority
+				WHEN 4 THEN 4  -- Failed: fourth priority
+				WHEN 5 THEN 5  -- Canceled: lowest priority
+				ELSE 6
+			END,
+			created_at DESC
+		LIMIT 1
+		`
+			// Task types: InstallApp = 1, CloneApp = 5
 			var metadataStr string
 			var taskType int
-			err = db.QueryRow(query, msg.Name, userID, 3, 1, 5).Scan(&metadataStr, &taskType)
+			var taskStatus int
+			var taskCreatedAt time.Time
+			err = db.QueryRow(query, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
 			if err == nil && metadataStr != "" {
 				var metadataMap map[string]interface{}
 				if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
 					if s, ok := metadataMap["source"].(string); ok && s != "" {
 						sourceID = s
-						log.Printf("Found source=%s from completed task database for app=%s, user=%s", sourceID, msg.Name, userID)
+						log.Printf("Found source=%s from task database (status=%d, created_at=%s) for app=%s, user=%s",
+							sourceID, taskStatus, taskCreatedAt.Format(time.RFC3339), msg.Name, userID)
 					}
 				}
 			}
