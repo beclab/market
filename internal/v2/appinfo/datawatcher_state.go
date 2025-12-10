@@ -538,6 +538,26 @@ func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage s
 	}
 }
 
+// isFailedOrCanceledState checks if the state represents a failed or canceled operation
+// These states should not be used to determine sourceID from cache, as they may be stale
+func isFailedOrCanceledState(state string) bool {
+	failedStates := []string{
+		"installFailed",
+		"downloadFailed",
+		"installCancelFailed",
+		"downloadCancelFailed",
+		"installCanceled",
+		"installingCanceled",
+		"uninstallFailed",
+	}
+	for _, failedState := range failedStates {
+		if state == failedState {
+			return true
+		}
+	}
+	return false
+}
+
 // storeStateToCache stores the app state message to cache as AppStateLatestData
 func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	if dw.cacheManager == nil {
@@ -610,22 +630,35 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 
 	sourceID := ""
 
-	userData := dw.cacheManager.GetUserData(userID)
-	if userData != nil {
-		for srcID, srcData := range userData.Sources {
-			if srcData == nil || srcData.AppStateLatest == nil {
-				continue
-			}
-			for _, appState := range srcData.AppStateLatest {
-				if appState != nil && appState.Status.State != "uninstalled" && appState.Status.Name == msg.Name {
-					sourceID = srcID
+	// If current message is in failed/canceled state, skip cache lookup to avoid using stale source
+	// and query from task module or database instead
+	skipCacheLookup := isFailedOrCanceledState(msg.State)
+
+	if !skipCacheLookup {
+		userData := dw.cacheManager.GetUserData(userID)
+		if userData != nil {
+			for srcID, srcData := range userData.Sources {
+				if srcData == nil || srcData.AppStateLatest == nil {
+					continue
+				}
+				for _, appState := range srcData.AppStateLatest {
+					// Exclude uninstalled and failed/canceled states when looking up sourceID
+					if appState != nil &&
+						appState.Status.State != "uninstalled" &&
+						!isFailedOrCanceledState(appState.Status.State) &&
+						appState.Status.Name == msg.Name {
+						sourceID = srcID
+						break
+					}
+				}
+				if sourceID != "" {
 					break
 				}
 			}
-			if sourceID != "" {
-				break
-			}
 		}
+	} else {
+		log.Printf("Skipping cache lookup for sourceID due to failed/canceled state: %s for app=%s, user=%s",
+			msg.State, msg.Name, userID)
 	}
 
 	if sourceID == "" && dw.taskModule != nil {
