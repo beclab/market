@@ -441,7 +441,7 @@
 ```json
 {
   "appName": string,
-  "type": "app" | "middleware"
+  "all": boolean
 }
 ```
 
@@ -466,9 +466,13 @@
 ```json
 {
   "appName": string,
-  "type": "app" | "middleware"
+  "all": boolean
 }
 ```
+
+**请求体参数:**
+- `appName`: 应用名称（必需）
+- `all`: 是否停止所有实例，默认为 false（可选）
 
 **响应:**
 ```json
