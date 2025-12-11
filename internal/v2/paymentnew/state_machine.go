@@ -1120,6 +1120,18 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}, nil
 	}
 
+	// 1.7) Frontend has completed payment -> waiting_developer_confirmation
+	// Check this early to avoid returning other states when payment is already completed
+	// This prevents frontend from continuing operations when waiting for developer confirmation
+	if state.PaymentStatus == PaymentFrontendCompleted {
+		response := map[string]interface{}{
+			"status":  "waiting_developer_confirmation",
+			"message": "payment completed, waiting for developer confirmation",
+		}
+		attachFrontendPayload(response, state.FrontendData)
+		return response, nil
+	}
+
 	// Create HTTP client for API calls
 	httpClient := resty.New()
 	httpClient.SetTimeout(10 * time.Second)
@@ -1140,13 +1152,14 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 
 	// 1.5) Error states handling: check if we can still return payment info for retry
 	// If JWS exists and payment notification was sent, allow frontend to retry payment
+	// Note: This should not apply when PaymentFrontendCompleted (already handled above)
 	if state.SignatureStatus == SignatureErrorNoRecord {
 		// If JWS exists and payment notification was sent (or frontend already proceeded), return payment data to allow retry
 		// Use payment_retry_required instead of payment_required to distinguish from unpaid state
+		// Exclude PaymentFrontendCompleted as it's already handled above
 		if state.JWS != "" &&
 			(state.PaymentStatus == PaymentNotificationSent ||
-				state.PaymentStatus == PaymentFrontendStarted ||
-				state.PaymentStatus == PaymentFrontendCompleted) {
+				state.PaymentStatus == PaymentFrontendStarted) {
 			log.Printf("buildPurchaseResponse: error_no_record but JWS and notification exist, returning payment data for retry")
 			developerDID := state.Developer.DID
 			userDID, err := getUserDID(userID, xForwardedHost)
@@ -1159,7 +1172,12 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 				"payment_data": paymentData,
 				"message":      "developer has no matching payment record, please retry payment",
 			}
+			// Ensure FrontendData is attached
 			attachFrontendPayload(response, state.FrontendData)
+			// Also set frontend_data directly to match GetPaymentStatus behavior
+			if len(state.FrontendData) > 0 {
+				response["frontend_data"] = cloneFrontendData(state.FrontendData)
+			}
 			return response, nil
 		}
 		// Otherwise return error message
@@ -1210,7 +1228,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		return response, nil
 	}
 
-	// 3) Frontend has completed payment
+	// 3) Frontend has started payment
 	if state.PaymentStatus == PaymentFrontendStarted {
 		response := map[string]interface{}{
 			"status": "payment_frontend_started",
@@ -1219,14 +1237,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		return response, nil
 	}
 
-	if state.PaymentStatus == PaymentFrontendCompleted {
-		response := map[string]interface{}{
-			"status":  "waiting_developer_confirmation",
-			"message": "payment completed, waiting for developer confirmation",
-		}
-		attachFrontendPayload(response, state.FrontendData)
-		return response, nil
-	}
+	// PaymentFrontendCompleted is already handled above (1.7) to prioritize waiting_developer_confirmation
 
 	// 4) VC present -> purchased (fallback check, should have been caught earlier)
 	if state.DeveloperSync == DeveloperSyncCompleted && state.VC != "" {
