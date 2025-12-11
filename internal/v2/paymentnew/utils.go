@@ -1231,6 +1231,29 @@ func buildPurchaseInfoFromState(state *PaymentState) *types.PurchaseInfo {
 	}
 }
 
+// isValidDID checks if a string is a valid DID format (starts with "did:")
+func isValidDID(did string) bool {
+	return strings.HasPrefix(did, "did:")
+}
+
+// getValidDeveloperDID validates and returns developer DID from state
+// Returns empty string and logs error if DID is invalid
+// Note: This function does not attempt to refetch DID to avoid state inconsistency
+func getValidDeveloperDID(state *PaymentState) string {
+	if state == nil {
+		log.Printf("getValidDeveloperDID: state is nil")
+		return ""
+	}
+
+	did := state.Developer.DID
+	if !isValidDID(did) {
+		log.Printf("getValidDeveloperDID: Invalid DID format in state: %s (expected format: did:key:...), DeveloperName=%s", did, state.DeveloperName)
+		return ""
+	}
+
+	return did
+}
+
 // getUserDID obtains user's DID via X-Forwarded-Host
 // X-Forwarded-Host format is a.b.c.d; take the last three segments b.c.d, then query DID
 func getUserDID(userID, xForwardedHost string) (string, error) {

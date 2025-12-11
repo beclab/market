@@ -329,17 +329,22 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 				latest.PaymentStatus == PaymentFrontendStarted ||
 				latest.PaymentStatus == PaymentFrontendCompleted ||
 				latest.PaymentStatus == PaymentDeveloperConfirmed) {
-				_ = notifyFrontendPaymentRequired(
-					psm.dataSender,
-					newState.UserID,
-					newState.AppID,
-					newState.AppName,
-					newState.SourceID,
-					newState.ProductID,
-					newState.Developer.DID,
-					effectiveHost,
-					nil, // appInfo not available in state machine context
-				)
+				developerDID := getValidDeveloperDID(&newState)
+				if developerDID != "" {
+					_ = notifyFrontendPaymentRequired(
+						psm.dataSender,
+						newState.UserID,
+						newState.AppID,
+						newState.AppName,
+						newState.SourceID,
+						newState.ProductID,
+						developerDID,
+						effectiveHost,
+						nil, // appInfo not available in state machine context
+					)
+				} else {
+					log.Printf("Cannot notify frontend payment required: invalid developer DID in newState")
+				}
 
 				_ = psm.updateState(newState.GetKey(), func(s *PaymentState) error {
 					switch s.PaymentStatus {
@@ -1218,7 +1223,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 				state.PaymentStatus == PaymentFrontendStarted) {
 			log.Printf("buildPurchaseResponse: error_no_record but JWS and notification exist, returning payment data for retry")
 			log.Printf("buildPurchaseResponse: FrontendData length=%d for payment_retry_required", len(state.FrontendData))
-			developerDID := state.Developer.DID
+			developerDID := getValidDeveloperDID(state)
+			if developerDID == "" {
+				return nil, fmt.Errorf("invalid developer DID in state, cannot create payment data")
+			}
 			userDID, err := getUserDID(userID, xForwardedHost)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get user DID: %w", err)
@@ -1249,7 +1257,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 
 	// 2) Signed -> return payment data for frontend transfer
 	if state.SignatureStatus == SignatureRequiredAndSigned {
-		developerDID := state.Developer.DID
+		developerDID := getValidDeveloperDID(state)
+		if developerDID == "" {
+			return nil, fmt.Errorf("invalid developer DID in state, cannot create payment data")
+		}
 		userDID, err := getUserDID(userID, xForwardedHost)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
@@ -1268,7 +1279,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 	// Note: SignatureErrorNoRecord and SignatureErrorNeedReSign cases are already handled above, so we exclude them here
 	if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent &&
 		state.SignatureStatus != SignatureErrorNoRecord && state.SignatureStatus != SignatureErrorNeedReSign {
-		developerDID := state.Developer.DID
+		developerDID := getValidDeveloperDID(state)
+		if developerDID == "" {
+			return nil, fmt.Errorf("invalid developer DID in state, cannot create payment data")
+		}
 		userDID, err := getUserDID(userID, xForwardedHost)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)

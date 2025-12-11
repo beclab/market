@@ -418,6 +418,11 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 
 	// Step 4: Notify frontend to pay (only when not notified/early stage)
 	if shouldNotifyFrontend && globalStateMachine.dataSender != nil {
+		developerDID := getValidDeveloperDID(state)
+		if developerDID == "" {
+			log.Printf("Cannot notify frontend payment required: invalid developer DID in state")
+			return fmt.Errorf("invalid developer DID in state, cannot notify frontend")
+		}
 		if err := notifyFrontendPaymentRequired(
 			globalStateMachine.dataSender,
 			state.UserID,
@@ -425,7 +430,7 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 			state.AppName,
 			state.SourceID,
 			state.ProductID,
-			state.Developer.DID,
+			developerDID,
 			xForwardedHost,
 			nil, // appInfo not available in SubmitSignature context
 		); err != nil {
@@ -777,6 +782,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		dev, err := fetchDidInfo(ctx, client, developerName)
 		if err != nil {
 			// When DID lookup fails, also mark DeveloperSync as failed
+			// Note: Developer.DID should be empty when DID lookup fails, not set to developerName
 			failedState := &PaymentState{
 				UserID:          userID,
 				AppID:           appID,
@@ -784,7 +790,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 				SourceID:        sourceID,
 				ProductID:       productID,
 				DeveloperName:   developerName,
-				Developer:       DeveloperInfo{Name: "", DID: developerName, RSAPubKey: ""},
+				Developer:       DeveloperInfo{Name: "", DID: "", RSAPubKey: ""},
 				PaymentNeed:     PaymentNeedErrorDeveloperFetchFailed,
 				DeveloperSync:   DeveloperSyncFailed,
 				LarePassSync:    LarePassSyncNotStarted,
