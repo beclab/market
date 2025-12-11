@@ -32,6 +32,21 @@ type EntranceStatus struct {
 	Invisible  *bool  `json:"invisible,omitempty"`
 }
 
+// SharedEntrance represents a shared entrance configuration from app-service
+type SharedEntrance struct {
+	Name            string `yaml:"name" json:"name"`
+	Host            string `yaml:"host" json:"host"`
+	Port            int32  `yaml:"port" json:"port"`
+	Icon            string `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Title           string `yaml:"title" json:"title,omitempty"`
+	AuthLevel       string `yaml:"authLevel,omitempty" json:"authLevel,omitempty"`
+	Invisible       bool   `yaml:"invisible,omitempty" json:"invisible,omitempty"`
+	URL             string `yaml:"url,omitempty" json:"url,omitempty"`
+	OpenMethod      string `yaml:"openMethod,omitempty" json:"openMethod,omitempty"`
+	WindowPushState bool   `yaml:"windowPushState,omitempty" json:"windowPushState,omitempty"`
+	Skip            bool   `yaml:"skip,omitempty" json:"skip,omitempty"`
+}
+
 // AppStateMessage represents the message structure from NATS
 type AppStateMessage struct {
 	EventID          string           `json:"eventID"`
@@ -45,6 +60,7 @@ type AppStateMessage struct {
 	User             string           `json:"user"`
 	Progress         string           `json:"progress"`
 	EntranceStatuses []EntranceStatus `json:"entranceStatuses"`
+	SharedEntrances  []SharedEntrance `json:"sharedEntrances,omitempty"`
 }
 
 // DataWatcherState handles app state messages from NATS
@@ -613,6 +629,24 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		}
 	}
 
+	// Convert SharedEntrances to interface slice
+	sharedEntrances := make([]interface{}, len(msg.SharedEntrances))
+	for i, v := range msg.SharedEntrances {
+		sharedEntrances[i] = map[string]interface{}{
+			"name":            v.Name,
+			"host":            v.Host,
+			"port":            v.Port,
+			"icon":            v.Icon,
+			"title":           v.Title,
+			"authLevel":       v.AuthLevel,
+			"invisible":       v.Invisible,
+			"url":             v.URL,
+			"openMethod":      v.OpenMethod,
+			"windowPushState": v.WindowPushState,
+			"skip":            v.Skip,
+		}
+	}
+
 	stateData := map[string]interface{}{
 		"state":              msg.State,
 		"updateTime":         "",
@@ -624,6 +658,11 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		"rawAppName":         msg.RawAppName, // Add raw app name for clone app support
 		"title":              msg.Title,      // Add title from message
 		"opType":             msg.OpType,     // Add operation type from message
+	}
+
+	// Add SharedEntrances if present
+	if len(msg.SharedEntrances) > 0 {
+		stateData["sharedEntrances"] = sharedEntrances
 	}
 
 	// Add debug logging for stateData
@@ -823,6 +862,13 @@ func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	for i, status := range msg.EntranceStatuses {
 		log.Printf("  [%d] Name: %s, State: %s, Status Time: %s, Reason: %s",
 			i, status.Name, status.State, status.StatusTime, status.Reason)
+	}
+	if len(msg.SharedEntrances) > 0 {
+		log.Printf("Shared Entrances:")
+		for i, entrance := range msg.SharedEntrances {
+			log.Printf("  [%d] Name: %s, Host: %s, Port: %d, URL: %s, Invisible: %t",
+				i, entrance.Name, entrance.Host, entrance.Port, entrance.URL, entrance.Invisible)
+		}
 	}
 	log.Printf("========================")
 }

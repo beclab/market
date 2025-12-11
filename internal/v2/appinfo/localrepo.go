@@ -102,7 +102,7 @@ type Options struct {
 	AllowMultipleInstall bool              `yaml:"allowMultipleInstall,omitempty"`
 }
 
-// Entrance represents an app entrance point
+// Entrance represents an app entrance point (for YAML configuration)
 type Entrance struct {
 	Name        string `yaml:"name"`
 	Port        int    `yaml:"port,omitempty"`
