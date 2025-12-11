@@ -38,6 +38,11 @@ type paymentPollingRequest struct {
 	ProductID string `json:"product_id"`
 }
 
+// resendPaymentVCRequest is a local request model for re-sending VC to LarePass
+type resendPaymentVCRequest struct {
+	ProductID string `json:"product_id"`
+}
+
 // frontendPaymentStartRequest is a local request model for frontend payment start event
 type frontendPaymentStartRequest struct {
 	SourceID     string                 `json:"source_id"`
@@ -2454,4 +2459,51 @@ func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendResponse(w, http.StatusOK, true, "Frontend payment state updated", result)
+}
+
+// resendPaymentVC handles POST /api/v2/payment/resend-vc
+// When payment is already confirmed, it re-sends VC to LarePass with topic save_payment_vc.
+func (s *Server) resendPaymentVC(w http.ResponseWriter, r *http.Request) {
+	log.Println("POST /api/v2/payment/resend-vc - Resend payment VC to LarePass")
+
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for resend vc request: %s", userID)
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
+		return
+	}
+	defer r.Body.Close()
+
+	var req resendPaymentVCRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		log.Printf("Failed to parse JSON request: %v", err)
+		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
+		return
+	}
+
+	productID := strings.TrimSpace(req.ProductID)
+	if productID == "" {
+		log.Printf("Missing product_id in resend vc request")
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required field: product_id", nil)
+		return
+	}
+
+	if err := paymentnew.ResendPaymentVCToLarePass(userID, productID); err != nil {
+		log.Printf("ResendPaymentVCToLarePass failed for user=%s product=%s: %v", userID, productID, err)
+		s.sendResponse(w, http.StatusBadRequest, false, fmt.Sprintf("Failed to resend VC: %v", err), nil)
+		return
+	}
+
+	s.sendResponse(w, http.StatusOK, true, "VC resent to LarePass successfully", map[string]interface{}{
+		"product_id": productID,
+	})
 }

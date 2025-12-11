@@ -173,6 +173,19 @@ type AppStateLatestData struct {
 			Url        string `json:"url"`
 			Invisible  bool   `json:"invisible"`
 		} `json:"entranceStatuses"`
+		SharedEntrances []struct {
+			Name            string `json:"name"`
+			Host            string `json:"host"`
+			Port            int32  `json:"port"`
+			Icon            string `json:"icon,omitempty"`
+			Title           string `json:"title,omitempty"`
+			AuthLevel       string `json:"authLevel,omitempty"`
+			Invisible       bool   `json:"invisible,omitempty"`
+			URL             string `json:"url,omitempty"`
+			OpenMethod      string `json:"openMethod,omitempty"`
+			WindowPushState bool   `json:"windowPushState,omitempty"`
+			Skip            bool   `json:"skip,omitempty"`
+		} `json:"sharedEntrances,omitempty"`
 	} `json:"status"`
 }
 
@@ -707,6 +720,21 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		opType = opTypeVal
 	}
 
+	// Extract SharedEntrances
+	var sharedEntrances []struct {
+		Name            string `json:"name"`
+		Host            string `json:"host"`
+		Port            int32  `json:"port"`
+		Icon            string `json:"icon,omitempty"`
+		Title           string `json:"title,omitempty"`
+		AuthLevel       string `json:"authLevel,omitempty"`
+		Invisible       bool   `json:"invisible,omitempty"`
+		URL             string `json:"url,omitempty"`
+		OpenMethod      string `json:"openMethod,omitempty"`
+		WindowPushState bool   `json:"windowPushState,omitempty"`
+		Skip            bool   `json:"skip,omitempty"`
+	}
+
 	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
 	if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
 		log.Printf("DEBUG: NewAppStateLatestData - found entranceStatuses, type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
@@ -812,6 +840,124 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 
 	log.Printf("DEBUG: NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
 
+	// Handle SharedEntrances - support both []interface{} and []map[string]interface{}
+	if sharedEntrancesVal, ok := data["sharedEntrances"]; ok && sharedEntrancesVal != nil {
+		log.Printf("DEBUG: NewAppStateLatestData - found sharedEntrances, type: %T", sharedEntrancesVal)
+
+		switch v := sharedEntrancesVal.(type) {
+		case []interface{}:
+			log.Printf("DEBUG: NewAppStateLatestData - handling sharedEntrances []interface{} case, length: %d", len(v))
+			sharedEntrances = make([]struct {
+				Name            string `json:"name"`
+				Host            string `json:"host"`
+				Port            int32  `json:"port"`
+				Icon            string `json:"icon,omitempty"`
+				Title           string `json:"title,omitempty"`
+				AuthLevel       string `json:"authLevel,omitempty"`
+				Invisible       bool   `json:"invisible,omitempty"`
+				URL             string `json:"url,omitempty"`
+				OpenMethod      string `json:"openMethod,omitempty"`
+				WindowPushState bool   `json:"windowPushState,omitempty"`
+				Skip            bool   `json:"skip,omitempty"`
+			}, len(v))
+
+			for i, entrance := range v {
+				if entranceMap, ok := entrance.(map[string]interface{}); ok {
+					if name, ok := entranceMap["name"].(string); ok {
+						sharedEntrances[i].Name = name
+					}
+					if host, ok := entranceMap["host"].(string); ok {
+						sharedEntrances[i].Host = host
+					}
+					if port, ok := entranceMap["port"].(float64); ok {
+						sharedEntrances[i].Port = int32(port)
+					}
+					if icon, ok := entranceMap["icon"].(string); ok {
+						sharedEntrances[i].Icon = icon
+					}
+					if title, ok := entranceMap["title"].(string); ok {
+						sharedEntrances[i].Title = title
+					}
+					if authLevel, ok := entranceMap["authLevel"].(string); ok {
+						sharedEntrances[i].AuthLevel = authLevel
+					}
+					if invisible, ok := entranceMap["invisible"].(bool); ok {
+						sharedEntrances[i].Invisible = invisible
+					}
+					if url, ok := entranceMap["url"].(string); ok {
+						sharedEntrances[i].URL = url
+					}
+					if openMethod, ok := entranceMap["openMethod"].(string); ok {
+						sharedEntrances[i].OpenMethod = openMethod
+					}
+					if windowPushState, ok := entranceMap["windowPushState"].(bool); ok {
+						sharedEntrances[i].WindowPushState = windowPushState
+					}
+					if skip, ok := entranceMap["skip"].(bool); ok {
+						sharedEntrances[i].Skip = skip
+					}
+				}
+			}
+		case []map[string]interface{}:
+			log.Printf("DEBUG: NewAppStateLatestData - handling sharedEntrances []map[string]interface{} case, length: %d", len(v))
+			sharedEntrances = make([]struct {
+				Name            string `json:"name"`
+				Host            string `json:"host"`
+				Port            int32  `json:"port"`
+				Icon            string `json:"icon,omitempty"`
+				Title           string `json:"title,omitempty"`
+				AuthLevel       string `json:"authLevel,omitempty"`
+				Invisible       bool   `json:"invisible,omitempty"`
+				URL             string `json:"url,omitempty"`
+				OpenMethod      string `json:"openMethod,omitempty"`
+				WindowPushState bool   `json:"windowPushState,omitempty"`
+				Skip            bool   `json:"skip,omitempty"`
+			}, len(v))
+
+			for i, entranceMap := range v {
+				if name, ok := entranceMap["name"].(string); ok {
+					sharedEntrances[i].Name = name
+				}
+				if host, ok := entranceMap["host"].(string); ok {
+					sharedEntrances[i].Host = host
+				}
+				if port, ok := entranceMap["port"].(float64); ok {
+					sharedEntrances[i].Port = int32(port)
+				}
+				if icon, ok := entranceMap["icon"].(string); ok {
+					sharedEntrances[i].Icon = icon
+				}
+				if title, ok := entranceMap["title"].(string); ok {
+					sharedEntrances[i].Title = title
+				}
+				if authLevel, ok := entranceMap["authLevel"].(string); ok {
+					sharedEntrances[i].AuthLevel = authLevel
+				}
+				if invisible, ok := entranceMap["invisible"].(bool); ok {
+					sharedEntrances[i].Invisible = invisible
+				}
+				if url, ok := entranceMap["url"].(string); ok {
+					sharedEntrances[i].URL = url
+				}
+				if openMethod, ok := entranceMap["openMethod"].(string); ok {
+					sharedEntrances[i].OpenMethod = openMethod
+				}
+				if windowPushState, ok := entranceMap["windowPushState"].(bool); ok {
+					sharedEntrances[i].WindowPushState = windowPushState
+				}
+				if skip, ok := entranceMap["skip"].(bool); ok {
+					sharedEntrances[i].Skip = skip
+				}
+			}
+		default:
+			log.Printf("DEBUG: NewAppStateLatestData - sharedEntrances type: %T, value: %+v", v, v)
+		}
+	} else {
+		log.Printf("DEBUG: NewAppStateLatestData - no sharedEntrances found in data")
+	}
+
+	log.Printf("DEBUG: NewAppStateLatestData - final sharedEntrances count: %d", len(sharedEntrances))
+
 	// Version assignment logic
 	version := ""
 	source := ""
@@ -858,6 +1004,19 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				Url        string `json:"url"`
 				Invisible  bool   `json:"invisible"`
 			} `json:"entranceStatuses"`
+			SharedEntrances []struct {
+				Name            string `json:"name"`
+				Host            string `json:"host"`
+				Port            int32  `json:"port"`
+				Icon            string `json:"icon,omitempty"`
+				Title           string `json:"title,omitempty"`
+				AuthLevel       string `json:"authLevel,omitempty"`
+				Invisible       bool   `json:"invisible,omitempty"`
+				URL             string `json:"url,omitempty"`
+				OpenMethod      string `json:"openMethod,omitempty"`
+				WindowPushState bool   `json:"windowPushState,omitempty"`
+				Skip            bool   `json:"skip,omitempty"`
+			} `json:"sharedEntrances,omitempty"`
 		}{
 			Name:               name,
 			RawAppName:         rawAppName,
@@ -869,6 +1028,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			Progress:           progress,
 			OpType:             opType,
 			EntranceStatuses:   entranceStatuses,
+			SharedEntrances:    sharedEntrances,
 		},
 	}, source
 }

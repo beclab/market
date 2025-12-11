@@ -422,6 +422,19 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 					Reason     string `json:"reason"`
 					Url        string `json:"url"`
 				} `json:"entranceStatuses"`
+				SharedEntrances []struct {
+					Name            string `json:"name"`
+					Host            string `json:"host"`
+					Port            int32  `json:"port"`
+					Icon            string `json:"icon,omitempty"`
+					Title           string `json:"title,omitempty"`
+					AuthLevel       string `json:"authLevel,omitempty"`
+					Invisible       bool   `json:"invisible,omitempty"`
+					URL             string `json:"url,omitempty"`
+					OpenMethod      string `json:"openMethod,omitempty"`
+					WindowPushState bool   `json:"windowPushState,omitempty"`
+					Skip            bool   `json:"skip,omitempty"`
+				} `json:"sharedEntrances,omitempty"`
 			}{
 				State:              middleware.ResourceStatus,
 				UpdateTime:         middleware.UpdateTime,
@@ -434,6 +447,19 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 					StatusTime string `json:"statusTime"`
 					Reason     string `json:"reason"`
 					Url        string `json:"url"`
+				}{},
+				SharedEntrances: []struct {
+					Name            string `json:"name"`
+					Host            string `json:"host"`
+					Port            int32  `json:"port"`
+					Icon            string `json:"icon,omitempty"`
+					Title           string `json:"title,omitempty"`
+					AuthLevel       string `json:"authLevel,omitempty"`
+					Invisible       bool   `json:"invisible,omitempty"`
+					URL             string `json:"url,omitempty"`
+					OpenMethod      string `json:"openMethod,omitempty"`
+					WindowPushState bool   `json:"windowPushState,omitempty"`
+					Skip            bool   `json:"skip,omitempty"`
 				}{},
 			},
 		}
@@ -999,9 +1025,23 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 		}
 	}
 
-	// Try to get rawAppName from cache if available
+	// Try to get rawAppName and SharedEntrances from cache if available
 	rawAppName := ""
 	title := app.Spec.Title
+	var sharedEntrances []struct {
+		Name            string `json:"name"`
+		Host            string `json:"host"`
+		Port            int32  `json:"port"`
+		Icon            string `json:"icon,omitempty"`
+		Title           string `json:"title,omitempty"`
+		AuthLevel       string `json:"authLevel,omitempty"`
+		Invisible       bool   `json:"invisible,omitempty"`
+		URL             string `json:"url,omitempty"`
+		OpenMethod      string `json:"openMethod,omitempty"`
+		WindowPushState bool   `json:"windowPushState,omitempty"`
+		Skip            bool   `json:"skip,omitempty"`
+	}
+
 	if scc.cacheManager != nil && userID != "" && app.Spec.Name != "" {
 		userData := scc.cacheManager.GetUserData(userID)
 		if userData != nil {
@@ -1015,16 +1055,25 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 						if title == "" && cachedAppState.Status.Title != "" {
 							title = cachedAppState.Status.Title
 						}
-						if rawAppName != "" && title != "" {
+						// Preserve SharedEntrances if cache有数据
+						if len(sharedEntrances) == 0 && len(cachedAppState.Status.SharedEntrances) > 0 {
+							sharedEntrances = cachedAppState.Status.SharedEntrances
+						}
+						if rawAppName != "" && title != "" && len(sharedEntrances) > 0 {
 							break
 						}
 					}
 				}
-				if rawAppName != "" && title != "" {
+				if rawAppName != "" && title != "" && len(sharedEntrances) > 0 {
 					break
 				}
 			}
 		}
+	}
+
+	// Prefer upstream SharedEntrances when后端状态里已经返回该字段
+	if len(app.Status.SharedEntrances) > 0 {
+		sharedEntrances = app.Status.SharedEntrances
 	}
 
 	return &types.AppStateLatestData{
@@ -1049,6 +1098,19 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 				Url        string `json:"url"`
 				Invisible  bool   `json:"invisible"`
 			} `json:"entranceStatuses"`
+			SharedEntrances []struct {
+				Name            string `json:"name"`
+				Host            string `json:"host"`
+				Port            int32  `json:"port"`
+				Icon            string `json:"icon,omitempty"`
+				Title           string `json:"title,omitempty"`
+				AuthLevel       string `json:"authLevel,omitempty"`
+				Invisible       bool   `json:"invisible,omitempty"`
+				URL             string `json:"url,omitempty"`
+				OpenMethod      string `json:"openMethod,omitempty"`
+				WindowPushState bool   `json:"windowPushState,omitempty"`
+				Skip            bool   `json:"skip,omitempty"`
+			} `json:"sharedEntrances,omitempty"`
 		}{
 			Name:               app.Spec.Name,
 			RawAppName:         rawAppName,
@@ -1060,6 +1122,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			Progress:           "",
 			OpType:             "", // AppServiceResponse doesn't have opType, will be set from NATS messages
 			EntranceStatuses:   entranceStatuses,
+			SharedEntrances:    sharedEntrances,
 		},
 	}, source
 }
@@ -1106,6 +1169,27 @@ func (scc *StatusCorrectionChecker) createStateDataFromAppStateData(appStateData
 		}
 	}
 	stateData["entranceStatuses"] = entranceStatuses
+
+	// Convert SharedEntrances to interface{} slice
+	if len(appStateData.Status.SharedEntrances) > 0 {
+		sharedEntrances := make([]interface{}, len(appStateData.Status.SharedEntrances))
+		for i, entrance := range appStateData.Status.SharedEntrances {
+			sharedEntrances[i] = map[string]interface{}{
+				"name":            entrance.Name,
+				"host":            entrance.Host,
+				"port":            entrance.Port,
+				"icon":            entrance.Icon,
+				"title":           entrance.Title,
+				"authLevel":       entrance.AuthLevel,
+				"invisible":       entrance.Invisible,
+				"url":             entrance.URL,
+				"openMethod":      entrance.OpenMethod,
+				"windowPushState": entrance.WindowPushState,
+				"skip":            entrance.Skip,
+			}
+		}
+		stateData["sharedEntrances"] = sharedEntrances
+	}
 
 	return stateData
 }

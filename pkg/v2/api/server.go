@@ -209,6 +209,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/payment/frontend-start", s.startFrontendPayment).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/payment/frontend-start")
 
+	// 26.1 Resend VC to LarePass for persistence
+	api.HandleFunc("/payment/resend-vc", s.resendPaymentVC).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/payment/resend-vc")
+
 	// 27. Fetch signature callback (from LarePass)
 	api.HandleFunc("/payment/fetch-signature-callback", s.fetchSignatureCallback).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/payment/fetch-signature-callback")

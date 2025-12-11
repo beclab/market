@@ -262,6 +262,9 @@ stateDiagram-v2
     - When:  
       - During preprocessing or `PurchaseApp` when `triggerPaymentStateSync` sees a state that should pull signature from LarePass  
         (typically when the user has signed before but local JWS is missing).
+  - Topic `save_payment_vc` (persist VC)  
+    - Builder: `notifyLarePassToSaveVC`  
+    - When: After the state machine processes `vc_received` and persists the receipt; if the first push might be missed, a compensating push can be triggered via `POST /api/v2/payment/resend-vc`.
 
 ## 4. Open Issues & Design Considerations
 

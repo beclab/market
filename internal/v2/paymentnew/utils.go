@@ -42,10 +42,16 @@ type didGateData struct {
 
 // manifestIdCache caches manifestId by productId:developerName to avoid repeated API calls
 var (
-	manifestIdCache       sync.Map // map[string]string: "productId:developerName" -> manifestId
+	manifestIdCache       sync.Map // map[string]manifestSchemaIDs: "productId:developerName" -> manifest + schema ids
 	manifestIdFetching    sync.Map // map[string]*sync.Mutex: tracks ongoing fetches to prevent duplicate requests
 	manifestIdFetchingMux sync.Mutex
 )
+
+type manifestSchemaIDs struct {
+	ManifestId                        string
+	PresentationDefinitionId          string
+	ApplicationVerifiableCredentialId string
+}
 
 // GetApplicationSchemaIdResponse represents the API response structure
 type GetApplicationSchemaIdResponse struct {
@@ -58,10 +64,10 @@ type GetApplicationSchemaIdResponse struct {
 }
 
 // merchantProductLicenseCredentialManifestJSON is the hardcoded schema for Merchant Product License Credential Manifest
-var merchantProductLicenseCredentialManifestJSON = `{"id":"","spec_version":"https://identity.foundation/credential-manifest/spec/v1.0.0/","name":"Merchant Product License Credential Manifest","description":"Credential manifest for issuing merchant product license based on payment proof","issuer":{"id":"did:key:z6Mkp53XYSGCVFu4sKin6QVKPjiqfUCauTqxW8QpoYq5nUZ9","name":"did:key:z6Mkp53XYSGCVFu4sKin6QVKPjiqfUCauTqxW8QpoYq5nUZ9"},"output_descriptors":[{"id":"70c236a7-7dbb-cf15-6d5c-5ceffb6caf24","schema":"3a8adbf4-a083-ea50-ecee-b5d55107e2a3","name":"Merchant Product License Credential","description":"Product license credential with complete payment and product information","display":{"title":{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},"properties":[{"label":"Product ID","path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},{"label":"systemChainId","path":["$.credentialSubject.systemChainId","$.vc.credentialSubject.systemChainId"],"schema":{"type":"string"}},{"label":"txHash","path":["$.credentialSubject.txHash","$.vc.credentialSubject.txHash"],"schema":{"type":"string"}}]},"styles":{"background":{"color":"#1e40af"},"text":{"color":"#ffffff"}}}],"format":{"jwt_vc":{"alg":["EdDSA"]}},"presentation_definition":{"id":"de434d03-052c-027a-d4cc-887be81aa941","name":"Merchant Product License Application Presentation Manifest","purpose":"Request presentation of application credentials for merchant product license","input_descriptors":[{"id":"productId","name":"Product ID","purpose":"Provide your product ID to activate from payment transaction","format":{"jwt_vc":{"alg":["EdDSA"]}},"constraints":{"fields":[{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"]}],"subject_is_issuer":"preferred"}}]}}`
+var merchantProductLicenseCredentialManifestJSON = `{"id":"","spec_version":"https://identity.foundation/credential-manifest/spec/v1.0.0/","name":"Merchant Product License Credential Manifest","description":"Credential manifest for issuing merchant product license based on payment proof","issuer":{"id":"","name":""},"output_descriptors":[{"id":"6af60757-a208-f23d-f622-23171da2b8b1","schema":"3a8adbf4-a083-ea50-ecee-b5d55107e2a3","name":"Merchant Product License Credential","description":"Product license credential with complete payment and product information","display":{"title":{"path":["$.credentialSubject.name","$.vc.credentialSubject.name"],"schema":{"type":"string"}},"subtitle":{"path":["$.credentialSubject.title","$.vc.credentialSubject.title"],"schema":{"type":"string"}},"description":{"path":["$.credentialSubject.description","$.vc.credentialSubject.description"],"schema":{"type":"string"}},"properties":[{"label":"Product ID","path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"],"schema":{"type":"string"}},{"label":"txHash","path":["$.credentialSubject.txHash","$.vc.credentialSubject.txHash"],"schema":{"type":"string"}}]},"styles":{"background":{"color":"#FFFFFF"},"text":{"color":"#000000"}}}],"format":{"jwt_vc":{"alg":["EdDSA"]}},"presentation_definition":{"id":"","name":"Merchant Product License Application Presentation Manifest","purpose":"Request presentation of application credentials for merchant product license","input_descriptors":[{"id":"productId","name":"Product ID","purpose":"Provide your product ID to activate from payment transaction","format":{"jwt_vc":{"alg":["EdDSA"]}},"constraints":{"fields":[{"path":["$.credentialSubject.productId","$.vc.credentialSubject.productId"]}],"subject_is_issuer":"preferred"}}]}}`
 
 // Temporarily unusable data
-var merchantProductLicenseApplicationVerifiableCredentialJSON = `{"id":"6ad3d05c-ccf2-90df-32e9-aea5d5cf3115","type":"CredentialSchema2023","credentialSchema":"eyJhbGciOiJFZERTQSIsImtpZCI6ImRpZDprZXk6ejZNa3A1M1hZU0dDVkZ1NHNLaW42UVZLUGppcWZVQ2F1VHF4VzhRcG9ZcTVuVVo5I3o2TWtwNTNYWVNHQ1ZGdTRzS2luNlFWS1BqaXFmVUNhdVRxeFc4UXBvWXE1blVaOSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NjI3NzIyMTEsImlzcyI6ImRpZDprZXk6ejZNa3A1M1hZU0dDVkZ1NHNLaW42UVZLUGppcWZVQ2F1VHF4VzhRcG9ZcTVuVVo5IiwianRpIjoiaHR0cDovL2xvY2FsaG9zdDo2MDAzL3YxL3NjaGVtYXMvNmFkM2QwNWMtY2NmMi05MGRmLTMyZTktYWVhNWQ1Y2YzMTE1IiwibmJmIjoxNzYyNzcyMjExLCJub25jZSI6IjlmY2U0ZjMwLTdjNWItNGRkOC04MjAzLTc5Yjk2MDg5ZGQ0ZiIsInZjIjp7IkBjb250ZXh0IjpbImh0dHBzOi8vd3d3LnczLm9yZy8yMDE4L2NyZWRlbnRpYWxzL3YxIl0sInR5cGUiOlsiVmVyaWZpYWJsZUNyZWRlbnRpYWwiXSwiY3JlZGVudGlhbFN1YmplY3QiOnsiJGlkIjoiNmFkM2QwNWMtY2NmMi05MGRmLTMyZTktYWVhNWQ1Y2YzMTE1IiwiJHNjaGVtYSI6Imh0dHBzOi8vanNvbi1zY2hlbWEub3JnL2RyYWZ0LzIwMjAtMTIvc2NoZW1hIiwiZGVzY3JpcHRpb24iOiJNZXJjaGFudCBQcm9kdWN0IExpY2Vuc2UgQXBwbGljYXRpb24gQ3JlZGVudGlhbCBTY2hlbWEiLCJuYW1lIjoiTWVyY2hhbnQgUHJvZHVjdCBMaWNlbnNlIEFwcGxpY2F0aW9uIENyZWRlbnRpYWwgU2NoZW1hIiwicHJvcGVydGllcyI6eyJjcmVkZW50aWFsU3ViamVjdCI6eyJhZGRpdGlvbmFsUHJvcGVydGllcyI6dHJ1ZSwicHJvcGVydGllcyI6eyJwcm9kdWN0SWQiOnsiZGVzY3JpcHRpb24iOiJQcm9kdWN0IElEIHRvIGFjdGl2YXRlIChzaW5jZSBwYXltZW50IG1heSBjb250YWluIG11bHRpcGxlIHByb2R1Y3RzKSIsInR5cGUiOiJzdHJpbmcifX0sInJlcXVpcmVkIjpbInByb2R1Y3RJZCJdLCJ0eXBlIjoib2JqZWN0In19LCJ0eXBlIjoib2JqZWN0In19fQ.ACqzHn9ADQyzZ3B3moprQ6ADRTRkuxo07Zu72uYP2r2BmHcHvhpFUZ3lcJgCeJ17Sx_cFpOdgLJCDZqGrDC7Cg","schema":{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"credentialSubject":{"$id":"6ad3d05c-ccf2-90df-32e9-aea5d5cf3115","$schema":"https://json-schema.org/draft/2020-12/schema","description":"Merchant Product License Application Credential Schema","name":"Merchant Product License Application Credential Schema","properties":{"credentialSubject":{"additionalProperties":true,"properties":{"productId":{"description":"Product ID to activate (since payment may contain multiple products)","type":"string"}},"required":["productId"],"type":"object"}},"type":"object"}}}`
+var merchantProductLicenseApplicationVerifiableCredentialJSON = `{"id":"","type":"CredentialSchema2023","credentialSchema":"eyJhbGciOiJFZERTQSIsImtpZCI6ImRpZDprZXk6ejZNa3A1M1hZU0dDVkZ1NHNLaW42UVZLUGppcWZVQ2F1VHF4VzhRcG9ZcTVuVVo5I3o2TWtwNTNYWVNHQ1ZGdTRzS2luNlFWS1BqaXFmVUNhdVRxeFc4UXBvWXE1blVaOSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NjUzNzMwMjgsImlzcyI6ImRpZDprZXk6ejZNa3A1M1hZU0dDVkZ1NHNLaW42UVZLUGppcWZVQ2F1VHF4VzhRcG9ZcTVuVVo5IiwianRpIjoiaHR0cDovL2xvY2FsaG9zdDo2MDAzL3YxL3NjaGVtYXMvNmFkM2QwNWMtY2NmMi05MGRmLTMyZTktYWVhNWQ1Y2YzMTE1IiwibmJmIjoxNzY1MzczMDI4LCJub25jZSI6IjVjNjBlZDQxLTYzZTYtNDBjYy04YTc1LTE3ZTliOWI3NjdhYiIsInZjIjp7IkBjb250ZXh0IjpbImh0dHBzOi8vd3d3LnczLm9yZy8yMDE4L2NyZWRlbnRpYWxzL3YxIl0sInR5cGUiOlsiVmVyaWZpYWJsZUNyZWRlbnRpYWwiXSwiY3JlZGVudGlhbFN1YmplY3QiOnsiJGlkIjoiNmFkM2QwNWMtY2NmMi05MGRmLTMyZTktYWVhNWQ1Y2YzMTE1IiwiJHNjaGVtYSI6Imh0dHBzOi8vanNvbi1zY2hlbWEub3JnL2RyYWZ0LzIwMjAtMTIvc2NoZW1hIiwiZGVzY3JpcHRpb24iOiJNZXJjaGFudCBQcm9kdWN0IExpY2Vuc2UgQXBwbGljYXRpb24gQ3JlZGVudGlhbCBTY2hlbWEiLCJuYW1lIjoiTWVyY2hhbnQgUHJvZHVjdCBMaWNlbnNlIEFwcGxpY2F0aW9uIENyZWRlbnRpYWwgU2NoZW1hIiwicHJvcGVydGllcyI6eyJjcmVkZW50aWFsU3ViamVjdCI6eyJhZGRpdGlvbmFsUHJvcGVydGllcyI6dHJ1ZSwicHJvcGVydGllcyI6eyJwcm9kdWN0SWQiOnsiZGVzY3JpcHRpb24iOiJQcm9kdWN0IElEIHRvIGFjdGl2YXRlIChzaW5jZSBwYXltZW50IG1heSBjb250YWluIG11bHRpcGxlIHByb2R1Y3RzKSIsInR5cGUiOiJzdHJpbmcifX0sInJlcXVpcmVkIjpbInByb2R1Y3RJZCJdLCJ0eXBlIjoib2JqZWN0In19LCJ0eXBlIjoib2JqZWN0In19fQ.xRn_2lfLEtCZOqR2cGkaqS5cNqzzpqAKFZNjoBLdU49zNosS6CGnfWZh3bemxWS7OM964ihtJ2PO1xgzEC0LAw","schema":{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential"],"credentialSubject":{"$id":"6ad3d05c-ccf2-90df-32e9-aea5d5cf3115","$schema":"https://json-schema.org/draft/2020-12/schema","description":"Merchant Product License Application Credential Schema","name":"Merchant Product License Application Credential Schema","properties":{"credentialSubject":{"additionalProperties":true,"properties":{"productId":{"description":"Product ID to activate (since payment may contain multiple products)","type":"string"}},"required":["productId"],"type":"object"}},"type":"object"}}}`
 
 // Local in-memory cache (paymentStateStore) removed; use state machine memory and Redis uniformly
 
@@ -223,23 +229,23 @@ func getManifestIdCacheKey(productID, developerName string) string {
 	return fmt.Sprintf("%s:%s", productID, developerName)
 }
 
-// getManifestId fetches manifestId from developer service API with caching
-// Returns manifestId and error
-func getManifestId(productID, developerName string) (string, error) {
+// getManifestSchemaIDs fetches manifest/schema ids from developer service API with caching
+func getManifestSchemaIDs(productID, developerName string) (manifestSchemaIDs, error) {
 	if productID == "" {
-		return "", errors.New("productID is required")
+		return manifestSchemaIDs{}, errors.New("productID is required")
 	}
 	if developerName == "" {
-		return "", errors.New("developerName is required")
+		return manifestSchemaIDs{}, errors.New("developerName is required")
 	}
 
 	cacheKey := getManifestIdCacheKey(productID, developerName)
 
 	// Check cache first
 	if cached, ok := manifestIdCache.Load(cacheKey); ok {
-		if manifestId, ok := cached.(string); ok && manifestId != "" {
-			log.Printf("getManifestId: Using cached manifestId for productID=%s, developerName=%s: %s", productID, developerName, manifestId)
-			return manifestId, nil
+		if ids, ok := cached.(manifestSchemaIDs); ok && ids.ManifestId != "" {
+			log.Printf("getManifestSchemaIDs: Using cached ids for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
+				productID, developerName, ids.ManifestId, ids.PresentationDefinitionId, ids.ApplicationVerifiableCredentialId)
+			return ids, nil
 		}
 	}
 
@@ -255,40 +261,42 @@ func getManifestId(productID, developerName string) (string, error) {
 
 	// Double-check cache after acquiring lock (another goroutine might have fetched it)
 	if cached, ok := manifestIdCache.Load(cacheKey); ok {
-		if manifestId, ok := cached.(string); ok && manifestId != "" {
-			log.Printf("getManifestId: Using cached manifestId (after lock) for productID=%s, developerName=%s: %s", productID, developerName, manifestId)
-			return manifestId, nil
+		if ids, ok := cached.(manifestSchemaIDs); ok && ids.ManifestId != "" {
+			log.Printf("getManifestSchemaIDs: Using cached ids (after lock) for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
+				productID, developerName, ids.ManifestId, ids.PresentationDefinitionId, ids.ApplicationVerifiableCredentialId)
+			return ids, nil
 		}
 	}
 
 	// Cache miss, fetch from API
-	manifestId, err := fetchManifestIdFromAPI(productID, developerName)
+	ids, err := fetchManifestSchemaIDsFromAPI(productID, developerName)
 	if err != nil {
 		// Clean up fetching mutex on error
 		manifestIdFetching.Delete(cacheKey)
-		return "", fmt.Errorf("failed to fetch manifestId: %w", err)
+		return manifestSchemaIDs{}, fmt.Errorf("failed to fetch manifest/schema ids: %w", err)
 	}
 
 	// Store in cache
-	if manifestId != "" {
-		manifestIdCache.Store(cacheKey, manifestId)
-		log.Printf("getManifestId: Cached manifestId for productID=%s, developerName=%s: %s", productID, developerName, manifestId)
+	if ids.ManifestId != "" {
+		manifestIdCache.Store(cacheKey, ids)
+		log.Printf("getManifestSchemaIDs: Cached ids for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
+			productID, developerName, ids.ManifestId, ids.PresentationDefinitionId, ids.ApplicationVerifiableCredentialId)
 	}
 
 	// Clean up fetching mutex
 	manifestIdFetching.Delete(cacheKey)
 
-	return manifestId, nil
+	return ids, nil
 }
 
-// fetchManifestIdFromAPI calls the GetApplicationSchemaId API
-func fetchManifestIdFromAPI(productID, developerName string) (string, error) {
+// fetchManifestSchemaIDsFromAPI calls the GetApplicationSchemaId API
+func fetchManifestSchemaIDsFromAPI(productID, developerName string) (manifestSchemaIDs, error) {
 	// Convert developerName to lowercase for DNS compatibility
 	developerName = strings.ToLower(developerName)
 	baseURL := fmt.Sprintf("https://4c94e3111.%s", developerName)
 	endpoint := fmt.Sprintf("%s/api/grpc/AuthService/GetApplicationSchemaId", baseURL)
 
-	log.Printf("fetchManifestIdFromAPI: Requesting manifestId for productID=%s, developerName=%s, endpoint=%s", productID, developerName, endpoint)
+	log.Printf("fetchManifestSchemaIDsFromAPI: Requesting manifest/schema ids for productID=%s, developerName=%s, endpoint=%s", productID, developerName, endpoint)
 
 	// Create HTTP client with timeout
 	httpClient := resty.New()
@@ -301,38 +309,52 @@ func fetchManifestIdFromAPI(productID, developerName string) (string, error) {
 		Post(endpoint)
 
 	if err != nil {
-		return "", fmt.Errorf("failed to call GetApplicationSchemaId API: %w", err)
+		return manifestSchemaIDs{}, fmt.Errorf("failed to call GetApplicationSchemaId API: %w", err)
 	}
 
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-		return "", fmt.Errorf("GetApplicationSchemaId API returned non-2xx status: %d, body: %s", resp.StatusCode(), string(resp.Body()))
+		return manifestSchemaIDs{}, fmt.Errorf("GetApplicationSchemaId API returned non-2xx status: %d, body: %s", resp.StatusCode(), string(resp.Body()))
 	}
 
 	// Parse response
 	var apiResponse GetApplicationSchemaIdResponse
 	if err := json.Unmarshal(resp.Body(), &apiResponse); err != nil {
-		return "", fmt.Errorf("failed to parse API response: %w", err)
+		return manifestSchemaIDs{}, fmt.Errorf("failed to parse API response: %w", err)
 	}
 
 	if apiResponse.Code != 0 {
-		return "", fmt.Errorf("API returned error code: %d", apiResponse.Code)
+		return manifestSchemaIDs{}, fmt.Errorf("API returned error code: %d", apiResponse.Code)
 	}
 
 	if apiResponse.Data.ManifestId == "" {
-		return "", errors.New("manifestId is empty in API response")
+		return manifestSchemaIDs{}, errors.New("manifestId is empty in API response")
 	}
 
-	log.Printf("fetchManifestIdFromAPI: Successfully fetched manifestId=%s for productID=%s", apiResponse.Data.ManifestId, productID)
-	return apiResponse.Data.ManifestId, nil
+	if apiResponse.Data.PresentationDefinitionId == "" {
+		return manifestSchemaIDs{}, errors.New("presentationDefinitionId is empty in API response")
+	}
+
+	if apiResponse.Data.ApplicationVerifiableCredentialId == "" {
+		return manifestSchemaIDs{}, errors.New("applicationVerifiableCredentialId is empty in API response")
+	}
+
+	log.Printf("fetchManifestSchemaIDsFromAPI: Successfully fetched manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s for productID=%s",
+		apiResponse.Data.ManifestId, apiResponse.Data.PresentationDefinitionId, apiResponse.Data.ApplicationVerifiableCredentialId, productID)
+
+	return manifestSchemaIDs{
+		ManifestId:                        apiResponse.Data.ManifestId,
+		PresentationDefinitionId:          apiResponse.Data.PresentationDefinitionId,
+		ApplicationVerifiableCredentialId: apiResponse.Data.ApplicationVerifiableCredentialId,
+	}, nil
 }
 
 // getMerchantProductLicenseCredentialManifestJSON returns the manifest JSON with manifestId injected
 // This function replaces direct usage of merchantProductLicenseCredentialManifestJSON variable
 func getMerchantProductLicenseCredentialManifestJSON(productID, developerName string) (string, error) {
 	// Get manifestId (with caching)
-	manifestId, err := getManifestId(productID, developerName)
+	ids, err := getManifestSchemaIDs(productID, developerName)
 	if err != nil {
-		return "", fmt.Errorf("failed to get manifestId: %w", err)
+		return "", fmt.Errorf("failed to get manifest/schema ids: %w", err)
 	}
 
 	// Parse the base manifest JSON
@@ -342,7 +364,14 @@ func getMerchantProductLicenseCredentialManifestJSON(productID, developerName st
 	}
 
 	// Inject manifestId into the JSON
-	manifestData["id"] = manifestId
+	manifestData["id"] = ids.ManifestId
+
+	// Inject presentationDefinitionId if present
+	if pd, ok := manifestData["presentation_definition"].(map[string]interface{}); ok {
+		pd["id"] = ids.PresentationDefinitionId
+	} else {
+		log.Printf("getMerchantProductLicenseCredentialManifestJSON: presentation_definition missing, cannot set id for productID=%s, developerName=%s", productID, developerName)
+	}
 
 	// Marshal back to JSON string
 	manifestJSONBytes, err := json.Marshal(manifestData)
@@ -351,6 +380,28 @@ func getMerchantProductLicenseCredentialManifestJSON(productID, developerName st
 	}
 
 	return string(manifestJSONBytes), nil
+}
+
+// getMerchantProductLicenseApplicationVerifiableCredentialJSON returns application VC schema JSON with id injected
+func getMerchantProductLicenseApplicationVerifiableCredentialJSON(productID, developerName string) (string, error) {
+	ids, err := getManifestSchemaIDs(productID, developerName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get manifest/schema ids: %w", err)
+	}
+
+	var schemaData map[string]interface{}
+	if err := json.Unmarshal([]byte(merchantProductLicenseApplicationVerifiableCredentialJSON), &schemaData); err != nil {
+		return "", fmt.Errorf("failed to parse base application VC schema JSON: %w", err)
+	}
+
+	schemaData["id"] = ids.ApplicationVerifiableCredentialId
+
+	schemaJSONBytes, err := json.Marshal(schemaData)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal application VC schema JSON: %w", err)
+	}
+
+	return string(schemaJSONBytes), nil
 }
 
 // VCQueryResult represents the result of querying VC
@@ -383,8 +434,12 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 	}
 
 	// Include application_verifiable_credential_schema for larepass
+	appSchemaJSON, err := getMerchantProductLicenseApplicationVerifiableCredentialJSON(productID, developerName)
+	if err != nil {
+		return fmt.Errorf("failed to get application VC schema JSON: %w", err)
+	}
 	var applicationCredentialSchema map[string]interface{}
-	if err := json.Unmarshal([]byte(merchantProductLicenseApplicationVerifiableCredentialJSON), &applicationCredentialSchema); err != nil {
+	if err := json.Unmarshal([]byte(appSchemaJSON), &applicationCredentialSchema); err != nil {
 		return fmt.Errorf("failed to parse application VC schema JSON: %w", err)
 	}
 	signBody["application_verifiable_credential_schema"] = applicationCredentialSchema
@@ -463,8 +518,13 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 	}
 
 	// Include application_verifiable_credential_schema for fetch-signature flow
+	appSchemaJSON, err := getMerchantProductLicenseApplicationVerifiableCredentialJSON(productID, developerName)
+	if err != nil {
+		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to get application VC schema JSON: %v", err)
+		return fmt.Errorf("failed to get application VC schema JSON: %w", err)
+	}
 	var applicationCredentialSchema map[string]interface{}
-	if err := json.Unmarshal([]byte(merchantProductLicenseApplicationVerifiableCredentialJSON), &applicationCredentialSchema); err != nil {
+	if err := json.Unmarshal([]byte(appSchemaJSON), &applicationCredentialSchema); err != nil {
 		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to parse application VC schema JSON: %v", err)
 		return fmt.Errorf("failed to parse application VC schema JSON: %w", err)
 	}
@@ -522,6 +582,61 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 		log.Printf("notifyLarePassToFetchSignature: Successfully notified frontend syncing status for user=%s app=%s product=%s", userID, appID, productID)
 	}
 
+	return nil
+}
+
+// notifyLarePassToSaveVC sends the confirmed VC to LarePass for persistence (topic: save_payment_vc)
+// The payload deliberately includes identifiers to help LarePass correlate the VC.
+func notifyLarePassToSaveVC(dataSender DataSenderInterface, state *PaymentState) error {
+	if dataSender == nil {
+		return errors.New("data sender is nil")
+	}
+	if state == nil {
+		return errors.New("payment state is nil")
+	}
+	if state.VC == "" {
+		return errors.New("vc is empty, cannot notify larepass")
+	}
+
+	signBody := map[string]interface{}{
+		"vc":         state.VC,
+		"product_id": state.ProductID,
+	}
+
+	if state.AppID != "" {
+		signBody["app_id"] = state.AppID
+	}
+	if state.AppName != "" {
+		signBody["app_name"] = state.AppName
+	}
+	if state.DeveloperName != "" {
+		signBody["developer_name"] = state.DeveloperName
+	}
+	if state.Developer.DID != "" {
+		signBody["developer_did"] = state.Developer.DID
+	}
+	if state.TxHash != "" {
+		signBody["tx_hash"] = state.TxHash
+	}
+	if state.UserID != "" {
+		signBody["user_id"] = state.UserID
+	}
+
+	update := types.SignNotificationUpdate{
+		Sign: types.SignNotificationData{
+			SignBody: signBody,
+		},
+		User:  state.UserID,
+		Vars:  make(map[string]string),
+		Topic: "save_payment_vc",
+	}
+
+	log.Printf("notifyLarePassToSaveVC: Sending VC to LarePass for user=%s app=%s product=%s topic=save_payment_vc", state.UserID, state.AppID, state.ProductID)
+	if err := dataSender.SendSignNotificationUpdate(update); err != nil {
+		log.Printf("notifyLarePassToSaveVC: ERROR - failed to send VC to LarePass: %v", err)
+		return err
+	}
+	log.Printf("notifyLarePassToSaveVC: Successfully sent VC to LarePass for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
 	return nil
 }
 
@@ -1229,6 +1344,29 @@ func buildPurchaseInfoFromState(state *PaymentState) *types.PurchaseInfo {
 		VC:     state.VC,
 		Status: string(state.PaymentStatus),
 	}
+}
+
+// isValidDID checks if a string is a valid DID format (starts with "did:")
+func isValidDID(did string) bool {
+	return strings.HasPrefix(did, "did:")
+}
+
+// getValidDeveloperDID validates and returns developer DID from state
+// Returns empty string and logs error if DID is invalid
+// Note: This function does not attempt to refetch DID to avoid state inconsistency
+func getValidDeveloperDID(state *PaymentState) string {
+	if state == nil {
+		log.Printf("getValidDeveloperDID: state is nil")
+		return ""
+	}
+
+	did := state.Developer.DID
+	if !isValidDID(did) {
+		log.Printf("getValidDeveloperDID: Invalid DID format in state: %s (expected format: did:key:...), DeveloperName=%s", did, state.DeveloperName)
+		return ""
+	}
+
+	return did
 }
 
 // getUserDID obtains user's DID via X-Forwarded-Host

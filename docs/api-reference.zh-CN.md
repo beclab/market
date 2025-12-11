@@ -690,6 +690,31 @@
 }
 ```
 
+### POST /payment/resend-vc
+
+当支付已确认且 VC 存在时，补偿性重推 VC 给 LarePass（topic: save_payment_vc），用于处理首推可能未达的场景。
+
+**请求体:**
+```json
+{
+  "product_id": "string"
+}
+```
+
+**请求头:**
+- `X-Bfl-User`: 必需
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "VC resent to LarePass successfully",
+  "data": {
+    "product_id": "string"
+  }
+}
+```
+
 ### POST /payment/fetch-signature-callback
 
 获取签名回调（来自 LarePass）。

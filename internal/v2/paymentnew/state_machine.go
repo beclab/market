@@ -32,8 +32,9 @@ func cloneFrontendData(data map[string]interface{}) map[string]interface{} {
 
 func attachFrontendPayload(response map[string]interface{}, data map[string]interface{}) {
 	cloned := cloneFrontendData(data)
-	if len(cloned) == 0 {
-		return
+	// Always set frontend_data field, even if empty, to ensure consistent response structure
+	if cloned == nil {
+		cloned = make(map[string]interface{})
 	}
 	response["frontend_data"] = cloned
 	response["frontend_payment_started_payload"] = FrontendPaymentStartedPayload{
@@ -61,12 +62,38 @@ func (psm *PaymentStateMachine) getState(userID, appID, productID string) (*Paym
 
 // updateState updates a state (internal method)
 func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentState) error) error {
-	psm.mu.Lock()
-	defer psm.mu.Unlock()
-
+	psm.mu.RLock()
 	state, exists := psm.states[key]
+	psm.mu.RUnlock()
+
 	if !exists {
-		return fmt.Errorf("state not found for key %s", key)
+		// Try to load from Redis if not in memory
+		// Extract userID, appID, productID from key (format: "userID:appID:productID")
+		parts := strings.Split(key, ":")
+		if len(parts) != 3 {
+			return fmt.Errorf("invalid state key format: %s", key)
+		}
+		if loaded, err := psm.LoadState(parts[0], parts[1], parts[2]); err == nil && loaded != nil {
+			state = loaded
+			log.Printf("updateState: Loaded state from Redis for key %s", key)
+		} else {
+			return fmt.Errorf("state not found for key %s", key)
+		}
+	} else {
+		// State exists in memory, but if FrontendData is nil/empty, reload from Redis to ensure we have latest data
+		// This prevents overwriting FrontendData that was saved by a recent operation
+		if state.FrontendData == nil || len(state.FrontendData) == 0 {
+			parts := strings.Split(key, ":")
+			if len(parts) == 3 {
+				if loaded, err := psm.forceReloadState(parts[0], parts[1], parts[2]); err == nil && loaded != nil {
+					// Only use loaded state if it has FrontendData, otherwise keep memory state
+					if loaded.FrontendData != nil && len(loaded.FrontendData) > 0 {
+						state = loaded
+						log.Printf("updateState: Reloaded state from Redis for key %s (memory state had empty FrontendData)", key)
+					}
+				}
+			}
+		}
 	}
 
 	// Copy state to avoid race condition
@@ -76,7 +103,10 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 	}
 
 	newState.UpdatedAt = time.Now()
+
+	psm.mu.Lock()
 	psm.states[key] = &newState
+	psm.mu.Unlock()
 
 	// Sync to persistent store asynchronously to avoid blocking
 	go func(st *PaymentState) {
@@ -107,12 +137,18 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 	psm.mu.Unlock()
 
 	if !exists {
-		return fmt.Errorf("state not found for key %s", key)
+		// Try to load from Redis if not in memory
+		if loaded, err := psm.LoadState(userID, appID, productID); err == nil && loaded != nil {
+			state = loaded
+			log.Printf("processEvent: Loaded state from Redis for key %s", key)
+		} else {
+			return fmt.Errorf("state not found for key %s", key)
+		}
 	}
 
 	log.Printf("Processing event %s for state %s", event, key)
-	log.Printf("Current state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
-		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus)
+	log.Printf("Current state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s, FrontendData length=%d",
+		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus, len(state.FrontendData))
 
 	// Handle state transition by event type
 	var nextState *PaymentState
@@ -185,6 +221,11 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	// 0) Error states that should short-circuit (no further processing)
 	if newState.SignatureStatus == SignatureErrorNoRecord {
 		log.Printf("handleStartPayment: signature status is error_no_record, no further processing needed for %s", newState.GetKey())
+		log.Printf("handleStartPayment: FrontendData length=%d before returning", len(newState.FrontendData))
+		// Ensure FrontendData is preserved (should already be set, but ensure it's not nil)
+		if newState.FrontendData == nil {
+			newState.FrontendData = make(map[string]interface{})
+		}
 		return &newState, nil
 	}
 
@@ -288,17 +329,22 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 				latest.PaymentStatus == PaymentFrontendStarted ||
 				latest.PaymentStatus == PaymentFrontendCompleted ||
 				latest.PaymentStatus == PaymentDeveloperConfirmed) {
-				_ = notifyFrontendPaymentRequired(
-					psm.dataSender,
-					newState.UserID,
-					newState.AppID,
-					newState.AppName,
-					newState.SourceID,
-					newState.ProductID,
-					newState.Developer.DID,
-					effectiveHost,
-					nil, // appInfo not available in state machine context
-				)
+				developerDID := getValidDeveloperDID(&newState)
+				if developerDID != "" {
+					_ = notifyFrontendPaymentRequired(
+						psm.dataSender,
+						newState.UserID,
+						newState.AppID,
+						newState.AppName,
+						newState.SourceID,
+						newState.ProductID,
+						developerDID,
+						effectiveHost,
+						nil, // appInfo not available in state machine context
+					)
+				} else {
+					log.Printf("Cannot notify frontend payment required: invalid developer DID in newState")
+				}
 
 				_ = psm.updateState(newState.GetKey(), func(s *PaymentState) error {
 					switch s.PaymentStatus {
@@ -463,6 +509,13 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 			log.Printf("Failed to notify frontend purchase completed for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
 		} else {
 			log.Printf("Successfully notified frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+		}
+
+		// Also push VC to LarePass for persistence
+		if err := notifyLarePassToSaveVC(psm.dataSender, &newState); err != nil {
+			log.Printf("Failed to notify LarePass save_payment_vc for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+		} else {
+			log.Printf("Successfully notified LarePass save_payment_vc for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 		}
 	} else {
 		log.Printf("Warning: dataSender is nil, cannot notify frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
@@ -785,6 +838,11 @@ func (psm *PaymentStateMachine) LoadState(userID, appID, productID string) (*Pay
 	if err := json.Unmarshal([]byte(val), &st); err != nil {
 		return nil, fmt.Errorf("failed to parse state from redis: %w", err)
 	}
+	// Ensure FrontendData is at least an empty map, not nil, to avoid issues with omitempty
+	// This ensures FrontendData is always available even if it wasn't serialized in Redis
+	if st.FrontendData == nil {
+		st.FrontendData = make(map[string]interface{})
+	}
 	psm.setState(&st)
 	return &st, nil
 }
@@ -810,6 +868,11 @@ func (psm *PaymentStateMachine) forceReloadState(userID, appID, productID string
 	if err := json.Unmarshal([]byte(val), &st); err != nil {
 		return nil, fmt.Errorf("failed to parse state from redis: %w", err)
 	}
+	// Ensure FrontendData is at least an empty map, not nil, to avoid issues with omitempty
+	// This ensures FrontendData is always available even if it wasn't serialized in Redis
+	if st.FrontendData == nil {
+		st.FrontendData = make(map[string]interface{})
+	}
 	psm.setState(&st)
 	return &st, nil
 }
@@ -825,6 +888,11 @@ func (psm *PaymentStateMachine) SaveState(state *PaymentState) error {
 	rc := psm.settingsManager.GetRedisClient()
 	if rc == nil {
 		return fmt.Errorf("redis client is nil")
+	}
+	// Ensure FrontendData is at least an empty map, not nil, before serialization
+	// This ensures the field is always present in JSON, even if empty
+	if state.FrontendData == nil {
+		state.FrontendData = make(map[string]interface{})
 	}
 	data, err := json.Marshal(state)
 	if err != nil {
@@ -1120,6 +1188,18 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}, nil
 	}
 
+	// 1.7) Frontend has completed payment -> waiting_developer_confirmation
+	// Check this early to avoid returning other states when payment is already completed
+	// This prevents frontend from continuing operations when waiting for developer confirmation
+	if state.PaymentStatus == PaymentFrontendCompleted {
+		response := map[string]interface{}{
+			"status":  "waiting_developer_confirmation",
+			"message": "payment completed, waiting for developer confirmation",
+		}
+		attachFrontendPayload(response, state.FrontendData)
+		return response, nil
+	}
+
 	// Create HTTP client for API calls
 	httpClient := resty.New()
 	httpClient.SetTimeout(10 * time.Second)
@@ -1140,15 +1220,20 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 
 	// 1.5) Error states handling: check if we can still return payment info for retry
 	// If JWS exists and payment notification was sent, allow frontend to retry payment
+	// Note: This should not apply when PaymentFrontendCompleted (already handled above)
 	if state.SignatureStatus == SignatureErrorNoRecord {
 		// If JWS exists and payment notification was sent (or frontend already proceeded), return payment data to allow retry
 		// Use payment_retry_required instead of payment_required to distinguish from unpaid state
+		// Exclude PaymentFrontendCompleted as it's already handled above
 		if state.JWS != "" &&
 			(state.PaymentStatus == PaymentNotificationSent ||
-				state.PaymentStatus == PaymentFrontendStarted ||
-				state.PaymentStatus == PaymentFrontendCompleted) {
+				state.PaymentStatus == PaymentFrontendStarted) {
 			log.Printf("buildPurchaseResponse: error_no_record but JWS and notification exist, returning payment data for retry")
-			developerDID := state.Developer.DID
+			log.Printf("buildPurchaseResponse: FrontendData length=%d for payment_retry_required", len(state.FrontendData))
+			developerDID := getValidDeveloperDID(state)
+			if developerDID == "" {
+				return nil, fmt.Errorf("invalid developer DID in state, cannot create payment data")
+			}
 			userDID, err := getUserDID(userID, xForwardedHost)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get user DID: %w", err)
@@ -1159,7 +1244,9 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 				"payment_data": paymentData,
 				"message":      "developer has no matching payment record, please retry payment",
 			}
+			// Ensure FrontendData is attached - attachFrontendPayload now always sets frontend_data field
 			attachFrontendPayload(response, state.FrontendData)
+			log.Printf("buildPurchaseResponse: payment_retry_required response includes frontend_data with %d keys", len(response["frontend_data"].(map[string]interface{})))
 			return response, nil
 		}
 		// Otherwise return error message
@@ -1177,7 +1264,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 
 	// 2) Signed -> return payment data for frontend transfer
 	if state.SignatureStatus == SignatureRequiredAndSigned {
-		developerDID := state.Developer.DID
+		developerDID := getValidDeveloperDID(state)
+		if developerDID == "" {
+			return nil, fmt.Errorf("invalid developer DID in state, cannot create payment data")
+		}
 		userDID, err := getUserDID(userID, xForwardedHost)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
@@ -1196,7 +1286,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 	// Note: SignatureErrorNoRecord and SignatureErrorNeedReSign cases are already handled above, so we exclude them here
 	if state.JWS != "" && state.PaymentStatus == PaymentNotificationSent &&
 		state.SignatureStatus != SignatureErrorNoRecord && state.SignatureStatus != SignatureErrorNeedReSign {
-		developerDID := state.Developer.DID
+		developerDID := getValidDeveloperDID(state)
+		if developerDID == "" {
+			return nil, fmt.Errorf("invalid developer DID in state, cannot create payment data")
+		}
 		userDID, err := getUserDID(userID, xForwardedHost)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user DID: %w", err)
@@ -1210,7 +1303,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		return response, nil
 	}
 
-	// 3) Frontend has completed payment
+	// 3) Frontend has started payment
 	if state.PaymentStatus == PaymentFrontendStarted {
 		response := map[string]interface{}{
 			"status": "payment_frontend_started",
@@ -1219,14 +1312,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		return response, nil
 	}
 
-	if state.PaymentStatus == PaymentFrontendCompleted {
-		response := map[string]interface{}{
-			"status":  "waiting_developer_confirmation",
-			"message": "payment completed, waiting for developer confirmation",
-		}
-		attachFrontendPayload(response, state.FrontendData)
-		return response, nil
-	}
+	// PaymentFrontendCompleted is already handled above (1.7) to prioritize waiting_developer_confirmation
 
 	// 4) VC present -> purchased (fallback check, should have been caught earlier)
 	if state.DeveloperSync == DeveloperSyncCompleted && state.VC != "" {
