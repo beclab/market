@@ -505,6 +505,39 @@ func resolveProductID(appInfo *types.AppInfo, realAppID string) string {
 	return realAppID
 }
 
+// ResendPaymentVCToLarePass re-sends confirmed VC to LarePass (topic: save_payment_vc)
+// 用于补偿初次推送可能未送达的场景；仅在 VC 已确认后允许调用。
+func ResendPaymentVCToLarePass(userID, productID string) error {
+	if globalStateMachine == nil {
+		return fmt.Errorf("state machine not initialized")
+	}
+
+	state := globalStateMachine.findStateByUserAndProduct(userID, productID)
+	if state == nil {
+		return fmt.Errorf("payment state not found for user %s and product %s", userID, productID)
+	}
+
+	latest, err := globalStateMachine.getState(state.UserID, state.AppID, state.ProductID)
+	if err == nil && latest != nil {
+		state = latest
+	}
+
+	if state.VC == "" {
+		return fmt.Errorf("vc not available for user %s product %s", userID, productID)
+	}
+
+	if state.DeveloperSync != DeveloperSyncCompleted || state.PaymentStatus != PaymentDeveloperConfirmed {
+		return fmt.Errorf("payment not confirmed, developer_sync=%s payment_status=%s", state.DeveloperSync, state.PaymentStatus)
+	}
+
+	if globalStateMachine.dataSender == nil {
+		return fmt.Errorf("data sender is nil")
+	}
+
+	stateCopy := *state
+	return notifyLarePassToSaveVC(globalStateMachine.dataSender, &stateCopy)
+}
+
 // StartFrontendPayment marks payment state as frontend started and caches frontend provided data
 func StartFrontendPayment(userID, appID, sourceID, productID, xForwardedHost string, appInfo *types.AppInfo, frontendData map[string]interface{}) (map[string]interface{}, error) {
 	log.Printf("=== StartFrontendPayment ===")

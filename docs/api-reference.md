@@ -689,6 +689,31 @@ Frontend signals payment readiness.
 }
 ```
 
+### POST /payment/resend-vc
+
+When payment is already confirmed and the VC exists, re-push the VC to LarePass (topic: `save_payment_vc`) as a compensating action in case the first push was missed.
+
+**Request Body:**
+```json
+{
+  "product_id": "string"
+}
+```
+
+**Headers:**
+- `X-Bfl-User`: Required
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "VC resent to LarePass successfully",
+  "data": {
+    "product_id": "string"
+  }
+}
+```
+
 ### POST /payment/fetch-signature-callback
 
 Fetch signature callback (from LarePass).

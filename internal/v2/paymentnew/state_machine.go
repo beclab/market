@@ -510,6 +510,13 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 		} else {
 			log.Printf("Successfully notified frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 		}
+
+		// Also push VC to LarePass for persistence
+		if err := notifyLarePassToSaveVC(psm.dataSender, &newState); err != nil {
+			log.Printf("Failed to notify LarePass save_payment_vc for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+		} else {
+			log.Printf("Successfully notified LarePass save_payment_vc for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+		}
 	} else {
 		log.Printf("Warning: dataSender is nil, cannot notify frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 	}

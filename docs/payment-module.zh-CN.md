@@ -160,6 +160,9 @@ stateDiagram-v2
   - `POST /api/v2/payment/start-polling`  
     - 函数: `StartPaymentPolling(userID, sourceID, appID, productID, txHash, xForwardedHost, systemChainID, appInfoLatest)`  
     - 用途: 前端在链上支付成功后，上报 `txHash` 并触发后端开始向开发者收银台轮询 VC。
+- `POST /api/v2/payment/resend-vc`  
+  - 函数: `ResendPaymentVCToLarePass(userID, productID)`（路由层在 `pkg/v2/api` 调用）  
+  - 用途: 当支付已确认（VC 已存在）时，补偿性地将 VC 重新推送到 LarePass（topic: `save_payment_vc`），避免首次推送丢失导致状态不同步。
 
 - **LarePass 回调入口**
   - `POST /api/v2/payment/submit-signature`  
@@ -258,6 +261,9 @@ stateDiagram-v2
   - 主题 `fetch_payment_signature`（取签名）  
     - 构造者: `notifyLarePassToFetchSignature`  
     - 发送时机: 预处理或 `PurchaseApp` 调用 `triggerPaymentStateSync` 时，发现签名状态允许/需要从 LarePass 主动拉取签名（通常在用户此前已签过但本地缺少 JWS 的场景）。
+  - 主题 `save_payment_vc`（保存 VC）  
+    - 构造者: `notifyLarePassToSaveVC`  
+    - 发送时机: 状态机处理 `vc_received`、确认 VC 并落库后自动推送；若首推可能未达，可通过 `POST /api/v2/payment/resend-vc` 再次补偿推送。
 
 ## 4. 待解决问题与设计考量
 
