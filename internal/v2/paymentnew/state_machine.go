@@ -62,12 +62,38 @@ func (psm *PaymentStateMachine) getState(userID, appID, productID string) (*Paym
 
 // updateState updates a state (internal method)
 func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentState) error) error {
-	psm.mu.Lock()
-	defer psm.mu.Unlock()
-
+	psm.mu.RLock()
 	state, exists := psm.states[key]
+	psm.mu.RUnlock()
+
 	if !exists {
-		return fmt.Errorf("state not found for key %s", key)
+		// Try to load from Redis if not in memory
+		// Extract userID, appID, productID from key (format: "userID:appID:productID")
+		parts := strings.Split(key, ":")
+		if len(parts) != 3 {
+			return fmt.Errorf("invalid state key format: %s", key)
+		}
+		if loaded, err := psm.LoadState(parts[0], parts[1], parts[2]); err == nil && loaded != nil {
+			state = loaded
+			log.Printf("updateState: Loaded state from Redis for key %s", key)
+		} else {
+			return fmt.Errorf("state not found for key %s", key)
+		}
+	} else {
+		// State exists in memory, but if FrontendData is nil/empty, reload from Redis to ensure we have latest data
+		// This prevents overwriting FrontendData that was saved by a recent operation
+		if state.FrontendData == nil || len(state.FrontendData) == 0 {
+			parts := strings.Split(key, ":")
+			if len(parts) == 3 {
+				if loaded, err := psm.forceReloadState(parts[0], parts[1], parts[2]); err == nil && loaded != nil {
+					// Only use loaded state if it has FrontendData, otherwise keep memory state
+					if loaded.FrontendData != nil && len(loaded.FrontendData) > 0 {
+						state = loaded
+						log.Printf("updateState: Reloaded state from Redis for key %s (memory state had empty FrontendData)", key)
+					}
+				}
+			}
+		}
 	}
 
 	// Copy state to avoid race condition
@@ -77,7 +103,10 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 	}
 
 	newState.UpdatedAt = time.Now()
+
+	psm.mu.Lock()
 	psm.states[key] = &newState
+	psm.mu.Unlock()
 
 	// Sync to persistent store asynchronously to avoid blocking
 	go func(st *PaymentState) {
