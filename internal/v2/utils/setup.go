@@ -48,6 +48,19 @@ type AppServiceResponse struct {
 			Reason     string `json:"reason"`
 			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
+		SharedEntrances []struct {
+			Name            string `json:"name"`
+			Host            string `json:"host"`
+			Port            int32  `json:"port"`
+			Icon            string `json:"icon,omitempty"`
+			Title           string `json:"title,omitempty"`
+			AuthLevel       string `json:"authLevel,omitempty"`
+			Invisible       bool   `json:"invisible,omitempty"`
+			URL             string `json:"url,omitempty"`
+			OpenMethod      string `json:"openMethod,omitempty"`
+			WindowPushState bool   `json:"windowPushState,omitempty"`
+			Skip            bool   `json:"skip,omitempty"`
+		} `json:"sharedEntrances,omitempty"`
 	} `json:"status"`
 }
 
@@ -68,6 +81,19 @@ type AppInfo struct {
 			Reason     string `json:"reason"`
 			Url        string `json:"url"`
 		} `json:"entranceStatuses"`
+		SharedEntrances []struct {
+			Name            string `json:"name"`
+			Host            string `json:"host"`
+			Port            int32  `json:"port"`
+			Icon            string `json:"icon,omitempty"`
+			Title           string `json:"title,omitempty"`
+			AuthLevel       string `json:"authLevel,omitempty"`
+			Invisible       bool   `json:"invisible,omitempty"`
+			URL             string `json:"url,omitempty"`
+			OpenMethod      string `json:"openMethod,omitempty"`
+			WindowPushState bool   `json:"windowPushState,omitempty"`
+			Skip            bool   `json:"skip,omitempty"`
+		} `json:"sharedEntrances,omitempty"`
 	} `json:"status"`
 }
 
@@ -640,6 +666,27 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 		})
 	}
 	data["entranceStatuses"] = entrances
+
+	// Carry SharedEntrances if backend status provides them
+	if len(app.Status.SharedEntrances) > 0 {
+		sharedEntrances := make([]interface{}, 0, len(app.Status.SharedEntrances))
+		for _, se := range app.Status.SharedEntrances {
+			sharedEntrances = append(sharedEntrances, map[string]interface{}{
+				"name":            se.Name,
+				"host":            se.Host,
+				"port":            se.Port,
+				"icon":            se.Icon,
+				"title":           se.Title,
+				"authLevel":       se.AuthLevel,
+				"invisible":       se.Invisible,
+				"url":             se.URL,
+				"openMethod":      se.OpenMethod,
+				"windowPushState": se.WindowPushState,
+				"skip":            se.Skip,
+			})
+		}
+		data["sharedEntrances"] = sharedEntrances
+	}
 
 	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppInfoLastInstalled)
 }
