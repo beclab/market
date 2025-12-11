@@ -479,6 +479,12 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 				newAppState.Status.Title = existingAppState.Status.Title
 			}
 
+			// Preserve SharedEntrances if new state lacks them but cache has some
+			if len(newAppState.Status.SharedEntrances) == 0 && len(existingAppState.Status.SharedEntrances) > 0 {
+				glog.Infof("New app state for %s has empty SharedEntrances, preserving old shared entrances", newAppState.Status.Name)
+				newAppState.Status.SharedEntrances = existingAppState.Status.SharedEntrances
+			}
+
 			// If new app state has empty EntranceStatuses, preserve the old ones
 			if len(newAppState.Status.EntranceStatuses) == 0 && len(existingAppState.Status.EntranceStatuses) > 0 {
 				glog.Infof("New app state for %s has empty EntranceStatuses, preserving old entrance statuses", newAppState.Status.Name)
