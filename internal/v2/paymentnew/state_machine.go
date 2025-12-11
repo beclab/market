@@ -32,8 +32,9 @@ func cloneFrontendData(data map[string]interface{}) map[string]interface{} {
 
 func attachFrontendPayload(response map[string]interface{}, data map[string]interface{}) {
 	cloned := cloneFrontendData(data)
-	if len(cloned) == 0 {
-		return
+	// Always set frontend_data field, even if empty, to ensure consistent response structure
+	if cloned == nil {
+		cloned = make(map[string]interface{})
 	}
 	response["frontend_data"] = cloned
 	response["frontend_payment_started_payload"] = FrontendPaymentStartedPayload{
@@ -785,6 +786,11 @@ func (psm *PaymentStateMachine) LoadState(userID, appID, productID string) (*Pay
 	if err := json.Unmarshal([]byte(val), &st); err != nil {
 		return nil, fmt.Errorf("failed to parse state from redis: %w", err)
 	}
+	// Ensure FrontendData is at least an empty map, not nil, to avoid issues with omitempty
+	// This ensures FrontendData is always available even if it wasn't serialized in Redis
+	if st.FrontendData == nil {
+		st.FrontendData = make(map[string]interface{})
+	}
 	psm.setState(&st)
 	return &st, nil
 }
@@ -809,6 +815,11 @@ func (psm *PaymentStateMachine) forceReloadState(userID, appID, productID string
 	var st PaymentState
 	if err := json.Unmarshal([]byte(val), &st); err != nil {
 		return nil, fmt.Errorf("failed to parse state from redis: %w", err)
+	}
+	// Ensure FrontendData is at least an empty map, not nil, to avoid issues with omitempty
+	// This ensures FrontendData is always available even if it wasn't serialized in Redis
+	if st.FrontendData == nil {
+		st.FrontendData = make(map[string]interface{})
 	}
 	psm.setState(&st)
 	return &st, nil
@@ -1161,6 +1172,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			(state.PaymentStatus == PaymentNotificationSent ||
 				state.PaymentStatus == PaymentFrontendStarted) {
 			log.Printf("buildPurchaseResponse: error_no_record but JWS and notification exist, returning payment data for retry")
+			log.Printf("buildPurchaseResponse: FrontendData length=%d for payment_retry_required", len(state.FrontendData))
 			developerDID := state.Developer.DID
 			userDID, err := getUserDID(userID, xForwardedHost)
 			if err != nil {
@@ -1172,12 +1184,9 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 				"payment_data": paymentData,
 				"message":      "developer has no matching payment record, please retry payment",
 			}
-			// Ensure FrontendData is attached
+			// Ensure FrontendData is attached - attachFrontendPayload now always sets frontend_data field
 			attachFrontendPayload(response, state.FrontendData)
-			// Also set frontend_data directly to match GetPaymentStatus behavior
-			if len(state.FrontendData) > 0 {
-				response["frontend_data"] = cloneFrontendData(state.FrontendData)
-			}
+			log.Printf("buildPurchaseResponse: payment_retry_required response includes frontend_data with %d keys", len(response["frontend_data"].(map[string]interface{})))
 			return response, nil
 		}
 		// Otherwise return error message
