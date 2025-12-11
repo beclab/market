@@ -108,12 +108,18 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 	psm.mu.Unlock()
 
 	if !exists {
-		return fmt.Errorf("state not found for key %s", key)
+		// Try to load from Redis if not in memory
+		if loaded, err := psm.LoadState(userID, appID, productID); err == nil && loaded != nil {
+			state = loaded
+			log.Printf("processEvent: Loaded state from Redis for key %s", key)
+		} else {
+			return fmt.Errorf("state not found for key %s", key)
+		}
 	}
 
 	log.Printf("Processing event %s for state %s", event, key)
-	log.Printf("Current state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
-		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus)
+	log.Printf("Current state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s, FrontendData length=%d",
+		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus, len(state.FrontendData))
 
 	// Handle state transition by event type
 	var nextState *PaymentState
@@ -186,6 +192,11 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	// 0) Error states that should short-circuit (no further processing)
 	if newState.SignatureStatus == SignatureErrorNoRecord {
 		log.Printf("handleStartPayment: signature status is error_no_record, no further processing needed for %s", newState.GetKey())
+		log.Printf("handleStartPayment: FrontendData length=%d before returning", len(newState.FrontendData))
+		// Ensure FrontendData is preserved (should already be set, but ensure it's not nil)
+		if newState.FrontendData == nil {
+			newState.FrontendData = make(map[string]interface{})
+		}
 		return &newState, nil
 	}
 
@@ -836,6 +847,11 @@ func (psm *PaymentStateMachine) SaveState(state *PaymentState) error {
 	rc := psm.settingsManager.GetRedisClient()
 	if rc == nil {
 		return fmt.Errorf("redis client is nil")
+	}
+	// Ensure FrontendData is at least an empty map, not nil, before serialization
+	// This ensures the field is always present in JSON, even if empty
+	if state.FrontendData == nil {
+		state.FrontendData = make(map[string]interface{})
 	}
 	data, err := json.Marshal(state)
 	if err != nil {
