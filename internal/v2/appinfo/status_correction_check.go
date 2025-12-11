@@ -1049,6 +1049,19 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 				Url        string `json:"url"`
 				Invisible  bool   `json:"invisible"`
 			} `json:"entranceStatuses"`
+			SharedEntrances []struct {
+				Name            string `json:"name"`
+				Host            string `json:"host"`
+				Port            int32  `json:"port"`
+				Icon            string `json:"icon,omitempty"`
+				Title           string `json:"title,omitempty"`
+				AuthLevel       string `json:"authLevel,omitempty"`
+				Invisible       bool   `json:"invisible,omitempty"`
+				URL             string `json:"url,omitempty"`
+				OpenMethod      string `json:"openMethod,omitempty"`
+				WindowPushState bool   `json:"windowPushState,omitempty"`
+				Skip            bool   `json:"skip,omitempty"`
+			} `json:"sharedEntrances,omitempty"`
 		}{
 			Name:               app.Spec.Name,
 			RawAppName:         rawAppName,
@@ -1060,6 +1073,19 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			Progress:           "",
 			OpType:             "", // AppServiceResponse doesn't have opType, will be set from NATS messages
 			EntranceStatuses:   entranceStatuses,
+			SharedEntrances: []struct {
+				Name            string `json:"name"`
+				Host            string `json:"host"`
+				Port            int32  `json:"port"`
+				Icon            string `json:"icon,omitempty"`
+				Title           string `json:"title,omitempty"`
+				AuthLevel       string `json:"authLevel,omitempty"`
+				Invisible       bool   `json:"invisible,omitempty"`
+				URL             string `json:"url,omitempty"`
+				OpenMethod      string `json:"openMethod,omitempty"`
+				WindowPushState bool   `json:"windowPushState,omitempty"`
+				Skip            bool   `json:"skip,omitempty"`
+			}{}, // AppServiceResponse doesn't have SharedEntrances, will be set from NATS messages
 		},
 	}, source
 }
