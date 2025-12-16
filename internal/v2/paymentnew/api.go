@@ -937,11 +937,65 @@ func RestorePurchase(userID, appID, sourceID, xForwardedHost string, appInfo *ty
 		}, nil
 	}
 
-	// Handle error states
+	// Handle error states - for restore purchase, we should trigger re-sign even if signature is invalid
 	if latest.SignatureStatus == SignatureErrorNeedReSign {
+		log.Printf("RestorePurchase: Signature invalid, triggering re-sign request for user=%s app=%s product=%s", userID, realAppID, productID)
+
+		// Update XForwardedHost if needed before requesting signature
+		effectiveHost := latest.XForwardedHost
+		if effectiveHost == "" && xForwardedHost != "" {
+			effectiveHost = xForwardedHost
+		}
+		if effectiveHost == "" {
+			return nil, fmt.Errorf("X-Forwarded-Host is required for restore purchase but not available")
+		}
+
+		// Reset signature status and trigger re-sign
+		_ = globalStateMachine.updateState(latest.GetKey(), func(s *PaymentState) error {
+			if s.XForwardedHost == "" {
+				s.XForwardedHost = effectiveHost
+			}
+			// Reset signature status to required for re-sign
+			s.SignatureStatus = SignatureRequired
+			s.JWS = "" // Clear invalid JWS
+			s.SignBody = ""
+			if s.LarePassSync == LarePassSyncNotStarted || s.LarePassSync == LarePassSyncFailed || s.LarePassSync == LarePassSyncCompleted {
+				s.LarePassSync = LarePassSyncInProgress
+			}
+			// Mark as notification_sent to indicate restore purchase flow
+			if s.PaymentStatus == PaymentNotEvaluated || s.PaymentStatus == PaymentNotNotified {
+				s.PaymentStatus = PaymentNotificationSent
+			}
+			return nil
+		})
+
+		// Reload latest state
+		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			latest = updated
+		}
+
+		// Notify LarePass to sign (re-sign flow)
+		if globalStateMachine.dataSender != nil {
+			_ = notifyLarePassToSign(
+				globalStateMachine.dataSender,
+				latest.UserID,
+				latest.AppID,
+				latest.ProductID,
+				latest.TxHash,
+				effectiveHost,
+				latest.DeveloperName,
+				true, // isReSign = true for re-sign flow
+			)
+
+			// Notify frontend that signature is required for restore purchase
+			if err := notifyFrontendStateUpdate(globalStateMachine.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, "signature_required"); err != nil {
+				log.Printf("Failed to notify frontend signature_required for restore purchase re-sign: %v", err)
+			}
+		}
+
 		return map[string]interface{}{
-			"status":  "signature_need_resign",
-			"message": "Signature invalid or expired, please re-sign to restore purchase",
+			"status":  "signature_required",
+			"message": "Signature invalid, re-signing for restore purchase",
 		}, nil
 	}
 
