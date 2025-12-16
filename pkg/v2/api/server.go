@@ -197,6 +197,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/sources/{source}/apps/{id}/purchase", s.purchaseApp).Methods("POST")
 	log.Printf("Route configured: POST /app-store/api/v2/sources/{source}/apps/{id}/purchase")
 
+	// 24.2 Restore purchase
+	api.HandleFunc("/sources/{source}/apps/{id}/restore-purchase", s.restorePurchase).Methods("POST")
+	log.Printf("Route configured: POST /app-store/api/v2/sources/{source}/apps/{id}/restore-purchase")
+
 	// Legacy route for backward compatibility (searches all sources)
 	api.HandleFunc("/apps/{id}/payment-status", s.getAppPaymentStatusLegacy).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/payment-status (legacy)")
@@ -228,6 +232,10 @@ func (s *Server) setupRoutes() {
 	// 30. Get runtime dashboard-app (HTML page for app processing flow)
 	api.HandleFunc("/runtime/dashboard-app", s.getRuntimeDashboardApp).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/runtime/dashboard-app")
+
+	// 31. Get payment state machine states
+	api.HandleFunc("/payment/states", s.getPaymentStates).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/payment/states")
 
 	log.Printf("All routes configured successfully")
 }

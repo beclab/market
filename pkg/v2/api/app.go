@@ -2195,6 +2195,61 @@ func (s *Server) purchaseApp(w http.ResponseWriter, r *http.Request) {
 	s.sendResponse(w, http.StatusOK, true, "OK", result)
 }
 
+// restorePurchase handles POST /api/v2/sources/{source}/apps/{id}/restore-purchase
+// Restore purchase flow: request signature if needed, then query VC from developer
+func (s *Server) restorePurchase(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+	source := vars["source"]
+
+	log.Printf("POST /api/v2/sources/%s/apps/%s/restore-purchase - Restore purchase", source, appID)
+
+	// Step 1: Get user information from request
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		log.Printf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	log.Printf("Retrieved user ID for restore purchase request: %s", userID)
+
+	// Read X-Forwarded-Host (needed for signature callbacks and user DID resolution)
+	xForwardedHost := r.Header.Get("X-Forwarded-Host")
+
+	// Derive AppInfoLatest from cache to supply AppInfo
+	var appInfoLatest *types.AppInfoLatestData
+	if s.cacheManager != nil {
+		userData := s.cacheManager.GetUserData(userID)
+		if userData != nil {
+			if app, _ := s.findAppInUserDataWithSource(userData, appID, source); app != nil {
+				appInfoLatest = app
+			}
+		}
+	}
+	if appInfoLatest == nil || appInfoLatest.AppInfo == nil {
+		s.sendResponse(w, http.StatusNotFound, false, "App info not found in cache", nil)
+		return
+	}
+
+	// Step 2: Call payment module restore purchase API
+	result, err := paymentnew.RestorePurchase(userID, appID, source, xForwardedHost, appInfoLatest.AppInfo)
+	if err != nil {
+		log.Printf("Failed to restore purchase: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to restore purchase", nil)
+		return
+	}
+
+	// Step 3: Respond
+	if result == nil {
+		result = map[string]interface{}{}
+	}
+	result["app_id"] = appID
+	result["source"] = source
+	result["user"] = userID
+	s.sendResponse(w, http.StatusOK, true, "OK", result)
+}
+
 // getAppPaymentStatusLegacy handles GET /api/v2/apps/{id}/payment-status (legacy route)
 // This route is kept for backward compatibility and searches all sources
 func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Request) {
@@ -2269,6 +2324,56 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 // findAppInUserData finds an app in user data by app ID (searches all sources)
 func (s *Server) findAppInUserData(userData *types.UserData, appID string) (*types.AppInfoLatestData, string) {
 	return utils.FindAppInUserData(userData, appID)
+}
+
+// getPaymentStates handles GET /api/v2/payment/states
+// Returns all payment state machine states for monitoring/debugging
+func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
+	log.Println("GET /api/v2/payment/states - Getting payment state machine states")
+
+	// Get all payment states
+	states := paymentnew.ListPaymentStates()
+	if states == nil {
+		states = make(map[string]*paymentnew.PaymentState)
+	}
+
+	// Convert to JSON-serializable format
+	statesData := make(map[string]interface{})
+	for key, state := range states {
+		if state != nil {
+			statesData[key] = map[string]interface{}{
+				"user_id":          state.UserID,
+				"app_id":           state.AppID,
+				"app_name":         state.AppName,
+				"source_id":        state.SourceID,
+				"product_id":       state.ProductID,
+				"developer_name":   state.DeveloperName,
+				"developer":        state.Developer,
+				"payment_need":     state.PaymentNeed,
+				"developer_sync":   state.DeveloperSync,
+				"larepass_sync":    state.LarePassSync,
+				"signature_status": state.SignatureStatus,
+				"payment_status":   state.PaymentStatus,
+				"jws":              state.JWS,
+				"sign_body":        state.SignBody,
+				"vc":               state.VC,
+				"tx_hash":          state.TxHash,
+				"x_forwarded_host": state.XForwardedHost,
+				"frontend_data":    state.FrontendData,
+				"created_at":       state.CreatedAt,
+				"updated_at":       state.UpdatedAt,
+			}
+		}
+	}
+
+	responseData := map[string]interface{}{
+		"total_states": len(statesData),
+		"states":       statesData,
+		"timestamp":    time.Now(),
+	}
+
+	log.Printf("Payment states retrieved: %d states", len(statesData))
+	s.sendResponse(w, http.StatusOK, true, "Payment states retrieved successfully", responseData)
 }
 
 // findAppInUserDataWithSource finds an app in user data by app ID and specific source

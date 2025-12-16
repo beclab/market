@@ -44,7 +44,7 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	// Get version from SyncContext, if not available use default
 	version := data.GetVersion()
 	if version == "" {
-		version = "1.12.0" // fallback version
+		version = "1.12.3" // fallback version
 		log.Printf("No version provided in context, using default: %s", version)
 	}
 

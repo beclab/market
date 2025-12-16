@@ -38,7 +38,7 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 	// Get version from SyncContext for API request
 	version := data.GetVersion()
 	if version == "" {
-		version = "1.12.0" // fallback version
+		version = "1.12.3" // fallback version
 		log.Printf("No version provided in context, using default: %s", version)
 	}
 

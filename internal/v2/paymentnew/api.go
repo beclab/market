@@ -413,10 +413,21 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 	}
 
 	// Determine follow-up actions based on payment status
-	shouldNotifyFrontend := latest.PaymentStatus == PaymentNotEvaluated || latest.PaymentStatus == PaymentNotNotified
-	shouldPollDeveloper := latest.PaymentStatus == PaymentFrontendCompleted
+	// Check if this is a restore purchase scenario: if payment status is early stage (not_evaluated/not_notified)
+	// but signature was submitted, it could be restore purchase - we should try VC polling directly
+	// Otherwise, if payment status indicates frontend hasn't been notified yet, notify frontend to pay
+	isEarlyStage := latest.PaymentStatus == PaymentNotEvaluated || latest.PaymentStatus == PaymentNotNotified
+	isPaymentCompleted := latest.PaymentStatus == PaymentFrontendCompleted
+	isNotificationSent := latest.PaymentStatus == PaymentNotificationSent || latest.PaymentStatus == PaymentFrontendStarted
 
-	// Step 4: Notify frontend to pay (only when not notified/early stage)
+	// For normal purchase: if early stage and not notification sent, notify frontend to pay
+	// For restore purchase: signature was submitted, we should try VC polling directly
+	// Also trigger VC polling if payment is already completed
+	shouldNotifyFrontend := isEarlyStage && !isNotificationSent && !isPaymentCompleted
+	// Trigger VC polling if: payment completed, OR notification already sent (restore purchase may have triggered signature)
+	shouldPollDeveloper := isPaymentCompleted || isNotificationSent || (isEarlyStage && latest.JWS != "")
+
+	// Step 4: Notify frontend to pay (only for normal purchase flow, not restore purchase)
 	if shouldNotifyFrontend && globalStateMachine.dataSender != nil {
 		developerDID := getValidDeveloperDID(state)
 		if developerDID == "" {
@@ -450,9 +461,18 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 		log.Printf("Skip notifying payment_required: current status=%s", latest.PaymentStatus)
 	}
 
-	// Step 5: If frontend payment already completed, restart VC polling with fresh signature
+	// Step 5: Start VC polling if:
+	// - Payment already completed (normal flow), OR
+	// - Notification already sent (restore purchase or retry scenario - signature received, directly query VC), OR
+	// - Early stage but signature exists (restore purchase scenario)
 	if shouldPollDeveloper {
-		log.Printf("Payment already completed; restarting VC polling with refreshed signature")
+		if isPaymentCompleted {
+			log.Printf("Payment already completed; restarting VC polling with refreshed signature")
+		} else if isNotificationSent {
+			log.Printf("Restore purchase/retry scenario detected (notification sent with signature); starting VC polling directly")
+		} else {
+			log.Printf("Early stage with signature detected; starting VC polling (restore purchase scenario)")
+		}
 		latestCopy := *latest
 		go globalStateMachine.pollForVCFromDeveloper(&latestCopy)
 	}
@@ -708,6 +728,289 @@ func StartPaymentPolling(userID, sourceID, appID, productID, txHash, xForwardedH
 
 	log.Printf("Payment polling started for user %s, app %s, product %s", userID, realAppID, resolvedProductID)
 	return nil
+}
+
+// RestorePurchase handles restore purchase flow
+// This function initiates signature request if needed, then directly queries VC from developer
+// It differs from PurchaseApp in that it doesn't notify frontend to pay, as payment has already been completed
+func RestorePurchase(userID, appID, sourceID, xForwardedHost string, appInfo *types.AppInfo) (map[string]interface{}, error) {
+	log.Printf("[RestorePurchase] user=%s app=%s source=%s", userID, appID, sourceID)
+
+	// Extract productID from app info with correct priority
+	if appInfo == nil {
+		return nil, fmt.Errorf("app info is nil")
+	}
+
+	// Use real app ID from AppEntry, not the URL parameter (which might be name)
+	realAppID := appID
+	if appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
+		realAppID = appInfo.AppEntry.ID
+		log.Printf("RestorePurchase: Using real app ID from AppEntry: %s (URL param was: %s)", realAppID, appID)
+	}
+
+	var productID string
+	if appInfo.Price != nil && appInfo.Price.Paid != nil {
+		if appInfo.Price.Paid.ProductID != "" {
+			productID = appInfo.Price.Paid.ProductID
+			log.Printf("RestorePurchase: Using productID from Price.Paid: %s", productID)
+		}
+	}
+	if productID == "" {
+		productID = getProductIDFromAppInfo(appInfo)
+		if productID != "" {
+			log.Printf("RestorePurchase: Using productID from Products: %s", productID)
+		}
+	}
+	if productID == "" {
+		// Final fallback: for paid apps without explicit product_id
+		productID = realAppID
+		log.Printf("RestorePurchase: productID not found in price, using real appID as fallback: %s", productID)
+	}
+
+	// Check if state machine is initialized
+	if globalStateMachine == nil {
+		return nil, fmt.Errorf("state machine not initialized")
+	}
+
+	// Locate or create state
+	var target *PaymentState
+	if st, err := globalStateMachine.getState(userID, realAppID, productID); err == nil {
+		target = st
+		log.Printf("RestorePurchase: Found state in memory for user=%s app=%s productID=%s", userID, realAppID, productID)
+	} else {
+		// Try LoadState (will check Redis and load to memory)
+		log.Printf("RestorePurchase: State not in memory, trying LoadState from Redis. Error: %v", err)
+		if st, err := globalStateMachine.LoadState(userID, realAppID, productID); err == nil {
+			target = st
+			log.Printf("RestorePurchase: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, realAppID, productID)
+		} else {
+			log.Printf("RestorePurchase: State not found in Redis either. Error: %v", err)
+		}
+	}
+
+	// If state not found, try to create via preprocessing
+	if target == nil {
+		log.Printf("RestorePurchase: Payment state not found for user=%s app=%s productID=%s. Attempting to create state via preprocessing.", userID, realAppID, productID)
+
+		if globalStateMachine == nil || globalStateMachine.settingsManager == nil {
+			return nil, fmt.Errorf("state machine or settings manager not initialized; cannot create payment state")
+		}
+
+		// Trigger preprocessing to create the state
+		client := resty.New()
+		client.SetTimeout(3 * time.Second)
+		_, err := PreprocessAppPaymentData(
+			context.Background(),
+			appInfo,
+			userID,
+			sourceID,
+			globalStateMachine.settingsManager,
+			client,
+		)
+		if err != nil {
+			log.Printf("RestorePurchase: Failed to preprocess payment data: %v", err)
+			return nil, fmt.Errorf("failed to create payment state: %w", err)
+		}
+
+		// Try to load the state again after preprocessing
+		if st, err := globalStateMachine.LoadState(userID, realAppID, productID); err == nil {
+			target = st
+			log.Printf("RestorePurchase: Successfully created and loaded state after preprocessing")
+		} else {
+			log.Printf("RestorePurchase: State still not found after preprocessing. Error: %v", err)
+			return nil, fmt.Errorf("payment state not found after preprocessing for product '%s'", productID)
+		}
+	}
+
+	// Update XForwardedHost if needed
+	if xForwardedHost != "" && target.XForwardedHost == "" {
+		_ = globalStateMachine.updateState(target.GetKey(), func(s *PaymentState) error {
+			s.XForwardedHost = xForwardedHost
+			return nil
+		})
+		// Reload state
+		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			target = updated
+		}
+	}
+
+	// Correct SourceID if it doesn't match
+	if target != nil && sourceID != "" && target.SourceID != sourceID {
+		log.Printf("RestorePurchase: Correcting SourceID mismatch - state has %s, request has %s", target.SourceID, sourceID)
+		_ = globalStateMachine.updateState(target.GetKey(), func(s *PaymentState) error {
+			s.SourceID = sourceID
+			return nil
+		})
+		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			target = updated
+		}
+	}
+
+	// Get latest state
+	latest, _ := globalStateMachine.getState(userID, realAppID, productID)
+	if latest == nil {
+		latest = target
+	}
+
+	// If VC already exists and confirmed, return success
+	if latest.VC != "" && latest.DeveloperSync == DeveloperSyncCompleted {
+		return map[string]interface{}{
+			"status":  "purchased",
+			"message": "Purchase already restored, VC confirmed",
+		}, nil
+	}
+
+	// Check if signature is available
+	if latest.SignatureStatus == SignatureRequiredAndSigned && latest.JWS != "" {
+		// Signature is ready, directly start VC polling
+		log.Printf("RestorePurchase: Signature already available, starting VC polling for user=%s app=%s product=%s", userID, realAppID, productID)
+		go globalStateMachine.pollForVCFromDeveloper(latest)
+		return map[string]interface{}{
+			"status":  "syncing",
+			"message": "Restore purchase started, polling for VC",
+		}, nil
+	}
+
+	// If signature is not available, trigger signature request
+	if latest.SignatureStatus == SignatureRequired || latest.SignatureStatus == SignatureNotEvaluated ||
+		latest.SignatureStatus == SignatureRequiredButPending {
+		log.Printf("RestorePurchase: Signature not available, triggering signature request for user=%s app=%s product=%s", userID, realAppID, productID)
+
+		// Update XForwardedHost if needed before requesting signature
+		effectiveHost := latest.XForwardedHost
+		if effectiveHost == "" && xForwardedHost != "" {
+			effectiveHost = xForwardedHost
+		}
+		if effectiveHost == "" {
+			return nil, fmt.Errorf("X-Forwarded-Host is required for restore purchase but not available")
+		}
+
+		// Update state to mark signature request in progress
+		// For restore purchase, we set payment status to notification_sent to indicate
+		// that this is a restore purchase flow (not a new purchase), so signature callback
+		// will trigger VC polling directly instead of notifying frontend to pay
+		_ = globalStateMachine.updateState(latest.GetKey(), func(s *PaymentState) error {
+			if s.XForwardedHost == "" {
+				s.XForwardedHost = effectiveHost
+			}
+			if s.LarePassSync == LarePassSyncNotStarted || s.LarePassSync == LarePassSyncFailed {
+				s.LarePassSync = LarePassSyncInProgress
+			}
+			if s.SignatureStatus == SignatureNotEvaluated || s.SignatureStatus == SignatureRequired {
+				s.SignatureStatus = SignatureRequired
+			}
+			// Mark as notification_sent to indicate restore purchase flow
+			// This will cause ProcessSignatureSubmission to trigger VC polling directly
+			if s.PaymentStatus == PaymentNotEvaluated || s.PaymentStatus == PaymentNotNotified {
+				s.PaymentStatus = PaymentNotificationSent
+			}
+			return nil
+		})
+
+		// Reload latest state
+		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			latest = updated
+		}
+
+		// Notify LarePass to sign
+		if globalStateMachine.dataSender != nil {
+			_ = notifyLarePassToSign(
+				globalStateMachine.dataSender,
+				latest.UserID,
+				latest.AppID,
+				latest.ProductID,
+				latest.TxHash,
+				effectiveHost,
+				latest.DeveloperName,
+				false, // not a re-sign flow
+			)
+
+			// Notify frontend that signature is required for restore purchase
+			if err := notifyFrontendStateUpdate(globalStateMachine.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, "signature_required"); err != nil {
+				log.Printf("Failed to notify frontend signature_required for restore purchase: %v", err)
+			}
+		}
+
+		return map[string]interface{}{
+			"status":  "signature_required",
+			"message": "Signature required for restore purchase, please sign and wait for callback",
+		}, nil
+	}
+
+	// Handle error states - for restore purchase, we should trigger re-sign even if signature is invalid
+	if latest.SignatureStatus == SignatureErrorNeedReSign {
+		log.Printf("RestorePurchase: Signature invalid, triggering re-sign request for user=%s app=%s product=%s", userID, realAppID, productID)
+
+		// Update XForwardedHost if needed before requesting signature
+		effectiveHost := latest.XForwardedHost
+		if effectiveHost == "" && xForwardedHost != "" {
+			effectiveHost = xForwardedHost
+		}
+		if effectiveHost == "" {
+			return nil, fmt.Errorf("X-Forwarded-Host is required for restore purchase but not available")
+		}
+
+		// Reset signature status and trigger re-sign
+		_ = globalStateMachine.updateState(latest.GetKey(), func(s *PaymentState) error {
+			if s.XForwardedHost == "" {
+				s.XForwardedHost = effectiveHost
+			}
+			// Reset signature status to required for re-sign
+			s.SignatureStatus = SignatureRequired
+			s.JWS = "" // Clear invalid JWS
+			s.SignBody = ""
+			if s.LarePassSync == LarePassSyncNotStarted || s.LarePassSync == LarePassSyncFailed || s.LarePassSync == LarePassSyncCompleted {
+				s.LarePassSync = LarePassSyncInProgress
+			}
+			// Mark as notification_sent to indicate restore purchase flow
+			if s.PaymentStatus == PaymentNotEvaluated || s.PaymentStatus == PaymentNotNotified {
+				s.PaymentStatus = PaymentNotificationSent
+			}
+			return nil
+		})
+
+		// Reload latest state
+		if updated, err := globalStateMachine.getState(userID, realAppID, productID); err == nil && updated != nil {
+			latest = updated
+		}
+
+		// Notify LarePass to sign (re-sign flow)
+		if globalStateMachine.dataSender != nil {
+			_ = notifyLarePassToSign(
+				globalStateMachine.dataSender,
+				latest.UserID,
+				latest.AppID,
+				latest.ProductID,
+				latest.TxHash,
+				effectiveHost,
+				latest.DeveloperName,
+				true, // isReSign = true for re-sign flow
+			)
+
+			// Notify frontend that signature is required for restore purchase
+			if err := notifyFrontendStateUpdate(globalStateMachine.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, "signature_required"); err != nil {
+				log.Printf("Failed to notify frontend signature_required for restore purchase re-sign: %v", err)
+			}
+		}
+
+		return map[string]interface{}{
+			"status":  "signature_required",
+			"message": "Signature invalid, re-signing for restore purchase",
+		}, nil
+	}
+
+	if latest.SignatureStatus == SignatureErrorNoRecord {
+		return map[string]interface{}{
+			"status":  "signature_no_record",
+			"message": "No payment record found, cannot restore purchase",
+		}, nil
+	}
+
+	// Default: syncing
+	return map[string]interface{}{
+		"status":  "syncing",
+		"message": "Restore purchase in progress",
+	}, nil
 }
 
 // ListPaymentStates returns all current states (for debugging/monitoring)

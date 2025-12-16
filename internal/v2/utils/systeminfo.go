@@ -21,8 +21,8 @@ type VersionInfo struct {
 func GetTerminusVersion() (string, error) {
 	// Check if running in development environment
 	if IsDevelopmentEnvironment() {
-		glog.Infof("Running in development environment, returning fixed version: 1.12.0")
-		return "1.12.0", nil
+		glog.Infof("Running in development environment, returning fixed version: 1.12.3")
+		return "1.12.3", nil
 	}
 
 	// For production environment, try to get version from service
@@ -41,8 +41,8 @@ func GetTerminusVersionValue() (string, error) {
 
 	// Check development environment
 	if IsDevelopmentEnvironment() {
-		glog.Infof("Development environment detected, returning version: 1.12.0")
-		return "1.12.0", nil
+		glog.Infof("Development environment detected, returning version: 1.12.3")
+		return "1.12.3", nil
 	}
 
 	// Get version from service
