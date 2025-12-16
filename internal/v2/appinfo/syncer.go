@@ -188,7 +188,7 @@ func getVersionForSync() string {
 		return version
 	} else {
 		log.Printf("Failed to get version, using fallback: %v", err)
-		return "1.12.0" // fallback version
+		return "1.12.3" // fallback version
 	}
 }
 
