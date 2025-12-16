@@ -233,6 +233,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/runtime/dashboard-app", s.getRuntimeDashboardApp).Methods("GET")
 	log.Printf("Route configured: GET /app-store/api/v2/runtime/dashboard-app")
 
+	// 31. Get payment state machine states
+	api.HandleFunc("/payment/states", s.getPaymentStates).Methods("GET")
+	log.Printf("Route configured: GET /app-store/api/v2/payment/states")
+
 	log.Printf("All routes configured successfully")
 }
 

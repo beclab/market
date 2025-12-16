@@ -495,6 +495,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                     <button class="main-tab" onclick="showMainTab('marketTasks', this)">Tasks</button>
                     <button class="main-tab" onclick="showMainTab('marketComponents', this)">Components</button>
                     <button class="main-tab" onclick="showMainTab('marketCache', this)">Cache & Sync</button>
+                    <button class="main-tab" onclick="showMainTab('marketPayment', this)">Payment States</button>
                 </div>
                 
                 <!-- Applications Tab Content -->
@@ -684,6 +685,32 @@ func generateDashboardHTML(snapshotJSON string) string {
                                 <tbody id="cacheStatsTableBody"></tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+                
+                <!-- Payment States Tab Content -->
+                <div id="marketPayment" class="main-tab-content">
+                    <div class="stats-grid" id="paymentStatsGrid"></div>
+                    <div class="table-container" style="margin-top: 16px;">
+                        <table id="paymentStatesTable">
+                            <thead>
+                                <tr>
+                                    <th>Key</th>
+                                    <th>User ID</th>
+                                    <th>App ID</th>
+                                    <th>App Name</th>
+                                    <th>Product ID</th>
+                                    <th>Payment Need</th>
+                                    <th>Developer Sync</th>
+                                    <th>LarePass Sync</th>
+                                    <th>Signature Status</th>
+                                    <th>Payment Status</th>
+                                    <th>VC Present</th>
+                                    <th>Updated At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentStatesTableBody"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -1689,6 +1716,117 @@ func generateDashboardHTML(snapshotJSON string) string {
             });
         }
         
+        let paymentStatesData = {};
+        
+        function renderPaymentStates() {
+            // Fetch payment states from API
+            fetch('/app-store/api/v2/payment/states')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        paymentStatesData = data.data;
+                        renderPaymentStats();
+                        renderPaymentStatesTable();
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to fetch payment states:', error);
+                    const statsGrid = document.getElementById('paymentStatsGrid');
+                    if (statsGrid) {
+                        statsGrid.innerHTML = '<div class="empty-state">Failed to load payment states</div>';
+                    }
+                    const tbody = document.getElementById('paymentStatesTableBody');
+                    if (tbody) {
+                        tbody.innerHTML = '<tr><td colspan="12" class="empty-state">Failed to load payment states</td></tr>';
+                    }
+                });
+        }
+        
+        function renderPaymentStats() {
+            const statsGrid = document.getElementById('paymentStatsGrid');
+            if (!statsGrid) return;
+            
+            const states = paymentStatesData.states || {};
+            const totalStates = paymentStatesData.total_states || 0;
+            
+            // Count states by status
+            let purchasedCount = 0;
+            let inProgressCount = 0;
+            let errorCount = 0;
+            
+            Object.values(states).forEach(state => {
+                if (state.vc && state.developer_sync === 'completed') {
+                    purchasedCount++;
+                } else if (state.payment_need === 'required') {
+                    if (state.signature_status && state.signature_status.includes('error')) {
+                        errorCount++;
+                    } else {
+                        inProgressCount++;
+                    }
+                }
+            });
+            
+            statsGrid.innerHTML = 
+                '<div class="stat-card">' +
+                    '<div class="label">Total States</div>' +
+                    '<div class="value">' + totalStates + '</div>' +
+                '</div>' +
+                '<div class="stat-card">' +
+                    '<div class="label">Purchased</div>' +
+                    '<div class="value">' + purchasedCount + '</div>' +
+                '</div>' +
+                '<div class="stat-card">' +
+                    '<div class="label">In Progress</div>' +
+                    '<div class="value">' + inProgressCount + '</div>' +
+                '</div>' +
+                '<div class="stat-card">' +
+                    '<div class="label">Error States</div>' +
+                    '<div class="value">' + errorCount + '</div>' +
+                '</div>';
+        }
+        
+        function renderPaymentStatesTable() {
+            const tbody = document.getElementById('paymentStatesTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            const states = paymentStatesData.states || {};
+            const stateList = Object.entries(states);
+            
+            if (stateList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="12" class="empty-state">No payment states</td></tr>';
+                return;
+            }
+            
+            // Sort by updated_at descending
+            stateList.sort((a, b) => {
+                const timeA = a[1].updated_at ? new Date(a[1].updated_at).getTime() : 0;
+                const timeB = b[1].updated_at ? new Date(b[1].updated_at).getTime() : 0;
+                return timeB - timeA;
+            });
+            
+            stateList.forEach(([key, state]) => {
+                const row = document.createElement('tr');
+                const vcPresent = state.vc ? 'Yes' : 'No';
+                const updatedAt = state.updated_at ? formatTimestamp(new Date(state.updated_at)) : 'N/A';
+                
+                row.innerHTML = 
+                    '<td style="font-size: 11px;">' + (key || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + (state.user_id || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + (state.app_id || 'N/A') + '</td>' +
+                    '<td>' + (state.app_name || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + (state.product_id || 'N/A') + '</td>' +
+                    '<td>' + getStatusBadge(state.payment_need || 'unknown') + '</td>' +
+                    '<td>' + getStatusBadge(state.developer_sync || 'unknown') + '</td>' +
+                    '<td>' + getStatusBadge(state.larepass_sync || 'unknown') + '</td>' +
+                    '<td>' + getStatusBadge(state.signature_status || 'unknown') + '</td>' +
+                    '<td>' + getStatusBadge(state.payment_status || 'unknown') + '</td>' +
+                    '<td>' + vcPresent + '</td>' +
+                    '<td style="font-size: 11px;">' + updatedAt + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+        
         function showMainTab(tabName, element) {
             // Find the parent panel to scope the tab switching
             const panel = element ? element.closest('.panel') : null;
@@ -1748,6 +1886,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                     renderSyncer();
                     renderHydrator();
                     renderCacheStats();
+                } else if (tabName === 'marketPayment') {
+                    renderPaymentStates();
                 }
             } else if (tabName.startsWith('chartRepo')) {
                 renderChartRepo();
@@ -2275,6 +2415,11 @@ func generateDashboardHTML(snapshotJSON string) string {
             renderHydrator();
             renderCacheStats();
             renderChartRepo();
+            // Only render payment states if the tab is active
+            const paymentTab = document.getElementById('marketPayment');
+            if (paymentTab && paymentTab.classList.contains('active')) {
+                renderPaymentStates();
+            }
         }
         
         function toggleAutoRefresh() {

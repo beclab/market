@@ -2326,6 +2326,56 @@ func (s *Server) findAppInUserData(userData *types.UserData, appID string) (*typ
 	return utils.FindAppInUserData(userData, appID)
 }
 
+// getPaymentStates handles GET /api/v2/payment/states
+// Returns all payment state machine states for monitoring/debugging
+func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
+	log.Println("GET /api/v2/payment/states - Getting payment state machine states")
+
+	// Get all payment states
+	states := paymentnew.ListPaymentStates()
+	if states == nil {
+		states = make(map[string]*paymentnew.PaymentState)
+	}
+
+	// Convert to JSON-serializable format
+	statesData := make(map[string]interface{})
+	for key, state := range states {
+		if state != nil {
+			statesData[key] = map[string]interface{}{
+				"user_id":          state.UserID,
+				"app_id":           state.AppID,
+				"app_name":         state.AppName,
+				"source_id":        state.SourceID,
+				"product_id":       state.ProductID,
+				"developer_name":   state.DeveloperName,
+				"developer":        state.Developer,
+				"payment_need":     state.PaymentNeed,
+				"developer_sync":   state.DeveloperSync,
+				"larepass_sync":    state.LarePassSync,
+				"signature_status": state.SignatureStatus,
+				"payment_status":   state.PaymentStatus,
+				"jws":              state.JWS,
+				"sign_body":        state.SignBody,
+				"vc":               state.VC,
+				"tx_hash":          state.TxHash,
+				"x_forwarded_host": state.XForwardedHost,
+				"frontend_data":    state.FrontendData,
+				"created_at":       state.CreatedAt,
+				"updated_at":       state.UpdatedAt,
+			}
+		}
+	}
+
+	responseData := map[string]interface{}{
+		"total_states": len(statesData),
+		"states":       statesData,
+		"timestamp":    time.Now(),
+	}
+
+	log.Printf("Payment states retrieved: %d states", len(statesData))
+	s.sendResponse(w, http.StatusOK, true, "Payment states retrieved successfully", responseData)
+}
+
 // findAppInUserDataWithSource finds an app in user data by app ID and specific source
 // If source is empty, it searches all sources
 func (s *Server) findAppInUserDataWithSource(userData *types.UserData, appID string, source string) (*types.AppInfoLatestData, string) {
