@@ -164,6 +164,14 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	log.Printf("Completed detail fetch in %v: %d successful, %d errors, total %d apps",
 		overallDuration, successCount, errorCount, len(data.AppIDs))
 
+	// Final cleanup: Check all remaining apps in LatestData.Data.Apps for suspend/remove labels
+	// This handles cases where apps might have suspend/remove labels in the initial data fetch
+	// but were not returned in the detail API response
+	if data.LatestData != nil && data.LatestData.Data.Apps != nil {
+		log.Printf("Performing final cleanup: checking all apps in LatestData.Data.Apps for suspend/remove labels")
+		d.cleanupSuspendedAppsFromLatestData(data)
+	}
+
 	return nil
 }
 
@@ -327,6 +335,37 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 						log.Printf("Processing app %s data replacement", appID)
 
+						// Preserve appLabels from original data if detail API doesn't return it
+						// This handles the case where DataFetchStep has suspend/remove labels
+						// but detail API returns old version without labels
+						originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
+						var preservedAppLabels interface{}
+						if hasOriginal {
+							if originalMap, ok := originalAppData.(map[string]interface{}); ok {
+								if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
+									// Check if original has suspend/remove labels
+									hasSuspendOrRemoveInOriginal := false
+									for _, labelInterface := range originalLabels {
+										if label, ok := labelInterface.(string); ok {
+											if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
+												hasSuspendOrRemoveInOriginal = true
+												break
+											}
+										}
+									}
+									// If original has suspend/remove labels but detail API doesn't return labels or returns empty labels
+									if hasSuspendOrRemoveInOriginal {
+										detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
+										if !hasDetailLabels || len(detailLabels) == 0 {
+											// Preserve original labels (including suspend/remove)
+											preservedAppLabels = originalLabels
+											log.Printf("Preserving appLabels from original data for app %s (detail API didn't return labels)", appID)
+										}
+									}
+								}
+							}
+						}
+
 						// Replace the simplified app data with detailed data in LatestData
 						detailedAppData := map[string]interface{}{
 							// Basic fields
@@ -393,6 +432,11 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 							"tags":        appInfoMap["tags"],
 							"metadata":    appInfoMap["metadata"],
 							"updated_at":  appInfoMap["updated_at"],
+						}
+
+						// Use preserved labels if available
+						if preservedAppLabels != nil {
+							detailedAppData["appLabels"] = preservedAppLabels
 						}
 
 						data.LatestData.Data.Apps[appID] = detailedAppData
@@ -603,6 +647,84 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 	}
 
 	log.Printf("App removal from cache completed for app: %s", appID)
+}
+
+// cleanupSuspendedAppsFromLatestData checks all apps in LatestData.Data.Apps for suspend/remove labels
+// and removes them if they are not installed
+func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) {
+	if data.LatestData == nil || data.LatestData.Data.Apps == nil {
+		return
+	}
+
+	sourceID := ""
+	if marketSource := data.GetMarketSource(); marketSource != nil {
+		sourceID = marketSource.Name
+	}
+
+	// Collect apps to remove
+	appsToRemove := make([]struct {
+		appID      string
+		appInfoMap map[string]interface{}
+	}, 0)
+
+	// Check each app in LatestData.Data.Apps
+	for appID, appDataInterface := range data.LatestData.Data.Apps {
+		appInfoMap, ok := appDataInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check for suspend/remove labels
+		if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
+			hasSuspendOrRemove := false
+			var appName string
+			if name, ok := appInfoMap["name"].(string); ok {
+				appName = name
+			}
+
+			for _, labelInterface := range appLabels {
+				if label, ok := labelInterface.(string); ok {
+					if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
+						hasSuspendOrRemove = true
+						log.Printf("Found suspend/remove label in LatestData for app %s (appID: %s)", appName, appID)
+						break
+					}
+				}
+			}
+
+			if hasSuspendOrRemove {
+				shouldRemoveFromCache := true
+				if appName != "" && d.isAppInstalled(appName, sourceID, data) {
+					shouldRemoveFromCache = false
+					log.Printf("App %s has suspend/remove label but is still installed, keeping in LatestData", appName)
+				}
+
+				if shouldRemoveFromCache {
+					appsToRemove = append(appsToRemove, struct {
+						appID      string
+						appInfoMap map[string]interface{}
+					}{appID: appID, appInfoMap: appInfoMap})
+				}
+			}
+		}
+	}
+
+	// Remove apps from LatestData.Data.Apps
+	if len(appsToRemove) > 0 {
+		log.Printf("Removing %d apps with suspend/remove labels from LatestData.Data.Apps", len(appsToRemove))
+		for _, appToRemove := range appsToRemove {
+			delete(data.LatestData.Data.Apps, appToRemove.appID)
+			log.Printf("Removed app %s from LatestData.Data.Apps due to suspend/remove label", appToRemove.appID)
+		}
+
+		// Also remove from cache
+		for _, appToRemove := range appsToRemove {
+			log.Printf("Calling removeAppFromCache for app %s (final cleanup)", appToRemove.appID)
+			d.removeAppFromCache(appToRemove.appID, appToRemove.appInfoMap, data)
+		}
+	} else {
+		log.Printf("No apps with suspend/remove labels found in LatestData.Data.Apps during final cleanup")
+	}
 }
 
 // isAppInstalled determines whether the given app is currently installed for the active source.
