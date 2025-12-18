@@ -9,11 +9,19 @@ type CacheManagerInterface interface {
 	// Unlock releases the cache manager's write lock
 	Unlock()
 
+	// TryLock attempts to acquire the cache manager's write lock without blocking
+	// Returns true if lock acquired, false if would block
+	TryLock() bool
+
 	// RLock acquires the cache manager's read lock
 	RLock()
 
 	// RUnlock releases the cache manager's read lock
 	RUnlock()
+
+	// TryRLock attempts to acquire the cache manager's read lock without blocking
+	// Returns true if lock acquired, false if would block
+	TryRLock() bool
 
 	// GetCache returns the underlying cache data
 	GetCache() *CacheData
