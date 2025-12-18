@@ -567,8 +567,14 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 	}
 
 	// Get source ID from market source
-	sourceID := data.GetMarketSource().Name
-	log.Printf("Removing all versions of app %s (name: %s) from cache for source: %s", appID, appName, sourceID)
+	source := data.GetMarketSource()
+	if source == nil {
+		log.Printf("Warning: MarketSource is nil, cannot remove app %s from cache", appID)
+		return
+	}
+	// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
+	sourceID := source.ID
+	log.Printf("Removing all versions of app %s (name: %s) from cache for source: %s (sourceID=%s)", appID, appName, source.Name, sourceID)
 
 	if data.CacheManager == nil {
 		log.Printf("Warning: CacheManager is nil, cannot remove app from cache")
@@ -744,7 +750,8 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 
 	sourceID := ""
 	if marketSource := data.GetMarketSource(); marketSource != nil {
-		sourceID = marketSource.Name
+		// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
+		sourceID = marketSource.ID
 	}
 
 	// Collect apps to remove
