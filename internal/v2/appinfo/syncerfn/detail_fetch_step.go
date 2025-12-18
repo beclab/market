@@ -327,6 +327,18 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								// Remove from LatestData immediately when no installation is active
 								delete(data.LatestData.Data.Apps, appID)
 								log.Printf("Removed app %s from LatestData due to suspend/remove label", appID)
+								
+								// Also remove ALL versions of this app from LatestData.Data.Apps (by name)
+								if appName != "" {
+									for otherAppID, otherAppData := range data.LatestData.Data.Apps {
+										if otherAppInfoMap, ok := otherAppData.(map[string]interface{}); ok {
+											if otherAppName, ok := otherAppInfoMap["name"].(string); ok && otherAppName == appName {
+												delete(data.LatestData.Data.Apps, otherAppID)
+												log.Printf("Removed app version %s (name: %s) from LatestData (all versions removal)", otherAppID, appName)
+											}
+										}
+									}
+								}
 							} else if appInstalled {
 								log.Printf("App %s remains in LatestData (installed state detected)", appID)
 							}
@@ -546,7 +558,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 	log.Printf("Starting to remove app %s from cache", appID)
 
-	// Get app name for matching
+	// Get app name for matching - when an app is suspended, remove ALL versions of that app
 	appName, ok := appInfoMap["name"].(string)
 	if !ok || appName == "" {
 		log.Printf("Warning: Cannot remove app from cache - app name is empty for app: %s", appID)
@@ -555,7 +567,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 	// Get source ID from market source
 	sourceID := data.GetMarketSource().Name
-	log.Printf("Removing app %s (name: %s) from cache for source: %s", appID, appName, sourceID)
+	log.Printf("Removing all versions of app %s (name: %s) from cache for source: %s", appID, appName, sourceID)
 
 	if data.CacheManager == nil {
 		log.Printf("Warning: CacheManager is nil, cannot remove app from cache")
@@ -586,21 +598,35 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 			continue
 		}
 
-		// Create new lists without the target app
+		// Create new lists without the target app (all versions)
 		var newLatestList []*types.AppInfoLatestData
 		var newPendingList []*types.AppInfoLatestPendingData
 
-		// Filter latest list
+		// Filter latest list - remove ALL versions of the app by name
 		for _, latestApp := range sourceData.AppInfoLatest {
-			if latestApp.RawData == nil || latestApp.RawData.Name != appName {
+			if latestApp == nil || latestApp.RawData == nil {
 				newLatestList = append(newLatestList, latestApp)
+				continue
+			}
+			// Remove all versions of the app with matching name
+			if latestApp.RawData.Name != appName {
+				newLatestList = append(newLatestList, latestApp)
+			} else {
+				log.Printf("Removing app version %s (name: %s) from AppInfoLatest", latestApp.RawData.Version, appName)
 			}
 		}
 
-		// Filter pending list
+		// Filter pending list - remove ALL versions of the app by name
 		for _, pendingApp := range sourceData.AppInfoLatestPending {
-			if pendingApp.RawData == nil || pendingApp.RawData.Name != appName {
+			if pendingApp == nil || pendingApp.RawData == nil {
 				newPendingList = append(newPendingList, pendingApp)
+				continue
+			}
+			// Remove all versions of the app with matching name
+			if pendingApp.RawData.Name != appName {
+				newPendingList = append(newPendingList, pendingApp)
+			} else {
+				log.Printf("Removing pending app version %s (name: %s) from AppInfoLatestPending", pendingApp.RawData.Version, appName)
 			}
 		}
 
@@ -712,15 +738,48 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 	// Remove apps from LatestData.Data.Apps
 	if len(appsToRemove) > 0 {
 		log.Printf("Removing %d apps with suspend/remove labels from LatestData.Data.Apps", len(appsToRemove))
+		
+		// Collect app names that need to be removed (to remove all versions)
+		appNamesToRemove := make(map[string]bool)
 		for _, appToRemove := range appsToRemove {
+			if appName, ok := appToRemove.appInfoMap["name"].(string); ok && appName != "" {
+				appNamesToRemove[appName] = true
+			}
+			// Remove the specific appID from LatestData.Data.Apps
 			delete(data.LatestData.Data.Apps, appToRemove.appID)
 			log.Printf("Removed app %s from LatestData.Data.Apps due to suspend/remove label", appToRemove.appID)
 		}
 
-		// Also remove from cache
-		for _, appToRemove := range appsToRemove {
-			log.Printf("Calling removeAppFromCache for app %s (final cleanup)", appToRemove.appID)
-			d.removeAppFromCache(appToRemove.appID, appToRemove.appInfoMap, data)
+		// Remove ALL versions of suspended apps from LatestData.Data.Apps (by name)
+		for appID, appDataInterface := range data.LatestData.Data.Apps {
+			appInfoMap, ok := appDataInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if appName, ok := appInfoMap["name"].(string); ok {
+				if appNamesToRemove[appName] {
+					delete(data.LatestData.Data.Apps, appID)
+					log.Printf("Removed app version %s (name: %s) from LatestData.Data.Apps (all versions removal)", appID, appName)
+				}
+			}
+		}
+
+		// Also remove from cache - remove all versions by name
+		for appName := range appNamesToRemove {
+			// Find the first appInfoMap for this app name to use for removeAppFromCache
+			var appInfoMapForRemoval map[string]interface{}
+			var appIDForRemoval string
+			for _, appToRemove := range appsToRemove {
+				if name, ok := appToRemove.appInfoMap["name"].(string); ok && name == appName {
+					appInfoMapForRemoval = appToRemove.appInfoMap
+					appIDForRemoval = appToRemove.appID
+					break
+				}
+			}
+			if appInfoMapForRemoval != nil {
+				log.Printf("Calling removeAppFromCache for all versions of app %s (final cleanup)", appName)
+				d.removeAppFromCache(appIDForRemoval, appInfoMapForRemoval, data)
+			}
 		}
 	} else {
 		log.Printf("No apps with suspend/remove labels found in LatestData.Data.Apps during final cleanup")
