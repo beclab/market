@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"time"
 
@@ -574,9 +575,12 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		return
 	}
 
-	// Step 1: Use read lock to find all data that needs to be removed
-	log.Printf("Step 1: Acquiring read lock to find data for removal")
-	data.CacheManager.RLock()
+	// Step 1: Use try read lock to find all data that needs to be removed
+	log.Printf("Step 1: Attempting to acquire read lock to find data for removal")
+	if !data.CacheManager.TryRLock() {
+		log.Printf("Warning: Read lock not available for app removal, skipping: %s", appID)
+		return
+	}
 
 	// Collect all data that needs to be removed
 	type RemovalData struct {
@@ -643,19 +647,30 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		}
 	}
 
-	// Release read lock
-	data.CacheManager.RUnlock()
 	log.Printf("Step 1 completed: Found %d users with data to remove", len(removals))
 
-	// Step 2: Use write lock to quickly update the data
+	// Release read lock before acquiring write lock (must release manually since we need to acquire write lock)
+	data.CacheManager.RUnlock()
+
+	// Step 2: Use try write lock to quickly update the data
 	if len(removals) == 0 {
 		log.Printf("No data found to remove for app: %s", appID)
 		return
 	}
 
-	log.Printf("Step 2: Acquiring write lock to update data")
-	data.CacheManager.Lock()
+	log.Printf("Step 2: Attempting to acquire write lock to update data")
+	if !data.CacheManager.TryLock() {
+		log.Printf("Warning: Write lock not available for app removal, skipping: %s", appID)
+		return
+	}
 	defer data.CacheManager.Unlock()
+
+	// Collect sync requests to trigger after releasing the lock
+	type SyncReq struct {
+		userID   string
+		sourceID string
+	}
+	var syncReqs []SyncReq
 
 	// Quickly update all the data by replacing array pointers
 	for _, removal := range removals {
@@ -670,9 +685,54 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 			removal.userID, removal.sourceID, appName,
 			removal.originalLatestCount, len(removal.newLatestList),
 			removal.originalPendingCount, len(removal.newPendingList))
+
+		// Collect sync request
+		syncReqs = append(syncReqs, SyncReq{
+			userID:   removal.userID,
+			sourceID: removal.sourceID,
+		})
 	}
 
 	log.Printf("App removal from cache completed for app: %s", appID)
+
+	// Trigger sync to Redis for all affected users and sources after releasing the lock
+	// Use reflection to access the private requestSync method
+	// We do this in a goroutine to avoid blocking and to ensure the lock is released first
+	go func() {
+		// Wait a bit to ensure the lock is released
+		time.Sleep(10 * time.Millisecond)
+
+		cmValue := reflect.ValueOf(data.CacheManager)
+		if cmValue.Kind() == reflect.Ptr {
+			cmValue = cmValue.Elem()
+		}
+
+		requestSyncMethod := cmValue.MethodByName("requestSync")
+		if !requestSyncMethod.IsValid() {
+			log.Printf("Warning: Cannot find requestSync method in CacheManager, sync to Redis will be handled by StoreCompleteDataToPending")
+			return
+		}
+
+		// SyncSource = 1 (based on iota: SyncUser=0, SyncSource=1)
+		const SyncSource = 1
+
+		for _, syncReq := range syncReqs {
+			// Create SyncRequest struct value
+			// SyncRequest has: UserID string, SourceID string, Type SyncType (int)
+			syncRequestValue := reflect.New(reflect.TypeOf(struct {
+				UserID   string
+				SourceID string
+				Type     int
+			}{})).Elem()
+			syncRequestValue.Field(0).SetString(syncReq.userID)
+			syncRequestValue.Field(1).SetString(syncReq.sourceID)
+			syncRequestValue.Field(2).SetInt(SyncSource)
+
+			// Call requestSync method
+			requestSyncMethod.Call([]reflect.Value{syncRequestValue})
+			log.Printf("Triggered sync to Redis for user: %s, source: %s, app: %s", syncReq.userID, syncReq.sourceID, appName)
+		}
+	}()
 }
 
 // cleanupSuspendedAppsFromLatestData checks all apps in LatestData.Data.Apps for suspend/remove labels
@@ -792,8 +852,11 @@ func (d *DetailFetchStep) isAppInstalled(appName, sourceID string, data *SyncCon
 		return false
 	}
 
-	// English comment: use read lock to safely inspect installation states
-	data.CacheManager.RLock()
+	// English comment: use try read lock to safely inspect installation states
+	if !data.CacheManager.TryRLock() {
+		log.Printf("Warning: Read lock not available for isAppInstalled check, returning false")
+		return false
+	}
 	defer data.CacheManager.RUnlock()
 
 	for _, userData := range data.Cache.Users {
