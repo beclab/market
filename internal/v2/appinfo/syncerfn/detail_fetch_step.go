@@ -258,9 +258,10 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		// CRITICAL: Get sourceID BEFORE acquiring mutex lock to avoid deadlock
 		// GetMarketSource() uses RLock() internally, and calling it while holding Lock()
 		// would cause permanent deadlock in the same goroutine
+		// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
 		sourceID := ""
 		if marketSource := data.GetMarketSource(); marketSource != nil {
-			sourceID = marketSource.Name
+			sourceID = marketSource.ID
 		}
 
 		data.mutex.Lock()
