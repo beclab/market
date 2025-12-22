@@ -2371,27 +2371,21 @@ func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
 				"updated_at":       state.UpdatedAt,
 			}
 
-			// Determine payment status string to check if it's a non-purchased state
-			statusStr := paymentnew.BuildPaymentStatusFromState(state)
-			isNotPurchased := statusStr == "not_buy" || statusStr == "not_evaluated" || statusStr == "free"
-
-			// Add token_info for all non-not-purchased states
-			if !isNotPurchased {
-				// Try to get appInfo from cache
-				var appInfo *types.AppInfo
-				if s.cacheManager != nil && state.UserID != "" && state.AppID != "" {
-					userData := s.cacheManager.GetUserData(state.UserID)
-					if userData != nil {
-						if app, _ := s.findAppInUserDataWithSource(userData, state.AppID, state.SourceID); app != nil && app.AppInfo != nil {
-							appInfo = app.AppInfo
-						}
+			// Add token_info for all states
+			// Try to get appInfo from cache
+			var appInfo *types.AppInfo
+			if s.cacheManager != nil && state.UserID != "" && state.AppID != "" {
+				userData := s.cacheManager.GetUserData(state.UserID)
+				if userData != nil {
+					if app, _ := s.findAppInUserDataWithSource(userData, state.AppID, state.SourceID); app != nil && app.AppInfo != nil {
+						appInfo = app.AppInfo
 					}
 				}
+			}
 
-				// Extract token info
-				if tokenInfo := paymentnew.GetTokenInfoForState(context.Background(), state, appInfo, settingsManager); len(tokenInfo) > 0 {
-					stateData["token_info"] = tokenInfo
-				}
+			// Extract token info for all states
+			if tokenInfo := paymentnew.GetTokenInfoForState(context.Background(), state, appInfo, settingsManager); len(tokenInfo) > 0 {
+				stateData["token_info"] = tokenInfo
 			}
 
 			statesData[key] = stateData
