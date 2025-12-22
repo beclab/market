@@ -1172,6 +1172,11 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		return nil, fmt.Errorf("state is nil")
 	}
 
+	// Create HTTP client and context for API calls (needed early for token info extraction)
+	httpClient := resty.New()
+	httpClient.SetTimeout(10 * time.Second)
+	ctx := context.Background()
+
 	// 1) Need signature
 	if state.SignatureStatus == SignatureRequired || state.SignatureStatus == SignatureRequiredButPending {
 		response := map[string]interface{}{
@@ -1213,11 +1218,6 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}
 		return response, nil
 	}
-
-	// Create HTTP client for API calls
-	httpClient := resty.New()
-	httpClient.SetTimeout(10 * time.Second)
-	ctx := context.Background()
 
 	// Extract developer name and price config
 	var developerName string
@@ -1386,7 +1386,7 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		"message": "synchronizing payment state",
 	}
 	// Add token info if available
-	if tokenInfo := getTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+	if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
 		response["token_info"] = tokenInfo
 	}
 	return response, nil
