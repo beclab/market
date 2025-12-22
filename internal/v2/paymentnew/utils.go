@@ -844,6 +844,7 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 
 	log.Printf("extractTokenInfoFromPriceConfig: Starting extraction for productID=%s", productID)
 	log.Printf("extractTokenInfoFromPriceConfig: apiResp=%v, apiResp.Data.Apps=%v", apiResp != nil, apiResp != nil && apiResp.Data.Apps != nil)
+	log.Printf("extractTokenInfoFromPriceConfig: priceConfig.Paid=%v, priceConfig.Products count=%d", priceConfig.Paid != nil, len(priceConfig.Products))
 
 	var tokenInfos []types.TokenInfo
 
@@ -856,7 +857,7 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 				TokenSymbol:   priceEntry.TokenSymbol,
 				ReceiveWallet: priceEntry.ReceiveWallet,
 			}
-			log.Printf("extractTokenInfoFromPriceConfig: Processing price entry: chain=%s, symbol=%s", priceEntry.Chain, priceEntry.TokenSymbol)
+			log.Printf("extractTokenInfoFromPriceConfig: Processing price entry: chain=%s, symbol=%s, receiveWallet=%s", priceEntry.Chain, priceEntry.TokenSymbol, priceEntry.ReceiveWallet)
 
 			// Try to get token decimals from API response
 			if apiResp != nil && apiResp.Data.Apps != nil {
@@ -934,11 +935,16 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 			}
 
 			tokenInfos = append(tokenInfos, tokenInfo)
+			log.Printf("extractTokenInfoFromPriceConfig: Added token info from Paid section: chain=%s, symbol=%s", tokenInfo.Chain, tokenInfo.TokenSymbol)
 		}
+		log.Printf("extractTokenInfoFromPriceConfig: After processing Paid section, tokenInfos count=%d", len(tokenInfos))
+	} else {
+		log.Printf("extractTokenInfoFromPriceConfig: No Paid section or no price entries in Paid section")
 	}
 
 	// Extract from Products section
 	if len(priceConfig.Products) > 0 {
+		log.Printf("extractTokenInfoFromPriceConfig: Processing Products section with %d products", len(priceConfig.Products))
 		for _, product := range priceConfig.Products {
 			if product.ProductID == productID && len(product.Price) > 0 {
 				for _, priceEntry := range product.Price {
@@ -1008,12 +1014,17 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 					}
 
 					tokenInfos = append(tokenInfos, tokenInfo)
+					log.Printf("extractTokenInfoFromPriceConfig: Added token info from Products section: chain=%s, symbol=%s", tokenInfo.Chain, tokenInfo.TokenSymbol)
 				}
 				break
 			}
 		}
+		log.Printf("extractTokenInfoFromPriceConfig: After processing Products section, tokenInfos count=%d", len(tokenInfos))
+	} else {
+		log.Printf("extractTokenInfoFromPriceConfig: No Products section")
 	}
 
+	log.Printf("extractTokenInfoFromPriceConfig: Final result - returning %d token info entries for productID=%s", len(tokenInfos), productID)
 	return tokenInfos
 }
 

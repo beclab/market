@@ -34,6 +34,7 @@ type PaymentStatusResult struct {
 	Message          string                 `json:"message"`
 	PaymentError     string                 `json:"payment_error,omitempty"`
 	FrontendData     map[string]interface{} `json:"frontend_data,omitempty"`
+	TokenInfo        []types.TokenInfo      `json:"token_info,omitempty"` // Token information for payment
 }
 
 // PurchaseApp starts a purchase flow for a given user/app/source (placeholder)
@@ -360,6 +361,22 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 		result.Message = "Payment status not evaluated"
 	default:
 		result.Message = "Payment status updated"
+	}
+
+	// Extract token info for all non-free states
+	if status != "free" {
+		var settingsManager *settings.SettingsManager
+		if globalStateMachine != nil {
+			settingsManager = globalStateMachine.settingsManager
+		}
+		tokenInfo := GetTokenInfoForState(context.Background(), state, appInfo, settingsManager)
+		log.Printf("GetPaymentStatus: GetTokenInfoForState returned %d token info entries for user=%s app=%s product=%s", len(tokenInfo), userID, realAppID, productID)
+		if len(tokenInfo) > 0 {
+			result.TokenInfo = tokenInfo
+			log.Printf("GetPaymentStatus: Added token_info to response (count=%d)", len(tokenInfo))
+		} else {
+			log.Printf("GetPaymentStatus: No token_info extracted (appInfo=%v, developerName=%s, settingsManager=%v)", appInfo != nil, state.DeveloperName, settingsManager != nil)
+		}
 	}
 
 	log.Printf("GetPaymentStatus: responding with status=%s message=%s for user=%s app=%s product=%s", result.Status, result.Message, userID, realAppID, productID)

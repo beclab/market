@@ -1183,8 +1183,13 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"status": "signature_required",
 		}
 		// Add token info if available
-		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+		} else {
+			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1197,8 +1202,13 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"message": "already purchased, ready to install",
 		}
 		// Add token info if available
-		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+		} else {
+			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1213,8 +1223,13 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}
 		attachFrontendPayload(response, state.FrontendData)
 		// Add token info if available
-		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+		} else {
+			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1263,6 +1278,15 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		// Token info is already included in payment_data, but also add it at top level for consistency
 		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
 			response["token_info"] = paymentData.TokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
+		} else {
+			// Try to get token info even if payment_data doesn't have it
+			tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+			log.Printf("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
+			if len(tokenInfo) > 0 {
+				response["token_info"] = tokenInfo
+				log.Printf("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
+			}
 		}
 		log.Printf("buildPurchaseResponse: payment_retry_required response includes frontend_data with %d keys", len(response["frontend_data"].(map[string]interface{})))
 		return response, nil
@@ -1273,8 +1297,13 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"message": "developer has no matching payment record, please retry payment",
 		}
 		// Add token info if available
-		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+		} else {
+			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1284,8 +1313,13 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"message": "signature invalid or expired, please re-sign to continue",
 		}
 		// Add token info if available
-		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+		} else {
+			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1309,6 +1343,15 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		// Token info is already included in payment_data, but also add it at top level for consistency
 		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
 			response["token_info"] = paymentData.TokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
+		} else {
+			// Try to get token info even if payment_data doesn't have it
+			tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+			log.Printf("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
+			if len(tokenInfo) > 0 {
+				response["token_info"] = tokenInfo
+				log.Printf("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
+			}
 		}
 		return response, nil
 	}
@@ -1335,6 +1378,15 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		// Token info is already included in payment_data, but also add it at top level for consistency
 		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
 			response["token_info"] = paymentData.TokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
+		} else {
+			// Try to get token info even if payment_data doesn't have it
+			tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+			log.Printf("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
+			if len(tokenInfo) > 0 {
+				response["token_info"] = tokenInfo
+				log.Printf("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
+			}
 		}
 		return response, nil
 	}
@@ -1346,8 +1398,13 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}
 		attachFrontendPayload(response, state.FrontendData)
 		// Add token info if available
-		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+		} else {
+			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1361,8 +1418,13 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"message": "already purchased, ready to install",
 		}
 		// Add token info if available
-		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
+			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+		} else {
+			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}

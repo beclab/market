@@ -2135,6 +2135,12 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 		responseData["payment_error"] = result.PaymentError
 	}
 
+	// Add token_info if available
+	if len(result.TokenInfo) > 0 {
+		responseData["token_info"] = result.TokenInfo
+		log.Printf("getAppPaymentStatus: Added token_info to response (count=%d)", len(result.TokenInfo))
+	}
+
 	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s", appID, sourceID, userID, result.Status)
 	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
 }
@@ -2316,6 +2322,12 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 
 	if result.PaymentError != "" {
 		responseData["payment_error"] = result.PaymentError
+	}
+
+	// Add token_info if available
+	if len(result.TokenInfo) > 0 {
+		responseData["token_info"] = result.TokenInfo
+		log.Printf("getAppPaymentStatusLegacy: Added token_info to response (count=%d)", len(result.TokenInfo))
 	}
 
 	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s (legacy)", appID, sourceID, userID, result.Status)
