@@ -1174,18 +1174,28 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 
 	// 1) Need signature
 	if state.SignatureStatus == SignatureRequired || state.SignatureStatus == SignatureRequiredButPending {
-		return map[string]interface{}{
+		response := map[string]interface{}{
 			"status": "signature_required",
-		}, nil
+		}
+		// Add token info if available
+		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+			response["token_info"] = tokenInfo
+		}
+		return response, nil
 	}
 
 	// 1.6) VC already confirmed -> purchased (check before signature/payment status)
 	// This takes priority over other states to avoid returning payment_required when already purchased
 	if state.DeveloperSync == DeveloperSyncCompleted && state.VC != "" {
-		return map[string]interface{}{
+		response := map[string]interface{}{
 			"status":  "purchased",
 			"message": "already purchased, ready to install",
-		}, nil
+		}
+		// Add token info if available
+		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+			response["token_info"] = tokenInfo
+		}
+		return response, nil
 	}
 
 	// 1.7) Frontend has completed payment -> waiting_developer_confirmation
@@ -1197,6 +1207,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"message": "payment completed, waiting for developer confirmation",
 		}
 		attachFrontendPayload(response, state.FrontendData)
+		// Add token info if available
+		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+			response["token_info"] = tokenInfo
+		}
 		return response, nil
 	}
 
@@ -1238,28 +1252,42 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			if err != nil {
 				return nil, fmt.Errorf("failed to get user DID: %w", err)
 			}
-			paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
-			response := map[string]interface{}{
-				"status":       "payment_retry_required",
-				"payment_data": paymentData,
-				"message":      "developer has no matching payment record, please retry payment",
-			}
-			// Ensure FrontendData is attached - attachFrontendPayload now always sets frontend_data field
-			attachFrontendPayload(response, state.FrontendData)
-			log.Printf("buildPurchaseResponse: payment_retry_required response includes frontend_data with %d keys", len(response["frontend_data"].(map[string]interface{})))
-			return response, nil
+		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
+		response := map[string]interface{}{
+			"status":       "payment_retry_required",
+			"payment_data": paymentData,
+			"message":      "developer has no matching payment record, please retry payment",
+		}
+		// Ensure FrontendData is attached - attachFrontendPayload now always sets frontend_data field
+		attachFrontendPayload(response, state.FrontendData)
+		// Token info is already included in payment_data, but also add it at top level for consistency
+		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
+			response["token_info"] = paymentData.TokenInfo
+		}
+		log.Printf("buildPurchaseResponse: payment_retry_required response includes frontend_data with %d keys", len(response["frontend_data"].(map[string]interface{})))
+		return response, nil
 		}
 		// Otherwise return error message
-		return map[string]interface{}{
+		response := map[string]interface{}{
 			"status":  "signature_no_record",
 			"message": "developer has no matching payment record, please retry payment",
-		}, nil
+		}
+		// Add token info if available
+		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+			response["token_info"] = tokenInfo
+		}
+		return response, nil
 	}
 	if state.SignatureStatus == SignatureErrorNeedReSign {
-		return map[string]interface{}{
+		response := map[string]interface{}{
 			"status":  "signature_need_resign",
 			"message": "signature invalid or expired, please re-sign to continue",
-		}, nil
+		}
+		// Add token info if available
+		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+			response["token_info"] = tokenInfo
+		}
+		return response, nil
 	}
 
 	// 2) Signed -> return payment data for frontend transfer
@@ -1278,6 +1306,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"payment_data": paymentData,
 		}
 		attachFrontendPayload(response, state.FrontendData)
+		// Token info is already included in payment_data, but also add it at top level for consistency
+		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
+			response["token_info"] = paymentData.TokenInfo
+		}
 		return response, nil
 	}
 
@@ -1300,6 +1332,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"payment_data": paymentData,
 		}
 		attachFrontendPayload(response, state.FrontendData)
+		// Token info is already included in payment_data, but also add it at top level for consistency
+		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
+			response["token_info"] = paymentData.TokenInfo
+		}
 		return response, nil
 	}
 
@@ -1309,6 +1345,10 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			"status": "payment_frontend_started",
 		}
 		attachFrontendPayload(response, state.FrontendData)
+		// Add token info if available
+		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+			response["token_info"] = tokenInfo
+		}
 		return response, nil
 	}
 
@@ -1316,10 +1356,15 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 
 	// 4) VC present -> purchased (fallback check, should have been caught earlier)
 	if state.DeveloperSync == DeveloperSyncCompleted && state.VC != "" {
-		return map[string]interface{}{
+		response := map[string]interface{}{
 			"status":  "purchased",
 			"message": "already purchased, ready to install",
-		}, nil
+		}
+		// Add token info if available
+		if tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+			response["token_info"] = tokenInfo
+		}
+		return response, nil
 	}
 
 	// Default syncing - log all state information for debugging
@@ -1336,8 +1381,13 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		log.Printf("buildPurchaseResponse: Developer.DID=%s", state.Developer.DID)
 	}
 
-	return map[string]interface{}{
+	response := map[string]interface{}{
 		"status":  "syncing",
 		"message": "synchronizing payment state",
-	}, nil
+	}
+	// Add token info if available
+	if tokenInfo := getTokenInfoForState(ctx, state, appInfo, psm.settingsManager); len(tokenInfo) > 0 {
+		response["token_info"] = tokenInfo
+	}
+	return response, nil
 }

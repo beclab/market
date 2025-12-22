@@ -321,7 +321,7 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 		_ = triggerPaymentStateSync(state)
 	}
 
-	status := buildPaymentStatusFromState(state)
+	status := BuildPaymentStatusFromState(state)
 	result := &PaymentStatusResult{RequiresPurchase: true, Status: status}
 
 	switch status {

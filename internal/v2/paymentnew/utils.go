@@ -1094,6 +1094,48 @@ func getMapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
+// GetTokenInfoForState extracts token information for a payment state
+// This function can be used to add token_info to responses even when payment_data is not present
+func GetTokenInfoForState(ctx context.Context, state *PaymentState, appInfo *types.AppInfo, settingsManager *settings.SettingsManager) []types.TokenInfo {
+	if state == nil {
+		return nil
+	}
+
+	// Extract developer name and price config
+	var developerName string
+	var priceConfig *types.PriceConfig
+	if appInfo != nil && appInfo.Price != nil {
+		priceConfig = appInfo.Price
+		developerName = getDeveloperNameFromPrice(appInfo)
+	} else {
+		// Fallback to state's developer name
+		developerName = state.DeveloperName
+	}
+
+	if developerName == "" || priceConfig == nil {
+		log.Printf("GetTokenInfoForState: Missing developerName or priceConfig, cannot extract token info")
+		return nil
+	}
+
+	// Create HTTP client for API calls
+	httpClient := resty.New()
+	httpClient.SetTimeout(10 * time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Fetch developer info from API to get token info
+	apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName, settingsManager, state.SourceID)
+	if err != nil {
+		log.Printf("GetTokenInfoForState: Failed to fetch developer info from API: %v, returning token info from price config only", err)
+		// Return basic token info from price config even if API call fails
+		return extractTokenInfoFromPriceConfig(priceConfig, nil, state.ProductID)
+	}
+
+	// Extract token info from price config and API response
+	return extractTokenInfoFromPriceConfig(priceConfig, apiResp, state.ProductID)
+}
+
 // convertRSAKeyToPEM converts RSA public key from hex format (0x...) to PEM format
 func convertRSAKeyToPEM(hexKey string) string {
 	if hexKey == "" || hexKey == "0x" {
@@ -1178,9 +1220,9 @@ func checkIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
 	return false, nil // Not a paid app
 }
 
-// buildPaymentStatusFromState constructs a user-facing payment status string from PaymentState
+// BuildPaymentStatusFromState constructs a user-facing payment status string from PaymentState
 // TODO: Complete mappings and edge-case handling
-func buildPaymentStatusFromState(state *PaymentState) string {
+func BuildPaymentStatusFromState(state *PaymentState) string {
 	if state == nil {
 		return "not_evaluated"
 	}

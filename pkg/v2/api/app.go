@@ -12,6 +12,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/paymentnew"
+	"market/internal/v2/settings"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -2337,11 +2338,17 @@ func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
 		states = make(map[string]*paymentnew.PaymentState)
 	}
 
+	// Get settings manager for token info extraction
+	var settingsManager *settings.SettingsManager
+	if s.cacheManager != nil {
+		settingsManager = s.cacheManager.GetSettingsManager()
+	}
+
 	// Convert to JSON-serializable format
 	statesData := make(map[string]interface{})
 	for key, state := range states {
 		if state != nil {
-			statesData[key] = map[string]interface{}{
+			stateData := map[string]interface{}{
 				"user_id":          state.UserID,
 				"app_id":           state.AppID,
 				"app_name":         state.AppName,
@@ -2363,6 +2370,31 @@ func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
 				"created_at":       state.CreatedAt,
 				"updated_at":       state.UpdatedAt,
 			}
+
+			// Determine payment status string to check if it's a non-purchased state
+			statusStr := paymentnew.BuildPaymentStatusFromState(state)
+			isNotPurchased := statusStr == "not_buy" || statusStr == "not_evaluated" || statusStr == "free"
+
+			// Add token_info for all non-not-purchased states
+			if !isNotPurchased {
+				// Try to get appInfo from cache
+				var appInfo *types.AppInfo
+				if s.cacheManager != nil && state.UserID != "" && state.AppID != "" {
+					userData := s.cacheManager.GetUserData(state.UserID)
+					if userData != nil {
+						if app, _ := s.findAppInUserDataWithSource(userData, state.AppID, state.SourceID); app != nil && app.AppInfo != nil {
+							appInfo = app.AppInfo
+						}
+					}
+				}
+
+				// Extract token info
+				if tokenInfo := paymentnew.GetTokenInfoForState(context.Background(), state, appInfo, settingsManager); len(tokenInfo) > 0 {
+					stateData["token_info"] = tokenInfo
+				}
+			}
+
+			statesData[key] = stateData
 		}
 	}
 
