@@ -1098,6 +1098,7 @@ func getMapKeys(m map[string]interface{}) []string {
 // This function can be used to add token_info to responses even when payment_data is not present
 func GetTokenInfoForState(ctx context.Context, state *PaymentState, appInfo *types.AppInfo, settingsManager *settings.SettingsManager) []types.TokenInfo {
 	if state == nil {
+		log.Printf("GetTokenInfoForState: state is nil")
 		return nil
 	}
 
@@ -1107,13 +1108,15 @@ func GetTokenInfoForState(ctx context.Context, state *PaymentState, appInfo *typ
 	if appInfo != nil && appInfo.Price != nil {
 		priceConfig = appInfo.Price
 		developerName = getDeveloperNameFromPrice(appInfo)
+		log.Printf("GetTokenInfoForState: Using developerName=%s and priceConfig from appInfo for user=%s app=%s product=%s", developerName, state.UserID, state.AppID, state.ProductID)
 	} else {
 		// Fallback to state's developer name
 		developerName = state.DeveloperName
+		log.Printf("GetTokenInfoForState: Using developerName=%s from state (appInfo=%v, priceConfig=%v) for user=%s app=%s product=%s", developerName, appInfo != nil, priceConfig != nil, state.UserID, state.AppID, state.ProductID)
 	}
 
-	if developerName == "" || priceConfig == nil {
-		log.Printf("GetTokenInfoForState: Missing developerName or priceConfig, cannot extract token info")
+	if developerName == "" {
+		log.Printf("GetTokenInfoForState: developerName is empty, cannot extract token info for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
 		return nil
 	}
 
@@ -1127,13 +1130,101 @@ func GetTokenInfoForState(ctx context.Context, state *PaymentState, appInfo *typ
 	// Fetch developer info from API to get token info
 	apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName, settingsManager, state.SourceID)
 	if err != nil {
-		log.Printf("GetTokenInfoForState: Failed to fetch developer info from API: %v, returning token info from price config only", err)
-		// Return basic token info from price config even if API call fails
-		return extractTokenInfoFromPriceConfig(priceConfig, nil, state.ProductID)
+		log.Printf("GetTokenInfoForState: Failed to fetch developer info from API: %v for user=%s app=%s product=%s", err, state.UserID, state.AppID, state.ProductID)
+		// If we have priceConfig, return basic token info from price config even if API call fails
+		if priceConfig != nil {
+			log.Printf("GetTokenInfoForState: Returning token info from price config only (API call failed)")
+			return extractTokenInfoFromPriceConfig(priceConfig, nil, state.ProductID)
+		}
+		// If no priceConfig, try to extract from API response structure if available
+		log.Printf("GetTokenInfoForState: No priceConfig available, cannot extract token info without API response")
+		return nil
 	}
 
-	// Extract token info from price config and API response
-	return extractTokenInfoFromPriceConfig(priceConfig, apiResp, state.ProductID)
+	// If we have priceConfig, use the standard extraction method
+	if priceConfig != nil {
+		log.Printf("GetTokenInfoForState: Extracting token info from priceConfig and API response for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+		return extractTokenInfoFromPriceConfig(priceConfig, apiResp, state.ProductID)
+	}
+
+	// If no priceConfig but we have API response, try to extract token info directly from API
+	log.Printf("GetTokenInfoForState: No priceConfig, attempting to extract token info from API response only for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+	return extractTokenInfoFromAPIResponse(apiResp, state.ProductID)
+}
+
+// extractTokenInfoFromAPIResponse extracts token information directly from API response without price config
+func extractTokenInfoFromAPIResponse(apiResp *DeveloperAPIResponse, productID string) []types.TokenInfo {
+	if apiResp == nil || apiResp.Data.Apps == nil {
+		log.Printf("extractTokenInfoFromAPIResponse: API response or Apps is nil")
+		return nil
+	}
+
+	var tokenInfos []types.TokenInfo
+
+	// Extract from API response structure
+	if products, ok := apiResp.Data.Apps["products"].([]interface{}); ok {
+		log.Printf("extractTokenInfoFromAPIResponse: Found %d products in API response", len(products))
+		for _, p := range products {
+			if product, ok := p.(map[string]interface{}); ok {
+				pid, _ := product["product_id"].(string)
+				log.Printf("extractTokenInfoFromAPIResponse: Checking product_id=%s (expected=%s)", pid, productID)
+				if pid == productID {
+					log.Printf("extractTokenInfoFromAPIResponse: Product ID matched! Extracting token info from API response")
+					if prices, ok := product["price"].([]interface{}); ok {
+						log.Printf("extractTokenInfoFromAPIResponse: Found %d price entries", len(prices))
+						for _, pr := range prices {
+							if price, ok := pr.(map[string]interface{}); ok {
+								tokenInfo := types.TokenInfo{}
+
+								// Extract all fields from API response
+								if chain, ok := price["chain"].(string); ok {
+									tokenInfo.Chain = chain
+								}
+								if symbol, ok := price["token_symbol"].(string); ok {
+									tokenInfo.TokenSymbol = symbol
+								}
+								if wallet, ok := price["receive_wallet"].(string); ok {
+									tokenInfo.ReceiveWallet = wallet
+								}
+								if decimals, ok := price["token_decimals"].(float64); ok {
+									tokenInfo.TokenDecimals = int(decimals)
+								} else if decimals, ok := price["token_decimals"].(int); ok {
+									tokenInfo.TokenDecimals = decimals
+								} else if decimals, ok := price["token_decimals"].(int64); ok {
+									tokenInfo.TokenDecimals = int(decimals)
+								}
+								if contract, ok := price["token_contract"].(string); ok {
+									tokenInfo.TokenContract = contract
+								}
+								if amount, ok := price["token_amount"].(string); ok {
+									tokenInfo.TokenAmount = amount
+								}
+								if icon, ok := price["token_icon"].(string); ok {
+									tokenInfo.TokenIcon = icon
+								}
+
+								// Only add if we have at least chain and token_symbol
+								if tokenInfo.Chain != "" && tokenInfo.TokenSymbol != "" {
+									tokenInfos = append(tokenInfos, tokenInfo)
+									log.Printf("extractTokenInfoFromAPIResponse: Extracted token info: chain=%s, symbol=%s, decimals=%d, contract=%s, amount=%s", tokenInfo.Chain, tokenInfo.TokenSymbol, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount)
+								} else {
+									log.Printf("extractTokenInfoFromAPIResponse: Skipping incomplete token info (missing chain or symbol)")
+								}
+							}
+						}
+					} else {
+						log.Printf("extractTokenInfoFromAPIResponse: Product price field is not an array")
+					}
+					break
+				}
+			}
+		}
+	} else {
+		log.Printf("extractTokenInfoFromAPIResponse: No products array found in API response")
+	}
+
+	log.Printf("extractTokenInfoFromAPIResponse: Extracted %d token info entries", len(tokenInfos))
+	return tokenInfos
 }
 
 // convertRSAKeyToPEM converts RSA public key from hex format (0x...) to PEM format

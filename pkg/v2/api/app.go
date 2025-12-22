@@ -2379,13 +2379,24 @@ func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
 				if userData != nil {
 					if app, _ := s.findAppInUserDataWithSource(userData, state.AppID, state.SourceID); app != nil && app.AppInfo != nil {
 						appInfo = app.AppInfo
+						log.Printf("getPaymentStates: Found appInfo for user=%s app=%s source=%s", state.UserID, state.AppID, state.SourceID)
+					} else {
+						log.Printf("getPaymentStates: AppInfo not found in cache for user=%s app=%s source=%s", state.UserID, state.AppID, state.SourceID)
 					}
+				} else {
+					log.Printf("getPaymentStates: UserData not found for user=%s", state.UserID)
 				}
+			} else {
+				log.Printf("getPaymentStates: Cannot get appInfo - cacheManager=%v, userID=%s, appID=%s", s.cacheManager != nil, state.UserID, state.AppID)
 			}
 
 			// Extract token info for all states
-			if tokenInfo := paymentnew.GetTokenInfoForState(context.Background(), state, appInfo, settingsManager); len(tokenInfo) > 0 {
+			tokenInfo := paymentnew.GetTokenInfoForState(context.Background(), state, appInfo, settingsManager)
+			if len(tokenInfo) > 0 {
 				stateData["token_info"] = tokenInfo
+				log.Printf("getPaymentStates: Added token_info (count=%d) for user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+			} else {
+				log.Printf("getPaymentStates: No token_info extracted for user=%s app=%s product=%s (appInfo=%v, developerName=%s, settingsManager=%v)", state.UserID, state.AppID, state.ProductID, appInfo != nil, state.DeveloperName, settingsManager != nil)
 			}
 
 			statesData[key] = stateData
