@@ -844,6 +844,7 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 
 	log.Printf("extractTokenInfoFromPriceConfig: Starting extraction for productID=%s", productID)
 	log.Printf("extractTokenInfoFromPriceConfig: apiResp=%v, apiResp.Data.Apps=%v", apiResp != nil, apiResp != nil && apiResp.Data.Apps != nil)
+	log.Printf("extractTokenInfoFromPriceConfig: priceConfig.Paid=%v, priceConfig.Products count=%d", priceConfig.Paid != nil, len(priceConfig.Products))
 
 	var tokenInfos []types.TokenInfo
 
@@ -856,7 +857,7 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 				TokenSymbol:   priceEntry.TokenSymbol,
 				ReceiveWallet: priceEntry.ReceiveWallet,
 			}
-			log.Printf("extractTokenInfoFromPriceConfig: Processing price entry: chain=%s, symbol=%s", priceEntry.Chain, priceEntry.TokenSymbol)
+			log.Printf("extractTokenInfoFromPriceConfig: Processing price entry: chain=%s, symbol=%s, receiveWallet=%s", priceEntry.Chain, priceEntry.TokenSymbol, priceEntry.ReceiveWallet)
 
 			// Try to get token decimals from API response
 			if apiResp != nil && apiResp.Data.Apps != nil {
@@ -934,11 +935,16 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 			}
 
 			tokenInfos = append(tokenInfos, tokenInfo)
+			log.Printf("extractTokenInfoFromPriceConfig: Added token info from Paid section: chain=%s, symbol=%s", tokenInfo.Chain, tokenInfo.TokenSymbol)
 		}
+		log.Printf("extractTokenInfoFromPriceConfig: After processing Paid section, tokenInfos count=%d", len(tokenInfos))
+	} else {
+		log.Printf("extractTokenInfoFromPriceConfig: No Paid section or no price entries in Paid section")
 	}
 
 	// Extract from Products section
 	if len(priceConfig.Products) > 0 {
+		log.Printf("extractTokenInfoFromPriceConfig: Processing Products section with %d products", len(priceConfig.Products))
 		for _, product := range priceConfig.Products {
 			if product.ProductID == productID && len(product.Price) > 0 {
 				for _, priceEntry := range product.Price {
@@ -1008,12 +1014,17 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 					}
 
 					tokenInfos = append(tokenInfos, tokenInfo)
+					log.Printf("extractTokenInfoFromPriceConfig: Added token info from Products section: chain=%s, symbol=%s", tokenInfo.Chain, tokenInfo.TokenSymbol)
 				}
 				break
 			}
 		}
+		log.Printf("extractTokenInfoFromPriceConfig: After processing Products section, tokenInfos count=%d", len(tokenInfos))
+	} else {
+		log.Printf("extractTokenInfoFromPriceConfig: No Products section")
 	}
 
+	log.Printf("extractTokenInfoFromPriceConfig: Final result - returning %d token info entries for productID=%s", len(tokenInfos), productID)
 	return tokenInfos
 }
 
@@ -1092,6 +1103,139 @@ func getMapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// GetTokenInfoForState extracts token information for a payment state
+// This function can be used to add token_info to responses even when payment_data is not present
+func GetTokenInfoForState(ctx context.Context, state *PaymentState, appInfo *types.AppInfo, settingsManager *settings.SettingsManager) []types.TokenInfo {
+	if state == nil {
+		log.Printf("GetTokenInfoForState: state is nil")
+		return nil
+	}
+
+	// Extract developer name and price config
+	var developerName string
+	var priceConfig *types.PriceConfig
+	if appInfo != nil && appInfo.Price != nil {
+		priceConfig = appInfo.Price
+		developerName = getDeveloperNameFromPrice(appInfo)
+		log.Printf("GetTokenInfoForState: Using developerName=%s and priceConfig from appInfo for user=%s app=%s product=%s", developerName, state.UserID, state.AppID, state.ProductID)
+	} else {
+		// Fallback to state's developer name
+		developerName = state.DeveloperName
+		log.Printf("GetTokenInfoForState: Using developerName=%s from state (appInfo=%v, priceConfig=%v) for user=%s app=%s product=%s", developerName, appInfo != nil, priceConfig != nil, state.UserID, state.AppID, state.ProductID)
+	}
+
+	if developerName == "" {
+		log.Printf("GetTokenInfoForState: developerName is empty, cannot extract token info for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+		return nil
+	}
+
+	// Create HTTP client for API calls
+	httpClient := resty.New()
+	httpClient.SetTimeout(10 * time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Fetch developer info from API to get token info
+	apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName, settingsManager, state.SourceID)
+	if err != nil {
+		log.Printf("GetTokenInfoForState: Failed to fetch developer info from API: %v for user=%s app=%s product=%s", err, state.UserID, state.AppID, state.ProductID)
+		// If we have priceConfig, return basic token info from price config even if API call fails
+		if priceConfig != nil {
+			log.Printf("GetTokenInfoForState: Returning token info from price config only (API call failed)")
+			return extractTokenInfoFromPriceConfig(priceConfig, nil, state.ProductID)
+		}
+		// If no priceConfig, try to extract from API response structure if available
+		log.Printf("GetTokenInfoForState: No priceConfig available, cannot extract token info without API response")
+		return nil
+	}
+
+	// If we have priceConfig, use the standard extraction method
+	if priceConfig != nil {
+		log.Printf("GetTokenInfoForState: Extracting token info from priceConfig and API response for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+		return extractTokenInfoFromPriceConfig(priceConfig, apiResp, state.ProductID)
+	}
+
+	// If no priceConfig but we have API response, try to extract token info directly from API
+	log.Printf("GetTokenInfoForState: No priceConfig, attempting to extract token info from API response only for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+	return extractTokenInfoFromAPIResponse(apiResp, state.ProductID)
+}
+
+// extractTokenInfoFromAPIResponse extracts token information directly from API response without price config
+func extractTokenInfoFromAPIResponse(apiResp *DeveloperAPIResponse, productID string) []types.TokenInfo {
+	if apiResp == nil || apiResp.Data.Apps == nil {
+		log.Printf("extractTokenInfoFromAPIResponse: API response or Apps is nil")
+		return nil
+	}
+
+	var tokenInfos []types.TokenInfo
+
+	// Extract from API response structure
+	if products, ok := apiResp.Data.Apps["products"].([]interface{}); ok {
+		log.Printf("extractTokenInfoFromAPIResponse: Found %d products in API response", len(products))
+		for _, p := range products {
+			if product, ok := p.(map[string]interface{}); ok {
+				pid, _ := product["product_id"].(string)
+				log.Printf("extractTokenInfoFromAPIResponse: Checking product_id=%s (expected=%s)", pid, productID)
+				if pid == productID {
+					log.Printf("extractTokenInfoFromAPIResponse: Product ID matched! Extracting token info from API response")
+					if prices, ok := product["price"].([]interface{}); ok {
+						log.Printf("extractTokenInfoFromAPIResponse: Found %d price entries", len(prices))
+						for _, pr := range prices {
+							if price, ok := pr.(map[string]interface{}); ok {
+								tokenInfo := types.TokenInfo{}
+
+								// Extract all fields from API response
+								if chain, ok := price["chain"].(string); ok {
+									tokenInfo.Chain = chain
+								}
+								if symbol, ok := price["token_symbol"].(string); ok {
+									tokenInfo.TokenSymbol = symbol
+								}
+								if wallet, ok := price["receive_wallet"].(string); ok {
+									tokenInfo.ReceiveWallet = wallet
+								}
+								if decimals, ok := price["token_decimals"].(float64); ok {
+									tokenInfo.TokenDecimals = int(decimals)
+								} else if decimals, ok := price["token_decimals"].(int); ok {
+									tokenInfo.TokenDecimals = decimals
+								} else if decimals, ok := price["token_decimals"].(int64); ok {
+									tokenInfo.TokenDecimals = int(decimals)
+								}
+								if contract, ok := price["token_contract"].(string); ok {
+									tokenInfo.TokenContract = contract
+								}
+								if amount, ok := price["token_amount"].(string); ok {
+									tokenInfo.TokenAmount = amount
+								}
+								if icon, ok := price["token_icon"].(string); ok {
+									tokenInfo.TokenIcon = icon
+								}
+
+								// Only add if we have at least chain and token_symbol
+								if tokenInfo.Chain != "" && tokenInfo.TokenSymbol != "" {
+									tokenInfos = append(tokenInfos, tokenInfo)
+									log.Printf("extractTokenInfoFromAPIResponse: Extracted token info: chain=%s, symbol=%s, decimals=%d, contract=%s, amount=%s", tokenInfo.Chain, tokenInfo.TokenSymbol, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount)
+								} else {
+									log.Printf("extractTokenInfoFromAPIResponse: Skipping incomplete token info (missing chain or symbol)")
+								}
+							}
+						}
+					} else {
+						log.Printf("extractTokenInfoFromAPIResponse: Product price field is not an array")
+					}
+					break
+				}
+			}
+		}
+	} else {
+		log.Printf("extractTokenInfoFromAPIResponse: No products array found in API response")
+	}
+
+	log.Printf("extractTokenInfoFromAPIResponse: Extracted %d token info entries", len(tokenInfos))
+	return tokenInfos
 }
 
 // convertRSAKeyToPEM converts RSA public key from hex format (0x...) to PEM format
@@ -1178,9 +1322,9 @@ func checkIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
 	return false, nil // Not a paid app
 }
 
-// buildPaymentStatusFromState constructs a user-facing payment status string from PaymentState
+// BuildPaymentStatusFromState constructs a user-facing payment status string from PaymentState
 // TODO: Complete mappings and edge-case handling
-func buildPaymentStatusFromState(state *PaymentState) string {
+func BuildPaymentStatusFromState(state *PaymentState) string {
 	if state == nil {
 		return "not_evaluated"
 	}

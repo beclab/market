@@ -12,6 +12,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/paymentnew"
+	"market/internal/v2/settings"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -2134,6 +2135,12 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 		responseData["payment_error"] = result.PaymentError
 	}
 
+	// Add token_info if available
+	if len(result.TokenInfo) > 0 {
+		responseData["token_info"] = result.TokenInfo
+		log.Printf("getAppPaymentStatus: Added token_info to response (count=%d)", len(result.TokenInfo))
+	}
+
 	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s", appID, sourceID, userID, result.Status)
 	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
 }
@@ -2317,6 +2324,12 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 		responseData["payment_error"] = result.PaymentError
 	}
 
+	// Add token_info if available
+	if len(result.TokenInfo) > 0 {
+		responseData["token_info"] = result.TokenInfo
+		log.Printf("getAppPaymentStatusLegacy: Added token_info to response (count=%d)", len(result.TokenInfo))
+	}
+
 	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s (legacy)", appID, sourceID, userID, result.Status)
 	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
 }
@@ -2337,11 +2350,17 @@ func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
 		states = make(map[string]*paymentnew.PaymentState)
 	}
 
+	// Get settings manager for token info extraction
+	var settingsManager *settings.SettingsManager
+	if s.cacheManager != nil {
+		settingsManager = s.cacheManager.GetSettingsManager()
+	}
+
 	// Convert to JSON-serializable format
 	statesData := make(map[string]interface{})
 	for key, state := range states {
 		if state != nil {
-			statesData[key] = map[string]interface{}{
+			stateData := map[string]interface{}{
 				"user_id":          state.UserID,
 				"app_id":           state.AppID,
 				"app_name":         state.AppName,
@@ -2363,6 +2382,36 @@ func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
 				"created_at":       state.CreatedAt,
 				"updated_at":       state.UpdatedAt,
 			}
+
+			// Add token_info for all states
+			// Try to get appInfo from cache
+			var appInfo *types.AppInfo
+			if s.cacheManager != nil && state.UserID != "" && state.AppID != "" {
+				userData := s.cacheManager.GetUserData(state.UserID)
+				if userData != nil {
+					if app, _ := s.findAppInUserDataWithSource(userData, state.AppID, state.SourceID); app != nil && app.AppInfo != nil {
+						appInfo = app.AppInfo
+						log.Printf("getPaymentStates: Found appInfo for user=%s app=%s source=%s", state.UserID, state.AppID, state.SourceID)
+					} else {
+						log.Printf("getPaymentStates: AppInfo not found in cache for user=%s app=%s source=%s", state.UserID, state.AppID, state.SourceID)
+					}
+				} else {
+					log.Printf("getPaymentStates: UserData not found for user=%s", state.UserID)
+				}
+			} else {
+				log.Printf("getPaymentStates: Cannot get appInfo - cacheManager=%v, userID=%s, appID=%s", s.cacheManager != nil, state.UserID, state.AppID)
+			}
+
+			// Extract token info for all states
+			tokenInfo := paymentnew.GetTokenInfoForState(context.Background(), state, appInfo, settingsManager)
+			if len(tokenInfo) > 0 {
+				stateData["token_info"] = tokenInfo
+				log.Printf("getPaymentStates: Added token_info (count=%d) for user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+			} else {
+				log.Printf("getPaymentStates: No token_info extracted for user=%s app=%s product=%s (appInfo=%v, developerName=%s, settingsManager=%v)", state.UserID, state.AppID, state.ProductID, appInfo != nil, state.DeveloperName, settingsManager != nil)
+			}
+
+			statesData[key] = stateData
 		}
 	}
 
