@@ -1996,6 +1996,11 @@ func (cm *CacheManager) SetSettingsManager(sm *settings.SettingsManager) {
 	cm.settingsManager = sm
 }
 
+// GetSettingsManager returns the settings manager instance
+func (cm *CacheManager) GetSettingsManager() *settings.SettingsManager {
+	return cm.settingsManager
+}
+
 // SyncMarketSourcesToCache synchronizes market sources to all users in cache
 func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.MarketSource) error {
 	glog.Infof("[LOCK] cm.mutex.TryLock() @SyncMarketSourcesToCache Start")
