@@ -529,6 +529,12 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 	var changes []StatusChange
 
 	// Create maps for easier lookup
+	type cachedEntry struct {
+		sourceID   string
+		appState   *types.AppStateLatestData
+		statusTime time.Time
+	}
+
 	latestApps := make(map[string]*utils.AppServiceResponse)
 	for i := range latestStatus {
 		app := &latestStatus[i]
@@ -536,30 +542,37 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 		latestApps[key] = app
 	}
 
-	cachedApps := make(map[string]*types.AppStateLatestData)
-	var cachedAppKeys []string
+	// Group cache by user+appName, keep every source entry for per-source fix and pruning
+	cachedAppsByUserAndName := make(map[string][]cachedEntry)
 	for key, cached := range cachedStatus {
-		cachedApps[key] = cached
-		cachedAppKeys = append(cachedAppKeys, key)
-	}
-
-	// 1. Check for new apps (appeared in latest but not in cache)
-	// Build a set of all user+appName combinations in cache
-	cacheAppKeys := make(map[string]struct{})
-	for key := range cachedApps {
 		parts := strings.SplitN(key, ":", 3)
-		if len(parts) == 3 {
-			cacheAppKeys[parts[0]+":"+parts[2]] = struct{}{}
+		if len(parts) != 3 {
+			continue
 		}
+		userID, sourceID, appName := parts[0], parts[1], parts[2]
+
+		var statusTime time.Time
+		if cached != nil && cached.Status.StatusTime != "" {
+			if ts, err := time.Parse("2006-01-02T15:04:05.000000000Z", cached.Status.StatusTime); err == nil {
+				statusTime = ts
+			}
+		}
+
+		k := fmt.Sprintf("%s:%s", userID, appName)
+		cachedAppsByUserAndName[k] = append(cachedAppsByUserAndName[k], cachedEntry{
+			sourceID:   sourceID,
+			appState:   cached,
+			statusTime: statusTime,
+		})
 	}
 
+	// 1) Detect new apps (present in latest, absent in cache)
 	for _, app := range latestStatus {
 		userID := app.Spec.Owner
 		appName := app.Spec.Name
 		key := userID + ":" + appName
 
-		if _, exists := cacheAppKeys[key]; !exists {
-			// New app appeared, SourceID will be determined during correction
+		if _, exists := cachedAppsByUserAndName[key]; !exists {
 			change := StatusChange{
 				UserID:     userID,
 				SourceID:   "",
@@ -574,141 +587,159 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 		}
 	}
 
-	// 2. Check for disappeared apps (in cache but not in latest)
-	for key, cached := range cachedApps {
-		parts := strings.SplitN(key, ":", 3)
-		if len(parts) != 3 {
+	// 2) Detect disappeared apps (present in cache, absent in latest) per source
+	for key, entries := range cachedAppsByUserAndName {
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) != 2 {
 			continue
 		}
-		userID := parts[0]
-		sourceID := parts[1]
-		appName := cached.Status.Name
-
-		// Check if this app still exists in latest status
-		foundInLatest := false
-		for _, app := range latestStatus {
-			if app.Spec.Owner == userID && app.Spec.Name == appName {
-				foundInLatest = true
-				break
-			}
-		}
+		userID, appName := parts[0], parts[1]
+		_, foundInLatest := latestApps[key]
 
 		if !foundInLatest {
-			// App disappeared
+			for _, entry := range entries {
+				if entry.appState == nil {
+					continue
+				}
+				change := StatusChange{
+					UserID:     userID,
+					SourceID:   entry.sourceID,
+					AppName:    appName,
+					ChangeType: "app_disappeared",
+					OldState:   entry.appState.Status.State,
+					NewState:   "unknown",
+					Timestamp:  time.Now(),
+				}
+				changes = append(changes, change)
+
+				glog.Infof("App disappeared: %s (user: %s, source: %s, last state: %s)",
+					appName, userID, entry.sourceID, entry.appState.Status.State)
+			}
+		}
+	}
+
+	// 3) Detect state changes for every source entry that matches latest app
+	for key, latest := range latestApps {
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		userID, appName := parts[0], parts[1]
+
+		entries := cachedAppsByUserAndName[key]
+		if len(entries) == 0 {
+			continue // already handled as new app in step 1
+		}
+
+		for _, entry := range entries {
+			if entry.appState == nil {
+				continue
+			}
+
+			stateChanged := entry.appState.Status.State != latest.Status.State
+			entranceChanges := scc.compareEntranceStatuses(entry.appState.Status.EntranceStatuses, latest.Status.EntranceStatuses)
+
+			if stateChanged || len(entranceChanges) > 0 {
+				change := StatusChange{
+					UserID:          userID,
+					SourceID:        entry.sourceID,
+					AppName:         appName,
+					ChangeType:      "state_change",
+					OldState:        entry.appState.Status.State,
+					NewState:        latest.Status.State,
+					EntranceChanges: entranceChanges,
+					Timestamp:       time.Now(),
+				}
+				changes = append(changes, change)
+
+				glog.Infof("Status change detected for app %s (user: %s, source: %s): %s -> %s",
+					appName, userID, entry.sourceID, entry.appState.Status.State, latest.Status.State)
+
+				if len(entranceChanges) > 0 {
+					for _, entranceChange := range entranceChanges {
+						glog.Infof("  Entrance %s: %s -> %s",
+							entranceChange.EntranceName, entranceChange.OldState, entranceChange.NewState)
+					}
+				}
+			}
+		}
+	}
+
+	// 4) Prune duplicates: same user+app across multiple sources -> keep only the latest-installed
+	for key, entries := range cachedAppsByUserAndName {
+		if len(entries) <= 1 {
+			continue
+		}
+
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		userID, appName := parts[0], parts[1]
+
+		// Prefer the source recorded by GetAppInfoLastInstalled as latest-installed
+		preferredSource := ""
+		if _, src, err := utils.GetAppInfoLastInstalled(userID, appName); err == nil && src != "" {
+			preferredSource = src
+		}
+
+		// Fallback: use newest StatusTime when no record found
+		if preferredSource == "" {
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].statusTime.After(entries[j].statusTime)
+			})
+			preferredSource = entries[0].sourceID
+		}
+
+		for _, entry := range entries {
+			if entry.sourceID == preferredSource || entry.appState == nil {
+				continue
+			}
+
 			change := StatusChange{
 				UserID:     userID,
-				SourceID:   sourceID,
+				SourceID:   entry.sourceID,
 				AppName:    appName,
-				ChangeType: "app_disappeared",
-				OldState:   cached.Status.State,
-				NewState:   "unknown",
+				ChangeType: "duplicate_prune",
+				OldState:   entry.appState.Status.State,
+				NewState:   "removed",
 				Timestamp:  time.Now(),
 			}
 			changes = append(changes, change)
 
-			glog.Infof("App disappeared: %s (user: %s, source: %s, last state: %s)",
-				appName, userID, sourceID, cached.Status.State)
+			glog.Infof("Duplicate app detected (user=%s, app=%s): keep source=%s, prune source=%s (state=%s)",
+				userID, appName, preferredSource, entry.sourceID, entry.appState.Status.State)
 		}
 	}
 
-	// 3. Check for state changes in existing apps
+	// 5. Check for state inconsistency (all entrances running but app state is not running)
 	for _, app := range latestStatus {
 		userID := app.Spec.Owner
 		appName := app.Spec.Name
+		key := fmt.Sprintf("%s:%s", userID, appName)
 
-		// Find matching cached app by searching through all sources
-		var cachedApp *types.AppStateLatestData
-		var sourceID string
-
-		for key, cached := range cachedApps {
-			if cached.Status.Name == appName {
-				// Extract user and source from key
-				parts := strings.SplitN(key, ":", 3)
-				if len(parts) == 3 && parts[0] == userID {
-					cachedApp = cached
-					sourceID = parts[1]
-					break
-				}
-			}
-		}
-
-		if cachedApp == nil {
-			// This case is already handled in step 1 (new app)
-			continue
-		}
-
-		// Compare main state
-		stateChanged := cachedApp.Status.State != app.Status.State
-
-		// Compare entrance statuses
-		entranceChanges := scc.compareEntranceStatuses(cachedApp.Status.EntranceStatuses, app.Status.EntranceStatuses)
-
-		if stateChanged || len(entranceChanges) > 0 {
-			change := StatusChange{
-				UserID:          userID,
-				SourceID:        sourceID,
-				AppName:         appName,
-				ChangeType:      "state_change",
-				OldState:        cachedApp.Status.State,
-				NewState:        app.Status.State,
-				EntranceChanges: entranceChanges,
-				Timestamp:       time.Now(),
-			}
-			changes = append(changes, change)
-
-			glog.Infof("Status change detected for app %s (user: %s, source: %s): %s -> %s",
-				appName, userID, sourceID, cachedApp.Status.State, app.Status.State)
-
-			if len(entranceChanges) > 0 {
-				for _, entranceChange := range entranceChanges {
-					glog.Infof("  Entrance %s: %s -> %s",
-						entranceChange.EntranceName, entranceChange.OldState, entranceChange.NewState)
-				}
-			}
-		}
-	}
-
-	// 4. Check for state inconsistency (all entrances are running but app state is not running)
-	for _, app := range latestStatus {
-		userID := app.Spec.Owner
-		appName := app.Spec.Name
-
-		// Find matching cached app by searching through all sources
-		var cachedApp *types.AppStateLatestData
-		// var sourceID string
-
-		for key, cached := range cachedApps {
-			if cached.Status.Name == appName {
-				// Extract user and source from key
-				parts := strings.SplitN(key, ":", 3)
-				if len(parts) == 3 && parts[0] == userID {
-					cachedApp = cached
-					// sourceID = parts[1]
-					break
-				}
-			}
-		}
-
-		if cachedApp == nil {
-			// This case is already handled in step 1 (new app)
+		entries := cachedAppsByUserAndName[key]
+		if len(entries) == 0 {
 			continue
 		}
 
 		// // Check for state inconsistency
-		// if scc.isStateInconsistent(app) {
-		// 	change := StatusChange{
-		// 		UserID:     userID,
-		// 		SourceID:   sourceID,
-		// 		AppName:    appName,
-		// 		ChangeType: "state_inconsistency",
-		// 		OldState:   cachedApp.Status.State,
-		// 		NewState:   "running", // Should be corrected to running
-		// 		Timestamp:  time.Now(),
+		// for _, entry := range entries {
+		// 	if entry.appState == nil {
+		// 		continue
 		// 	}
-		// 	changes = append(changes, change)
-
-		// 	glog.Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running",
-		// 		appName, userID, sourceID, app.Status.State)
+		// 	if scc.isStateInconsistent(app) {
+		// 		change := StatusChange{
+		// 			UserID:     userID,
+		// 			SourceID:   entry.sourceID,
+		// 			AppName:    appName,
+		// 			ChangeType: "state_inconsistency",
+		// 			OldState:   entry.appState.Status.State,
+		// 			NewState:   "running",
+		// 			Timestamp:  time.Now(),
+		// 		}
+		// 		changes = append(changes, change)
+		// 	}
 		// }
 	}
 
@@ -903,6 +934,20 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 			} else {
 				glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
 					change.AppName, change.UserID, sourceID)
+			}
+
+		case "duplicate_prune":
+			glog.Infof("Pruning duplicate app %s (user: %s, source: %s), kept latest elsewhere; last state: %s",
+				change.AppName, change.UserID, change.SourceID, change.OldState)
+			if scc.cacheManager != nil {
+				if err := scc.cacheManager.RemoveAppStateData(change.UserID, change.SourceID, change.AppName); err != nil {
+					glog.Warningf("Failed to remove AppStateLatest for duplicate app %s (user: %s, source: %s): %v",
+						change.AppName, change.UserID, change.SourceID, err)
+				}
+				if err := scc.cacheManager.RemoveAppInfoLatestData(change.UserID, change.SourceID, change.AppName); err != nil {
+					glog.Warningf("Failed to remove AppInfoLatest for duplicate app %s (user: %s, source: %s): %v",
+						change.AppName, change.UserID, change.SourceID, err)
+				}
 			}
 
 		case "state_inconsistency":
