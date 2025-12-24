@@ -902,6 +902,8 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	// Create AppSimpleInfo from available data
 	if pendingApp.AppSimpleInfo != nil {
 		latestApp.AppSimpleInfo = pendingApp.AppSimpleInfo
+		// Ensure Categories and SupportArch are preserved from RawData or AppInfo if empty
+		dw.ensureAppSimpleInfoFields(latestApp.AppSimpleInfo, pendingApp)
 	} else {
 		latestApp.AppSimpleInfo = dw.createAppSimpleInfo(pendingApp)
 	}
@@ -1105,6 +1107,35 @@ func (dw *DataWatcher) copyMultilingualMap(source map[string]string) map[string]
 		result[key] = value
 	}
 	return result
+}
+
+// ensureAppSimpleInfoFields ensures Categories and SupportArch are preserved from RawData or AppInfo if empty
+func (dw *DataWatcher) ensureAppSimpleInfoFields(appSimpleInfo *types.AppSimpleInfo, pendingApp *types.AppInfoLatestPendingData) {
+	if appSimpleInfo == nil || pendingApp == nil {
+		return
+	}
+
+	// Ensure SupportArch is preserved if empty
+	if len(appSimpleInfo.SupportArch) == 0 {
+		if pendingApp.RawData != nil && len(pendingApp.RawData.SupportArch) > 0 {
+			appSimpleInfo.SupportArch = append([]string{}, pendingApp.RawData.SupportArch...)
+			glog.Infof("DataWatcher: Restored SupportArch from RawData for app %s", appSimpleInfo.AppID)
+		} else if pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil && len(pendingApp.AppInfo.AppEntry.SupportArch) > 0 {
+			appSimpleInfo.SupportArch = append([]string{}, pendingApp.AppInfo.AppEntry.SupportArch...)
+			glog.Infof("DataWatcher: Restored SupportArch from AppInfo.AppEntry for app %s", appSimpleInfo.AppID)
+		}
+	}
+
+	// Ensure Categories is preserved if empty
+	if len(appSimpleInfo.Categories) == 0 {
+		if pendingApp.RawData != nil && len(pendingApp.RawData.Categories) > 0 {
+			appSimpleInfo.Categories = append([]string{}, pendingApp.RawData.Categories...)
+			glog.Infof("DataWatcher: Restored Categories from RawData for app %s", appSimpleInfo.AppID)
+		} else if pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil && len(pendingApp.AppInfo.AppEntry.Categories) > 0 {
+			appSimpleInfo.Categories = append([]string{}, pendingApp.AppInfo.AppEntry.Categories...)
+			glog.Infof("DataWatcher: Restored Categories from AppInfo.AppEntry for app %s", appSimpleInfo.AppID)
+		}
+	}
 }
 
 // ForceCalculateUserHash forces hash calculation for a user regardless of app movement
