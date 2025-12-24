@@ -249,6 +249,18 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	log.Printf("Batch request completed with status: %d for apps: %v (request took %v)",
 		resp.StatusCode(), appIDs, requestDuration)
 
+	// Debug: Log raw response for categories and supportArch fields
+	if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
+		for appID, appData := range appsData {
+			if appInfoMap, ok := appData.(map[string]interface{}); ok {
+				categories := appInfoMap["categories"]
+				supportArch := appInfoMap["supportArch"]
+				log.Printf("DEBUG: Chartrepo response for app %s - categories: %v (type: %T), supportArch: %v (type: %T)",
+					appID, categories, categories, supportArch, supportArch)
+			}
+		}
+	}
+
 	// Handle different status codes
 	switch resp.StatusCode() {
 	case 200:
@@ -283,6 +295,17 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 				for appID, appData := range appsData {
 					log.Printf("Processing app %s in batch", appID)
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
+						// Debug: Log categories and supportArch from chartrepo response
+						if categories, ok := appInfoMap["categories"]; ok {
+							log.Printf("DEBUG: App %s - chartrepo returned categories: %v (type: %T)", appID, categories, categories)
+						} else {
+							log.Printf("DEBUG: App %s - chartrepo did not return categories field", appID)
+						}
+						if supportArch, ok := appInfoMap["supportArch"]; ok {
+							log.Printf("DEBUG: App %s - chartrepo returned supportArch: %v (type: %T)", appID, supportArch, supportArch)
+						} else {
+							log.Printf("DEBUG: App %s - chartrepo did not return supportArch field", appID)
+						}
 						// Check for Suspend or Remove labels before processing the app
 						shouldSkip := false
 						shouldRemoveFromCache := false
@@ -354,6 +377,8 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// but detail API returns old version without labels
 						originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
 						var preservedAppLabels interface{}
+						var preservedCategories interface{}
+						var preservedSupportArch interface{}
 						if hasOriginal {
 							if originalMap, ok := originalAppData.(map[string]interface{}); ok {
 								if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
@@ -375,6 +400,24 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 											preservedAppLabels = originalLabels
 											log.Printf("Preserving appLabels from original data for app %s (detail API didn't return labels)", appID)
 										}
+									}
+								}
+
+								// Preserve categories from original data if detail API returns null or empty
+								if originalCategories, ok := originalMap["categories"]; ok && originalCategories != nil {
+									detailCategories := appInfoMap["categories"]
+									if detailCategories == nil || (detailCategoriesSlice, ok := detailCategories.([]interface{}); ok && len(detailCategoriesSlice) == 0) {
+										preservedCategories = originalCategories
+										log.Printf("Preserving categories from original data for app %s (detail API returned null or empty)", appID)
+									}
+								}
+
+								// Preserve supportArch from original data if detail API returns null or empty
+								if originalSupportArch, ok := originalMap["supportArch"]; ok && originalSupportArch != nil {
+									detailSupportArch := appInfoMap["supportArch"]
+									if detailSupportArch == nil || (detailSupportArchSlice, ok := detailSupportArch.([]interface{}); ok && len(detailSupportArchSlice) == 0) {
+										preservedSupportArch = originalSupportArch
+										log.Printf("Preserving supportArch from original data for app %s (detail API returned null or empty)", appID)
 									}
 								}
 							}
@@ -451,6 +494,16 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Use preserved labels if available
 						if preservedAppLabels != nil {
 							detailedAppData["appLabels"] = preservedAppLabels
+						}
+
+						// Use preserved categories if available
+						if preservedCategories != nil {
+							detailedAppData["categories"] = preservedCategories
+						}
+
+						// Use preserved supportArch if available
+						if preservedSupportArch != nil {
+							detailedAppData["supportArch"] = preservedSupportArch
 						}
 
 						data.LatestData.Data.Apps[appID] = detailedAppData
