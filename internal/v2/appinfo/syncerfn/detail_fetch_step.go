@@ -406,7 +406,13 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								// Preserve categories from original data if detail API returns null or empty
 								if originalCategories, ok := originalMap["categories"]; ok && originalCategories != nil {
 									detailCategories := appInfoMap["categories"]
-									if detailCategories == nil || (detailCategoriesSlice, ok := detailCategories.([]interface{}); ok && len(detailCategoriesSlice) == 0) {
+									shouldPreserveCategories := false
+									if detailCategories == nil {
+										shouldPreserveCategories = true
+									} else if detailCategoriesSlice, ok := detailCategories.([]interface{}); ok && len(detailCategoriesSlice) == 0 {
+										shouldPreserveCategories = true
+									}
+									if shouldPreserveCategories {
 										preservedCategories = originalCategories
 										log.Printf("Preserving categories from original data for app %s (detail API returned null or empty)", appID)
 									}
@@ -415,7 +421,13 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								// Preserve supportArch from original data if detail API returns null or empty
 								if originalSupportArch, ok := originalMap["supportArch"]; ok && originalSupportArch != nil {
 									detailSupportArch := appInfoMap["supportArch"]
-									if detailSupportArch == nil || (detailSupportArchSlice, ok := detailSupportArch.([]interface{}); ok && len(detailSupportArchSlice) == 0) {
+									shouldPreserveSupportArch := false
+									if detailSupportArch == nil {
+										shouldPreserveSupportArch = true
+									} else if detailSupportArchSlice, ok := detailSupportArch.([]interface{}); ok && len(detailSupportArchSlice) == 0 {
+										shouldPreserveSupportArch = true
+									}
+									if shouldPreserveSupportArch {
 										preservedSupportArch = originalSupportArch
 										log.Printf("Preserving supportArch from original data for app %s (detail API returned null or empty)", appID)
 									}
