@@ -477,9 +477,25 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Use smart merge to preserve original fields when detail API returns empty/null
 						detailedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
 
-						// Use preserved labels if available
+						// Log appLabels from detail API response for debugging
+						if detailLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
+							log.Printf("DEBUG: App %s - detail API returned appLabels: %v (length: %d)", appID, detailLabels, len(detailLabels))
+						} else {
+							log.Printf("DEBUG: App %s - detail API did not return appLabels or wrong type", appID)
+						}
+						log.Printf("DEBUG: App %s - detailedAppData appLabels after mergeAppData: %v", appID, detailedAppData["appLabels"])
+
+						// Use preserved labels if available (only if detail API didn't return labels)
+						// IMPORTANT: If detail API returns appLabels (including suspend/remove), use them instead of preserved labels
 						if preservedAppLabels != nil {
-							detailedAppData["appLabels"] = preservedAppLabels
+							// Only use preserved labels if detail API didn't return any labels
+							detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
+							if !hasDetailLabels || len(detailLabels) == 0 {
+								detailedAppData["appLabels"] = preservedAppLabels
+								log.Printf("Using preserved appLabels for app %s (detail API didn't return labels)", appID)
+							} else {
+								log.Printf("Skipping preserved appLabels for app %s (detail API returned labels: %v)", appID, detailLabels)
+							}
 						}
 
 						// Use preserved categories if available
