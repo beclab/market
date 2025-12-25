@@ -833,9 +833,8 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 
 	// Collect apps to remove
 	appsToRemove := make([]struct {
-		appID        string
-		appInfoMap   map[string]interface{}
-		appInstalled bool
+		appID      string
+		appInfoMap map[string]interface{}
 	}, 0)
 
 	// Check each app in LatestData.Data.Apps
@@ -865,19 +864,16 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 
 			if hasSuspendOrRemove {
 				shouldRemoveFromCache := true
-				appInstalled := false
 				if appName != "" && d.isAppInstalled(appName, sourceID, data) {
 					shouldRemoveFromCache = false
-					appInstalled = true
 					log.Printf("App %s has suspend/remove label but is still installed, keeping in LatestData and PendingData", appName)
 				}
 
 				if shouldRemoveFromCache {
 					appsToRemove = append(appsToRemove, struct {
-						appID        string
-						appInfoMap   map[string]interface{}
-						appInstalled bool
-					}{appID: appID, appInfoMap: appInfoMap, appInstalled: appInstalled})
+						appID      string
+						appInfoMap map[string]interface{}
+					}{appID: appID, appInfoMap: appInfoMap})
 				}
 			}
 		}
@@ -912,25 +908,21 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 			}
 		}
 
-		// Also remove from cache - remove all versions by name (only if not installed)
+		// Also remove from cache - remove all versions by name
 		for appName := range appNamesToRemove {
 			// Find the first appInfoMap for this app name to use for removeAppFromCache
 			var appInfoMapForRemoval map[string]interface{}
 			var appIDForRemoval string
-			var isAppInstalled bool
 			for _, appToRemove := range appsToRemove {
 				if name, ok := appToRemove.appInfoMap["name"].(string); ok && name == appName {
 					appInfoMapForRemoval = appToRemove.appInfoMap
 					appIDForRemoval = appToRemove.appID
-					isAppInstalled = appToRemove.appInstalled
 					break
 				}
 			}
-			if appInfoMapForRemoval != nil && !isAppInstalled {
+			if appInfoMapForRemoval != nil {
 				log.Printf("Calling removeAppFromCache for all versions of app %s (final cleanup)", appName)
 				d.removeAppFromCache(appIDForRemoval, appInfoMapForRemoval, data)
-			} else if isAppInstalled {
-				log.Printf("Skipping removeAppFromCache for app %s (still installed, keeping PendingData)", appName)
 			}
 		}
 	} else {
