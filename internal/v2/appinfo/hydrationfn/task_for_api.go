@@ -210,6 +210,32 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	appInfoLatest.RawData.VersionHistory = pendingData.RawData.VersionHistory
 	appInfoLatest.AppInfo.AppEntry.VersionHistory = pendingData.RawData.VersionHistory
 
+	// Preserve appLabels from pendingData if chartrepo didn't return them or returned empty array
+	// This is critical for delisted apps (with suspend/remove labels) that are still installed
+	if pendingData.RawData != nil && len(pendingData.RawData.AppLabels) > 0 {
+		// Check if chartrepo returned appLabels
+		chartrepoHasLabels := false
+		if appDataMap, ok := appData.(map[string]interface{}); ok {
+			if appInfoMap, ok := appDataMap["app_info"].(map[string]interface{}); ok {
+				if appEntryMap, ok := appInfoMap["app_entry"].(map[string]interface{}); ok {
+					if appLabels, ok := appEntryMap["appLabels"].([]interface{}); ok && len(appLabels) > 0 {
+						chartrepoHasLabels = true
+						log.Printf("[DEBUG] writeAppDataToCache: Chartrepo returned appLabels: %v for user=%s, source=%s, app=%s", appLabels, task.UserID, task.SourceID, task.AppID)
+					}
+				}
+			}
+		}
+		
+		// If chartrepo didn't return labels, preserve from pendingData
+		if !chartrepoHasLabels {
+			appInfoLatest.RawData.AppLabels = pendingData.RawData.AppLabels
+			appInfoLatest.AppInfo.AppEntry.AppLabels = pendingData.RawData.AppLabels
+			log.Printf("[DEBUG] writeAppDataToCache: Preserved appLabels from pendingData: %v for user=%s, source=%s, app=%s", pendingData.RawData.AppLabels, task.UserID, task.SourceID, task.AppID)
+		} else {
+			log.Printf("[DEBUG] writeAppDataToCache: Using chartrepo appLabels for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+		}
+	}
+
 	// Overwrite all fields of pendingData (keep the pointer address, update all contents)
 	pendingData.Type = appInfoLatest.Type
 	pendingData.Timestamp = appInfoLatest.Timestamp
