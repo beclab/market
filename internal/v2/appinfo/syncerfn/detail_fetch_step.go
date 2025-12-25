@@ -366,6 +366,17 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								}
 							} else if appInstalled {
 								log.Printf("App %s remains in LatestData (installed state detected)", appID)
+								// Even though we skip full data replacement, we should update appLabels
+								// to ensure the suspend/remove label is visible to the frontend
+								if originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]; hasOriginal {
+									if originalMap, ok := originalAppData.(map[string]interface{}); ok {
+										// Update appLabels from chartrepo response
+										if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
+											originalMap["appLabels"] = chartrepoLabels
+											log.Printf("Updated appLabels for installed app %s: %v", appID, chartrepoLabels)
+										}
+									}
+								}
 							}
 							continue
 						}
