@@ -169,7 +169,6 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	// This handles cases where apps might have suspend/remove labels in the initial data fetch
 	// but were not returned in the detail API response
 	if data.LatestData != nil && data.LatestData.Data.Apps != nil {
-		log.Printf("Performing final cleanup: checking all apps in LatestData.Data.Apps for suspend/remove labels")
 		d.cleanupSuspendedAppsFromLatestData(data)
 	}
 
@@ -249,18 +248,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	log.Printf("Batch request completed with status: %d for apps: %v (request took %v)",
 		resp.StatusCode(), appIDs, requestDuration)
 
-	// Debug: Log raw response for categories and supportArch fields
-	if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
-		for appID, appData := range appsData {
-			if appInfoMap, ok := appData.(map[string]interface{}); ok {
-				categories := appInfoMap["categories"]
-				supportArch := appInfoMap["supportArch"]
-				log.Printf("DEBUG: Chartrepo response for app %s - categories: %v (type: %T), supportArch: %v (type: %T)",
-					appID, categories, categories, supportArch, supportArch)
-			}
-		}
-	}
-
 	// Handle different status codes
 	switch resp.StatusCode() {
 	case 200:
@@ -295,17 +282,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 				for appID, appData := range appsData {
 					log.Printf("Processing app %s in batch", appID)
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
-						// Debug: Log categories and supportArch from chartrepo response
-						if categories, ok := appInfoMap["categories"]; ok {
-							log.Printf("DEBUG: App %s - chartrepo returned categories: %v (type: %T)", appID, categories, categories)
-						} else {
-							log.Printf("DEBUG: App %s - chartrepo did not return categories field", appID)
-						}
-						if supportArch, ok := appInfoMap["supportArch"]; ok {
-							log.Printf("DEBUG: App %s - chartrepo returned supportArch: %v (type: %T)", appID, supportArch, supportArch)
-						} else {
-							log.Printf("DEBUG: App %s - chartrepo did not return supportArch field", appID)
-						}
 						// Check for Suspend or Remove labels before processing the app
 						shouldSkip := false
 						shouldRemoveFromCache := false
@@ -316,18 +292,16 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						}
 
 						if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
-							log.Printf("App %s has %d labels", appID, len(appLabels))
 							for _, labelInterface := range appLabels {
 								if label, ok := labelInterface.(string); ok {
 									if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
 										shouldSkip = true
-										log.Printf("Warning: Skipping app %s - contains label: %s", appID, label)
 
 										shouldRemoveFromCache = true
 										if d.isAppInstalled(appName, sourceID, data) {
 											shouldRemoveFromCache = false
 											appInstalled = true
-											log.Printf("App %s is suspended but still installed, keep cache entry until uninstall completes", appName)
+											log.Printf("App %s is suspended but still installed, keeping cache entry", appName)
 										}
 
 										if shouldRemoveFromCache {
@@ -341,17 +315,13 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 									}
 								}
 							}
-						} else {
-							log.Printf("App %s has no labels or labels is not an array", appID)
 						}
 
 						// Skip processing if app should be removed
 						if shouldSkip {
-							log.Printf("Skipping app %s due to suspend/remove label", appID)
 							if shouldRemoveFromCache {
 								// Remove from LatestData immediately when no installation is active
 								delete(data.LatestData.Data.Apps, appID)
-								log.Printf("Removed app %s from LatestData due to suspend/remove label", appID)
 								
 								// Also remove ALL versions of this app from LatestData.Data.Apps (by name)
 								if appName != "" {
@@ -359,13 +329,11 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 										if otherAppInfoMap, ok := otherAppData.(map[string]interface{}); ok {
 											if otherAppName, ok := otherAppInfoMap["name"].(string); ok && otherAppName == appName {
 												delete(data.LatestData.Data.Apps, otherAppID)
-												log.Printf("Removed app version %s (name: %s) from LatestData (all versions removal)", otherAppID, appName)
 											}
 										}
 									}
 								}
 							} else if appInstalled {
-								log.Printf("App %s remains in LatestData (installed state detected)", appID)
 								// For installed delisted apps, use chartrepo's complete data as base
 								// and merge with original data only when chartrepo fields are empty/null
 								// This ensures chartrepo's rendered data is preserved
@@ -378,7 +346,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								// Ensure appLabels contains suspend/remove label from chartrepo response
 								if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
 									mergedAppData["appLabels"] = chartrepoLabels
-									log.Printf("Using chartrepo appLabels for installed delisted app %s: %v", appID, chartrepoLabels)
 								} else if hasOriginal {
 									// If chartrepo doesn't return labels, check if original has suspend/remove labels
 									if originalMap, ok := originalAppData.(map[string]interface{}); ok {
@@ -394,7 +361,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 											}
 											if hasSuspendOrRemove {
 												mergedAppData["appLabels"] = originalLabels
-												log.Printf("Preserving appLabels for installed delisted app %s: %v (chartrepo didn't return labels)", appID, originalLabels)
 											}
 										}
 									}
@@ -403,7 +369,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								// Update LatestData with merged data (chartrepo data as base, original as fallback)
 								data.LatestData.Data.Apps[appID] = mergedAppData
 								data.DetailedApps[appID] = mergedAppData
-								log.Printf("Updated installed delisted app %s with merged data (chartrepo data as base)", appID)
 							}
 							continue
 						}
@@ -436,7 +401,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 										if !hasDetailLabels || len(detailLabels) == 0 {
 											// Preserve original labels (including suspend/remove)
 											preservedAppLabels = originalLabels
-											log.Printf("Preserving appLabels from original data for app %s (detail API didn't return labels)", appID)
 										}
 									}
 								}
@@ -452,7 +416,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 									}
 									if shouldPreserveCategories {
 										preservedCategories = originalCategories
-										log.Printf("Preserving categories from original data for app %s (detail API returned null or empty)", appID)
 									}
 								}
 
@@ -467,7 +430,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 									}
 									if shouldPreserveSupportArch {
 										preservedSupportArch = originalSupportArch
-										log.Printf("Preserving supportArch from original data for app %s (detail API returned null or empty)", appID)
 									}
 								}
 							}
@@ -477,14 +439,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Use smart merge to preserve original fields when detail API returns empty/null
 						detailedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
 
-						// Log appLabels from detail API response for debugging
-						if detailLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
-							log.Printf("DEBUG: App %s - detail API returned appLabels: %v (length: %d)", appID, detailLabels, len(detailLabels))
-						} else {
-							log.Printf("DEBUG: App %s - detail API did not return appLabels or wrong type", appID)
-						}
-						log.Printf("DEBUG: App %s - detailedAppData appLabels after mergeAppData: %v", appID, detailedAppData["appLabels"])
-
 						// Use preserved labels if available (only if detail API didn't return labels)
 						// IMPORTANT: If detail API returns appLabels (including suspend/remove), use them instead of preserved labels
 						if preservedAppLabels != nil {
@@ -492,9 +446,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 							detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
 							if !hasDetailLabels || len(detailLabels) == 0 {
 								detailedAppData["appLabels"] = preservedAppLabels
-								log.Printf("Using preserved appLabels for app %s (detail API didn't return labels)", appID)
-							} else {
-								log.Printf("Skipping preserved appLabels for app %s (detail API returned labels: %v)", appID, detailLabels)
 							}
 						}
 
@@ -537,9 +488,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 		// Now remove apps from cache after releasing the main lock to avoid nested locks
 		for _, appToRemove := range appsToRemove {
-			log.Printf("Calling removeAppFromCache for app %s", appToRemove.appID)
 			d.removeAppFromCache(appToRemove.appID, appToRemove.appInfoMap, data)
-			log.Printf("removeAppFromCache completed for app %s", appToRemove.appID)
 		}
 
 		// Count successful and failed apps
@@ -835,7 +784,6 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 				if label, ok := labelInterface.(string); ok {
 					if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
 						hasSuspendOrRemove = true
-						log.Printf("Found suspend/remove label in LatestData for app %s (appID: %s)", appName, appID)
 						break
 					}
 				}
@@ -845,7 +793,6 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 				shouldRemoveFromCache := true
 				if appName != "" && d.isAppInstalled(appName, sourceID, data) {
 					shouldRemoveFromCache = false
-					log.Printf("App %s has suspend/remove label but is still installed, keeping in LatestData", appName)
 				}
 
 				if shouldRemoveFromCache {
@@ -860,8 +807,6 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 
 	// Remove apps from LatestData.Data.Apps
 	if len(appsToRemove) > 0 {
-		log.Printf("Removing %d apps with suspend/remove labels from LatestData.Data.Apps", len(appsToRemove))
-		
 		// Collect app names that need to be removed (to remove all versions)
 		appNamesToRemove := make(map[string]bool)
 		for _, appToRemove := range appsToRemove {
@@ -870,7 +815,6 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 			}
 			// Remove the specific appID from LatestData.Data.Apps
 			delete(data.LatestData.Data.Apps, appToRemove.appID)
-			log.Printf("Removed app %s from LatestData.Data.Apps due to suspend/remove label", appToRemove.appID)
 		}
 
 		// Remove ALL versions of suspended apps from LatestData.Data.Apps (by name)
@@ -882,7 +826,6 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 			if appName, ok := appInfoMap["name"].(string); ok {
 				if appNamesToRemove[appName] {
 					delete(data.LatestData.Data.Apps, appID)
-					log.Printf("Removed app version %s (name: %s) from LatestData.Data.Apps (all versions removal)", appID, appName)
 				}
 			}
 		}
@@ -900,12 +843,9 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 				}
 			}
 			if appInfoMapForRemoval != nil {
-				log.Printf("Calling removeAppFromCache for all versions of app %s (final cleanup)", appName)
 				d.removeAppFromCache(appIDForRemoval, appInfoMapForRemoval, data)
 			}
 		}
-	} else {
-		log.Printf("No apps with suspend/remove labels found in LatestData.Data.Apps during final cleanup")
 	}
 }
 
@@ -1010,7 +950,6 @@ func (d *DetailFetchStep) mergeAppData(originalAppData interface{}, appInfoMap m
 				// Preserve original value if detail API returned empty/null and original has value
 				if shouldPreserve && hasOriginalValue && originalValue != nil {
 					detailedAppData[field] = originalValue
-					log.Printf("Preserved field %s for app %s (detail API returned empty/null)", field, appID)
 				}
 			}
 		}
@@ -1053,7 +992,6 @@ func (d *DetailFetchStep) preserveFieldsForDelistedApp(originalMap, detailMap ma
 		// Preserve original value if detail API returned empty/null and original has value
 		if shouldPreserve && hasOriginal && originalValue != nil {
 			originalMap[field] = originalValue
-			log.Printf("Preserved field %s for installed delisted app %s (detail API returned empty/null)", field, appID)
 		}
 	}
 }
