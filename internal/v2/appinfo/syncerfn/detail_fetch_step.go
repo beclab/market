@@ -366,17 +366,44 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								}
 							} else if appInstalled {
 								log.Printf("App %s remains in LatestData (installed state detected)", appID)
-								// Even though we skip full data replacement, we should update appLabels
-								// to ensure the suspend/remove label is visible to the frontend
-								if originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]; hasOriginal {
+								// For installed delisted apps, use chartrepo's complete data as base
+								// and merge with original data only when chartrepo fields are empty/null
+								// This ensures chartrepo's rendered data is preserved
+								originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
+								
+								// Use mergeAppData to intelligently merge chartrepo data with original data
+								// This will use chartrepo data when available, and fall back to original when chartrepo is empty/null
+								mergedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
+								
+								// Ensure appLabels contains suspend/remove label from chartrepo response
+								if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
+									mergedAppData["appLabels"] = chartrepoLabels
+									log.Printf("Using chartrepo appLabels for installed delisted app %s: %v", appID, chartrepoLabels)
+								} else if hasOriginal {
+									// If chartrepo doesn't return labels, check if original has suspend/remove labels
 									if originalMap, ok := originalAppData.(map[string]interface{}); ok {
-										// Update appLabels from chartrepo response
-										if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
-											originalMap["appLabels"] = chartrepoLabels
-											log.Printf("Updated appLabels for installed app %s: %v", appID, chartrepoLabels)
+										if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
+											hasSuspendOrRemove := false
+											for _, labelInterface := range originalLabels {
+												if label, ok := labelInterface.(string); ok {
+													if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
+														hasSuspendOrRemove = true
+														break
+													}
+												}
+											}
+											if hasSuspendOrRemove {
+												mergedAppData["appLabels"] = originalLabels
+												log.Printf("Preserving appLabels for installed delisted app %s: %v (chartrepo didn't return labels)", appID, originalLabels)
+											}
 										}
 									}
 								}
+								
+								// Update LatestData with merged data (chartrepo data as base, original as fallback)
+								data.LatestData.Data.Apps[appID] = mergedAppData
+								data.DetailedApps[appID] = mergedAppData
+								log.Printf("Updated installed delisted app %s with merged data (chartrepo data as base)", appID)
 							}
 							continue
 						}
@@ -447,72 +474,8 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						}
 
 						// Replace the simplified app data with detailed data in LatestData
-						detailedAppData := map[string]interface{}{
-							// Basic fields
-							"id":        appInfoMap["id"],
-							"name":      appInfoMap["name"],
-							"cfgType":   appInfoMap["cfgType"],
-							"chartName": appInfoMap["chartName"],
-							"icon":      appInfoMap["icon"],
-							// Skip multi-language fields to avoid type mismatch
-							// "description": appInfoMap["description"],
-							"appID": appInfoMap["appID"],
-							// "title":       appInfoMap["title"],
-							"version":     appInfoMap["version"],
-							"categories":  appInfoMap["categories"],
-							"versionName": appInfoMap["versionName"],
-
-							// Extended fields - skip multi-language fields
-							// "fullDescription":    appInfoMap["fullDescription"],
-							// "upgradeDescription": appInfoMap["upgradeDescription"],
-							"promoteImage":   appInfoMap["promoteImage"],
-							"promoteVideo":   appInfoMap["promoteVideo"],
-							"subCategory":    appInfoMap["subCategory"],
-							"locale":         appInfoMap["locale"],
-							"developer":      appInfoMap["developer"],
-							"requiredMemory": appInfoMap["requiredMemory"],
-							"requiredDisk":   appInfoMap["requiredDisk"],
-							"supportClient":  appInfoMap["supportClient"],
-							"supportArch":    appInfoMap["supportArch"],
-							"requiredGPU":    appInfoMap["requiredGPU"],
-							"requiredCPU":    appInfoMap["requiredCPU"],
-							"rating":         appInfoMap["rating"],
-							"target":         appInfoMap["target"],
-							"permission":     appInfoMap["permission"],
-							"entrances":      appInfoMap["entrances"],
-							"middleware":     appInfoMap["middleware"],
-							"options":        appInfoMap["options"],
-
-							// Additional metadata fields
-							"submitter":     appInfoMap["submitter"],
-							"doc":           appInfoMap["doc"],
-							"website":       appInfoMap["website"],
-							"featuredImage": appInfoMap["featuredImage"],
-							"sourceCode":    appInfoMap["sourceCode"],
-							"license":       appInfoMap["license"],
-							"legal":         appInfoMap["legal"],
-							"i18n":          appInfoMap["i18n"],
-
-							"modelSize": appInfoMap["modelSize"],
-							"namespace": appInfoMap["namespace"],
-							"onlyAdmin": appInfoMap["onlyAdmin"],
-
-							"lastCommitHash": appInfoMap["lastCommitHash"],
-							"createTime":     appInfoMap["createTime"],
-							"updateTime":     appInfoMap["updateTime"],
-							"appLabels":      appInfoMap["appLabels"],
-							"count":          appInfoMap["count"],
-							"variants":       appInfoMap["variants"],
-
-							// Version history information
-							"versionHistory": appInfoMap["versionHistory"],
-
-							// Legacy fields for backward compatibility
-							"screenshots": appInfoMap["screenshots"],
-							"tags":        appInfoMap["tags"],
-							"metadata":    appInfoMap["metadata"],
-							"updated_at":  appInfoMap["updated_at"],
-						}
+						// Use smart merge to preserve original fields when detail API returns empty/null
+						detailedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
 
 						// Use preserved labels if available
 						if preservedAppLabels != nil {
@@ -927,6 +890,155 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 		}
 	} else {
 		log.Printf("No apps with suspend/remove labels found in LatestData.Data.Apps during final cleanup")
+	}
+}
+
+// mergeAppData merges detail API data with original data, preserving original values when detail API returns empty/null
+func (d *DetailFetchStep) mergeAppData(originalAppData interface{}, appInfoMap map[string]interface{}, appID string, hasOriginal bool) map[string]interface{} {
+	// Start with detail API data
+	detailedAppData := map[string]interface{}{
+		// Basic fields
+		"id":        appInfoMap["id"],
+		"name":      appInfoMap["name"],
+		"cfgType":   appInfoMap["cfgType"],
+		"chartName": appInfoMap["chartName"],
+		"icon":      appInfoMap["icon"],
+		"appID":     appInfoMap["appID"],
+		"version":   appInfoMap["version"],
+		"categories": appInfoMap["categories"],
+		"versionName": appInfoMap["versionName"],
+
+		// Extended fields
+		"promoteImage":   appInfoMap["promoteImage"],
+		"promoteVideo":   appInfoMap["promoteVideo"],
+		"subCategory":    appInfoMap["subCategory"],
+		"locale":         appInfoMap["locale"],
+		"developer":      appInfoMap["developer"],
+		"requiredMemory": appInfoMap["requiredMemory"],
+		"requiredDisk":   appInfoMap["requiredDisk"],
+		"supportClient": appInfoMap["supportClient"],
+		"supportArch":    appInfoMap["supportArch"],
+		"requiredGPU":    appInfoMap["requiredGPU"],
+		"requiredCPU":    appInfoMap["requiredCPU"],
+		"rating":         appInfoMap["rating"],
+		"target":         appInfoMap["target"],
+		"permission":     appInfoMap["permission"],
+		"entrances":      appInfoMap["entrances"],
+		"middleware":     appInfoMap["middleware"],
+		"options":        appInfoMap["options"],
+
+		// Additional metadata fields
+		"submitter":     appInfoMap["submitter"],
+		"doc":           appInfoMap["doc"],
+		"website":       appInfoMap["website"],
+		"featuredImage": appInfoMap["featuredImage"],
+		"sourceCode":    appInfoMap["sourceCode"],
+		"license":       appInfoMap["license"],
+		"legal":         appInfoMap["legal"],
+		"i18n":          appInfoMap["i18n"],
+
+		"modelSize": appInfoMap["modelSize"],
+		"namespace": appInfoMap["namespace"],
+		"onlyAdmin": appInfoMap["onlyAdmin"],
+
+		"lastCommitHash": appInfoMap["lastCommitHash"],
+		"createTime":     appInfoMap["createTime"],
+		"updateTime":     appInfoMap["updateTime"],
+		"appLabels":      appInfoMap["appLabels"],
+		"count":          appInfoMap["count"],
+		"variants":       appInfoMap["variants"],
+
+		// Version history information
+		"versionHistory": appInfoMap["versionHistory"],
+
+		// Legacy fields for backward compatibility
+		"screenshots": appInfoMap["screenshots"],
+		"tags":        appInfoMap["tags"],
+		"metadata":    appInfoMap["metadata"],
+		"updated_at":  appInfoMap["updated_at"],
+	}
+
+	// If we have original data, merge it intelligently
+	if hasOriginal {
+		if originalMap, ok := originalAppData.(map[string]interface{}); ok {
+			// List of fields to preserve if detail API returns empty/null
+			// IMPORTANT: appLabels must be preserved if detail API returns empty/null, especially for delisted apps
+			fieldsToPreserve := []string{
+				"icon", "description", "title", "developer", "promoteImage", "promoteVideo",
+				"subCategory", "locale", "requiredMemory", "requiredDisk", "supportClient",
+				"requiredGPU", "requiredCPU", "rating", "target", "permission", "entrances",
+				"middleware", "options", "submitter", "doc", "website", "featuredImage",
+				"sourceCode", "license", "legal", "i18n", "modelSize", "namespace",
+				"onlyAdmin", "lastCommitHash", "createTime", "updateTime", "count",
+				"variants", "screenshots", "tags", "metadata", "updated_at", "versionHistory",
+				"fullDescription", "upgradeDescription", "cfgType", "chartName", "versionName",
+				"id", "name", "appID", "version", "appLabels", "categories", "supportArch",
+			}
+
+			for _, field := range fieldsToPreserve {
+				detailValue := detailedAppData[field]
+				originalValue, hasOriginalValue := originalMap[field]
+
+				// Check if detail API returned empty/null value
+				shouldPreserve := false
+				if detailValue == nil {
+					shouldPreserve = true
+				} else if strValue, ok := detailValue.(string); ok && strValue == "" {
+					shouldPreserve = true
+				} else if sliceValue, ok := detailValue.([]interface{}); ok && len(sliceValue) == 0 {
+					shouldPreserve = true
+				} else if mapValue, ok := detailValue.(map[string]interface{}); ok && len(mapValue) == 0 {
+					shouldPreserve = true
+				}
+
+				// Preserve original value if detail API returned empty/null and original has value
+				if shouldPreserve && hasOriginalValue && originalValue != nil {
+					detailedAppData[field] = originalValue
+					log.Printf("Preserved field %s for app %s (detail API returned empty/null)", field, appID)
+				}
+			}
+		}
+	}
+
+	return detailedAppData
+}
+
+// preserveFieldsForDelistedApp preserves fields from original data if detail API returns empty/null values
+// This ensures installed delisted apps retain all their information
+func (d *DetailFetchStep) preserveFieldsForDelistedApp(originalMap, detailMap map[string]interface{}, appID string) {
+	// List of fields to preserve if detail API returns empty/null
+	fieldsToPreserve := []string{
+		"icon", "description", "title", "developer", "promoteImage", "promoteVideo",
+		"subCategory", "locale", "requiredMemory", "requiredDisk", "supportClient",
+		"requiredGPU", "requiredCPU", "rating", "target", "permission", "entrances",
+		"middleware", "options", "submitter", "doc", "website", "featuredImage",
+		"sourceCode", "license", "legal", "i18n", "modelSize", "namespace",
+		"onlyAdmin", "lastCommitHash", "createTime", "updateTime", "count",
+		"variants", "screenshots", "tags", "metadata", "updated_at", "versionHistory",
+		"fullDescription", "upgradeDescription", "cfgType", "chartName", "versionName",
+	}
+
+	for _, field := range fieldsToPreserve {
+		detailValue := detailMap[field]
+		originalValue, hasOriginal := originalMap[field]
+
+		// Check if detail API returned empty/null value
+		shouldPreserve := false
+		if detailValue == nil {
+			shouldPreserve = true
+		} else if strValue, ok := detailValue.(string); ok && strValue == "" {
+			shouldPreserve = true
+		} else if sliceValue, ok := detailValue.([]interface{}); ok && len(sliceValue) == 0 {
+			shouldPreserve = true
+		} else if mapValue, ok := detailValue.(map[string]interface{}); ok && len(mapValue) == 0 {
+			shouldPreserve = true
+		}
+
+		// Preserve original value if detail API returned empty/null and original has value
+		if shouldPreserve && hasOriginal && originalValue != nil {
+			originalMap[field] = originalValue
+			log.Printf("Preserved field %s for installed delisted app %s (detail API returned empty/null)", field, appID)
+		}
 	}
 }
 

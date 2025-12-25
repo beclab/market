@@ -1470,17 +1470,11 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 		return nil
 	}
 
-	// Filter out apps with Suspend or Remove labels
-	if appLabels, ok := appData["appLabels"].([]interface{}); ok {
-		for _, labelInterface := range appLabels {
-			if label, ok := labelInterface.(string); ok {
-				if strings.EqualFold(label, "suspend") || strings.EqualFold(label, "remove") {
-					log.Printf("DEBUG: Skipping app with label: %s", label)
-					return nil
-				}
-			}
-		}
-	}
+	// NOTE: Do not filter out apps with Suspend or Remove labels here
+	// The filtering logic has been moved to detail_fetch_step.go where we can check
+	// if the app is installed. Installed delisted apps should be preserved with their labels
+	// so they can be properly displayed to users who have them installed.
+	// This ensures appLabels (including suspend/remove) are preserved in the data flow.
 
 	// Check if we have essential app identifiers (id, name, or appID)
 	var primaryID, primaryName string
