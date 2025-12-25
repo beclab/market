@@ -366,8 +366,8 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								}
 							} else if appInstalled {
 								log.Printf("App %s remains in LatestData (installed state detected)", appID)
-								// Even though we skip full data replacement, we should update appLabels
-								// to ensure the suspend/remove label is visible to the frontend
+								// Update appLabels from chartrepo response to ensure suspend/remove label is visible
+								// This is safe because the app is already in LatestData and won't trigger new hydration tasks
 								if originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]; hasOriginal {
 									if originalMap, ok := originalAppData.(map[string]interface{}); ok {
 										// Update appLabels from chartrepo response
@@ -833,8 +833,9 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 
 	// Collect apps to remove
 	appsToRemove := make([]struct {
-		appID      string
-		appInfoMap map[string]interface{}
+		appID        string
+		appInfoMap   map[string]interface{}
+		appInstalled bool
 	}, 0)
 
 	// Check each app in LatestData.Data.Apps
@@ -864,16 +865,19 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 
 			if hasSuspendOrRemove {
 				shouldRemoveFromCache := true
+				appInstalled := false
 				if appName != "" && d.isAppInstalled(appName, sourceID, data) {
 					shouldRemoveFromCache = false
-					log.Printf("App %s has suspend/remove label but is still installed, keeping in LatestData", appName)
+					appInstalled = true
+					log.Printf("App %s has suspend/remove label but is still installed, keeping in LatestData and PendingData", appName)
 				}
 
 				if shouldRemoveFromCache {
 					appsToRemove = append(appsToRemove, struct {
-						appID      string
-						appInfoMap map[string]interface{}
-					}{appID: appID, appInfoMap: appInfoMap})
+						appID        string
+						appInfoMap   map[string]interface{}
+						appInstalled bool
+					}{appID: appID, appInfoMap: appInfoMap, appInstalled: appInstalled})
 				}
 			}
 		}
@@ -908,21 +912,25 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 			}
 		}
 
-		// Also remove from cache - remove all versions by name
+		// Also remove from cache - remove all versions by name (only if not installed)
 		for appName := range appNamesToRemove {
 			// Find the first appInfoMap for this app name to use for removeAppFromCache
 			var appInfoMapForRemoval map[string]interface{}
 			var appIDForRemoval string
+			var isAppInstalled bool
 			for _, appToRemove := range appsToRemove {
 				if name, ok := appToRemove.appInfoMap["name"].(string); ok && name == appName {
 					appInfoMapForRemoval = appToRemove.appInfoMap
 					appIDForRemoval = appToRemove.appID
+					isAppInstalled = appToRemove.appInstalled
 					break
 				}
 			}
-			if appInfoMapForRemoval != nil {
+			if appInfoMapForRemoval != nil && !isAppInstalled {
 				log.Printf("Calling removeAppFromCache for all versions of app %s (final cleanup)", appName)
 				d.removeAppFromCache(appIDForRemoval, appInfoMapForRemoval, data)
+			} else if isAppInstalled {
+				log.Printf("Skipping removeAppFromCache for app %s (still installed, keeping PendingData)", appName)
 			}
 		}
 	} else {
