@@ -1001,7 +1001,7 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 	if sourceData.AppInfoLatest != nil {
 		for _, appInfoData := range sourceData.AppInfoLatest {
 			if appInfoData != nil {
-				// Use createSafeAppSimpleInfoCopy to ensure all fields including support_arch are included
+				// Use createSafeAppSimpleInfoCopy to ensure all fields including support_arch and categories are included
 				var safeAppSimpleInfo map[string]interface{}
 				if appInfoData.AppSimpleInfo != nil {
 					// Debug: Log the original AppSimpleInfo data
@@ -1016,6 +1016,17 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 						} else if appInfoData.AppInfo != nil && appInfoData.AppInfo.AppEntry != nil && len(appInfoData.AppInfo.AppEntry.SupportArch) > 0 {
 							log.Printf("DEBUG: Found SupportArch in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.SupportArch)
 							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.AppInfo.AppEntry.SupportArch...)
+						}
+					}
+
+					// Check if Categories is empty, try to get it from RawData or AppInfo
+					if len(appInfoData.AppSimpleInfo.Categories) == 0 {
+						if appInfoData.RawData != nil && len(appInfoData.RawData.Categories) > 0 {
+							log.Printf("DEBUG: Found Categories in RawData: %+v", appInfoData.RawData.Categories)
+							appInfoData.AppSimpleInfo.Categories = append([]string{}, appInfoData.RawData.Categories...)
+						} else if appInfoData.AppInfo != nil && appInfoData.AppInfo.AppEntry != nil && len(appInfoData.AppInfo.AppEntry.Categories) > 0 {
+							log.Printf("DEBUG: Found Categories in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.Categories)
+							appInfoData.AppSimpleInfo.Categories = append([]string{}, appInfoData.AppInfo.AppEntry.Categories...)
 						}
 					}
 

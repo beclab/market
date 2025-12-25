@@ -202,18 +202,25 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	s.lastSyncTime.Store(time.Now())
 	s.syncCount.Add(1)
 
-	// Get available data sources
-	activeSources := s.settingsManager.GetActiveMarketSources()
-	if len(activeSources) == 0 {
+	// Get all configured market sources (no IsActive filter - sync all configured sources)
+	config := s.settingsManager.GetMarketSources()
+	if config == nil || len(config.Sources) == 0 {
 		log.Println("==================== SYNC CYCLE FAILED ====================")
-		err := fmt.Errorf("no active market sources available")
+		err := fmt.Errorf("no market sources configured")
 		s.updateSyncFailure(err, startTime)
 		return err
 	}
 
+	// Log all configured sources for debugging
+	log.Printf("Found %d configured market sources:", len(config.Sources))
+	for _, src := range config.Sources {
+		log.Printf("  - Source ID: %s, Name: %s, Type: %s, IsActive: %v, Priority: %d, BaseURL: %s",
+			src.ID, src.Name, src.Type, src.IsActive, src.Priority, src.BaseURL)
+	}
+
 	// Filter to only remote sources - syncer only processes remote sources
 	var remoteSources []*settings.MarketSource
-	for _, source := range activeSources {
+	for _, source := range config.Sources {
 		if source.Type == "remote" {
 			remoteSources = append(remoteSources, source)
 		} else {
@@ -228,7 +235,7 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		return nil
 	}
 
-	log.Printf("Found %d active market sources (%d remote, %d local)", len(activeSources), len(remoteSources), len(activeSources)-len(remoteSources))
+	log.Printf("Found %d configured market sources (%d remote, %d local)", len(config.Sources), len(remoteSources), len(config.Sources)-len(remoteSources))
 
 	// Process all remote sources in priority order - each source is synced independently
 	var lastError error

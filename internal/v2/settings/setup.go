@@ -41,7 +41,8 @@ type ChartRepoResponse struct {
 // SyncMarketSourceConfigWithChartRepo synchronizes market source configuration with chart repository service
 // This function is called after AppInfo module initialization to ensure chart repo service
 // has the latest market source configuration
-func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
+// If settingsManager is provided, it will reload market sources from Redis after syncing
+func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManager ...*SettingsManager) error {
 	log.Println("=== Syncing market source configuration with chart repository service ===")
 
 	clearCache := os.Getenv("CLEAR_CACHE")
@@ -215,7 +216,60 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient) error {
 		log.Println("Remote source already exists, skipping")
 	}
 
-	// 7. Report sync results
+	// 7. Get final configuration from chart repo (after all additions) and save to Redis
+	log.Println("Step 6: Saving final market source configuration to Redis")
+	finalConfig, err := getMarketSourceFromChartRepo(chartRepoHost)
+	if err != nil {
+		log.Printf("Failed to get final market source configuration: %v", err)
+		// Continue even if this fails - we've already synced the sources
+	} else {
+		// Convert ChartRepoMarketSourcesConfig to MarketSourcesConfig
+		var marketSources []*MarketSource
+		for _, chartRepoSource := range finalConfig.Sources {
+			marketSource := &MarketSource{
+				ID:          chartRepoSource.ID,
+				Name:        chartRepoSource.Name,
+				Type:        chartRepoSource.Type,
+				BaseURL:     chartRepoSource.BaseURL,
+				Priority:    chartRepoSource.Priority,
+				IsActive:    chartRepoSource.IsActive,
+				UpdatedAt:   chartRepoSource.UpdatedAt,
+				Description: chartRepoSource.Description,
+			}
+			marketSources = append(marketSources, marketSource)
+		}
+
+		marketSourcesConfig := &MarketSourcesConfig{
+			Sources:       marketSources,
+			DefaultSource: finalConfig.DefaultSource,
+			UpdatedAt:     time.Now(),
+		}
+
+		// Save to Redis
+		configJSON, err := json.Marshal(marketSourcesConfig)
+		if err != nil {
+			log.Printf("Failed to marshal market sources config: %v", err)
+		} else {
+			if err := redisClient.Set(RedisKeyMarketSources, string(configJSON), 0); err != nil {
+				log.Printf("Failed to save market sources to Redis: %v", err)
+			} else {
+				log.Printf("Successfully saved %d market sources to Redis", len(marketSources))
+			}
+		}
+
+		// Reload SettingsManager if provided
+		if len(settingsManager) > 0 && settingsManager[0] != nil {
+			log.Println("Step 7: Reloading SettingsManager with updated market sources")
+			if err := settingsManager[0].ReloadMarketSources(); err != nil {
+				log.Printf("Failed to reload SettingsManager: %v", err)
+				// Don't fail the entire sync if reload fails
+			} else {
+				log.Println("Successfully reloaded SettingsManager with updated market sources")
+			}
+		}
+	}
+
+	// 8. Report sync results
 	if len(syncErrors) > 0 {
 		log.Printf("Market source configuration sync completed with %d errors:", len(syncErrors))
 		for i, err := range syncErrors {

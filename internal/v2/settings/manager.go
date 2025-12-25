@@ -104,6 +104,28 @@ func (sm *SettingsManager) initializeMarketSources() error {
 	return nil
 }
 
+// ReloadMarketSources reloads market sources from Redis into memory
+// This is useful after syncing sources from chartrepo
+func (sm *SettingsManager) ReloadMarketSources() error {
+	log.Println("Reloading market sources from Redis...")
+	config, err := sm.loadMarketSourcesFromRedis()
+	if err != nil {
+		log.Printf("Failed to reload market sources from Redis: %v", err)
+		return err
+	}
+
+	// Merge with default config to ensure default sources are preserved
+	config = sm.mergeWithDefaultConfig(config)
+
+	// Set in memory
+	sm.mu.Lock()
+	sm.marketSources = config
+	sm.mu.Unlock()
+
+	log.Printf("Successfully reloaded %d market sources from Redis", len(config.Sources))
+	return nil
+}
+
 // initializeAPIEndpoints initializes API endpoints configuration
 func (sm *SettingsManager) initializeAPIEndpoints() error {
 	// Try to load from Redis first
