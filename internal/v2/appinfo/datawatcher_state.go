@@ -627,6 +627,7 @@ func isFailedOrCanceledState(state string) bool {
 		"downloadFailed",
 		"installCancelFailed",
 		"downloadCancelFailed",
+		"pendingCanceled",
 		"installCanceled",
 		"installingCanceled",
 		"downloadingCanceled",  // Canceled during downloading phase
