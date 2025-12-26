@@ -63,6 +63,14 @@ type AppStateMessage struct {
 	SharedEntrances  []SharedEntrance `json:"sharedEntrances,omitempty"`
 }
 
+// DelayedMessage represents a message that needs to be processed later
+type DelayedMessage struct {
+	msg        *nats.Msg
+	appStateMsg AppStateMessage
+	retryCount int
+	nextRetry  time.Time
+}
+
 // DataWatcherState handles app state messages from NATS
 type DataWatcherState struct {
 	nc            *nats.Conn
@@ -82,6 +90,9 @@ type DataWatcherState struct {
 	// Cache for app-service API responses to avoid repeated calls
 	appServiceCache      map[string]map[string]bool // key: "userID:appName", value: map[entranceName]invisible
 	appServiceCacheMutex sync.RWMutex
+	// Delayed message queue for pending state messages
+	delayedMessages      []*DelayedMessage
+	delayedMessagesMutex sync.Mutex
 }
 
 // getExistingEntranceInvisibleMap collects cached invisible flags for the specified app.
@@ -250,6 +261,7 @@ func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule
 		taskModule:      taskModule,   // Set task module reference
 		dataWatcher:     dataWatcher,  // Set data watcher reference
 		appServiceCache: make(map[string]map[string]bool),
+		delayedMessages: make([]*DelayedMessage, 0),
 	}
 
 	return dw
@@ -282,6 +294,8 @@ func (dw *DataWatcherState) Start() error {
 			log.Printf("Error in NATS connection: %v", err)
 		}
 	}()
+	// Start delayed message processor
+	go dw.processDelayedMessages()
 	return nil
 }
 
@@ -477,6 +491,29 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		}
 	}
 
+	// Special handling for pending state: delay processing if there are pending/running install tasks
+	if appStateMsg.OpType == "install" && appStateMsg.State == "pending" {
+		if dw.taskModule != nil {
+			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(appStateMsg.Name, appStateMsg.User)
+			if !lockAcquired {
+				// If we can't acquire the lock, delay processing to be safe
+				// This avoids blocking NATS message processing
+				log.Printf("Delaying pending state message for app=%s, user=%s, opID=%s - failed to acquire lock",
+					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
+				dw.addDelayedMessage(msg, appStateMsg)
+				return
+			}
+			if hasPendingTask {
+				// If there are pending/running install tasks, delay processing this message
+				// This avoids matching to the wrong source when a new install starts
+				log.Printf("Delaying pending state message for app=%s, user=%s, opID=%s - found pending/running install task",
+					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
+				dw.addDelayedMessage(msg, appStateMsg)
+				return
+			}
+		}
+	}
+
 	userData := dw.cacheManager.getUserData(appStateMsg.User)
 	if userData == nil {
 		log.Printf("User data not found for user %s", appStateMsg.User)
@@ -514,14 +551,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		}
 	}
 
-	// Store as history record
-	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
-
-	// Store state data to cache
-	dw.storeStateToCache(appStateMsg)
-
-	// Print the parsed message
-	dw.printAppStateMessage(appStateMsg)
+	// Process the message
+	dw.processMessageInternal(msg, appStateMsg)
 }
 
 // storeHistoryRecord stores the app state message as a history record
@@ -957,4 +988,104 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 	// No previous downloading record found in DB
 	log.Printf("No previous downloading record found in DB for app %s, user %s, proceeding with message storage", appName, userID)
 	return false
+}
+
+// addDelayedMessage adds a message to the delayed processing queue
+func (dw *DataWatcherState) addDelayedMessage(msg *nats.Msg, appStateMsg AppStateMessage) {
+	dw.delayedMessagesMutex.Lock()
+	defer dw.delayedMessagesMutex.Unlock()
+
+	delayedMsg := &DelayedMessage{
+		msg:        msg,
+		appStateMsg: appStateMsg,
+		retryCount: 0,
+		nextRetry:  time.Now().Add(2 * time.Second), // First retry after 2 seconds
+	}
+
+	dw.delayedMessages = append(dw.delayedMessages, delayedMsg)
+	log.Printf("Added delayed message to queue: app=%s, user=%s, opID=%s, queue_size=%d",
+		appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, len(dw.delayedMessages))
+}
+
+// processDelayedMessages processes delayed messages in the background
+func (dw *DataWatcherState) processDelayedMessages() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-dw.ctx.Done():
+			return
+		case <-ticker.C:
+			dw.processDelayedMessagesBatch()
+		}
+	}
+}
+
+// processDelayedMessagesBatch processes a batch of delayed messages that are ready to be retried
+func (dw *DataWatcherState) processDelayedMessagesBatch() {
+	dw.delayedMessagesMutex.Lock()
+	defer dw.delayedMessagesMutex.Unlock()
+
+	now := time.Now()
+	var remaining []*DelayedMessage
+	maxRetries := 10 // Maximum 10 retries (about 20 seconds total)
+
+	for _, delayedMsg := range dw.delayedMessages {
+		if now.Before(delayedMsg.nextRetry) {
+			// Not ready to retry yet
+			remaining = append(remaining, delayedMsg)
+			continue
+		}
+
+		if delayedMsg.retryCount >= maxRetries {
+			// Max retries reached, process anyway
+			log.Printf("Max retries reached for delayed message: app=%s, user=%s, opID=%s, processing anyway",
+				delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID)
+			dw.processMessageInternal(delayedMsg.msg, delayedMsg.appStateMsg)
+			continue
+		}
+
+		// Check if there are still pending/running install tasks
+		if dw.taskModule != nil {
+			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User)
+			if !lockAcquired {
+				// If we can't acquire the lock, retry later
+				delayedMsg.retryCount++
+				delayedMsg.nextRetry = now.Add(2 * time.Second)
+				remaining = append(remaining, delayedMsg)
+				log.Printf("Retrying delayed message later (lock not acquired): app=%s, user=%s, opID=%s, retry_count=%d",
+					delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
+				continue
+			}
+			if hasPendingTask {
+				// Still has pending tasks, retry later
+				delayedMsg.retryCount++
+				delayedMsg.nextRetry = now.Add(2 * time.Second)
+				remaining = append(remaining, delayedMsg)
+				log.Printf("Retrying delayed message later: app=%s, user=%s, opID=%s, retry_count=%d",
+					delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
+				continue
+			}
+		}
+
+		// No pending tasks, process the message
+		log.Printf("Processing delayed message: app=%s, user=%s, opID=%s, retry_count=%d",
+			delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
+		dw.processMessageInternal(delayedMsg.msg, delayedMsg.appStateMsg)
+	}
+
+	dw.delayedMessages = remaining
+}
+
+// processMessageInternal processes a message (extracted from handleMessage for reuse)
+func (dw *DataWatcherState) processMessageInternal(msg *nats.Msg, appStateMsg AppStateMessage) {
+	// Store as history record
+	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
+
+	// Store state data to cache
+	dw.storeStateToCache(appStateMsg)
+
+	// Print the parsed message
+	dw.printAppStateMessage(appStateMsg)
 }

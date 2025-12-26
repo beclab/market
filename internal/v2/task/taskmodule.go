@@ -1112,6 +1112,32 @@ func (tm *TaskModule) GetInstanceID() string {
 	return tm.instanceID
 }
 
+// HasPendingOrRunningInstallTask checks if there are any pending or running install/clone tasks for the given app and user
+// Returns (hasTask, lockAcquired) where hasTask indicates if there are such tasks, and lockAcquired indicates if the lock was successfully acquired
+// If lockAcquired is false, the result is unreliable and the caller should handle accordingly (e.g., delay processing)
+func (tm *TaskModule) HasPendingOrRunningInstallTask(appName, user string) (hasTask bool, lockAcquired bool) {
+	if !tm.mu.TryRLock() {
+		return false, false
+	}
+	defer tm.mu.RUnlock()
+
+	// Check running tasks
+	for _, t := range tm.runningTasks {
+		if t.AppName == appName && t.User == user && (t.Type == InstallApp || t.Type == CloneApp) {
+			return true, true
+		}
+	}
+
+	// Check pending tasks
+	for _, t := range tm.pendingTasks {
+		if t.AppName == appName && t.User == user && (t.Type == InstallApp || t.Type == CloneApp) {
+			return true, true
+		}
+	}
+
+	return false, true
+}
+
 // InstallTaskSucceed marks an install or clone task as completed successfully by opID or appName+user
 func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
 	if !tm.mu.TryLock() {
