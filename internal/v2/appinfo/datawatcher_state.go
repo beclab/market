@@ -492,6 +492,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 	}
 
 	// Special handling for pending state: delay processing if there are pending/running install tasks
+	// Or if task is not found in memory and we need to wait for database persistence
 	if appStateMsg.OpType == "install" && appStateMsg.State == "pending" {
 		if dw.taskModule != nil {
 			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(appStateMsg.Name, appStateMsg.User)
@@ -510,6 +511,38 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
 				dw.addDelayedMessage(msg, appStateMsg)
 				return
+			}
+		}
+		// If we have OpID but no pending/running tasks, check if task exists in database
+		// This handles the case where task completed very quickly before pending message arrived
+		if appStateMsg.OpID != "" {
+			db, err := utils.GetTaskStoreForQuery()
+			if err == nil && db != nil {
+				query := `
+				SELECT metadata, type, status, created_at
+				FROM task_records
+				WHERE op_id = $1
+					AND app_name = $2
+					AND user_account = $3
+					AND type IN ($4, $5)
+				ORDER BY created_at DESC
+				LIMIT 1
+				`
+				var metadataStr string
+				var taskType int
+				var taskStatus int
+				var taskCreatedAt time.Time
+				err = db.QueryRow(query, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
+				if err != nil {
+					// Task not found in database, delay to wait for task to be persisted
+					log.Printf("Delaying pending state message for app=%s, user=%s, opID=%s - task not found in DB, waiting for persistence",
+						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
+					dw.addDelayedMessage(msg, appStateMsg)
+					return
+				}
+				// Task found in database, can proceed (storeStateToCache will use OpID to query from DB)
+				log.Printf("Found task with OpID=%s in database for pending state message (app=%s, user=%s), proceeding with processing",
+					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 			}
 		}
 	}
@@ -594,6 +627,7 @@ func isFailedOrCanceledState(state string) bool {
 		"downloadFailed",
 		"installCancelFailed",
 		"downloadCancelFailed",
+		"pendingCanceled",
 		"installCanceled",
 		"installingCanceled",
 		"downloadingCanceled",  // Canceled during downloading phase
@@ -708,7 +742,55 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	// and query from task module or database instead
 	skipCacheLookup := isFailedOrCanceledState(msg.State)
 
-	if !skipCacheLookup {
+	// For install operations, prioritize OpID-based lookup to ensure accurate source matching
+	// This is especially important when tasks complete quickly before state messages arrive
+	isInstallOp := msg.OpType == "install"
+	shouldPrioritizeOpID := isInstallOp && msg.OpID != ""
+
+	if shouldPrioritizeOpID {
+		// Try OpID lookup first (from memory or database)
+		if dw.taskModule != nil {
+			_, src, found, _ := dw.taskModule.GetTaskByOpID(msg.OpID)
+			if found && src != "" {
+				sourceID = src
+				log.Printf("Found task with source=%s by OpID=%s for app=%s, user=%s (prioritized OpID lookup)",
+					src, msg.OpID, msg.Name, userID)
+			} else {
+				// Task not found in memory, try to query from database (task might be completed)
+				db, err := utils.GetTaskStoreForQuery()
+				if err == nil && db != nil {
+					query := `
+					SELECT metadata, type, status, created_at
+					FROM task_records
+					WHERE op_id = $1
+						AND app_name = $2
+						AND user_account = $3
+						AND type IN ($4, $5)
+					ORDER BY created_at DESC
+					LIMIT 1
+					`
+					var metadataStr string
+					var taskType int
+					var taskStatus int
+					var taskCreatedAt time.Time
+					err = db.QueryRow(query, msg.OpID, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
+					if err == nil && metadataStr != "" {
+						var metadataMap map[string]interface{}
+						if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
+							if s, ok := metadataMap["source"].(string); ok && s != "" {
+								sourceID = s
+								log.Printf("Found task with source=%s by OpID=%s from database (status=%d, created_at=%s) for app=%s, user=%s (prioritized OpID lookup)",
+									sourceID, msg.OpID, taskStatus, taskCreatedAt.Format(time.RFC3339), msg.Name, userID)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// If OpID lookup didn't find source, fall back to cache lookup (for non-install ops or when OpID is missing)
+	if sourceID == "" && !skipCacheLookup {
 		userData := dw.cacheManager.GetUserData(userID)
 		if userData != nil {
 			// Collect all matching app states from all sources
@@ -779,13 +861,44 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			msg.State, msg.Name, userID)
 	}
 
+	// If OpID lookup was not prioritized (non-install ops or missing OpID), try fallback methods
 	if sourceID == "" && dw.taskModule != nil {
-		// First try to find task by OpID (most accurate match for current operation)
-		if msg.OpID != "" {
+		// For non-install ops or when OpID is missing, try OpID lookup as fallback
+		if msg.OpID != "" && !shouldPrioritizeOpID {
 			_, src, found, _ := dw.taskModule.GetTaskByOpID(msg.OpID)
 			if found && src != "" {
 				sourceID = src
 				log.Printf("Found task with source=%s by OpID=%s for app=%s, user=%s", src, msg.OpID, msg.Name, userID)
+			} else {
+				// Task not found in memory, try to query from database (task might be completed)
+				db, err := utils.GetTaskStoreForQuery()
+				if err == nil && db != nil {
+					query := `
+					SELECT metadata, type, status, created_at
+					FROM task_records
+					WHERE op_id = $1
+						AND app_name = $2
+						AND user_account = $3
+						AND type IN ($4, $5)
+					ORDER BY created_at DESC
+					LIMIT 1
+					`
+					var metadataStr string
+					var taskType int
+					var taskStatus int
+					var taskCreatedAt time.Time
+					err = db.QueryRow(query, msg.OpID, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
+					if err == nil && metadataStr != "" {
+						var metadataMap map[string]interface{}
+						if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
+							if s, ok := metadataMap["source"].(string); ok && s != "" {
+								sourceID = s
+								log.Printf("Found task with source=%s by OpID=%s from database (status=%d, created_at=%s) for app=%s, user=%s",
+									sourceID, msg.OpID, taskStatus, taskCreatedAt.Format(time.RFC3339), msg.Name, userID)
+							}
+						}
+					}
+				}
 			}
 		}
 		// If OpID match failed, try to find by appName and user
