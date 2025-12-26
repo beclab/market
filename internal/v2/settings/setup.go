@@ -48,10 +48,14 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 	clearCache := os.Getenv("CLEAR_CACHE")
 	if clearCache == "true" {
 		log.Println("CLEAR_CACHE is true, clearing settings Redis keys...")
-		// Only clear settings Redis keys for this module
-		if err := ClearSettingsRedis(redisClient); err != nil {
-			log.Printf("Failed to clear settings Redis: %v", err)
-			return fmt.Errorf("failed to clear settings Redis: %w", err)
+		// Only clear settings Redis keys for this module (skip if redisClient is nil)
+		if redisClient != nil {
+			if err := ClearSettingsRedis(redisClient); err != nil {
+				log.Printf("Failed to clear settings Redis: %v", err)
+				return fmt.Errorf("failed to clear settings Redis: %w", err)
+			}
+		} else {
+			log.Println("Redis client not available, skipping clear Redis (public environment)")
 		}
 	}
 
@@ -245,16 +249,20 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 			UpdatedAt:     time.Now(),
 		}
 
-		// Save to Redis
-		configJSON, err := json.Marshal(marketSourcesConfig)
-		if err != nil {
-			log.Printf("Failed to marshal market sources config: %v", err)
-		} else {
-			if err := redisClient.Set(RedisKeyMarketSources, string(configJSON), 0); err != nil {
-				log.Printf("Failed to save market sources to Redis: %v", err)
+		// Save to Redis (skip if redisClient is nil, e.g., in public environment)
+		if redisClient != nil {
+			configJSON, err := json.Marshal(marketSourcesConfig)
+			if err != nil {
+				log.Printf("Failed to marshal market sources config: %v", err)
 			} else {
-				log.Printf("Successfully saved %d market sources to Redis", len(marketSources))
+				if err := redisClient.Set(RedisKeyMarketSources, string(configJSON), 0); err != nil {
+					log.Printf("Failed to save market sources to Redis: %v", err)
+				} else {
+					log.Printf("Successfully saved %d market sources to Redis", len(marketSources))
+				}
 			}
+		} else {
+			log.Println("Redis client not available, skipping save to Redis (public environment)")
 		}
 
 		// Reload SettingsManager if provided
