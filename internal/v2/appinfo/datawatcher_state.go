@@ -65,10 +65,10 @@ type AppStateMessage struct {
 
 // DelayedMessage represents a message that needs to be processed later
 type DelayedMessage struct {
-	msg        *nats.Msg
+	msg         *nats.Msg
 	appStateMsg AppStateMessage
-	retryCount int
-	nextRetry  time.Time
+	retryCount  int
+	nextRetry   time.Time
 }
 
 // DataWatcherState handles app state messages from NATS
@@ -555,8 +555,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 
 	for _, sourceData := range userData.Sources {
 		for _, appState := range sourceData.AppStateLatest {
-			if appState.Status.Name == appStateMsg.Name &&
-				appState.Status.State == appStateMsg.State {
+			if appState.Status.Name == appStateMsg.Name { // && appState.Status.State == appStateMsg.State
 
 				if (appStateMsg.EntranceStatuses == nil || len(appStateMsg.EntranceStatuses) == 0) && appState.Status.Progress == appStateMsg.Progress {
 					log.Printf("App state message is the same as the cached app state message for app %s, user %s, source %s",
@@ -1109,10 +1108,10 @@ func (dw *DataWatcherState) addDelayedMessage(msg *nats.Msg, appStateMsg AppStat
 	defer dw.delayedMessagesMutex.Unlock()
 
 	delayedMsg := &DelayedMessage{
-		msg:        msg,
+		msg:         msg,
 		appStateMsg: appStateMsg,
-		retryCount: 0,
-		nextRetry:  time.Now().Add(2 * time.Second), // First retry after 2 seconds
+		retryCount:  0,
+		nextRetry:   time.Now().Add(2 * time.Second), // First retry after 2 seconds
 	}
 
 	dw.delayedMessages = append(dw.delayedMessages, delayedMsg)

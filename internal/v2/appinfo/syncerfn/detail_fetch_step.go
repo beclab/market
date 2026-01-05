@@ -322,7 +322,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 							if shouldRemoveFromCache {
 								// Remove from LatestData immediately when no installation is active
 								delete(data.LatestData.Data.Apps, appID)
-								
+
 								// Also remove ALL versions of this app from LatestData.Data.Apps (by name)
 								if appName != "" {
 									for otherAppID, otherAppData := range data.LatestData.Data.Apps {
@@ -338,11 +338,11 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								// and merge with original data only when chartrepo fields are empty/null
 								// This ensures chartrepo's rendered data is preserved
 								originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
-								
+
 								// Use mergeAppData to intelligently merge chartrepo data with original data
 								// This will use chartrepo data when available, and fall back to original when chartrepo is empty/null
 								mergedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
-								
+
 								// Ensure appLabels contains suspend/remove label from chartrepo response
 								if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
 									mergedAppData["appLabels"] = chartrepoLabels
@@ -365,7 +365,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 										}
 									}
 								}
-								
+
 								// Update LatestData with merged data (chartrepo data as base, original as fallback)
 								data.LatestData.Data.Apps[appID] = mergedAppData
 								data.DetailedApps[appID] = mergedAppData
@@ -854,14 +854,14 @@ func (d *DetailFetchStep) mergeAppData(originalAppData interface{}, appInfoMap m
 	// Start with detail API data
 	detailedAppData := map[string]interface{}{
 		// Basic fields
-		"id":        appInfoMap["id"],
-		"name":      appInfoMap["name"],
-		"cfgType":   appInfoMap["cfgType"],
-		"chartName": appInfoMap["chartName"],
-		"icon":      appInfoMap["icon"],
-		"appID":     appInfoMap["appID"],
-		"version":   appInfoMap["version"],
-		"categories": appInfoMap["categories"],
+		"id":          appInfoMap["id"],
+		"name":        appInfoMap["name"],
+		"cfgType":     appInfoMap["cfgType"],
+		"chartName":   appInfoMap["chartName"],
+		"icon":        appInfoMap["icon"],
+		"appID":       appInfoMap["appID"],
+		"version":     appInfoMap["version"],
+		"categories":  appInfoMap["categories"],
 		"versionName": appInfoMap["versionName"],
 
 		// Extended fields
@@ -872,7 +872,7 @@ func (d *DetailFetchStep) mergeAppData(originalAppData interface{}, appInfoMap m
 		"developer":      appInfoMap["developer"],
 		"requiredMemory": appInfoMap["requiredMemory"],
 		"requiredDisk":   appInfoMap["requiredDisk"],
-		"supportClient": appInfoMap["supportClient"],
+		"supportClient":  appInfoMap["supportClient"],
 		"supportArch":    appInfoMap["supportArch"],
 		"requiredGPU":    appInfoMap["requiredGPU"],
 		"requiredCPU":    appInfoMap["requiredCPU"],

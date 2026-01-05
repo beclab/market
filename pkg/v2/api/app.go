@@ -328,7 +328,6 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 				if appID == appQuery.AppID || (appInfoData.RawData != nil && appInfoData.RawData.Name == appQuery.AppID) {
 					log.Printf("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
 
-					// 使用 safe copy，避免循环引用
 					safeCopy := s.createSafeAppInfoLatestCopy(appInfoData)
 					foundApps = append(foundApps, safeCopy)
 					found = true
@@ -517,6 +516,7 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 			"developer":    appInfo.Developer,
 			"rating":       appInfo.Rating,
 			"target":       appInfo.Target,
+			"app_labels":   appInfo.AppLabels,
 			"create_time":  appInfo.CreateTime,
 			"update_time":  appInfo.UpdateTime,
 		},
@@ -1030,7 +1030,7 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 						}
 					}
 
-					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo)
+					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo, appInfoData.AppInfo.AppEntry)
 					// log.Printf("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
 				}
 
@@ -1316,7 +1316,7 @@ func (s *Server) createSafeAppInfoLatestCopy(data *types.AppInfoLatestData) map[
 
 	// Include AppSimpleInfo if it exists
 	if data.AppSimpleInfo != nil {
-		safeCopy["app_simple_info"] = s.createSafeAppSimpleInfoCopy(data.AppSimpleInfo)
+		safeCopy["app_simple_info"] = s.createSafeAppSimpleInfoCopy(data.AppSimpleInfo, data.AppInfo.AppEntry)
 	}
 
 	return safeCopy
@@ -1665,12 +1665,12 @@ func (s *Server) createSafeLayerInfoCopy(layer *types.LayerInfo) map[string]inte
 }
 
 // createSafeAppSimpleInfoCopy creates a safe copy of AppSimpleInfo to avoid circular references
-func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[string]interface{} {
+func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo, entry *types.ApplicationInfoEntry) map[string]interface{} {
 	if info == nil {
 		return nil
 	}
 
-	return map[string]interface{}{
+	var data = map[string]interface{}{
 		"app_id":          info.AppID,
 		"app_name":        info.AppName,
 		"app_icon":        info.AppIcon,
@@ -1680,6 +1680,11 @@ func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[stri
 		"categories":      info.Categories,
 		"support_arch":    info.SupportArch,
 	}
+	if len(entry.AppLabels) > 0 {
+		data["app_labels"] = entry.AppLabels
+	}
+
+	return data
 }
 
 // createSafeOthersCopy creates a safe copy of Others data to avoid circular references
