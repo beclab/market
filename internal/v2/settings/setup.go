@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 // ChartRepoMarketSource represents the market source structure used by chart repository service
@@ -43,14 +45,14 @@ type ChartRepoResponse struct {
 // has the latest market source configuration
 // If settingsManager is provided, it will reload market sources from Redis after syncing
 func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManager ...*SettingsManager) error {
-	log.Println("=== Syncing market source configuration with chart repository service ===")
+	glog.V(2).Info("=== Syncing market source configuration with chart repository service ===")
 
 	clearCache := os.Getenv("CLEAR_CACHE")
 	if clearCache == "true" {
-		log.Println("CLEAR_CACHE is true, clearing settings Redis keys...")
+		glog.V(2).Info("CLEAR_CACHE is true, clearing settings Redis keys...")
 		// Only clear settings Redis keys for this module
 		if err := ClearSettingsRedis(redisClient); err != nil {
-			log.Printf("Failed to clear settings Redis: %v", err)
+			glog.Errorf("Failed to clear settings Redis: %v", err)
 			return fmt.Errorf("failed to clear settings Redis: %w", err)
 		}
 	}
@@ -62,41 +64,41 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 	// 1. Get chart repository service host from environment variable
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
 	if chartRepoHost == "" {
-		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, skipping sync")
+		glog.V(3).Info("CHART_REPO_SERVICE_HOST environment variable not set, skipping sync")
 		return nil
 	}
 
-	log.Printf("Chart repository service host: %s", chartRepoHost)
+	glog.V(2).Infof("Chart repository service host: %s", chartRepoHost)
 
 	// 2. Get current market source configuration from chart repository service
 	log.Println("Step 1: Getting market source configuration from chart repository service")
 	currentConfig, err := getMarketSourceFromChartRepo(chartRepoHost)
 	if err != nil {
-		log.Printf("Failed to get market source configuration: %v", err)
+		glog.Errorf("Failed to get market source configuration: %v", err)
 		return fmt.Errorf("failed to get market source configuration: %w", err)
 	}
 
-	log.Printf("Retrieved %d market sources from chart repository service", len(currentConfig.Sources))
+	glog.V(3).Infof("Retrieved %d market sources from chart repository service", len(currentConfig.Sources))
 
 	// 3. Check if local source (type=local, name=upload) exists
-	log.Println("Step 2: Checking for local source (type=local, name=upload)")
+	glog.V(2).Info("Step 2: Checking for local source (type=local, name=upload)")
 	localSourceExists := false
 	studioSourceExists := false
 	cliSourceExists := false
 	for _, source := range currentConfig.Sources {
 		if source.Type == "local" && source.ID == "upload" {
 			localSourceExists = true
-			log.Printf("Local source found: %s (ID: %s)", source.Name, source.ID)
+			glog.V(2).Infof("Local source found: %s (ID: %s)", source.Name, source.ID)
 			break
 		}
 		if source.Type == "local" && source.ID == "studio" {
 			studioSourceExists = true
-			log.Printf("Studio source found: %s (ID: %s)", source.Name, source.ID)
+			glog.V(2).Infof("Studio source found: %s (ID: %s)", source.Name, source.ID)
 			break
 		}
 		if source.Type == "local" && source.ID == "cli" {
 			cliSourceExists = true
-			log.Printf("CLI source found: %s (ID: %s)", source.Name, source.ID)
+			glog.V(2).Infof("CLI source found: %s (ID: %s)", source.Name, source.ID)
 			break
 		}
 	}
@@ -106,7 +108,7 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 	var syncErrors []string
 
 	if !localSourceExists {
-		log.Println("Step 3: Adding upload source (type=local, name=upload)")
+		glog.V(2).Info("Step 3: Adding upload source (type=local, name=upload)")
 		localSource := &ChartRepoMarketSource{
 			ID:          "upload",
 			Name:        "upload",
@@ -119,17 +121,17 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 		}
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, localSource); err != nil {
-			log.Printf("Failed to add upload source: %v", err)
+			glog.Errorf("Failed to add upload source: %v", err)
 			syncErrors = append(syncErrors, fmt.Sprintf("upload source: %v", err))
 		} else {
-			log.Println("upload source added successfully")
+			glog.V(3).Info("upload source added successfully")
 		}
 	} else {
-		log.Println("upload source already exists, skipping")
+		glog.V(3).Info("upload source already exists, skipping")
 	}
 
 	if !studioSourceExists {
-		log.Println("Step 3: Adding studio source (type=local, name=studio)")
+		glog.V(3).Info("Step 3: Adding studio source (type=local, name=studio)")
 		studioSource := &ChartRepoMarketSource{
 			ID:          "studio",
 			Name:        "studio",
@@ -142,17 +144,17 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 		}
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, studioSource); err != nil {
-			log.Printf("Failed to add studio source: %v", err)
+			glog.Errorf("Failed to add studio source: %v", err)
 			syncErrors = append(syncErrors, fmt.Sprintf("studio source: %v", err))
 		} else {
-			log.Println("studio source added successfully")
+			glog.V(2).Info("studio source added successfully")
 		}
 	} else {
-		log.Println("studio source already exists, skipping")
+		glog.V(3).Info("studio source already exists, skipping")
 	}
 
 	if !cliSourceExists {
-		log.Println("Step 3: Adding cli source (type=local, name=cli)")
+		glog.V(3).Info("Step 3: Adding cli source (type=local, name=cli)")
 		cliSource := &ChartRepoMarketSource{
 			ID:          "cli",
 			Name:        "cli",
@@ -165,33 +167,33 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 		}
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, cliSource); err != nil {
-			log.Printf("Failed to add cli source: %v", err)
+			glog.Errorf("Failed to add cli source: %v", err)
 			syncErrors = append(syncErrors, fmt.Sprintf("cli source: %v", err))
 		} else {
-			log.Println("cli source added successfully")
+			glog.V(2).Info("cli source added successfully")
 		}
 	} else {
-		log.Println("cli source already exists, skipping")
+		glog.V(3).Info("cli source already exists, skipping")
 	}
 
 	// 5. Check if remote source (type=remote, name=market.olares) exists
-	log.Println("Step 4: Checking for remote source (type=remote, name=market.olares)")
+	glog.V(2).Info("Step 4: Checking for remote source (type=remote, name=market.olares)")
 	remoteSourceExists := false
 	for _, source := range currentConfig.Sources {
 		if source.Type == "remote" && source.ID == "market.olares" {
 			remoteSourceExists = true
-			log.Printf("Remote source found: %s (ID: %s)", source.Name, source.ID)
+			glog.V(2).Infof("Remote source found: %s (ID: %s)", source.Name, source.ID)
 			break
 		}
 	}
 
 	// 6. Add remote source if it doesn't exist
 	if !remoteSourceExists {
-		log.Println("Step 5: Adding remote source (type=remote, name=market.olares)")
+		glog.V(2).Info("Step 5: Adding remote source (type=remote, name=market.olares)")
 		// Get base URL from environment variables
 		baseURL := getMarketServiceURL()
 		if baseURL == "" {
-			log.Println("No market service base URL found in environment variables for remote market.olares. Please check OLARES_SYSTEM_REMOTE_SERVICE, MARKET_PROVIDER, or SYNCER_REMOTE.")
+			glog.V(3).Info("No market service base URL found in environment variables for remote market.olares. Please check OLARES_SYSTEM_REMOTE_SERVICE, MARKET_PROVIDER, or SYNCER_REMOTE.")
 			return fmt.Errorf("sync market sources: missing remote market base URL in environment")
 		}
 
@@ -207,20 +209,20 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 		}
 
 		if err := addMarketSourceToChartRepo(chartRepoHost, remoteSource); err != nil {
-			log.Printf("Failed to add remote source: %v", err)
+			glog.Errorf("Failed to add remote source: %v", err)
 			syncErrors = append(syncErrors, fmt.Sprintf("remote source: %v", err))
 		} else {
-			log.Println("Remote source added successfully")
+			glog.V(2).Info("Remote source added successfully")
 		}
 	} else {
-		log.Println("Remote source already exists, skipping")
+		glog.V(3).Info("Remote source already exists, skipping")
 	}
 
 	// 7. Get final configuration from chart repo (after all additions) and save to Redis
-	log.Println("Step 6: Saving final market source configuration to Redis")
+	glog.V(2).Info("Step 6: Saving final market source configuration to Redis")
 	finalConfig, err := getMarketSourceFromChartRepo(chartRepoHost)
 	if err != nil {
-		log.Printf("Failed to get final market source configuration: %v", err)
+		glog.Errorf("Failed to get final market source configuration: %v", err)
 		// Continue even if this fails - we've already synced the sources
 	} else {
 		// Convert ChartRepoMarketSourcesConfig to MarketSourcesConfig
@@ -248,37 +250,37 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 		// Save to Redis
 		configJSON, err := json.Marshal(marketSourcesConfig)
 		if err != nil {
-			log.Printf("Failed to marshal market sources config: %v", err)
+			glog.Errorf("Failed to marshal market sources config: %v", err)
 		} else {
 			if err := redisClient.Set(RedisKeyMarketSources, string(configJSON), 0); err != nil {
-				log.Printf("Failed to save market sources to Redis: %v", err)
+				glog.Errorf("Failed to save market sources to Redis: %v", err)
 			} else {
-				log.Printf("Successfully saved %d market sources to Redis", len(marketSources))
+				glog.V(2).Infof("Successfully saved %d market sources to Redis", len(marketSources))
 			}
 		}
 
 		// Reload SettingsManager if provided
 		if len(settingsManager) > 0 && settingsManager[0] != nil {
-			log.Println("Step 7: Reloading SettingsManager with updated market sources")
+			glog.V(2).Info("Step 7: Reloading SettingsManager with updated market sources")
 			if err := settingsManager[0].ReloadMarketSources(); err != nil {
-				log.Printf("Failed to reload SettingsManager: %v", err)
+				glog.Errorf("Failed to reload SettingsManager: %v", err)
 				// Don't fail the entire sync if reload fails
 			} else {
-				log.Println("Successfully reloaded SettingsManager with updated market sources")
+				glog.V(3).Info("Successfully reloaded SettingsManager with updated market sources")
 			}
 		}
 	}
 
 	// 8. Report sync results
 	if len(syncErrors) > 0 {
-		log.Printf("Market source configuration sync completed with %d errors:", len(syncErrors))
+		glog.V(3).Infof("Market source configuration sync completed with %d errors:", len(syncErrors))
 		for i, err := range syncErrors {
-			log.Printf("  Error %d: %s", i+1, err)
+			glog.Errorf("  Error %d: %s", i+1, err)
 		}
 		// Don't return error, just log warnings - individual source failures shouldn't stop the entire process
-		log.Println("Continuing with available sources...")
+		glog.V(3).Info("Continuing with available sources...")
 	} else {
-		log.Println("Market source configuration sync completed successfully")
+		glog.V(2).Info("Market source configuration sync completed successfully")
 	}
 
 	return nil
@@ -288,7 +290,7 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 func getMarketSourceFromChartRepo(host string) (*ChartRepoMarketSourcesConfig, error) {
 	url := fmt.Sprintf("http://%s/chart-repo/api/v2/settings/market-source", host)
 
-	log.Printf("Making GET request to: %s", url)
+	glog.V(2).Infof("Making GET request to: %s", url)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -301,8 +303,8 @@ func getMarketSourceFromChartRepo(host string) (*ChartRepoMarketSourcesConfig, e
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	log.Printf("Response status: %d", resp.StatusCode)
-	log.Printf("Response body: %s", string(body))
+	glog.V(2).Infof("Response status: %d", resp.StatusCode)
+	glog.V(2).Infof("Response body: %s", string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
@@ -335,8 +337,8 @@ func getMarketSourceFromChartRepo(host string) (*ChartRepoMarketSourcesConfig, e
 func addMarketSourceToChartRepo(host string, source *ChartRepoMarketSource) error {
 	url := fmt.Sprintf("http://%s/chart-repo/api/v2/settings/market-source", host)
 
-	log.Printf("Making POST request to: %s", url)
-	log.Printf("Adding market source: %s (Type: %s, Name: %s)", source.ID, source.Type, source.Name)
+	glog.V(2).Infof("Making POST request to: %s", url)
+	glog.V(2).Infof("Adding market source: %s (Type: %s, Name: %s)", source.ID, source.Type, source.Name)
 
 	// Marshal the source to JSON
 	jsonData, err := json.Marshal(source)
@@ -344,7 +346,7 @@ func addMarketSourceToChartRepo(host string, source *ChartRepoMarketSource) erro
 		return fmt.Errorf("failed to marshal market source: %w", err)
 	}
 
-	log.Printf("Request body: %s", string(jsonData))
+	glog.V(2).Infof("Request body: %s", string(jsonData))
 
 	// Create HTTP request
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
@@ -367,8 +369,8 @@ func addMarketSourceToChartRepo(host string, source *ChartRepoMarketSource) erro
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	log.Printf("Response status: %d", resp.StatusCode)
-	log.Printf("Response body: %s", string(body))
+	glog.V(3).Infof("Response status: %d", resp.StatusCode)
+	glog.V(3).Infof("Response body: %s", string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
@@ -390,8 +392,8 @@ func addMarketSourceToChartRepo(host string, source *ChartRepoMarketSource) erro
 func deleteMarketSourceFromChartRepo(host string, sourceID string) error {
 	url := fmt.Sprintf("http://%s/chart-repo/api/v2/settings/market-source/%s", host, sourceID)
 
-	log.Printf("Making DELETE request to: %s", url)
-	log.Printf("Deleting market source with ID: %s", sourceID)
+	glog.V(2).Infof("Making DELETE request to: %s", url)
+	glog.V(2).Infof("Deleting market source with ID: %s", sourceID)
 
 	// Create HTTP request
 	req, err := http.NewRequest("DELETE", url, nil)
@@ -412,8 +414,8 @@ func deleteMarketSourceFromChartRepo(host string, sourceID string) error {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	log.Printf("Response status: %d", resp.StatusCode)
-	log.Printf("Response body: %s", string(body))
+	glog.V(2).Infof("Response status: %d", resp.StatusCode)
+	glog.V(2).Infof("Response body: %s", string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))

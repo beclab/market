@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
 	"market/internal/v2/types"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/golang/glog"
 )
 
 // Response represents the response from chart repo sync-app API
@@ -85,7 +85,7 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		Post(url)
 	duration := time.Since(startTime)
 	if err != nil || resp.StatusCode() >= 300 {
-		log.Printf("TaskForApiStep - Request failed in %v for user=%s, source=%s, app=%s: %v", duration, task.UserID, task.SourceID, task.AppID, err)
+		glog.Errorf("TaskForApiStep - Request failed in %v for user=%s, source=%s, app=%s: %v", duration, task.UserID, task.SourceID, task.AppID, err)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to call chart repo sync-app: %w", err)
@@ -106,19 +106,18 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 			if appData, hasAppData := dataMap["app_data"]; hasAppData && appData != nil {
 				// Convert app_data to AppInfoLatestData and write to cache
 				if err := s.writeAppDataToCache(task, appData); err != nil {
-					log.Printf("Warning: failed to write app_data to cache: %v", err)
+					glog.Errorf("Warning: failed to write app_data to cache: %v", err)
 				} else {
-					log.Printf("Successfully wrote app_data to cache for user=%s, source=%s, app=%s",
+					glog.V(3).Infof("Successfully wrote app_data to cache for user=%s, source=%s, app=%s",
 						task.UserID, task.SourceID, task.AppID)
 				}
 			}
 		}
 	}
 
-	log.Printf("SyncApp to chart repo completed successfully")
+	glog.V(3).Info("SyncApp to chart repo completed successfully")
 	return nil
 }
-
 
 // writeAppDataToCache writes AppInfoLatestData to cache by updating the corresponding AppInfoLatestPendingData
 func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interface{}) error {
@@ -197,7 +196,7 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 				}
 			}
 		}
-		
+
 		// If chartrepo didn't return labels, preserve from pendingData
 		if !chartrepoHasLabels {
 			appInfoLatest.RawData.AppLabels = pendingData.RawData.AppLabels

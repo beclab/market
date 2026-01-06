@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"reflect"
 	"sort"
@@ -104,7 +103,7 @@ type TaskHistoryEntry struct {
 // NewHydrator creates a new hydrator with the given configuration
 func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManager, cacheManager *CacheManager, config HydratorConfig) *Hydrator {
 	if cacheManager == nil {
-		log.Panicf("cacheManager must not be nil when creating Hydrator")
+		glog.V(3).Infof("cacheManager must not be nil when creating Hydrator")
 	}
 
 	hydrator := &Hydrator{
@@ -170,7 +169,7 @@ func (h *Hydrator) Start(ctx context.Context) error {
 	}
 	h.isRunning.Store(true)
 
-	log.Printf("Starting hydrator with %d workers and %d steps", h.workerCount, len(h.steps))
+	glog.V(3).Infof("Starting hydrator with %d workers and %d steps", h.workerCount, len(h.steps))
 
 	// Start worker goroutines
 	for i := 0; i < h.workerCount; i++ {
@@ -197,7 +196,7 @@ func (h *Hydrator) Stop() {
 		return
 	}
 
-	log.Println("Stopping hydrator...")
+	glog.V(4).Info("Stopping hydrator...")
 	close(h.stopChan)
 	h.isRunning.Store(false)
 }
@@ -216,11 +215,11 @@ func (h *Hydrator) EnqueueTask(task *hydrationfn.HydrationTask) error {
 	select {
 	case h.taskQueue <- task:
 		h.trackTask(task)
-		log.Printf("Enqueued hydration task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
+		glog.V(4).Infof("Enqueued hydration task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
 			task.ID, task.AppID, task.UserID, task.SourceID, len(h.taskQueue))
 		return nil
 	default:
-		log.Printf("ERROR: Task queue is full! Cannot enqueue task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
+		glog.Errorf("ERROR: Task queue is full! Cannot enqueue task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
 			task.ID, task.AppID, task.UserID, task.SourceID, len(h.taskQueue))
 		return fmt.Errorf("task queue is full")
 	}
@@ -228,7 +227,7 @@ func (h *Hydrator) EnqueueTask(task *hydrationfn.HydrationTask) error {
 
 // worker processes tasks from the queue
 func (h *Hydrator) worker(ctx context.Context, workerID int) {
-	log.Printf("Hydration worker %d started", workerID)
+	glog.V(3).Infof("Hydration worker %d started", workerID)
 
 	// Initialize worker status
 	h.updateWorkerStatus(workerID, nil, true)
@@ -236,7 +235,7 @@ func (h *Hydrator) worker(ctx context.Context, workerID int) {
 	defer func() {
 		// Mark worker as idle when stopping
 		h.updateWorkerStatus(workerID, nil, true)
-		log.Printf("Hydration worker %d stopped", workerID)
+		glog.V(4).Infof("Hydration worker %d stopped", workerID)
 	}()
 
 	for {
@@ -247,7 +246,7 @@ func (h *Hydrator) worker(ctx context.Context, workerID int) {
 			return
 		case task := <-h.taskQueue:
 			if task != nil {
-				log.Printf("DEBUG: Worker %d received task from queue: %s for app: %s (user: %s, source: %s)", workerID, task.ID, task.AppID, task.UserID, task.SourceID)
+				glog.V(3).Infof("DEBUG: Worker %d received task from queue: %s for app: %s (user: %s, source: %s)", workerID, task.ID, task.AppID, task.UserID, task.SourceID)
 				h.processTask(ctx, task, workerID)
 			}
 		}
@@ -259,8 +258,8 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 	// Add memory monitoring at the start of task processing
 	h.monitorMemoryUsage()
 
-	log.Printf("==================== HYDRATION TASK STARTED ====================")
-	log.Printf("Worker %d processing task: %s for app: %s", workerID, task.ID, task.AppID)
+	glog.V(3).Info("==================== HYDRATION TASK STARTED ====================")
+	glog.V(3).Infof("Worker %d processing task: %s for app: %s", workerID, task.ID, task.AppID)
 
 	// Update worker status to indicate it's processing this task
 	h.updateWorkerStatus(workerID, task, false)
@@ -271,7 +270,7 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 	// Check if task is in cooldown period
 	if task.LastFailureTime != nil && time.Since(*task.LastFailureTime) < 5*time.Minute {
-		log.Printf("Task %s is in cooldown period, skipping. Next retry available at: %v",
+		glog.V(4).Infof("Task %s is in cooldown period, skipping. Next retry available at: %v",
 			task.ID, task.LastFailureTime.Add(5*time.Minute))
 		return
 	}
@@ -286,14 +285,14 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 		// Check if step can be skipped
 		if step.CanSkip(ctx, task) {
-			log.Printf("Skipping step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
-			log.Printf("-------- HYDRATION STEP %d/%d SKIPPED: %s --------", i+1, len(h.steps), step.GetStepName())
+			glog.V(3).Infof("Skipping step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
+			glog.V(3).Infof("-------- HYDRATION STEP %d/%d SKIPPED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.IncrementStep()
 			continue
 		}
 
-		log.Printf("-------- HYDRATION STEP %d/%d STARTED: %s --------", i+1, len(h.steps), step.GetStepName())
-		log.Printf("Executing step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
+		glog.V(3).Infof("-------- HYDRATION STEP %d/%d STARTED: %s --------", i+1, len(h.steps), step.GetStepName())
+		glog.V(3).Infof("Executing step %d (%s) for task: %s", i+1, step.GetStepName(), task.ID)
 
 		// Update worker status with current step
 		h.updateWorkerStatus(workerID, task, false)
@@ -303,8 +302,8 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 		// Execute step
 		if err := step.Execute(ctx, task); err != nil {
-			log.Printf("Step %d (%s) failed for task: %s, error: %v", i+1, step.GetStepName(), task.ID, err)
-			log.Printf("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
+			glog.V(3).Infof("Step %d (%s) failed for task: %s, error: %v", i+1, step.GetStepName(), task.ID, err)
+			glog.V(3).Infof("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.SetError(err)
 
 			// Clean up resources before failure
@@ -330,13 +329,13 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 							h.markTaskFailed(task, time.Now(), 0, "retry", err.Error())
 						}
 					}()
-					log.Printf("==================== HYDRATION TASK QUEUED FOR RETRY AFTER COOLDOWN ====================")
+					glog.V(3).Infof("==================== HYDRATION TASK QUEUED FOR RETRY AFTER COOLDOWN ====================")
 					return
 				} else {
 					// Max retries exceeded
-					log.Printf("Task failed after max retries: %s", task.ID)
+					glog.V(3).Infof("Task failed after max retries: %s", task.ID)
 					h.markTaskFailed(task, time.Now(), 0, "max_retries", "max retries exceeded")
-					log.Printf("==================== HYDRATION TASK FAILED ====================")
+					glog.V(3).Infof("==================== HYDRATION TASK FAILED ====================")
 					return
 				}
 			*/
@@ -345,14 +344,14 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			failureReason := err.Error()
 			failureStep := step.GetStepName()
 
-			log.Printf("Task %s failed at step %s, moving to render failed list with reason: %s",
+			glog.V(3).Infof("Task %s failed at step %s, moving to render failed list with reason: %s",
 				task.ID, failureStep, failureReason)
 
 			duration := time.Since(taskStartTime)
 			h.moveTaskToRenderFailed(task, failureReason, failureStep)
 			h.markTaskFailed(task, taskStartTime, duration, failureStep, failureReason)
 
-			log.Printf("==================== HYDRATION TASK MOVED TO RENDER FAILED LIST ====================")
+			glog.V(4).Info("==================== HYDRATION TASK MOVED TO RENDER FAILED LIST ====================")
 			return
 		}
 
@@ -360,8 +359,8 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 		h.logTaskDataAfterStep(task, i+1, step.GetStepName())
 
 		task.IncrementStep()
-		log.Printf("Step %d (%s) completed for task: %s", i+1, step.GetStepName(), task.ID)
-		log.Printf("-------- HYDRATION STEP %d/%d COMPLETED: %s --------", i+1, len(h.steps), step.GetStepName())
+		glog.V(3).Infof("Step %d (%s) completed for task: %s", i+1, step.GetStepName(), task.ID)
+		glog.V(4).Infof("-------- HYDRATION STEP %d/%d COMPLETED: %s --------", i+1, len(h.steps), step.GetStepName())
 	}
 
 	// All steps completed successfully
@@ -369,8 +368,9 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 	duration := time.Since(taskStartTime)
 	h.markTaskCompleted(task, taskStartTime, duration)
 
-	log.Printf("Task completed successfully: %s for app: %s", task.ID, task.AppID)
-	log.Printf("==================== HYDRATION TASK COMPLETED ====================")
+	glog.V(3).Infof("Task completed successfully: %s for app: %s", task.ID, task.AppID)
+	glog.V(4).Infof("==================== HYDRATION TASK COMPLETED ====================")
+	glog.V(4).Infoln("")
 }
 
 // updateWorkerStatus updates the status of a worker
@@ -401,70 +401,64 @@ func (h *Hydrator) updateWorkerStatus(workerID int, task *hydrationfn.HydrationT
 
 // logTaskDataBeforeStep logs task data before step execution to help debug JSON cycle issues
 func (h *Hydrator) logTaskDataBeforeStep(task *hydrationfn.HydrationTask, stepNum int, stepName string) {
-	log.Printf("DEBUG: Before step %d (%s) - Task data structure check", stepNum, stepName)
+	glog.V(3).Infof("DEBUG: Before step %d (%s) - Task data structure check", stepNum, stepName)
 
 	// Try to JSON marshal task.ChartData
 	if len(task.ChartData) > 0 {
 		if jsonData, err := json.Marshal(task.ChartData); err != nil {
-			log.Printf("ERROR: JSON marshal failed for task.ChartData before step %d: %v", stepNum, err)
-			log.Printf("ERROR: ChartData keys: %v", h.getMapKeys(task.ChartData))
+			glog.Errorf("ERROR: JSON marshal failed for task.ChartData before step %d: %v, ChartData keys: %v", stepNum, err, h.getMapKeys(task.ChartData))
 		} else {
-			log.Printf("DEBUG: task.ChartData JSON length before step %d: %d bytes", stepNum, len(jsonData))
+			glog.V(3).Infof("DEBUG: task.ChartData JSON length before step %d: %d bytes", stepNum, len(jsonData))
 		}
 	}
 
 	// Try to JSON marshal task.AppData
 	if len(task.AppData) > 0 {
 		if jsonData, err := json.Marshal(task.AppData); err != nil {
-			log.Printf("ERROR: JSON marshal failed for task.AppData before step %d: %v", stepNum, err)
-			log.Printf("ERROR: AppData keys: %v", h.getMapKeys(task.AppData))
+			glog.Errorf("ERROR: JSON marshal failed for task.AppData before step %d: %v, AppData keys: %v", stepNum, err, h.getMapKeys(task.AppData))
 		} else {
-			log.Printf("DEBUG: task.AppData JSON length before step %d: %d bytes", stepNum, len(jsonData))
+			glog.V(3).Infof("DEBUG: task.AppData JSON length before step %d: %d bytes", stepNum, len(jsonData))
 		}
 	}
 
 	// Try to JSON marshal task.DatabaseUpdateData
 	if len(task.DatabaseUpdateData) > 0 {
 		if jsonData, err := json.Marshal(task.DatabaseUpdateData); err != nil {
-			log.Printf("ERROR: JSON marshal failed for task.DatabaseUpdateData before step %d: %v", stepNum, err)
-			log.Printf("ERROR: DatabaseUpdateData keys: %v", h.getMapKeys(task.DatabaseUpdateData))
+			glog.Errorf("ERROR: JSON marshal failed for task.DatabaseUpdateData before step %d: %v, DatabaseUpdateData keys: %v", stepNum, err, h.getMapKeys(task.DatabaseUpdateData))
 		} else {
-			log.Printf("DEBUG: task.DatabaseUpdateData JSON length before step %d: %d bytes", stepNum, len(jsonData))
+			glog.V(3).Infof("DEBUG: task.DatabaseUpdateData JSON length before step %d: %d bytes", stepNum, len(jsonData))
 		}
 	}
 }
 
 // logTaskDataAfterStep logs task data after step execution to help debug JSON cycle issues
 func (h *Hydrator) logTaskDataAfterStep(task *hydrationfn.HydrationTask, stepNum int, stepName string) {
-	log.Printf("DEBUG: After step %d (%s) - Task data structure check", stepNum, stepName)
+	glog.V(3).Infof("DEBUG: After step %d (%s) - Task data structure check", stepNum, stepName)
 
 	// Try to JSON marshal task.ChartData
 	if len(task.ChartData) > 0 {
 		if jsonData, err := json.Marshal(task.ChartData); err != nil {
-			log.Printf("ERROR: JSON marshal failed for task.ChartData after step %d: %v", stepNum, err)
-			log.Printf("ERROR: ChartData keys: %v", h.getMapKeys(task.ChartData))
+			glog.Errorf("ERROR: JSON marshal failed for task.ChartData after step %d: %v, ChartData keys: %v", stepNum, err, h.getMapKeys(task.ChartData))
 		} else {
-			log.Printf("DEBUG: task.ChartData JSON length after step %d: %d bytes", stepNum, len(jsonData))
+			glog.V(3).Infof("DEBUG: task.ChartData JSON length after step %d: %d bytes", stepNum, len(jsonData))
 		}
 	}
 
 	// Try to JSON marshal task.AppData
 	if len(task.AppData) > 0 {
 		if jsonData, err := json.Marshal(task.AppData); err != nil {
-			log.Printf("ERROR: JSON marshal failed for task.AppData after step %d: %v", stepNum, err)
-			log.Printf("ERROR: AppData keys: %v", h.getMapKeys(task.AppData))
+			glog.Errorf("ERROR: JSON marshal failed for task.AppData after step %d: %v, AppData keys: %v", stepNum, err, h.getMapKeys(task.AppData))
 		} else {
-			log.Printf("DEBUG: task.AppData JSON length after step %d: %d bytes", stepNum, len(jsonData))
+			glog.V(3).Infof("DEBUG: task.AppData JSON length after step %d: %d bytes", stepNum, len(jsonData))
 		}
 	}
 
 	// Try to JSON marshal task.DatabaseUpdateData
 	if len(task.DatabaseUpdateData) > 0 {
 		if jsonData, err := json.Marshal(task.DatabaseUpdateData); err != nil {
-			log.Printf("ERROR: JSON marshal failed for task.DatabaseUpdateData after step %d: %v", stepNum, err)
-			log.Printf("ERROR: DatabaseUpdateData keys: %v", h.getMapKeys(task.DatabaseUpdateData))
+			glog.Errorf("ERROR: JSON marshal failed for task.DatabaseUpdateData after step %d: %v, DatabaseUpdateData keys: %v", stepNum, err, h.getMapKeys(task.DatabaseUpdateData))
 		} else {
-			log.Printf("DEBUG: task.DatabaseUpdateData JSON length after step %d: %d bytes", stepNum, len(jsonData))
+			glog.V(3).Infof("DEBUG: task.DatabaseUpdateData JSON length after step %d: %d bytes", stepNum, len(jsonData))
 		}
 	}
 }
@@ -483,14 +477,14 @@ func (h *Hydrator) cleanupTaskResources(task *hydrationfn.HydrationTask) {
 	// Clean up chart data
 	// if renderedDir, exists := task.ChartData["rendered_chart_dir"].(string); exists {
 	// 	if err := os.RemoveAll(renderedDir); err != nil {
-	// 		log.Printf("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
+	// 		glog.Info("Warning: Failed to clean up rendered chart directory %s: %v", renderedDir, err)
 	// 	}
 	// }
 
 	// Clean up source chart
 	if sourceChartPath, exists := task.ChartData["source_chart_path"].(string); exists {
 		if err := os.Remove(sourceChartPath); err != nil {
-			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
+			glog.Errorf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
 		}
 	}
 
@@ -504,8 +498,8 @@ func (h *Hydrator) cleanupTaskResources(task *hydrationfn.HydrationTask) {
 
 // pendingDataMonitor monitors for new pending data and creates tasks
 func (h *Hydrator) pendingDataMonitor(ctx context.Context) {
-	log.Println("Pending data monitor started")
-	defer log.Println("Pending data monitor stopped")
+	glog.V(3).Infoln("Pending data monitor started")
+	defer glog.V(3).Infoln("Pending data monitor stopped")
 
 	ticker := time.NewTicker(time.Second * 30) // Check every 30 seconds
 	defer ticker.Stop()
@@ -527,7 +521,7 @@ func (h *Hydrator) checkForPendingData() {
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
 		if !h.cacheManager.mutex.TryRLock() {
-			glog.Warningf("Hydrator.checkForPendingData: CacheManager read lock not available, skipping")
+			glog.Warning("[TryRLock] Hydrator.checkForPendingData: CacheManager read lock not available, skipping")
 			return
 		}
 		defer h.cacheManager.mutex.RUnlock()
@@ -538,55 +532,58 @@ func (h *Hydrator) checkForPendingData() {
 				// No nested locks needed since we already hold the global lock
 
 				// Log source type for debugging - both local and remote should be processed
-				log.Printf("Checking pending data for user: %s, source: %s, type: %s, pending: %d", userID, sourceID, sourceData.Type, len(sourceData.AppInfoLatestPending))
+				if len(sourceData.AppInfoLatestPending) > 0 {
+					glog.V(3).Infof("Checking pending data for user: %s, source: %s, type: %s, pending: %d", userID, sourceID, sourceData.Type, len(sourceData.AppInfoLatestPending))
+				}
 
 				// Check if there's pending data - process both local and remote sources
 				if len(sourceData.AppInfoLatestPending) > 0 {
-					log.Printf("Found %d pending apps for user: %s, source: %s, type: %s",
+					glog.V(3).Infof("Found %d pending apps for user: %s, source: %s, type: %s",
 						len(sourceData.AppInfoLatestPending), userID, sourceID, sourceData.Type)
-					log.Printf("DEBUG: About to process %d pending apps for user: %s, source: %s", len(sourceData.AppInfoLatestPending), userID, sourceID)
+					glog.V(3).Infof("DEBUG: About to process %d pending apps for user: %s, source: %s", len(sourceData.AppInfoLatestPending), userID, sourceID)
 					for i, pendingData := range sourceData.AppInfoLatestPending {
-						log.Printf("DEBUG: Processing pending data %d/%d for user: %s, source: %s, pendingData: %v", i+1, len(sourceData.AppInfoLatestPending), userID, sourceID, pendingData != nil)
+						glog.V(3).Infof("DEBUG: Processing pending data %d/%d for user: %s, source: %s, pendingData: %v", i+1, len(sourceData.AppInfoLatestPending), userID, sourceID, pendingData != nil)
 						h.createTasksFromPendingData(userID, sourceID, pendingData)
 					}
 				}
 			}
 		}
 	} else {
-		log.Printf("Warning: CacheManager not available for checkForPendingData")
+		glog.V(3).Infof("Warning: CacheManager not available for checkForPendingData")
 	}
 }
 
 // createTasksFromPendingData creates hydration tasks from pending app data
 func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingData *types.AppInfoLatestPendingData) {
 	if pendingData == nil {
-		log.Printf("DEBUG: createTasksFromPendingData called with nil pendingData for user: %s, source: %s", userID, sourceID)
+		glog.V(3).Infof("DEBUG: createTasksFromPendingData called with nil pendingData for user: %s, source: %s", userID, sourceID)
 		return
 	}
 
-	log.Printf("DEBUG: createTasksFromPendingData called for user: %s, source: %s, pendingData.RawData: %v", userID, sourceID, pendingData.RawData != nil)
+	glog.V(3).Infof("DEBUG: createTasksFromPendingData called for user: %s, source: %s, pendingData.RawData: %v", userID, sourceID, pendingData.RawData != nil)
 
 	// For the new structure, we can work with RawData if it exists
 	if pendingData.RawData != nil {
 		// Handle regular structured RawData
+		appName := pendingData.RawData.Name
 		appID := pendingData.RawData.AppID
 		if appID == "" {
 			appID = pendingData.RawData.ID
 		}
 
-		log.Printf("DEBUG: Processing appID: %s for user: %s, source: %s", appID, userID, sourceID)
+		glog.V(3).Infof("DEBUG: Processing appID: %s %s for user: %s, source: %s", appID, appName, userID, sourceID)
 
 		if appID != "" {
 			// Check if app is already in render failed list
-			if h.isAppInRenderFailedList(userID, sourceID, appID) {
-				log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
+			if h.isAppInRenderFailedList(userID, sourceID, appID, appName) {
+				glog.V(3).Infof("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
 					appID, userID, sourceID)
 				return
 			}
 
 			// Check if app hydration is already complete before creating new task
 			if h.isAppHydrationComplete(pendingData) {
-				log.Printf("DEBUG: App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+				glog.V(3).Infof("DEBUG: App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
 					appID, userID, sourceID)
 				return
 			}
@@ -597,19 +594,19 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 			if pendingData.RawData != nil {
 				version = pendingData.RawData.Version
 			}
-			if h.isAppInLatestQueue(userID, sourceID, appID, version) {
-				log.Printf("DEBUG: App already exists in latest queue for app: %s (user: %s, source: %s), skipping task creation",
+			if h.isAppInLatestQueue(userID, sourceID, appID, appName, version) {
+				glog.V(3).Infof("DEBUG: App already exists in latest queue for app: %s (user: %s, source: %s), skipping task creation",
 					appID, userID, sourceID)
 				return
 			}
 
-			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
-				log.Printf("DEBUG: No active task found for app: %s (user: %s, source: %s), proceeding with task creation", appID, userID, sourceID)
+			if !h.hasActiveTaskForApp(userID, sourceID, appID, appName) {
+				glog.V(3).Infof("DEBUG: No active task found for app: %s (user: %s, source: %s), proceeding with task creation", appID, userID, sourceID)
 				// Convert ApplicationInfoEntry to map for task creation
 				appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
 
 				if len(appDataMap) == 0 {
-					log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+					glog.V(3).Infof("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
 						appID, userID, sourceID)
 					return
 				}
@@ -625,10 +622,10 @@ func (h *Hydrator) createTasksFromPendingData(userID, sourceID string, pendingDa
 				)
 
 				if err := h.EnqueueTask(task); err != nil {
-					log.Printf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
+					glog.Errorf("Failed to enqueue task for app: %s (user: %s, source: %s), error: %v",
 						appID, userID, sourceID, err)
 				} else {
-					log.Printf("Created hydration task for structured app: %s (user: %s, source: %s)",
+					glog.V(3).Infof("Created hydration task for structured app: %s (user: %s, source: %s)",
 						appID, userID, sourceID)
 				}
 			}
@@ -645,7 +642,7 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 	// }
 
 	if pendingData == nil {
-		log.Printf("isAppHydrationComplete: pendingData is nil")
+		glog.V(3).Infof("isAppHydrationComplete: pendingData is nil")
 		return false
 	}
 
@@ -659,41 +656,41 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 		appName = pendingData.RawData.Name
 	}
 
-	log.Printf("DEBUG: isAppHydrationComplete checking appID=%s, name=%s, RawPackage=%s, RenderedPackage=%s",
+	glog.V(3).Infof("DEBUG: isAppHydrationComplete checking appID=%s, name=%s, RawPackage=%s, RenderedPackage=%s",
 		appID, appName, pendingData.RawPackage, pendingData.RenderedPackage)
 
 	if pendingData.RawPackage == "" {
-		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - RawPackage is empty for appID=%s, name=%s", appID, appName)
+		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - RawPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.RenderedPackage == "" {
-		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - RenderedPackage is empty for appID=%s, name=%s", appID, appName)
+		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - RenderedPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.AppInfo == nil {
-		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - AppInfo is nil for appID=%s, name=%s", appID, appName)
+		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - AppInfo is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	imageAnalysis := pendingData.AppInfo.ImageAnalysis
 	if imageAnalysis == nil {
-		log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
+		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if imageAnalysis.TotalImages > 0 {
-		log.Printf("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages > 0 for appID=%s, name=%s, TotalImages: %d", appID, appName, imageAnalysis.TotalImages)
+		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages > 0 for appID=%s, name=%s, TotalImages: %d", appID, appName, imageAnalysis.TotalImages)
 		return true
 	}
 
 	if imageAnalysis.TotalImages == 0 && imageAnalysis.Images != nil {
-		log.Printf("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages=0 but Images not nil for appID=%s, name=%s, Images: %v", appID, appName, imageAnalysis.Images)
+		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages=0 but Images not nil for appID=%s, name=%s, Images: %v", appID, appName, imageAnalysis.Images)
 		return true
 	}
 
-	log.Printf("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis incomplete for appID=%s, name=%s, TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
+	glog.V(2).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis incomplete for appID=%s, name=%s, TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
 	return false
 }
 
@@ -702,7 +699,7 @@ func (h *Hydrator) isAppDataHydrationComplete(userID, sourceID, appID string) bo
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
 		if !h.cacheManager.mutex.TryRLock() {
-			glog.Warningf("Hydrator.isAppDataHydrationComplete: CacheManager read lock not available for user %s, source %s, app %s, returning false", userID, sourceID, appID)
+			glog.Warningf("[TryRlock] Hydrator.isAppDataHydrationComplete: CacheManager read lock not available for user %s, source %s, app %s, returning false", userID, sourceID, appID)
 			return false
 		}
 		defer h.cacheManager.mutex.RUnlock()
@@ -726,7 +723,7 @@ func (h *Hydrator) isAppDataHydrationComplete(userID, sourceID, appID string) bo
 			}
 		}
 	} else {
-		log.Printf("Warning: CacheManager not available for isAppDataHydrationComplete")
+		glog.V(3).Infof("Warning: CacheManager not available for isAppDataHydrationComplete")
 	}
 
 	// If no pending data found for this app, consider it not hydrated
@@ -895,29 +892,31 @@ func (h *Hydrator) deepCopyValue(value interface{}, visited map[uintptr]bool) in
 }
 
 // hasActiveTaskForApp checks if there's already an active task for the given app
-func (h *Hydrator) hasActiveTaskForApp(userID, sourceID, appID string) bool {
+func (h *Hydrator) hasActiveTaskForApp(userID, sourceID, appID, appName string) bool {
 	if !h.taskMutex.TryRLock() {
-		log.Printf("Failed to acquire read lock for hasActiveTaskForApp, returning false")
+		glog.Warningf("[TryRLock] Failed to acquire read lock for hasActiveTaskForApp, returning false, user: %s, source: %s, id: %s, name: %s", userID, sourceID, appID, appName)
 		return false
 	}
 	defer h.taskMutex.RUnlock()
 
-	log.Printf("DEBUG: Checking active tasks for app: %s (user: %s, source: %s), total active tasks: %d", appID, userID, sourceID, len(h.activeTasks))
+	if len(h.activeTasks) > 0 {
+		glog.V(4).Infof("DEBUG: Checking active tasks for app: %s (user: %s, source: %s), total active tasks: %d", appID, userID, sourceID, len(h.activeTasks))
+	}
 
 	for _, task := range h.activeTasks {
 		if task.UserID == userID && task.SourceID == sourceID && task.AppID == appID {
-			log.Printf("DEBUG: Found active task for app: %s (user: %s, source: %s), taskID: %s", appID, userID, sourceID, task.ID)
+			glog.V(4).Infof("DEBUG: Found active task for app: %s (user: %s, source: %s), taskID: %s", appID, userID, sourceID, task.ID)
 			return true
 		}
 	}
-	log.Printf("DEBUG: No active task found for app: %s (user: %s, source: %s)", appID, userID, sourceID)
+	glog.V(4).Infof("DEBUG: No active task found for app: %s (user: %s, source: %s)", appID, userID, sourceID)
 	return false
 }
 
 // trackTask adds task to active tasks tracking
 func (h *Hydrator) trackTask(task *hydrationfn.HydrationTask) {
 	if !h.taskMutex.TryLock() {
-		log.Printf("Failed to acquire lock for trackTask, skipping task tracking")
+		glog.Warningf("[TryLock] Failed to acquire lock for trackTask, skipping task tracking, task: %s, name: %s, version: %s", task.ID, task.AppName, task.AppVersion)
 		return
 	}
 	defer h.taskMutex.Unlock()
@@ -933,7 +932,7 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask, startedAt 
 	}
 
 	if !h.taskMutex.TryLock() {
-		log.Printf("Failed to acquire lock for markTaskCompleted, skipping status update")
+		glog.Warningf("[TryLock] Failed to acquire lock for markTaskCompleted, skipping status update, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
 		return
 	}
 	delete(h.activeTasks, task.ID)
@@ -958,13 +957,13 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask, startedAt 
 		// Successfully queued for batch processing
 	default:
 		// Queue is full, log warning but don't block
-		log.Printf("Warning: batch completion queue is full, task %s not queued for processing", task.ID)
+		glog.V(3).Infof("Warning: batch completion queue is full, task %s not queued for processing", task.ID)
 	}
 
 	// Clean up file resources after releasing the lock
 	if sourceChartPath != "" {
 		if err := os.Remove(sourceChartPath); err != nil {
-			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
+			glog.Errorf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
 		}
 	}
 }
@@ -978,7 +977,7 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask, startedAt tim
 	}
 
 	if !h.taskMutex.TryLock() {
-		log.Printf("Failed to acquire lock for markTaskFailed, skipping status update")
+		glog.Warningf("[TryLock] Failed to acquire lock for markTaskFailed, skipping status update, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
 		return
 	}
 
@@ -1019,7 +1018,7 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask, startedAt tim
 	// Clean up file resources after releasing the lock
 	if sourceChartPath != "" {
 		if err := os.Remove(sourceChartPath); err != nil {
-			log.Printf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
+			glog.Errorf("Warning: Failed to clean up source chart file %s: %v", sourceChartPath, err)
 		}
 	}
 }
@@ -1027,7 +1026,7 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask, startedAt tim
 // addToCompletedHistory adds a task to the completed tasks history
 func (h *Hydrator) addToCompletedHistory(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration) {
 	if !h.workerStatusMutex.TryLock() {
-		log.Printf("Failed to acquire lock for addToCompletedHistory, skipping")
+		glog.Warningf("[TryLock] Failed to acquire lock for addToCompletedHistory, skipping, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
 		return
 	}
 	defer h.workerStatusMutex.Unlock()
@@ -1054,7 +1053,7 @@ func (h *Hydrator) addToCompletedHistory(task *hydrationfn.HydrationTask, starte
 // addToFailedHistory adds a task to the failed tasks history
 func (h *Hydrator) addToFailedHistory(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration, failedStep string, errorMsg string) {
 	if !h.workerStatusMutex.TryLock() {
-		log.Printf("Failed to acquire lock for addToFailedHistory, skipping")
+		glog.Warningf("[TryLock] Failed to acquire lock for addToFailedHistory, skipping, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
 		return
 	}
 	defer h.workerStatusMutex.Unlock()
@@ -1083,7 +1082,7 @@ func (h *Hydrator) addToFailedHistory(task *hydrationfn.HydrationTask, startedAt
 // moveTaskToRenderFailed moves a failed task to the render failed list in cache
 func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failureReason string, failureStep string) {
 	if h.cacheManager == nil {
-		log.Printf("Warning: Cache manager not set, cannot move task to render failed list")
+		glog.V(3).Infof("Warning: Cache manager not set, cannot move task to render failed list")
 		return
 	}
 
@@ -1091,20 +1090,20 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 	var pendingData *types.AppInfoLatestPendingData
 	if h.cacheManager != nil {
 		if !h.cacheManager.mutex.TryRLock() {
-			glog.Warningf("Hydrator.moveTaskToRenderFailed: CacheManager read lock not available for user %s, skipping", task.UserID)
+			glog.Warningf("[TryRLock] Hydrator.moveTaskToRenderFailed: CacheManager read lock not available for user %s, skipping, source: %s, id: %s, name: %s, version: %s", task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
 			return
 		}
 		userData, userExists := h.cache.Users[task.UserID]
 		if !userExists {
 			h.cacheManager.mutex.RUnlock()
-			log.Printf("Warning: User data not found for task: %s, user: %s", task.ID, task.UserID)
+			glog.Warningf("Warning: User data not found for task: %s, user: %s", task.ID, task.UserID)
 			return
 		}
 
 		sourceData, sourceExists := userData.Sources[task.SourceID]
 		if !sourceExists {
 			h.cacheManager.mutex.RUnlock()
-			log.Printf("Warning: Source data not found for task: %s, user: %s, source: %s", task.ID, task.UserID, task.SourceID)
+			glog.V(3).Infof("Warning: Source data not found for task: %s, user: %s, source: %s", task.ID, task.UserID, task.SourceID)
 			return
 		}
 
@@ -1118,12 +1117,12 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 		}
 		h.cacheManager.mutex.RUnlock()
 	} else {
-		log.Printf("Warning: CacheManager not available for moveTaskToRenderFailed")
+		glog.V(3).Infof("Warning: CacheManager not available for moveTaskToRenderFailed")
 		return
 	}
 
 	if pendingData == nil {
-		log.Printf("Warning: Pending data not found for task: %s, app: %s", task.ID, task.AppID)
+		glog.V(3).Infof("Warning: Pending data not found for task: %s, app: %s", task.ID, task.AppID)
 		return
 	}
 
@@ -1134,27 +1133,27 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 	if err := h.cacheManager.SetAppData(task.UserID, task.SourceID, types.AppRenderFailed, map[string]interface{}{
 		"failed_app": failedData,
 	}); err != nil {
-		log.Printf("Failed to add task to render failed list: %s, error: %v", task.ID, err)
+		glog.Errorf("Failed to add task to render failed list: %s, error: %v", task.ID, err)
 		return
 	}
 
-	log.Printf("Successfully moved task %s (app: %s) to render failed list with reason: %s, step: %s",
+	glog.V(2).Infof("Successfully moved task %s (app: %s) to render failed list with reason: %s, step: %s",
 		task.ID, task.AppID, failureReason, failureStep)
 
 	// Remove from pending list
-	h.removeFromPendingList(task.UserID, task.SourceID, task.AppID)
+	h.removeFromPendingList(task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
 }
 
 // removeFromPendingList removes an app from the pending list
-func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
+func (h *Hydrator) removeFromPendingList(userID, sourceID, appID, appName, appVersion string) {
 	if h.cacheManager == nil {
-		log.Printf("Warning: CacheManager not available for removeFromPendingList")
+		glog.V(3).Infof("Warning: CacheManager not available for removeFromPendingList")
 		return
 	}
 
 	// 1) Read-lock phase: locate index to remove (no writes under RLock)
 	if !h.cacheManager.mutex.TryRLock() {
-		glog.Warningf("Hydrator.removeFromPendingList: CacheManager read lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appID)
+		glog.Warningf("[TryRLock] Hydrator.removeFromPendingList: CacheManager read lock not available for user %s, source %s, app %s %s %s, skipping", userID, sourceID, appID, appName, appVersion)
 		return
 	}
 	userData, userExists := h.cache.Users[userID]
@@ -1184,7 +1183,7 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
 	// 2) Try to acquire short write-lock and apply removal with new slice; skip if contended
 	// Use TryLock to avoid blocking
 	if !h.cacheManager.mutex.TryLock() {
-		log.Printf("DEBUG: removeFromPendingList skipped (lock not available) for user=%s source=%s app=%s", userID, sourceID, appID)
+		glog.Warningf("[TryLock] DEBUG: removeFromPendingList skipped (lock not available) for user=%s source=%s app=%s %s %s", userID, sourceID, appID, appName, appVersion)
 		return
 	}
 	defer h.cacheManager.mutex.Unlock()
@@ -1204,7 +1203,7 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
 						newSlice = append(newSlice, old[removeIdx+1:]...)
 					}
 					sourceData2.AppInfoLatestPending = newSlice
-					log.Printf("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
+					glog.V(2).Infof("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
 				}
 			}
 		}
@@ -1214,7 +1213,7 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID string) {
 // GetMetrics returns hydrator metrics
 func (h *Hydrator) GetMetrics() HydratorMetrics {
 	if !h.taskMutex.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetMetrics, returning zero metrics")
+		glog.Warning("[TryRLock] Failed to acquire read lock for GetMetrics, returning zero metrics")
 		// Try to get worker status even if we can't get task lock
 		var workers []*WorkerStatus
 		if h.workerStatusMutex.TryRLock() {
@@ -1374,11 +1373,11 @@ func CreateDefaultHydrator(cache *types.CacheData, settingsManager *settings.Set
 // Processes pending data update notification and creates hydration tasks immediately
 func (h *Hydrator) NotifyPendingDataUpdate(userID, sourceID string, pendingData map[string]interface{}) {
 	if !h.IsRunning() {
-		log.Printf("Hydrator is not running, ignoring pending data notification for user: %s, source: %s", userID, sourceID)
+		glog.V(3).Infof("Hydrator is not running, ignoring pending data notification for user: %s, source: %s", userID, sourceID)
 		return
 	}
 
-	log.Printf("Received pending data update notification for user: %s, source: %s", userID, sourceID)
+	glog.V(2).Infof("Received pending data update notification for user: %s, source: %s", userID, sourceID)
 
 	// Create tasks from the pending data immediately
 	h.createTasksFromPendingDataMap(userID, sourceID, pendingData)
@@ -1386,12 +1385,12 @@ func (h *Hydrator) NotifyPendingDataUpdate(userID, sourceID string, pendingData 
 
 // createTasksFromPendingDataMap creates hydration tasks from pending data map
 func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendingData map[string]interface{}) {
-	log.Printf("Creating tasks from pending data for user: %s, source: %s", userID, sourceID)
+	glog.V(3).Infof("Creating tasks from pending data for user: %s, source: %s", userID, sourceID)
 
 	// Extract data section from pendingData
 	dataSection, ok := pendingData["data"]
 	if !ok {
-		log.Printf("No data section found in pending data for user: %s, source: %s", userID, sourceID)
+		glog.V(3).Infof("No data section found in pending data for user: %s, source: %s", userID, sourceID)
 		return
 	}
 
@@ -1399,7 +1398,7 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 	var appsMap map[string]interface{}
 
 	// First, try to handle the case where dataSection is an AppStoreDataSection struct
-	log.Printf("Data section type: %T for user: %s, source: %s", dataSection, userID, sourceID)
+	glog.V(2).Infof("Data section type: %T for user: %s, source: %s", dataSection, userID, sourceID)
 
 	// Check if it's an AppStoreDataSection by checking if it has Apps field
 	if dataStruct := dataSection; dataStruct != nil {
@@ -1411,29 +1410,29 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 			if apps, hasApps := dataMap["apps"]; hasApps {
 				if appsMapValue, ok := apps.(map[string]interface{}); ok {
 					appsMap = appsMapValue
-					log.Printf("Found apps data in standard map format for user: %s, source: %s", userID, sourceID)
+					glog.V(2).Infof("Found apps data in standard map format for user: %s, source: %s", userID, sourceID)
 				}
 			} else {
 				// Check if the dataMap itself contains app entries
 				if h.looksLikeAppsMap(dataMap) {
 					appsMap = dataMap
-					log.Printf("Data section appears to contain apps directly for user: %s, source: %s", userID, sourceID)
+					glog.V(2).Infof("Data section appears to contain apps directly for user: %s, source: %s", userID, sourceID)
 				}
 			}
 		} else {
 			// Try to handle AppStoreDataSection struct using interface conversion
-			log.Printf("Unsupported data format for user: %s, source: %s. Expected map[string]interface{} but got %T", userID, sourceID, dataSection)
-			log.Printf("Data section content: %+v", dataSection)
+			glog.V(2).Infof("Unsupported data format for user: %s, source: %s. Expected map[string]interface{} but got %T", userID, sourceID, dataSection)
+			glog.V(2).Infof("Data section content: %+v", dataSection)
 			return
 		}
 	}
 
 	if appsMap == nil || len(appsMap) == 0 {
-		log.Printf("No apps found in pending data for user: %s, source: %s", userID, sourceID)
+		glog.V(3).Infof("No apps found in pending data for user: %s, source: %s", userID, sourceID)
 		return
 	}
 
-	log.Printf("Found %d apps in pending data for user: %s, source: %s", len(appsMap), userID, sourceID)
+	glog.V(2).Infof("Found %d apps in pending data for user: %s, source: %s", len(appsMap), userID, sourceID)
 
 	// Create hydration task for each app
 	for appID, appData := range appsMap {
@@ -1441,16 +1440,16 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 		if appMap, ok := appData.(map[string]interface{}); ok {
 			// Check if app data contains necessary raw data fields before creating task
 			if !h.hasRequiredRawDataFields(appMap) {
-				log.Printf("App %s (user: %s, source: %s) missing required raw data fields, skipping task creation",
+				glog.V(3).Infof("App %s (user: %s, source: %s) missing required raw data fields, skipping task creation",
 					appID, userID, sourceID)
 				continue
 			}
-
+			var appName = appMap["name"].(string)
 			// Check if task already exists for this app to avoid duplicates
-			if !h.hasActiveTaskForApp(userID, sourceID, appID) {
+			if !h.hasActiveTaskForApp(userID, sourceID, appID, appName) {
 				// Check if app is already in render failed list
-				if h.isAppInRenderFailedList(userID, sourceID, appID) {
-					log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
+				if h.isAppInRenderFailedList(userID, sourceID, appID, appName) {
+					glog.V(3).Infof("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
 						appID, userID, sourceID)
 					continue
 				}
@@ -1463,14 +1462,14 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 						version = versionStr
 					}
 				}
-				if h.isAppInLatestQueue(userID, sourceID, appID, version) {
-					// log.Printf("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+				if h.isAppInLatestQueue(userID, sourceID, appID, appName, version) {
+					// glog.Infof("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
 					// 	appID, userID, sourceID)
 					continue
 				}
 
 				if len(appMap) == 0 {
-					log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+					glog.V(3).Infof("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
 						appID, userID, sourceID)
 					continue
 				}
@@ -1486,17 +1485,17 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 				)
 
 				if err := h.EnqueueTask(task); err != nil {
-					log.Printf("Failed to enqueue hydration task for app %s (user: %s, source: %s): %v",
+					glog.Errorf("Failed to enqueue hydration task for app %s (user: %s, source: %s): %v",
 						appID, userID, sourceID, err)
 				} else {
-					log.Printf("Successfully enqueued hydration task for app %s (user: %s, source: %s)",
+					glog.V(3).Infof("Successfully enqueued hydration task for app %s (user: %s, source: %s)",
 						appID, userID, sourceID)
 				}
 			} else {
-				log.Printf("Task already exists for app: %s (user: %s, source: %s), skipping", appID, userID, sourceID)
+				glog.V(3).Infof("Task already exists for app: %s (user: %s, source: %s), skipping", appID, userID, sourceID)
 			}
 		} else {
-			log.Printf("Invalid app data format for app %s (user: %s, source: %s)", appID, userID, sourceID)
+			glog.V(3).Infof("Invalid app data format for app %s (user: %s, source: %s)", appID, userID, sourceID)
 		}
 	}
 }
@@ -1536,7 +1535,7 @@ func (h *Hydrator) hasRequiredRawDataFields(appMap map[string]interface{}) bool 
 
 	// Log warning if missing recommended fields but still proceed
 	if !hasRecommendedField {
-		log.Printf("Warning: App data missing recommended fields (title, version, description, chartName), but proceeding with required fields")
+		glog.V(3).Infof("Warning: App data missing recommended fields (title, version, description, chartName), but proceeding with required fields")
 	}
 
 	return hasRequiredField
@@ -1574,8 +1573,8 @@ func (h *Hydrator) looksLikeAppsMap(data map[string]interface{}) bool {
 
 // batchCompletionProcessor processes completed tasks in batches
 func (h *Hydrator) batchCompletionProcessor(ctx context.Context) {
-	log.Println("Batch completion processor started")
-	defer log.Println("Batch completion processor stopped")
+	glog.V(3).Info("Batch completion processor started")
+	defer glog.V(3).Info("Batch completion processor stopped")
 
 	ticker := time.NewTicker(time.Second * 10) // Process every 10 seconds
 	defer ticker.Stop()
@@ -1600,8 +1599,8 @@ func (h *Hydrator) batchCompletionProcessor(ctx context.Context) {
 
 // databaseSyncMonitor monitors for database synchronization needs
 func (h *Hydrator) databaseSyncMonitor(ctx context.Context) {
-	log.Println("Database sync monitor started")
-	defer log.Println("Database sync monitor stopped")
+	glog.V(3).Info("Database sync monitor started")
+	defer glog.V(3).Info("Database sync monitor stopped")
 
 	ticker := time.NewTicker(h.syncInterval)
 	defer ticker.Stop()
@@ -1621,25 +1620,25 @@ func (h *Hydrator) databaseSyncMonitor(ctx context.Context) {
 // processCompletedTask processes a single completed task
 func (h *Hydrator) processCompletedTask(taskID string) {
 	if !h.taskMutex.TryRLock() {
-		log.Printf("Failed to acquire read lock for processCompletedTask, skipping")
+		glog.Warning("[TryRLock] Failed to acquire read lock for processCompletedTask, skipping")
 		return
 	}
 	task, exists := h.completedTasks[taskID]
 	h.taskMutex.RUnlock()
 
 	if !exists {
-		log.Printf("Warning: completed task %s not found in completed tasks map", taskID)
+		glog.V(3).Infof("Warning: completed task %s not found in completed tasks map", taskID)
 		return
 	}
 
-	log.Printf("Processing completed task: %s for app: %s", taskID, task.AppID)
+	glog.V(3).Infof("Processing completed task: %s for app: %s", taskID, task.AppID)
 	// Additional processing can be added here if needed
 }
 
 // processBatchCompletions processes completed tasks in batches
 func (h *Hydrator) processBatchCompletions() {
 	if !h.taskMutex.TryRLock() {
-		log.Printf("Failed to acquire read lock for processBatchCompletions, skipping")
+		glog.Warning("[TryRLock] Failed to acquire read lock for processBatchCompletions, skipping")
 		return
 	}
 	currentCompleted := h.totalTasksSucceeded
@@ -1647,7 +1646,7 @@ func (h *Hydrator) processBatchCompletions() {
 
 	// Check if significant number of tasks completed since last sync
 	if currentCompleted > h.completedTaskCount+10 { // Trigger sync after 10 more completions
-		log.Printf("Batch completion detected: %d tasks completed since last check",
+		glog.V(3).Infof("Batch completion detected: %d tasks completed since last check",
 			currentCompleted-h.completedTaskCount)
 		h.completedTaskCount = currentCompleted
 		h.triggerDatabaseSync()
@@ -1657,13 +1656,13 @@ func (h *Hydrator) processBatchCompletions() {
 // checkAndSyncToDatabase checks if database sync is needed and performs it
 func (h *Hydrator) checkAndSyncToDatabase() {
 	if h.cacheManager == nil {
-		log.Printf("Warning: Cache manager not set, skipping database sync")
+		glog.V(3).Infof("Warning: Cache manager not set, skipping database sync")
 		return
 	}
 
 	// Check if there are completed tasks that need syncing
 	if !h.taskMutex.TryRLock() {
-		log.Printf("Failed to acquire read lock for checkAndSyncToDatabase, skipping")
+		glog.Warning("[TryRLock] Failed to acquire read lock for checkAndSyncToDatabase, skipping")
 		return
 	}
 	completedCount := len(h.completedTasks)
@@ -1675,7 +1674,7 @@ func (h *Hydrator) checkAndSyncToDatabase() {
 
 	// Check if enough time has passed since last sync
 	if time.Since(h.lastSyncTime) >= h.syncInterval {
-		log.Printf("Periodic database sync triggered - %d completed tasks to sync", completedCount)
+		glog.V(3).Infof("Periodic database sync triggered - %d completed tasks to sync", completedCount)
 		h.triggerDatabaseSync()
 	}
 }
@@ -1683,17 +1682,17 @@ func (h *Hydrator) checkAndSyncToDatabase() {
 // triggerDatabaseSync triggers synchronization of cache data to database
 func (h *Hydrator) triggerDatabaseSync() {
 	if h.cacheManager == nil {
-		log.Printf("Warning: Cache manager not set, cannot sync to database")
+		glog.V(3).Infof("Warning: Cache manager not set, cannot sync to database")
 		return
 	}
 
-	log.Printf("Triggering database synchronization")
+	glog.V(3).Infof("Triggering database synchronization")
 
 	// Force sync all cache data to Redis/database
 	if err := h.cacheManager.ForceSync(); err != nil {
-		log.Printf("Error during database sync: %v", err)
+		glog.Errorf("Error during database sync: %v", err)
 	} else {
-		log.Printf("Database sync completed successfully")
+		glog.V(3).Infof("Database sync completed successfully")
 		h.lastSyncTime = time.Now()
 
 		// Optionally clean up old completed tasks to prevent memory growth
@@ -1704,7 +1703,7 @@ func (h *Hydrator) triggerDatabaseSync() {
 // cleanupOldCompletedTasks removes old completed tasks from memory
 func (h *Hydrator) cleanupOldCompletedTasks() {
 	if !h.taskMutex.TryLock() {
-		log.Printf("Failed to acquire lock for cleanupOldCompletedTasks, skipping")
+		glog.Warning("[TryLock] Failed to acquire lock for cleanupOldCompletedTasks, skipping")
 		return
 	}
 	defer h.taskMutex.Unlock()
@@ -1731,7 +1730,7 @@ func (h *Hydrator) cleanupOldCompletedTasks() {
 			removed++
 		}
 
-		log.Printf("Cleaned up %d old completed tasks from memory", removed)
+		glog.V(3).Infof("Cleaned up %d old completed tasks from memory", removed)
 	}
 }
 
@@ -1744,7 +1743,7 @@ func (h *Hydrator) monitorMemoryUsage() {
 	h.lastMemoryCheck = time.Now()
 
 	if !h.taskMutex.TryRLock() {
-		log.Printf("Failed to acquire read lock for monitorMemoryUsage, skipping")
+		glog.Warning("[TryRLock] Failed to acquire read lock for monitorMemoryUsage, skipping")
 		return
 	}
 	activeCount := len(h.activeTasks)
@@ -1753,12 +1752,12 @@ func (h *Hydrator) monitorMemoryUsage() {
 	h.taskMutex.RUnlock()
 
 	// Log memory usage metrics
-	log.Printf("Memory usage metrics - Active tasks: %d, Completed tasks: %d, Failed tasks: %d",
+	glog.V(3).Infof("Memory usage metrics - Active tasks: %d, Completed tasks: %d, Failed tasks: %d",
 		activeCount, completedCount, failedCount)
 
 	// If we have too many tasks, trigger cleanup
 	if activeCount > 100 || completedCount > 100 {
-		log.Printf("Warning: High number of tasks detected, triggering cleanup")
+		glog.V(3).Infof("Warning: High number of tasks detected, triggering cleanup")
 		h.cleanupOldTasks()
 	}
 }
@@ -1766,7 +1765,7 @@ func (h *Hydrator) monitorMemoryUsage() {
 // cleanupOldTasks cleans up old tasks from all task maps
 func (h *Hydrator) cleanupOldTasks() {
 	if !h.taskMutex.TryLock() {
-		log.Printf("Failed to acquire lock for cleanupOldTasks, skipping")
+		glog.Warning("[TryLock] Failed to acquire lock for cleanupOldTasks, skipping")
 		return
 	}
 	defer h.taskMutex.Unlock()
@@ -1776,7 +1775,7 @@ func (h *Hydrator) cleanupOldTasks() {
 	// Clean up active tasks older than 1 hour
 	for id, task := range h.activeTasks {
 		if now.Sub(task.UpdatedAt) > time.Hour {
-			log.Printf("Cleaning up stale active task: %s", id)
+			glog.V(3).Infof("Cleaning up stale active task: %s", id)
 			h.cleanupTaskResources(task)
 			delete(h.activeTasks, id)
 		}
@@ -1804,7 +1803,7 @@ func (h *Hydrator) cleanupOldTasks() {
 			removed++
 		}
 
-		log.Printf("Cleaned up %d old completed tasks", removed)
+		glog.V(3).Infof("Cleaned up %d old completed tasks", removed)
 	}
 
 	// Failed tasks are already limited to 10
@@ -1835,18 +1834,18 @@ func (h *Hydrator) cleanupOldTasks() {
 			removed++
 		}
 
-		log.Printf("Cleaned up %d old failed tasks", removed)
+		glog.V(3).Infof("Cleaned up %d old failed tasks", removed)
 	}
 }
 
 // isAppInLatestQueue checks if an app already exists in the AppInfoLatest queue with version comparison
-func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) bool {
-	log.Printf("DEBUG: isAppInLatestQueue checking appID=%s, version=%s for user=%s, source=%s", appID, version, userID, sourceID)
+func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, appName, version string) bool {
+	glog.V(3).Infof("DEBUG: isAppInLatestQueue checking appID=%s %s, version=%s for user=%s, source=%s", appID, appName, version, userID, sourceID)
 
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
 		if !h.cacheManager.mutex.TryRLock() {
-			glog.Warningf("Hydrator.isAppInLatestQueue: CacheManager read lock not available for user %s, source %s, app %s, returning false", userID, sourceID, appID)
+			glog.Warningf("[TryRLock] Hydrator.isAppInLatestQueue: CacheManager read lock not available for user: %s, source: %s, app: %s %s %s, returning false", userID, sourceID, appID, appName, version)
 			return false
 		}
 		defer h.cacheManager.mutex.RUnlock()
@@ -1874,11 +1873,11 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) b
 					latestData.RawData.Name == appID {
 					// Add version comparison - only return true if versions match
 					if version != "" && latestData.RawData.Version != version {
-						log.Printf("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
+						glog.V(3).Infof("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
 							appID, version, latestData.RawData.Version)
 						continue
 					}
-					log.Printf("App %s found in latest queue with matching version: %s", appID, version)
+					glog.V(3).Infof("App %s found in latest queue with matching version: %s", appID, version)
 					return true
 				}
 			}
@@ -1890,11 +1889,11 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) b
 					latestData.AppInfo.AppEntry.Name == appID {
 					// Add version comparison - only return true if versions match
 					if version != "" && latestData.AppInfo.AppEntry.Version != version {
-						log.Printf("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
+						glog.V(3).Infof("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
 							appID, version, latestData.AppInfo.AppEntry.Version)
 						continue
 					}
-					log.Printf("App %s found in latest queue with matching version: %s", appID, version)
+					glog.V(3).Infof("App %s found in latest queue with matching version: %s", appID, version)
 					return true
 				}
 			}
@@ -1905,20 +1904,20 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, version string) b
 					latestData.AppSimpleInfo.AppName == appID {
 					// For AppSimpleInfo, we may not have version info, so only check if version is empty
 					if version == "" {
-						log.Printf("App %s found in latest queue (AppSimpleInfo)", appID)
+						glog.V(3).Infof("App %s found in latest queue (AppSimpleInfo)", appID)
 						return true
 					}
 					// If version is provided but AppSimpleInfo doesn't have version, skip
-					log.Printf("App %s found in latest queue but AppSimpleInfo has no version info, skipping", appID)
+					glog.V(3).Infof("App %s found in latest queue but AppSimpleInfo has no version info, skipping", appID)
 					continue
 				}
 			}
 		}
 	} else {
-		log.Printf("Warning: CacheManager not available for isAppInLatestQueue")
+		glog.V(3).Infof("Warning: CacheManager not available for isAppInLatestQueue")
 	}
 
-	log.Printf("DEBUG: isAppInLatestQueue returning false for appID=%s, version=%s, user=%s, source=%s", appID, version, userID, sourceID)
+	glog.V(3).Infof("DEBUG: isAppInLatestQueue returning false for appID=%s, version=%s, user=%s, source=%s", appID, version, userID, sourceID)
 	return false
 }
 
@@ -1935,18 +1934,22 @@ func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestDat
 
 	// Extract app ID from latest data
 	var appID string
+	var appName string
 	if latestData.RawData != nil {
 		appID = latestData.RawData.AppID
+		appName = latestData.RawData.Name
 		if appID == "" {
 			appID = latestData.RawData.ID
 		}
 	} else if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
 		appID = latestData.AppInfo.AppEntry.AppID
+		appName = latestData.AppInfo.AppEntry.Name
 		if appID == "" {
 			appID = latestData.AppInfo.AppEntry.ID
 		}
 	} else if latestData.AppSimpleInfo != nil {
 		appID = latestData.AppSimpleInfo.AppID
+		appName = latestData.AppSimpleInfo.AppName
 	}
 
 	if appID == "" {
@@ -1954,14 +1957,14 @@ func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestDat
 	}
 
 	// Check if task already exists for this app to avoid duplicates
-	if h.hasActiveTaskForApp(userID, sourceID, appID) {
-		log.Printf("Task already exists for app: %s (user: %s, source: %s), skipping force add", appID, userID, sourceID)
+	if h.hasActiveTaskForApp(userID, sourceID, appID, appName) {
+		glog.V(3).Infof("Task already exists for app: %s (user: %s, source: %s), skipping force add", appID, userID, sourceID)
 		return nil
 	}
 
 	// Check if app is already in render failed list
-	if h.isAppInRenderFailedList(userID, sourceID, appID) {
-		log.Printf("App %s (user: %s, source: %s) is already in render failed list, skipping force add",
+	if h.isAppInRenderFailedList(userID, sourceID, appID, appName) {
+		glog.V(3).Infof("App %s (user: %s, source: %s) is already in render failed list, skipping force add",
 			appID, userID, sourceID)
 		return nil
 	}
@@ -1970,7 +1973,7 @@ func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestDat
 	appDataMap := h.convertLatestDataToMap(latestData)
 
 	if len(appDataMap) == 0 {
-		log.Printf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+		glog.V(3).Infof("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
 			appID, userID, sourceID)
 		return nil
 	}
@@ -1986,12 +1989,12 @@ func (h *Hydrator) ForceAddTaskFromLatestData(userID, sourceID string, latestDat
 	)
 
 	if err := h.EnqueueTask(task); err != nil {
-		log.Printf("Failed to enqueue force task for app: %s (user: %s, source: %s), error: %v",
+		glog.Errorf("Failed to enqueue force task for app: %s (user: %s, source: %s), error: %v",
 			appID, userID, sourceID, err)
 		return err
 	}
 
-	log.Printf("Successfully force added hydration task for app: %s (user: %s, source: %s)",
+	glog.V(2).Infof("Successfully force added hydration task for app: %s (user: %s, source: %s)",
 		appID, userID, sourceID)
 	return nil
 }
@@ -2066,11 +2069,11 @@ func (h *Hydrator) convertLatestDataToMap(latestData *types.AppInfoLatestData) m
 }
 
 // isAppInRenderFailedList checks if an app already exists in the render failed list
-func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool {
+func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID, appName string) bool {
 	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
 		if !h.cacheManager.mutex.TryRLock() {
-			glog.Warningf("Hydrator.isAppInRenderFailedList: CacheManager read lock not available for user %s, source %s, app %s, returning false", userID, sourceID, appID)
+			glog.Warningf("[TryRLock] Hydrator.isAppInRenderFailedList: CacheManager read lock not available for user %s, source %s, app %s %s, returning false", userID, sourceID, appID, appName)
 			return false
 		}
 		defer h.cacheManager.mutex.RUnlock()
@@ -2093,7 +2096,7 @@ func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool 
 			}
 		}
 	} else {
-		log.Printf("Warning: CacheManager not available for isAppInRenderFailedList")
+		glog.V(2).Infof("Warning: CacheManager not available for isAppInRenderFailedList")
 	}
 
 	return false
@@ -2103,10 +2106,10 @@ func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID string) bool 
 // This method can be called externally to force immediate processing of pending data
 func (h *Hydrator) ForceCheckPendingData() {
 	if !h.IsRunning() {
-		log.Printf("Hydrator is not running, cannot force check pending data")
+		glog.V(3).Infof("Hydrator is not running, cannot force check pending data")
 		return
 	}
 
-	log.Printf("Force checking pending data triggered externally")
+	glog.V(3).Infof("Force checking pending data triggered externally")
 	h.checkForPendingData()
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -455,7 +454,7 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 		}
 	}
 
-	glog.V(2).Infof("Prepared batch Redis operations for user=%s, source=%s", userID, sourceID)
+	glog.V(3).Infof("Prepared batch Redis operations for user=%s, source=%s", userID, sourceID)
 	return nil
 }
 
@@ -511,7 +510,7 @@ func (r *RedisClient) SaveSourceDataToRedis(userID, sourceID string, sourceData 
 	if failedOps > 0 {
 		glog.Warningf("Redis pipeline completed with %d failed operations out of %d total for user=%s, source=%s", failedOps, len(results), userID, sourceID)
 	} else {
-		glog.V(2).Infof("Successfully saved source data to Redis for user=%s, source=%s in %v (%d operations)", userID, sourceID, duration, len(results))
+		glog.V(4).Infof("Successfully saved source data to Redis for user=%s, source=%s in %v (%d operations)", userID, sourceID, duration, len(results))
 	}
 
 	return nil
@@ -624,7 +623,7 @@ func convertToStringMapDB(val interface{}) map[string]interface{} {
 
 	// If conversion failed, try simple type conversion
 	if result == nil {
-		log.Printf("WARNING: convertToStringMapDB returned nil, attempting simple conversion")
+		glog.V(3).Info("WARNING: convertToStringMapDB returned nil, attempting simple conversion")
 		switch v := val.(type) {
 		case map[string]interface{}:
 			// Create shallow copy
@@ -641,7 +640,7 @@ func convertToStringMapDB(val interface{}) map[string]interface{} {
 			}
 			return converted
 		default:
-			log.Printf("ERROR: Cannot convert supportClient type: %T", val)
+			glog.V(3).Infof("ERROR: Cannot convert supportClient type: %T", val)
 			return nil
 		}
 	}
@@ -737,7 +736,7 @@ func (r *RedisClient) createSafeAppInfoCopy(appInfo *types.AppInfo) map[string]i
 			priceCopy["products"] = appInfo.Price.Products
 		}
 		safeCopy["price"] = priceCopy
-		glog.V(2).Infof("Saved price config to Redis for app %s", appInfo.AppEntry.ID)
+		glog.V(3).Infof("Saved price config to Redis for app %s", appInfo.AppEntry.ID)
 	}
 
 	// Include PurchaseInfo field if present

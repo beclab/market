@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 type MarketSettings struct {
@@ -737,11 +739,11 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 
 	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
 	if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
-		log.Printf("DEBUG: NewAppStateLatestData - found entranceStatuses, type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
+		glog.V(3).Infof("DEBUG: NewAppStateLatestData - found entranceStatuses, type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 
 		switch v := entranceStatusesVal.(type) {
 		case []interface{}:
-			log.Printf("DEBUG: NewAppStateLatestData - handling []interface{} case, length: %d", len(v))
+			glog.V(3).Infof("DEBUG: NewAppStateLatestData - handling []interface{} case, length: %d", len(v))
 			// Handle []interface{} case (from map[string]interface{})
 			entranceStatuses = make([]struct {
 				ID         string `json:"id"`
@@ -754,7 +756,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			}, len(v))
 
 			for i, entrance := range v {
-				log.Printf("DEBUG: NewAppStateLatestData - processing entrance[%d], type: %T, value: %+v", i, entrance, entrance)
+				glog.V(3).Infof("DEBUG: NewAppStateLatestData - processing entrance[%d], type: %T, value: %+v", i, entrance, entrance)
 				if entranceMap, ok := entrance.(map[string]interface{}); ok {
 					if name, ok := entranceMap["name"].(string); ok {
 						entranceStatuses[i].Name = name
@@ -781,14 +783,14 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 					if invisible, ok := entranceMap["invisible"].(bool); ok {
 						entranceStatuses[i].Invisible = invisible
 					}
-					log.Printf("DEBUG: NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
+					glog.V(3).Infof("DEBUG: NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
 						i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
 				} else {
-					log.Printf("DEBUG: NewAppStateLatestData - entrance[%d] is not map[string]interface{}, type: %T", i, entrance)
+					glog.V(3).Infof("DEBUG: NewAppStateLatestData - entrance[%d] is not map[string]interface{}, type: %T", i, entrance)
 				}
 			}
 		case []map[string]interface{}:
-			log.Printf("DEBUG: NewAppStateLatestData - handling []map[string]interface{} case, length: %d", len(v))
+			glog.V(3).Infof("DEBUG: NewAppStateLatestData - handling []map[string]interface{} case, length: %d", len(v))
 			// Handle []map[string]interface{} case (direct conversion)
 			entranceStatuses = make([]struct {
 				ID         string `json:"id"`
@@ -801,7 +803,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			}, len(v))
 
 			for i, entranceMap := range v {
-				log.Printf("DEBUG: NewAppStateLatestData - processing entranceMap[%d]: %+v", i, entranceMap)
+				glog.V(3).Infof("DEBUG: NewAppStateLatestData - processing entranceMap[%d]: %+v", i, entranceMap)
 				if name, ok := entranceMap["name"].(string); ok {
 					entranceStatuses[i].Name = name
 				}
@@ -827,26 +829,26 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				if invisible, ok := entranceMap["invisible"].(bool); ok {
 					entranceStatuses[i].Invisible = invisible
 				}
-				log.Printf("DEBUG: NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
+				glog.V(3).Infof("DEBUG: NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
 					i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
 			}
 		default:
 			// Try to handle other cases by converting to JSON and back
-			log.Printf("DEBUG: NewAppStateLatestData - entranceStatuses type: %T, value: %+v", v, v)
+			glog.V(3).Infof("DEBUG: NewAppStateLatestData - entranceStatuses type: %T, value: %+v", v, v)
 		}
 	} else {
-		log.Printf("DEBUG: NewAppStateLatestData - no entranceStatuses found in data")
+		glog.V(3).Info("DEBUG: NewAppStateLatestData - no entranceStatuses found in data")
 	}
 
-	log.Printf("DEBUG: NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
+	glog.V(3).Infof("DEBUG: NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
 
 	// Handle SharedEntrances - support both []interface{} and []map[string]interface{}
 	if sharedEntrancesVal, ok := data["sharedEntrances"]; ok && sharedEntrancesVal != nil {
-		log.Printf("DEBUG: NewAppStateLatestData - found sharedEntrances, type: %T", sharedEntrancesVal)
+		glog.V(3).Infof("DEBUG: NewAppStateLatestData - found sharedEntrances, type: %T", sharedEntrancesVal)
 
 		switch v := sharedEntrancesVal.(type) {
 		case []interface{}:
-			log.Printf("DEBUG: NewAppStateLatestData - handling sharedEntrances []interface{} case, length: %d", len(v))
+			glog.V(3).Infof("DEBUG: NewAppStateLatestData - handling sharedEntrances []interface{} case, length: %d", len(v))
 			sharedEntrances = make([]struct {
 				Name            string `json:"name"`
 				Host            string `json:"host"`
@@ -899,7 +901,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				}
 			}
 		case []map[string]interface{}:
-			log.Printf("DEBUG: NewAppStateLatestData - handling sharedEntrances []map[string]interface{} case, length: %d", len(v))
+			glog.V(3).Infof("DEBUG: NewAppStateLatestData - handling sharedEntrances []map[string]interface{} case, length: %d", len(v))
 			sharedEntrances = make([]struct {
 				Name            string `json:"name"`
 				Host            string `json:"host"`
@@ -950,30 +952,30 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				}
 			}
 		default:
-			log.Printf("DEBUG: NewAppStateLatestData - sharedEntrances type: %T, value: %+v", v, v)
+			glog.V(3).Infof("DEBUG: NewAppStateLatestData - sharedEntrances type: %T, value: %+v", v, v)
 		}
 	} else {
-		log.Printf("DEBUG: NewAppStateLatestData - no sharedEntrances found in data")
+		glog.V(3).Info("DEBUG: NewAppStateLatestData - no sharedEntrances found in data")
 	}
 
-	log.Printf("DEBUG: NewAppStateLatestData - final sharedEntrances count: %d", len(sharedEntrances))
+	glog.V(3).Infof("DEBUG: NewAppStateLatestData - final sharedEntrances count: %d", len(sharedEntrances))
 
 	// Version assignment logic
 	version := ""
 	source := ""
 	if versionVal, ok := data["version"].(string); ok && versionVal != "" {
 		version = versionVal
-		log.Printf("DEBUG: NewAppStateLatestData - using version from data: %s", version)
+		glog.V(3).Infof("DEBUG: NewAppStateLatestData - using version from data: %s", version)
 	}
 	// If version is still empty, and getInfoFunc is available, and userID/name are not empty, try to get from record
 	if version == "" && getInfoFunc != nil && userID != "" && name != "" {
 		versionFromRecord, sourceFromRecord, err := getInfoFunc(userID, name)
 		if err != nil {
-			log.Printf("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
+			glog.V(3).Infof("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
 		} else if versionFromRecord != "" {
 			version = versionFromRecord
 			source = sourceFromRecord
-			log.Printf("DEBUG: NewAppStateLatestData - using version from download record: %s, source: %s", version, source)
+			glog.V(3).Infof("DEBUG: NewAppStateLatestData - using version from download record: %s, source: %s", version, source)
 		}
 	}
 	// If version is still empty, log error and return nil
@@ -1035,9 +1037,9 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 
 // NewAppInfoLatestData creates a new app info latest data structure
 func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
-	log.Printf("[DEBUG] NewAppInfoLatestData: Starting with %d fields", len(data))
+	glog.V(3).Infof("[DEBUG] NewAppInfoLatestData: Starting with %d fields", len(data))
 	if data == nil || len(data) == 0 {
-		log.Printf("DEBUG: NewAppInfoLatestData called with nil or empty data, returning nil")
+		glog.V(3).Info("DEBUG: NewAppInfoLatestData called with nil or empty data, returning nil")
 		return nil
 	}
 
@@ -1175,8 +1177,8 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 
 	// If no essential data found, return nil to prevent empty data creation
 	if !hasEssentialData {
-		log.Printf("DEBUG: NewAppInfoLatestData found no essential app data in input, returning nil")
-		log.Printf("DEBUG: Input data keys: %v", getMapKeys(data))
+		glog.V(3).Info("DEBUG: NewAppInfoLatestData found no essential app data in input, returning nil")
+		glog.V(3).Infof("DEBUG: Input data keys: %v", getMapKeys(data))
 		return nil
 	}
 
@@ -1256,16 +1258,16 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 				var priceConfig PriceConfig
 				if err := json.Unmarshal(b, &priceConfig); err == nil {
 					price = &priceConfig
-					log.Printf("[DEBUG] NewAppInfoLatestData: Successfully restored price config for app %s", appID)
+					glog.V(3).Infof("[DEBUG] NewAppInfoLatestData: Successfully restored price config for app %s", appID)
 				} else {
-					log.Printf("[DEBUG] NewAppInfoLatestData: Failed to unmarshal price config: %v", err)
+					glog.V(3).Infof("[DEBUG] NewAppInfoLatestData: Failed to unmarshal price config: %v", err)
 				}
 			} else {
-				log.Printf("[DEBUG] NewAppInfoLatestData: Failed to marshal price data: %v", err)
+				glog.Errorf("[DEBUG] NewAppInfoLatestData: Failed to marshal price data: %v", err)
 			}
 		}
 	} else {
-		log.Printf("[DEBUG] NewAppInfoLatestData: No price data found for app %s", appID)
+		glog.V(3).Infof("[DEBUG] NewAppInfoLatestData: No price data found for app %s", appID)
 	}
 
 	appInfoLatest.AppInfo = &AppInfo{
@@ -1274,7 +1276,7 @@ func NewAppInfoLatestData(data map[string]interface{}) *AppInfoLatestData {
 		Price:         price,         // Set Price if present
 	}
 
-	log.Printf("[DEBUG] NewAppInfoLatestData: Completed successfully")
+	glog.V(2).Info("[DEBUG] NewAppInfoLatestData: Completed successfully")
 	return appInfoLatest
 }
 
@@ -1466,7 +1468,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 
 	// Validate input data - ensure we have at least basic app identifier
 	if appData == nil || len(appData) == 0 {
-		log.Printf("DEBUG: appData is nil or empty, returning nil")
+		glog.V(2).Info("DEBUG: appData is nil or empty, returning nil")
 		return nil
 	}
 
@@ -1481,36 +1483,36 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 
 	if id, ok := appData["id"].(string); ok && id != "" {
 		primaryID = id
-		log.Printf("DEBUG: Found primaryID from 'id': %s", primaryID)
+		glog.V(3).Infof("DEBUG: Found primaryID from 'id': %s", primaryID)
 	}
 	if name, ok := appData["name"].(string); ok && name != "" {
 		primaryName = name
-		log.Printf("DEBUG: Found primaryName from 'name': %s", primaryName)
+		glog.V(3).Infof("DEBUG: Found primaryName from 'name': %s", primaryName)
 	}
 	if appID, ok := appData["appID"].(string); ok && appID != "" && appID != "0" {
 		if primaryID == "" {
 			primaryID = appID
-			log.Printf("DEBUG: Found primaryID from 'appID': %s", primaryID)
+			glog.V(3).Infof("DEBUG: Found primaryID from 'appID': %s", primaryID)
 		}
 	}
 	if primaryID == "" {
 		if appID, ok := appData["app_id"].(string); ok && appID != "" && appID != "0" {
 			primaryID = appID
-			log.Printf("DEBUG: Found primaryID from 'app_id': %s", primaryID)
+			glog.V(3).Infof("DEBUG: Found primaryID from 'app_id': %s", primaryID)
 		}
 	}
 	if primaryName == "" {
 		if title, ok := appData["title"].(string); ok && title != "" {
 			primaryName = title
-			log.Printf("DEBUG: Found primaryName from 'title': %s", primaryName)
+			glog.V(3).Infof("DEBUG: Found primaryName from 'title': %s", primaryName)
 		}
 	}
 
-	log.Printf("DEBUG: Final primaryID: '%s', primaryName: '%s'", primaryID, primaryName)
+	glog.V(3).Infof("DEBUG: Final primaryID: '%s', primaryName: '%s'", primaryID, primaryName)
 
 	// If this doesn't look like single app data, return nil
 	if primaryID == "" && primaryName == "" {
-		log.Printf("DEBUG: Both primaryID and primaryName are empty, returning nil")
+		glog.V(3).Info("DEBUG: Both primaryID and primaryName are empty, returning nil")
 		return nil
 	}
 
@@ -1574,7 +1576,7 @@ func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *
 
 // NewAppInfoLatestPendingDataFromLegacyCompleteData creates AppInfoLatestPendingData from complete legacy data with single app
 func NewAppInfoLatestPendingDataFromLegacyCompleteData(appData map[string]interface{}, others *Others) *AppInfoLatestPendingData {
-	log.Printf("DEBUG: CALL POINT 4 - ")
+	glog.V(2).Infof("DEBUG: CALL POINT 4 - ")
 	pendingData := NewAppInfoLatestPendingDataFromLegacyData(appData)
 	// Check if base pending data creation was successful
 	if pendingData == nil {
@@ -1588,9 +1590,9 @@ func NewAppInfoLatestPendingDataFromLegacyCompleteData(appData map[string]interf
 // mapAllApplicationInfoEntryFields maps all fields from source data to ApplicationInfoEntry
 // This function ensures no data is lost during conversion
 func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *ApplicationInfoEntry) {
-	log.Printf("[DEBUG] mapAllApplicationInfoEntryFields: Starting with %d fields", len(sourceData))
+	glog.V(3).Infof("[DEBUG] mapAllApplicationInfoEntryFields: Starting with %d fields", len(sourceData))
 	if sourceData == nil || entry == nil {
-		log.Printf("[DEBUG] mapAllApplicationInfoEntryFields: sourceData or entry is nil")
+		glog.V(3).Infof("[DEBUG] mapAllApplicationInfoEntryFields: sourceData or entry is nil")
 		return
 	}
 
@@ -1668,22 +1670,22 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 	}
 	// Handle supportArch - check both []interface{} and []string types
 	if val, ok := sourceData["supportArch"].([]interface{}); ok {
-		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
+		glog.V(3).Infof("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
 		entry.SupportArch = make([]string, len(val))
 		for i, arch := range val {
 			if archStr, ok := arch.(string); ok {
 				entry.SupportArch[i] = archStr
 			}
 		}
-		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
+		glog.V(3).Infof("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
 	} else if val, ok := sourceData["supportArch"].([]string); ok {
-		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch as []string in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
+		glog.V(3).Infof("DEBUG: mapAllApplicationInfoEntryFields - Found supportArch as []string in sourceData: %+v (type: %T, length: %d)", val, val, len(val))
 		entry.SupportArch = append([]string{}, val...)
-		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
+		glog.V(3).Infof("DEBUG: mapAllApplicationInfoEntryFields - Mapped supportArch to entry: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
 	} else {
-		log.Printf("DEBUG: mapAllApplicationInfoEntryFields - supportArch not found in sourceData or wrong type")
+		glog.V(3).Infof("DEBUG: mapAllApplicationInfoEntryFields - supportArch not found in sourceData or wrong type")
 		if supportArchVal, exists := sourceData["supportArch"]; exists {
-			log.Printf("DEBUG: mapAllApplicationInfoEntryFields - supportArch value exists but wrong type: %+v (type: %T)", supportArchVal, supportArchVal)
+			glog.V(3).Infof("DEBUG: mapAllApplicationInfoEntryFields - supportArch value exists but wrong type: %+v (type: %T)", supportArchVal, supportArchVal)
 		}
 	}
 	if val, ok := sourceData["promoteImage"].([]interface{}); ok {
@@ -1820,7 +1822,7 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 		switch v := val.(type) {
 		case map[string]interface{}:
 			entry.SupportClient = v
-			log.Printf("DEBUG: Successfully mapped supportClient from map[string]interface{}")
+			glog.V(3).Info("DEBUG: Successfully mapped supportClient from map[string]interface{}")
 		case map[interface{}]interface{}:
 			// Convert map[interface{}]interface{} to map[string]interface{}
 			converted := make(map[string]interface{})
@@ -1828,11 +1830,11 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 				if ks, ok := k.(string); ok {
 					converted[ks] = v2
 				} else {
-					log.Printf("WARNING: supportClient key is not string: %T", k)
+					glog.V(3).Infof("WARNING: supportClient key is not string: %T", k)
 				}
 			}
 			entry.SupportClient = converted
-			log.Printf("DEBUG: Converted supportClient from map[interface{}]interface{}")
+			glog.V(3).Info("DEBUG: Converted supportClient from map[interface{}]interface{}")
 		case map[string]string:
 			// If it's map[string]string, convert to map[string]interface{}
 			converted := make(map[string]interface{})
@@ -1840,14 +1842,14 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 				converted[k] = v2
 			}
 			entry.SupportClient = converted
-			log.Printf("DEBUG: Converted supportClient from map[string]string")
+			glog.V(3).Info("DEBUG: Converted supportClient from map[string]string")
 		default:
-			log.Printf("ERROR: supportClient has unexpected type: %T, value: %v", val, val)
+			glog.V(3).Infof("ERROR: supportClient has unexpected type: %T, value: %v", val, val)
 			// Try to create empty structure
 			entry.SupportClient = make(map[string]interface{})
 		}
 	} else {
-		log.Printf("DEBUG: supportClient field not found in source data")
+		glog.V(3).Info("DEBUG: supportClient field not found in source data")
 	}
 	if val, ok := sourceData["permission"].(map[string]interface{}); ok {
 		entry.Permission = val
@@ -1975,7 +1977,7 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 
 	// Validate and fix SupportClient data after mapping
 	ValidateAndFixSupportClient(sourceData, entry)
-	log.Printf("[DEBUG] mapAllApplicationInfoEntryFields: Completed successfully")
+	glog.V(3).Info("[DEBUG] mapAllApplicationInfoEntryFields: Completed successfully")
 }
 
 // NewApplicationInfoEntry creates a complete ApplicationInfoEntry from source data
@@ -2228,32 +2230,32 @@ func ValidateApplicationInfoEntryFields(entry *ApplicationInfoEntry) map[string]
 
 // DebugAppLabelsFlow helps debug AppLabels data flow through the system
 func DebugAppLabelsFlow(sourceData map[string]interface{}, entry *ApplicationInfoEntry, stage string) {
-	log.Printf("DEBUG: AppLabels Flow - Stage: %s", stage)
+	glog.V(3).Infof("DEBUG: AppLabels Flow - Stage: %s", stage)
 
 	// Check source data
 	if sourceData != nil {
 		if appLabels, ok := sourceData["appLabels"].([]interface{}); ok {
-			log.Printf("DEBUG: Source data AppLabels: %v (type: %T, length: %d)", appLabels, appLabels, len(appLabels))
+			glog.V(3).Infof("DEBUG: Source data AppLabels: %v (type: %T, length: %d)", appLabels, appLabels, len(appLabels))
 		} else {
-			log.Printf("DEBUG: Source data AppLabels: not found or wrong type")
+			glog.V(3).Info("DEBUG: Source data AppLabels: not found or wrong type")
 		}
 	} else {
-		log.Printf("DEBUG: Source data is nil")
+		glog.V(3).Info("DEBUG: Source data is nil")
 	}
 
 	// Check entry
 	if entry != nil {
-		log.Printf("DEBUG: Entry AppLabels: %v (type: %T, length: %d)", entry.AppLabels, entry.AppLabels, len(entry.AppLabels))
+		glog.V(3).Infof("DEBUG: Entry AppLabels: %v (type: %T, length: %d)", entry.AppLabels, entry.AppLabels, len(entry.AppLabels))
 		if len(entry.AppLabels) > 0 {
 			for i, label := range entry.AppLabels {
-				log.Printf("DEBUG: Entry AppLabels[%d]: %s", i, label)
+				glog.V(3).Infof("DEBUG: Entry AppLabels[%d]: %s", i, label)
 			}
 		}
 	} else {
-		log.Printf("DEBUG: Entry is nil")
+		glog.V(3).Info("DEBUG: Entry is nil")
 	}
 
-	log.Printf("DEBUG: AppLabels Flow - Stage: %s - END", stage)
+	glog.V(3).Infof("DEBUG: AppLabels Flow - Stage: %s - END", stage)
 }
 
 // ValidateAndFixAppLabels ensures AppLabels are properly set and not lost
@@ -2278,7 +2280,7 @@ func ValidateAndFixAppLabels(sourceData map[string]interface{}, entry *Applicati
 						entry.AppLabels[i] = labelStr
 					}
 				}
-				log.Printf("DEBUG: Fixed missing AppLabels from source data: %v", entry.AppLabels)
+				glog.V(3).Infof("DEBUG: Fixed missing AppLabels from source data: %v", entry.AppLabels)
 			}
 		}
 	}
@@ -2293,7 +2295,7 @@ func ValidateAndFixAppLabels(sourceData map[string]interface{}, entry *Applicati
 						entry.AppLabels[i] = labelStr
 					}
 				}
-				log.Printf("DEBUG: Fixed missing AppLabels from metadata: %v", entry.AppLabels)
+				glog.V(3).Infof("DEBUG: Fixed missing AppLabels from metadata: %v", entry.AppLabels)
 			}
 		}
 	}
@@ -2344,12 +2346,12 @@ type CacheConfig struct {
 // ValidateSupportClientData validates SupportClient data integrity
 func ValidateSupportClientData(entry *ApplicationInfoEntry) {
 	if entry == nil {
-		log.Printf("WARNING: Cannot validate SupportClient for nil entry")
+		glog.V(3).Info("WARNING: Cannot validate SupportClient for nil entry")
 		return
 	}
 
 	if entry.SupportClient == nil {
-		log.Printf("WARNING: SupportClient is nil in entry %s", entry.Name)
+		glog.V(3).Infof("WARNING: SupportClient is nil in entry %s", entry.Name)
 		return
 	}
 
@@ -2360,21 +2362,21 @@ func ValidateSupportClientData(entry *ApplicationInfoEntry) {
 	for _, clientType := range expectedClients {
 		if url, exists := entry.SupportClient[clientType]; exists {
 			if url == nil {
-				log.Printf("WARNING: SupportClient.%s is nil", clientType)
+				glog.V(3).Infof("WARNING: SupportClient.%s is nil", clientType)
 			} else if urlStr, ok := url.(string); ok {
 				if urlStr == "" {
-					log.Printf("WARNING: SupportClient.%s is empty string", clientType)
+					glog.V(3).Infof("WARNING: SupportClient.%s is empty string", clientType)
 				} else {
 					validCount++
-					log.Printf("DEBUG: SupportClient.%s: %s", clientType, urlStr)
+					glog.V(3).Infof("DEBUG: SupportClient.%s: %s", clientType, urlStr)
 				}
 			} else {
-				log.Printf("WARNING: SupportClient.%s has wrong type: %T", clientType, url)
+				glog.V(3).Infof("WARNING: SupportClient.%s has wrong type: %T", clientType, url)
 			}
 		}
 	}
 
-	log.Printf("DEBUG: SupportClient validation completed for entry %s - %d valid clients found", entry.Name, validCount)
+	glog.V(3).Infof("DEBUG: SupportClient validation completed for entry %s - %d valid clients found", entry.Name, validCount)
 }
 
 // ValidateAndFixSupportClient ensures SupportClient data is properly set and not lost
@@ -2392,12 +2394,12 @@ func ValidateAndFixSupportClient(sourceData map[string]interface{}, entry *Appli
 	if len(entry.SupportClient) == 0 {
 		if sourceData != nil {
 			if supportClient, ok := sourceData["supportClient"]; ok && supportClient != nil {
-				log.Printf("DEBUG: Attempting to fix missing SupportClient from source data")
+				glog.V(3).Info("DEBUG: Attempting to fix missing SupportClient from source data")
 
 				switch v := supportClient.(type) {
 				case map[string]interface{}:
 					entry.SupportClient = v
-					log.Printf("DEBUG: Fixed missing SupportClient from source data: %v", entry.SupportClient)
+					glog.V(3).Infof("DEBUG: Fixed missing SupportClient from source data: %v", entry.SupportClient)
 				case map[interface{}]interface{}:
 					// Convert map[interface{}]interface{} to map[string]interface{}
 					converted := make(map[string]interface{})
@@ -2407,7 +2409,7 @@ func ValidateAndFixSupportClient(sourceData map[string]interface{}, entry *Appli
 						}
 					}
 					entry.SupportClient = converted
-					log.Printf("DEBUG: Fixed missing SupportClient from source data (converted): %v", entry.SupportClient)
+					glog.V(3).Infof("DEBUG: Fixed missing SupportClient from source data (converted): %v", entry.SupportClient)
 				case map[string]string:
 					// Convert map[string]string to map[string]interface{}
 					converted := make(map[string]interface{})
@@ -2415,9 +2417,9 @@ func ValidateAndFixSupportClient(sourceData map[string]interface{}, entry *Appli
 						converted[k] = v2
 					}
 					entry.SupportClient = converted
-					log.Printf("DEBUG: Fixed missing SupportClient from source data (converted): %v", entry.SupportClient)
+					glog.V(3).Infof("DEBUG: Fixed missing SupportClient from source data (converted): %v", entry.SupportClient)
 				default:
-					log.Printf("WARNING: SupportClient in source data has unexpected type: %T", supportClient)
+					glog.V(3).Infof("WARNING: SupportClient in source data has unexpected type: %T", supportClient)
 				}
 			}
 		}

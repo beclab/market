@@ -605,7 +605,7 @@ func CalculateSourceDataHashWithSize(sourceData SourceDataInterface) (string, in
 	}
 
 	if len(dataComponents) == 0 {
-		glog.V(2).Infof("No data components found for hash calculation")
+		glog.V(3).Infof("No data components found for hash calculation")
 		return "", 0, nil
 	}
 

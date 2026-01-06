@@ -22,3 +22,4 @@ output
 charts
 chartsTmp
 .gocache
+Dockerfile.server.local

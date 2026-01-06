@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 // CacheManager interface for updating cache when market sources change
@@ -526,7 +528,7 @@ func (sm *SettingsManager) GetAPIEndpoints() *APIEndpointsConfig {
 
 // BuildAPIURL builds a complete API URL from base URL and endpoint path
 func (sm *SettingsManager) BuildAPIURL(baseURL, endpointPath string) string {
-	log.Printf("Building API URL - Base URL: %s, Endpoint Path: %s", baseURL, endpointPath)
+	glog.V(3).Infof("Building API URL - Base URL: %s, Endpoint Path: %s", baseURL, endpointPath)
 
 	// Add https:// prefix if baseURL doesn't start with http://, https:// or ftp://
 	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") && !strings.HasPrefix(baseURL, "ftp://") && !strings.HasPrefix(baseURL, "file://") {
@@ -538,7 +540,7 @@ func (sm *SettingsManager) BuildAPIURL(baseURL, endpointPath string) string {
 	endpointPath = strings.TrimPrefix(endpointPath, "/")
 
 	finalURL := fmt.Sprintf("%s/%s", baseURL, endpointPath)
-	log.Printf("Final API URL: %s", finalURL)
+	glog.V(3).Infof("Final API URL: %s", finalURL)
 
 	return finalURL
 }
@@ -555,7 +557,7 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	// First, add to chart repository service
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
 	if chartRepoHost == "" {
-		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
+		glog.V(3).Info("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
 	} else {
 		// Convert to ChartRepoMarketSource format
 		chartRepoSource := &ChartRepoMarketSource{
@@ -572,7 +574,7 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 		if err := addMarketSourceToChartRepo(chartRepoHost, chartRepoSource); err != nil {
 			return fmt.Errorf("failed to add market source to chart repo: %w", err)
 		}
-		log.Printf("Successfully added market source to chart repo: %s (%s)", source.Name, source.ID)
+		glog.V(3).Infof("Successfully added market source to chart repo: %s (%s)", source.Name, source.ID)
 	}
 
 	// After successful chart repo operation, update local database
@@ -605,7 +607,7 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	// Sync to cache
 	sm.syncMarketSourcesToCache()
 
-	log.Printf("Added new market source: %s (%s)", source.Name, source.ID)
+	glog.V(3).Infof("Added new market source: %s (%s)", source.Name, source.ID)
 	return nil
 }
 
@@ -622,7 +624,7 @@ func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) err
 		return fmt.Errorf("failed to save API endpoints to Redis: %w", err)
 	}
 
-	log.Printf("Updated API endpoints configuration")
+	glog.V(3).Infof("Updated API endpoints configuration")
 	return nil
 }
 

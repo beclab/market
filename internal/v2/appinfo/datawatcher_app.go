@@ -183,10 +183,10 @@ func (dw *DataWatcher) processCompletedApps() {
 
 	processingDuration := time.Since(processingStart)
 	if totalMoved > 0 {
-		glog.Infof("DataWatcher: Processing cycle completed in %v - %d apps processed, %d moved to AppInfoLatest",
+		glog.V(2).Infof("DataWatcher: Processing cycle completed in %v - %d apps processed, %d moved to AppInfoLatest",
 			processingDuration, totalProcessed, totalMoved)
 	} else {
-		glog.Infof("DataWatcher: Processing cycle completed in %v - %d apps processed, no moves needed",
+		glog.V(3).Infof("DataWatcher: Processing cycle completed in %v - %d apps processed, no moves needed",
 			processingDuration, totalProcessed)
 	}
 }
@@ -210,7 +210,7 @@ func (dw *DataWatcher) processUserBatch(ctx context.Context, userIDs []string, u
 			continue
 		}
 
-		glog.Infof("DataWatcher: Processing user %d/%d in batch: %s", i+1, len(userIDs), userID)
+		glog.V(3).Infof("DataWatcher: Processing user %d/%d in batch: %s", i+1, len(userIDs), userID)
 		processed, moved := dw.processUserData(userID, userData)
 		totalProcessed += processed
 		totalMoved += moved
@@ -280,7 +280,7 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 			dw.calculateAndSetUserHashDirect(userID, userData)
 		}()
 	} else {
-		glog.V(2).Infof("DataWatcher: No apps moved and hash exists for user %s, skipping hash calculation", userID)
+		glog.V(3).Infof("DataWatcher: No apps moved and hash exists for user %s, skipping hash calculation", userID)
 	}
 
 	return totalProcessed, totalMoved
@@ -401,8 +401,8 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 			}
 		}()
 
-		glog.Infof("DataWatcher: Attempting to acquire write lock for user %s", userID)
-		glog.Infof("[LOCK] dw.cacheManager.mutex.TryLock() @439 Start")
+		glog.V(3).Infof("DataWatcher: Attempting to acquire write lock for user %s", userID)
+		glog.V(3).Infof("[LOCK] dw.cacheManager.mutex.TryLock() @439 Start")
 		if !dw.cacheManager.mutex.TryLock() {
 			glog.Warningf("DataWatcher: Write lock not available for user %s, skipping hash update", userID)
 			writeLockError <- fmt.Errorf("write lock not available")
@@ -410,20 +410,20 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		}
 		defer func() {
 			dw.cacheManager.mutex.Unlock()
-			glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @453 Start")
-			glog.Infof("DataWatcher: Write lock released for user %s", userID)
+			glog.V(3).Infof("[LOCK] dw.cacheManager.mutex.Unlock() @453 Start")
+			glog.V(3).Infof("DataWatcher: Write lock released for user %s", userID)
 		}()
 
 		// Check if cancelled before sending signal
 		select {
 		case <-cancel:
-			glog.Warningf("DataWatcher: Write lock acquisition cancelled for user %s", userID)
+			glog.V(3).Infof("DataWatcher: Write lock acquisition cancelled for user %s", userID)
 			return
 		default:
 		}
 
-		glog.Infof("DataWatcher: Write lock acquired for user %s", userID)
-		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Success")
+		glog.V(3).Infof("DataWatcher: Write lock acquired for user %s", userID)
+		glog.V(3).Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Success")
 
 		// Send signal and wait for processing
 		select {
@@ -431,18 +431,18 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 			// Successfully sent signal, wait for cancellation or completion
 			<-cancel
 		case <-cancel:
-			glog.Warningf("DataWatcher: Write lock acquisition cancelled before signal for user %s", userID)
+			glog.V(3).Infof("DataWatcher: Write lock acquisition cancelled before signal for user %s", userID)
 		}
 	}()
 
 	select {
 	case <-writeLockAcquired:
 		// Write lock acquired successfully
-		glog.Infof("DataWatcher: Write lock acquired for hash update, user %s", userID)
+		glog.V(3).Infof("DataWatcher: Write lock acquired for hash update, user %s", userID)
 
 		// Update hash and release lock immediately
 		originalUserData.Hash = newHash
-		glog.Infof("DataWatcher: Hash updated in memory for user %s", userID)
+		glog.V(3).Infof("DataWatcher: Hash updated in memory for user %s", userID)
 
 		// Cancel the goroutine to release the lock
 		close(cancel)
@@ -472,12 +472,12 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	}
 
 	// Trigger force sync to persist the hash change
-	glog.Infof("DataWatcher: Starting force sync for user %s", userID)
+	glog.V(3).Infof("DataWatcher: Starting force sync for user %s", userID)
 	if err := dw.cacheManager.ForceSync(); err != nil {
 		glog.Errorf("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
 		return false
 	} else {
-		glog.Infof("DataWatcher: Force sync completed after hash update for user %s", userID)
+		glog.V(2).Infof("DataWatcher: Force sync completed after hash update for user %s", userID)
 	}
 
 	return true
@@ -521,14 +521,14 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 
 	// Step 1: Quick check and data copy with minimal lock time
 	func() {
-		glog.Infof("[LOCK] dw.cacheManager.mutex.TryRLock() @660 Start")
+		glog.V(3).Info("[LOCK] dw.cacheManager.mutex.TryRLock() @660 Start")
 		if !dw.cacheManager.mutex.TryRLock() {
-			glog.Warningf("processSourceData: Read lock not available for user %s, source %s, skipping", userID, sourceID)
+			glog.Warningf("[TryRLock] processSourceData: Read lock not available for user: %s, source: %s, skipping", userID, sourceID)
 			return
 		}
 		defer func() {
 			dw.cacheManager.mutex.RUnlock()
-			glog.Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @660 End")
+			glog.V(3).Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @660 End")
 		}()
 
 		// Quick check - if no pending apps, exit early
@@ -563,7 +563,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		}
 
 		if isDevEnvironment() {
-			glog.V(2).Infof("DataWatcher: Checking app %d/%d: %s", i+1, len(pendingApps), dw.getAppID(pendingApp))
+			glog.V(3).Infof("DataWatcher: Checking app %d/%d: %s", i+1, len(pendingApps), dw.getAppID(pendingApp))
 		}
 
 		if dw.isAppHydrationCompletedWithTimeout(ctx, pendingApp) {
@@ -572,7 +572,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	}
 
 	if len(completedApps) == 0 {
-		glog.V(2).Infof("DataWatcher: No completed apps found for user=%s, source=%s", userID, sourceID)
+		glog.V(3).Infof("DataWatcher: No completed apps found for user=%s, source=%s", userID, sourceID)
 		return int64(len(pendingApps)), 0
 	}
 
@@ -591,25 +591,25 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	lockCancel := make(chan bool, 1)
 
 	go func() {
-		glog.Infof("[LOCK] dw.cacheManager.mutex.TryLock() @716 Start")
+		glog.V(3).Info("[LOCK] dw.cacheManager.mutex.TryLock() @716 Start")
 		if !dw.cacheManager.mutex.TryLock() {
 			glog.Warningf("DataWatcher: Write lock not available for user %s, source %s, skipping app move", userID, sourceID)
 			return
 		}
 		defer func() {
 			dw.cacheManager.mutex.Unlock()
-			glog.Infof("[LOCK] dw.cacheManager.mutex.Unlock() @725 Start")
+			glog.V(3).Info("[LOCK] dw.cacheManager.mutex.Unlock() @725 Start")
 		}()
 
 		// Check if cancelled before sending signal
 		select {
 		case <-lockCancel:
-			glog.Warningf("DataWatcher: Write lock acquisition cancelled for user=%s, source=%s", userID, sourceID)
+			glog.V(3).Infof("DataWatcher: Write lock acquisition cancelled for user=%s, source=%s", userID, sourceID)
 			return
 		default:
 		}
 
-		glog.Infof("[LOCK] dw.cacheManager.mutex.Lock() @716 Success")
+		glog.V(3).Info("[LOCK] dw.cacheManager.mutex.Lock() @716 Success")
 
 		// Send signal and wait for processing
 		select {
@@ -617,18 +617,18 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 			// Successfully sent signal, wait for cancellation
 			<-lockCancel
 		case <-lockCancel:
-			glog.Warningf("DataWatcher: Write lock acquisition cancelled before signal for user=%s, source=%s", userID, sourceID)
+			glog.V(3).Infof("DataWatcher: Write lock acquisition cancelled before signal for user=%s, source=%s", userID, sourceID)
 		}
 	}()
 
 	// Use a short timeout to avoid blocking too long
 	select {
 	case <-lockAcquired:
-		glog.Infof("DataWatcher: Write lock acquired for user=%s, source=%s", userID, sourceID)
+		glog.V(3).Infof("DataWatcher: Write lock acquired for user=%s, source=%s", userID, sourceID)
 
 		defer func() {
 			totalLockTime := time.Since(lockStartTime)
-			glog.Infof("DataWatcher: Write lock released after %v for user=%s, source=%s", totalLockTime, userID, sourceID)
+			glog.V(3).Infof("DataWatcher: Write lock released after %v for user=%s, source=%s", totalLockTime, userID, sourceID)
 			// Cancel the goroutine to release the lock
 			close(lockCancel)
 		}()
@@ -659,17 +659,17 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 					if latestData.AppInfo.AppEntry.Version != sourceData.AppInfoLatest[existingIndex].AppInfo.AppEntry.Version {
 						// Send system notification for new app ready
 						dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
-						glog.Infof("DataWatcher: Sent system notification for new app ready: %s", appName)
+						glog.V(3).Infof("DataWatcher: Sent system notification for new app ready: %s", appName)
 					}
 
 					// Replace existing app with same name
 					sourceData.AppInfoLatest[existingIndex] = latestData
-					glog.Infof("DataWatcher: Replaced existing app with same name: %s (index: %d)", appName, existingIndex)
+					glog.V(3).Infof("DataWatcher: Replaced existing app with same name: %s (index: %d)", appName, existingIndex)
 
 				} else {
 					// Add new app if no existing app with same name
 					sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
-					glog.Infof("DataWatcher: Added new app to latest: %s", appName)
+					glog.V(2).Infof("DataWatcher: Added new app to latest: %s", appName)
 					// Send system notification for new app ready
 					dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
 				}
@@ -709,7 +709,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 
 	case <-time.After(2 * time.Second):
 		close(lockCancel) // Cancel the goroutine to release the lock
-		glog.Warningf("DataWatcher: Skipping write lock acquisition for user=%s, source=%s (timeout after 2s) - will retry in next cycle", userID, sourceID)
+		glog.V(3).Infof("DataWatcher: Skipping write lock acquisition for user=%s, source=%s (timeout after 2s) - will retry in next cycle", userID, sourceID)
 		return int64(len(pendingApps)), 0
 	}
 }
@@ -717,11 +717,11 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 // isAppHydrationCompletedWithTimeout checks if app hydration is completed with timeout protection
 func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, pendingApp *types.AppInfoLatestPendingData) bool {
 	if pendingApp == nil {
-		glog.V(2).Infof("DataWatcher: isAppHydrationCompletedWithTimeout called with nil pendingApp")
+		glog.V(3).Info("DataWatcher: isAppHydrationCompletedWithTimeout called with nil pendingApp")
 		return false
 	}
 	if dw.hydrator == nil {
-		glog.Errorf("DataWatcher: Hydrator is nil, cannot check hydration completion")
+		glog.V(3).Info("DataWatcher: Hydrator is nil, cannot check hydration completion")
 		return false
 	}
 
@@ -747,7 +747,7 @@ func (dw *DataWatcher) isAppHydrationCompletedWithTimeout(ctx context.Context, p
 		return result
 	case <-ctx.Done():
 		appID := dw.getAppID(pendingApp)
-		glog.Warningf("DataWatcher: Timeout checking hydration completion for app=%s", appID)
+		glog.V(3).Infof("DataWatcher: Timeout checking hydration completion for app=%s", appID)
 		return false
 	}
 }
@@ -841,7 +841,7 @@ func (dw *DataWatcher) getAppNameFromLatest(latestApp *types.AppInfoLatestData) 
 // convertPendingToLatest converts AppInfoLatestPendingData to AppInfoLatestData
 func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPendingData) *types.AppInfoLatestData {
 	if pendingApp == nil {
-		glog.Warningf("DataWatcher: convertPendingToLatest called with nil pendingApp")
+		glog.V(3).Info("DataWatcher: convertPendingToLatest called with nil pendingApp")
 		return nil
 	}
 
@@ -853,18 +853,18 @@ func (dw *DataWatcher) convertPendingToLatest(pendingApp *types.AppInfoLatestPen
 	// Return nil if no essential data is present
 	if !hasRawData && !hasAppInfo && !hasPackageInfo {
 		appID := dw.getAppID(pendingApp)
-		glog.Warningf("DataWatcher: Skipping conversion of pending app %s - no essential data found", appID)
+		glog.V(3).Infof("DataWatcher: Skipping conversion of pending app %s - no essential data found", appID)
 		return nil
 	}
 
 	// Additional validation for data integrity
 	if hasRawData && (pendingApp.RawData.AppID == "" && pendingApp.RawData.ID == "" && pendingApp.RawData.Name == "") {
-		glog.Warningf("DataWatcher: Skipping conversion - RawData exists but lacks identifying information")
+		glog.V(3).Info("DataWatcher: Skipping conversion - RawData exists but lacks identifying information")
 		return nil
 	}
 
 	if hasAppInfo && (pendingApp.AppInfo.AppEntry.AppID == "" && pendingApp.AppInfo.AppEntry.ID == "" && pendingApp.AppInfo.AppEntry.Name == "") {
-		glog.Warningf("DataWatcher: Skipping conversion - AppInfo exists but lacks identifying information")
+		glog.V(3).Info("DataWatcher: Skipping conversion - AppInfo exists but lacks identifying information")
 		return nil
 	}
 
@@ -941,7 +941,7 @@ func (dw *DataWatcher) SetInterval(interval time.Duration) {
 
 	// Use atomic operation for thread safety since interval can be modified at runtime
 	atomic.StoreInt64((*int64)(&dw.interval), int64(interval))
-	glog.Infof("DataWatcher interval set to: %v", interval)
+	glog.V(3).Info("DataWatcher interval set to: %v", interval)
 }
 
 // createAppSimpleInfo creates an AppSimpleInfo from pending app data
@@ -1060,7 +1060,7 @@ func (dw *DataWatcher) createAppSimpleInfo(pendingApp *types.AppInfoLatestPendin
 
 	// Return nil if no essential information is available
 	if appSimpleInfo.AppID == "" && appSimpleInfo.AppName == "" {
-		glog.Warningf("DataWatcher: createAppSimpleInfo - no essential app information available")
+		glog.V(3).Info("DataWatcher: createAppSimpleInfo - no essential app information available")
 		return nil
 	}
 
@@ -1119,7 +1119,7 @@ func (dw *DataWatcher) ensureAppSimpleInfoFields(appSimpleInfo *types.AppSimpleI
 	if len(appSimpleInfo.SupportArch) == 0 {
 		if pendingApp.RawData != nil && len(pendingApp.RawData.SupportArch) > 0 {
 			appSimpleInfo.SupportArch = append([]string{}, pendingApp.RawData.SupportArch...)
-			glog.Infof("DataWatcher: Restored SupportArch from RawData for app %s", appSimpleInfo.AppID)
+			glog.V(3).Infof("DataWatcher: Restored SupportArch from RawData for app %s", appSimpleInfo.AppID)
 		} else if pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil && len(pendingApp.AppInfo.AppEntry.SupportArch) > 0 {
 			appSimpleInfo.SupportArch = append([]string{}, pendingApp.AppInfo.AppEntry.SupportArch...)
 			glog.Infof("DataWatcher: Restored SupportArch from AppInfo.AppEntry for app %s", appSimpleInfo.AppID)
@@ -1130,7 +1130,7 @@ func (dw *DataWatcher) ensureAppSimpleInfoFields(appSimpleInfo *types.AppSimpleI
 	if len(appSimpleInfo.Categories) == 0 {
 		if pendingApp.RawData != nil && len(pendingApp.RawData.Categories) > 0 {
 			appSimpleInfo.Categories = append([]string{}, pendingApp.RawData.Categories...)
-			glog.Infof("DataWatcher: Restored Categories from RawData for app %s", appSimpleInfo.AppID)
+			glog.V(3).Infof("DataWatcher: Restored Categories from RawData for app %s", appSimpleInfo.AppID)
 		} else if pendingApp.AppInfo != nil && pendingApp.AppInfo.AppEntry != nil && len(pendingApp.AppInfo.AppEntry.Categories) > 0 {
 			appSimpleInfo.Categories = append([]string{}, pendingApp.AppInfo.AppEntry.Categories...)
 			glog.Infof("DataWatcher: Restored Categories from AppInfo.AppEntry for app %s", appSimpleInfo.AppID)
@@ -1139,23 +1139,25 @@ func (dw *DataWatcher) ensureAppSimpleInfoFields(appSimpleInfo *types.AppSimpleI
 }
 
 // ForceCalculateUserHash forces hash calculation for a user regardless of app movement
+// not used
 func (dw *DataWatcher) ForceCalculateUserHash(userID string) error {
-	glog.Infof("DataWatcher: Force calculating hash for user %s", userID)
-
-	// Get user data from cache manager
-	userData := dw.cacheManager.GetUserData(userID)
-	if userData == nil {
-		return fmt.Errorf("user data not found for user %s", userID)
-	}
-
-	// Call hash calculation directly
-	dw.calculateAndSetUserHashWithRetry(userID, userData)
 	return nil
+	// glog.Infof("DataWatcher: Force calculating hash for user %s", userID)
+
+	// // Get user data from cache manager
+	// userData := dw.cacheManager.GetUserData(userID)
+	// if userData == nil {
+	// 	return fmt.Errorf("user data not found for user %s", userID)
+	// }
+
+	// // Call hash calculation directly
+	// dw.calculateAndSetUserHashWithRetry(userID, userData)
+	// return nil
 }
 
 // ForceCalculateAllUsersHash forces hash calculation for all users
 func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
-	glog.Infof("DataWatcher: Force calculating hash for all users")
+	glog.V(3).Infof("DataWatcher: Force calculating hash for all users")
 
 	// Get all users data
 	allUsersData := dw.cacheManager.GetAllUsersData()
@@ -1165,7 +1167,7 @@ func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
 
 	for userID, userData := range allUsersData {
 		if userData != nil {
-			glog.Infof("DataWatcher: Force calculating hash for user: %s", userID)
+			glog.V(3).Infof("DataWatcher: Force calculating hash for user: %s", userID)
 			dw.calculateAndSetUserHash(userID, userData)
 		}
 	}
@@ -1204,12 +1206,12 @@ func (dw *DataWatcher) getAppVersion(pendingApp *types.AppInfoLatestPendingData)
 // sendNewAppReadyNotification sends a system notification for a new app ready
 func (dw *DataWatcher) sendNewAppReadyNotification(userID string, completedApp *types.AppInfoLatestPendingData, sourceID string) {
 	if completedApp == nil {
-		glog.Warningf("DataWatcher: sendNewAppReadyNotification called with nil completedApp")
+		glog.V(3).Info("DataWatcher: sendNewAppReadyNotification called with nil completedApp")
 		return
 	}
 
 	if dw.dataSender == nil {
-		glog.Warningf("DataWatcher: dataSender is nil, unable to send notification")
+		glog.V(3).Info("DataWatcher: dataSender is nil, unable to send notification")
 		return
 	}
 
@@ -1239,6 +1241,6 @@ func (dw *DataWatcher) sendNewAppReadyNotification(userID string, completedApp *
 	if err := dw.dataSender.SendMarketSystemUpdate(*update); err != nil {
 		glog.Errorf("DataWatcher: Failed to send new app ready notification for app %s: %v", appName, err)
 	} else {
-		glog.Infof("DataWatcher: Successfully sent new app ready notification for app %s (version: %s, source: %s)", appName, appVersion, sourceID)
+		glog.V(2).Info("DataWatcher: Successfully sent new app ready notification for app %s (version: %s, source: %s)", appName, appVersion, sourceID)
 	}
 }

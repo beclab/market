@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"market/internal/v2/types"
+
+	"github.com/golang/glog"
 )
 
 // DataSenderInterface defines the interface for sending app info updates
@@ -37,7 +39,7 @@ func (sm *StateMonitor) NotifyStateChange(
 ) error {
 	if !hasChanged {
 		// Only log at debug level for no changes to reduce log noise
-		log.Printf("No state change detected for app %s (user=%s, source=%s), reason: %s",
+		glog.V(3).Infof("No state change detected for app %s (user=%s, source=%s), reason: %s",
 			appName, userID, sourceID, changeReason)
 		return nil
 	}

@@ -3,9 +3,9 @@ package hydrationfn
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/golang/glog"
 
 	"market/internal/v2/paymentnew"
 )
@@ -51,7 +51,7 @@ func (s *TaskForPaymentStep) Execute(ctx context.Context, task *HydrationTask) e
 	// If there is no purchase info (pi is nil), it's not an error for free apps or unpaid apps
 	if pi != nil {
 		pending.AppInfo.PurchaseInfo = pi
-		log.Printf("Successfully loaded purchase info for user=%s app=%s", task.UserID, task.AppID)
+		glog.V(2).Infof("Successfully loaded purchase info for user=%s app=%s", task.UserID, task.AppID)
 	}
 
 	return nil

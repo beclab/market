@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"market/internal/v2/types"
 	"net/http"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/golang/glog"
 )
 
 // StateChange represents a single state change record from the API
@@ -75,7 +75,7 @@ func NewDataWatcherRepo(redisClient *RedisClient, cacheManager *CacheManager, da
 	apiBaseURL := os.Getenv("CHART_REPO_SERVICE_HOST")
 	if apiBaseURL == "" {
 		apiBaseURL = "http://localhost:8080" // Default fallback
-		log.Printf("CHART_REPO_SERVICE_HOST not set, using default: %s", apiBaseURL)
+		glog.V(2).Infof("CHART_REPO_SERVICE_HOST not set, using default: %s", apiBaseURL)
 	}
 
 	repo := &DataWatcherRepo{
@@ -103,22 +103,22 @@ func (dwr *DataWatcherRepo) initializeLastProcessedID() error {
 		if err == redis.Nil {
 			// No record found, start from 0
 			dwr.lastProcessedID = 0
-			log.Printf("No previous state changes found, starting from ID 0")
+			glog.Error("No previous state changes found, starting from ID 0")
 			return nil
 		}
-		log.Printf("Error retrieving last processed ID from Redis: %v", err)
+		glog.Errorf("Error retrieving last processed ID from Redis: %v", err)
 		return err
 	}
 
 	lastID, err := strconv.ParseInt(lastIDStr, 10, 64)
 	if err != nil {
-		log.Printf("Error parsing last processed ID from Redis: %v", err)
+		glog.Errorf("Error parsing last processed ID from Redis: %v", err)
 		dwr.lastProcessedID = 0
 		return nil
 	}
 
 	dwr.lastProcessedID = lastID
-	log.Printf("Initialized last processed ID from Redis: %d", dwr.lastProcessedID)
+	glog.V(2).Infof("Initialized last processed ID from Redis: %d", dwr.lastProcessedID)
 	return nil
 }
 
@@ -135,7 +135,7 @@ func (dwr *DataWatcherRepo) Start() error {
 	dwr.ticker = time.NewTicker(2 * time.Minute)
 	dwr.isRunning = true
 
-	log.Printf("Starting data watcher with 2-minute intervals")
+	glog.V(3).Info("Starting data watcher with 2-minute intervals")
 
 	// Start the monitoring goroutine
 	go dwr.monitorStateChanges()
@@ -161,7 +161,7 @@ func (dwr *DataWatcherRepo) Stop() error {
 	close(dwr.stopChannel)
 	dwr.isRunning = false
 
-	log.Printf("Data watcher stopped")
+	glog.V(3).Info("Data watcher stopped")
 	return nil
 }
 
@@ -174,21 +174,21 @@ func (dwr *DataWatcherRepo) IsRunning() bool {
 
 // monitorStateChanges runs the main monitoring loop
 func (dwr *DataWatcherRepo) monitorStateChanges() {
-	log.Printf("State change monitoring started")
+	glog.V(3).Info("State change monitoring started")
 
 	// Process immediately on start
 	if err := dwr.processStateChanges(); err != nil {
-		log.Printf("Error processing state changes on startup: %v", err)
+		glog.Errorf("Error processing state changes on startup: %v", err)
 	}
 
 	for {
 		select {
 		case <-dwr.ticker.C:
 			if err := dwr.processStateChanges(); err != nil {
-				log.Printf("Error processing state changes: %v", err)
+				glog.Errorf("Error processing state changes: %v", err)
 			}
 		case <-dwr.stopChannel:
-			log.Printf("State change monitoring stopped")
+			glog.V(3).Info("State change monitoring stopped")
 			return
 		}
 	}
@@ -196,7 +196,7 @@ func (dwr *DataWatcherRepo) monitorStateChanges() {
 
 // processStateChanges fetches and processes new state changes
 func (dwr *DataWatcherRepo) processStateChanges() error {
-	log.Printf("Processing state changes after ID: %d", dwr.lastProcessedID)
+	glog.V(3).Infof("Processing state changes after ID: %d", dwr.lastProcessedID)
 
 	// Fetch new state changes from API
 	stateChanges, err := dwr.fetchStateChanges(dwr.lastProcessedID)
@@ -205,24 +205,24 @@ func (dwr *DataWatcherRepo) processStateChanges() error {
 	}
 
 	if len(stateChanges) == 0 {
-		log.Printf("No new state changes found")
+		glog.V(3).Info("No new state changes found")
 		return nil
 	}
 
-	log.Printf("Found %d new state changes", len(stateChanges))
+	glog.V(2).Infof("Found %d new state changes", len(stateChanges))
 
 	// Sort state changes by ID to ensure proper order
 	sort.Slice(stateChanges, func(i, j int) bool {
 		return stateChanges[i].ID < stateChanges[j].ID
 	})
 
-	log.Printf("State changes sorted by ID, processing in order...")
+	glog.V(2).Info("State changes sorted by ID, processing in order...")
 
 	// Process state changes in order by ID
 	var lastProcessedID int64
 	for _, change := range stateChanges {
 		if err := dwr.processStateChange(change); err != nil {
-			log.Printf("Error processing state change ID %d: %v", change.ID, err)
+			glog.Errorf("Error processing state change ID %d: %v", change.ID, err)
 			continue
 		}
 
@@ -233,7 +233,7 @@ func (dwr *DataWatcherRepo) processStateChanges() error {
 	ctx := context.Background()
 	err = dwr.redisClient.client.Set(ctx, "datawatcher:last_processed_id", strconv.FormatInt(lastProcessedID, 10), 0).Err()
 	if err != nil {
-		log.Printf("Failed to update last processed ID in Redis: %v", err)
+		glog.Errorf("Failed to update last processed ID in Redis: %v", err)
 	}
 
 	return nil
@@ -243,7 +243,7 @@ func (dwr *DataWatcherRepo) processStateChanges() error {
 func (dwr *DataWatcherRepo) fetchStateChanges(afterID int64) ([]*StateChange, error) {
 	url := fmt.Sprintf("http://%s/chart-repo/api/v2/state-changes?after_id=%d&limit=1000", dwr.apiBaseURL, afterID)
 
-	log.Printf("Fetching state changes from: %s", url)
+	glog.V(2).Infof("Fetching state changes from: %s", url)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -268,13 +268,13 @@ func (dwr *DataWatcherRepo) fetchStateChanges(afterID int64) ([]*StateChange, er
 		return nil, fmt.Errorf("API response data is nil")
 	}
 
-	log.Printf("Successfully fetched %d state changes", apiResponse.Data.Count)
+	glog.V(2).Infof("Successfully fetched %d state changes", apiResponse.Data.Count)
 	return apiResponse.Data.StateChanges, nil
 }
 
 // processStateChange processes a single state change based on its type
 func (dwr *DataWatcherRepo) processStateChange(change *StateChange) error {
-	log.Printf("Processing state change ID %d, type: %s", change.ID, change.Type)
+	glog.V(2).Infof("Processing state change ID %d, type: %s", change.ID, change.Type)
 
 	switch change.Type {
 	case "app_upload_completed":
@@ -282,29 +282,29 @@ func (dwr *DataWatcherRepo) processStateChange(change *StateChange) error {
 	case "image_info_updated":
 		return dwr.handleImageInfoUpdated(change)
 	default:
-		log.Printf("Unknown state change type: %s, skipping", change.Type)
+		glog.V(3).Infof("Unknown state change type: %s, skipping", change.Type)
 		return nil
 	}
 }
 
 // handleAppUploadCompleted handles app upload completed state changes
 func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *StateChange) error {
-	log.Printf("Handling app upload completed for app: %s, source: %s, user: %s",
+	glog.V(2).Infof("Handling app upload completed for app: %s, source: %s, user: %s",
 		change.AppData.AppName, change.AppData.Source, change.AppData.UserID)
 
 	// Check if cache manager is available
 	if dwr.cacheManager == nil {
-		log.Printf("Cache manager is not available, skipping app upload completed handling")
+		glog.V(3).Infof("Cache manager is not available, skipping app upload completed handling")
 		return fmt.Errorf("cache manager not available")
 	}
 
 	// Step 1: Fetch app information from API directly
-	log.Printf("Fetching app info from API for app: %s, user: %s, source: %s",
+	glog.V(2).Infof("Fetching app info from API for app: %s, user: %s, source: %s",
 		change.AppData.AppName, change.AppData.UserID, change.AppData.Source)
 
 	appInfo, err := dwr.fetchAppInfoFromAPI(change.AppData.UserID, change.AppData.Source, change.AppData.AppName)
 	if err != nil {
-		log.Printf("Failed to fetch app info from API: %v", err)
+		glog.Errorf("Failed to fetch app info from API: %v", err)
 		return fmt.Errorf("failed to fetch app info from API: %w", err)
 	}
 
@@ -312,22 +312,22 @@ func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *StateChange) error 
 	shouldUpdate := dwr.shouldUpdateAppInCache(change.AppData.UserID, change.AppData.Source, change.AppData.AppName, appInfo)
 
 	if !shouldUpdate {
-		log.Printf("App %s already exists in cache with same or newer version for user %s, source %s",
+		glog.V(3).Infof("App %s already exists in cache with same or newer version for user %s, source %s",
 			change.AppData.AppName, change.AppData.UserID, change.AppData.Source)
 		return nil
 	}
 
-	log.Printf("App %s needs update in cache for user %s, source %s",
+	glog.V(2).Infof("App %s needs update in cache for user %s, source %s",
 		change.AppData.AppName, change.AppData.UserID, change.AppData.Source)
 
 	// Step 3: Update cache with the fetched app information
 	err = dwr.updateCacheWithAppInfo(change.AppData.UserID, change.AppData.Source, appInfo)
 	if err != nil {
-		log.Printf("Failed to update cache with app info: %v", err)
+		glog.Errorf("Failed to update cache with app info: %v", err)
 		return fmt.Errorf("failed to update cache with app info: %w", err)
 	}
 
-	log.Printf("Successfully updated cache with app info for app %s, user %s, source %s",
+	glog.V(2).Infof("Successfully updated cache with app info for app %s, user %s, source %s",
 		change.AppData.AppName, change.AppData.UserID, change.AppData.Source)
 
 	return nil
@@ -335,10 +335,10 @@ func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *StateChange) error 
 
 // handleImageInfoUpdated handles image info updated state changes
 func (dwr *DataWatcherRepo) handleImageInfoUpdated(change *StateChange) error {
-	log.Printf("Handling image info updated for image: %s", change.ImageData.ImageName)
+	glog.V(3).Infof("Handling image info updated for image: %s", change.ImageData.ImageName)
 
 	if dwr.cacheManager == nil {
-		log.Printf("Cache manager is not available, skipping image info updated handling")
+		glog.V(3).Info("Cache manager is not available, skipping image info updated handling")
 		return fmt.Errorf("cache manager not available")
 	}
 
@@ -346,49 +346,49 @@ func (dwr *DataWatcherRepo) handleImageInfoUpdated(change *StateChange) error {
 	imageName := change.ImageData.ImageName
 	updatedImageInfo, err := dwr.fetchImageInfoFromAPI(imageName)
 	if err != nil {
-		log.Printf("Failed to fetch image info from API for image %s: %v", imageName, err)
+		glog.Errorf("Failed to fetch image info from API for image %s: %v", imageName, err)
 		return fmt.Errorf("failed to fetch image info from API: %w", err)
 	}
 
-	log.Printf("Successfully fetched updated image info for %s", imageName)
+	glog.V(3).Infof("Successfully fetched updated image info for %s", imageName)
 
 	// Step 2: Update image information in all cache data
 	updatedCount := dwr.updateImageInfoInCache(imageName, updatedImageInfo)
-	log.Printf("Updated image info for %s in %d cache entries", imageName, updatedCount)
+	glog.V(3).Infof("Updated image info for %s in %d cache entries", imageName, updatedCount)
 
 	// Step 3: Trigger hash calculation for all users
 	if dwr.dataWatcher != nil {
 		if err := dwr.dataWatcher.ForceCalculateAllUsersHash(); err != nil {
-			log.Printf("Failed to trigger hash calculation for all users: %v", err)
+			glog.Errorf("Failed to trigger hash calculation for all users: %v", err)
 			return fmt.Errorf("failed to trigger hash calculation: %w", err)
 		}
-		log.Printf("Successfully triggered hash calculation for all users after image update")
+		glog.V(3).Info("Successfully triggered hash calculation for all users after image update")
 	} else {
-		log.Printf("DataWatcher not available, skipping hash calculation")
+		glog.V(3).Info("DataWatcher not available, skipping hash calculation")
 	}
 
-	log.Printf("Successfully handled image info updated for image: %s", imageName)
+	glog.V(2).Infof("Successfully handled image info updated for image: %s", imageName)
 	return nil
 }
 
 // checkAppInCache checks if an app exists in the cache
 func (dwr *DataWatcherRepo) checkAppInCache(userID, sourceID, appName string) bool {
 	if dwr.cacheManager == nil {
-		log.Printf("Cache manager is nil, cannot check cache for app: %s", appName)
+		glog.V(3).Infof("Cache manager is nil, cannot check cache for app: %s", appName)
 		return false
 	}
 
 	// Get user data from cache
 	userData := dwr.cacheManager.GetUserData(userID)
 	if userData == nil {
-		log.Printf("User data not found in cache for user: %s", userID)
+		glog.V(3).Infof("User data not found in cache for user: %s", userID)
 		return false
 	}
 
 	// Check if source exists
 	sourceData, exists := userData.Sources[sourceID]
 	if !exists {
-		log.Printf("Source %s not found in cache for user: %s", sourceID, userID)
+		glog.V(3).Infof("Source %s not found in cache for user: %s", sourceID, userID)
 		return false
 	}
 
@@ -396,7 +396,7 @@ func (dwr *DataWatcherRepo) checkAppInCache(userID, sourceID, appName string) bo
 	for _, appInfo := range sourceData.AppInfoLatest {
 		if appInfo != nil && appInfo.RawData != nil {
 			if appInfo.RawData.Name == appName || appInfo.RawData.AppID == appName || appInfo.RawData.ID == appName {
-				log.Printf("App %s found in AppInfoLatest cache", appName)
+				glog.V(3).Infof("App %s found in AppInfoLatest cache", appName)
 				return true
 			}
 		}
@@ -405,7 +405,7 @@ func (dwr *DataWatcherRepo) checkAppInCache(userID, sourceID, appName string) bo
 	// Check in AppStateLatest
 	for _, appState := range sourceData.AppStateLatest {
 		if appState != nil && appState.Status.Name == appName {
-			log.Printf("App %s found in AppStateLatest cache", appName)
+			glog.V(3).Infof("App %s found in AppStateLatest cache", appName)
 			return true
 		}
 	}
@@ -414,13 +414,13 @@ func (dwr *DataWatcherRepo) checkAppInCache(userID, sourceID, appName string) bo
 	for _, appPending := range sourceData.AppInfoLatestPending {
 		if appPending != nil && appPending.RawData != nil {
 			if appPending.RawData.Name == appName || appPending.RawData.AppID == appName || appPending.RawData.ID == appName {
-				log.Printf("App %s found in AppInfoLatestPending cache", appName)
+				glog.V(3).Infof("App %s found in AppInfoLatestPending cache", appName)
 				return true
 			}
 		}
 	}
 
-	log.Printf("App %s not found in any cache data for user: %s, source: %s", appName, userID, sourceID)
+	glog.V(2).Infof("App %s not found in any cache data for user: %s, source: %s", appName, userID, sourceID)
 	return false
 }
 
@@ -445,7 +445,7 @@ func (dwr *DataWatcherRepo) fetchAppInfoFromAPI(userID, sourceID, appName string
 
 	// Make HTTP request to /apps endpoint
 	url := fmt.Sprintf("http://%s/chart-repo/api/v2/apps", dwr.apiBaseURL)
-	log.Printf("Fetching app info from API: %s for app: %s, user: %s, source: %s", url, appName, userID, sourceID)
+	glog.V(3).Infof("Fetching app info from API: %s for app: %s, user: %s, source: %s", url, appName, userID, sourceID)
 
 	// Create HTTP request with context
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -490,7 +490,7 @@ func (dwr *DataWatcherRepo) fetchAppInfoFromAPI(userID, sourceID, appName string
 	if appsData, ok := apiResponse.Data["apps"]; ok {
 		if apps, ok := appsData.([]interface{}); ok && len(apps) > 0 {
 			if appInfo, ok := apps[0].(map[string]interface{}); ok {
-				log.Printf("Successfully fetched app info from API for app: %s", appName)
+				glog.V(3).Infof("Successfully fetched app info from API for app: %s", appName)
 				return appInfo, nil
 			}
 		}
@@ -505,7 +505,7 @@ func (dwr *DataWatcherRepo) updateCacheWithAppInfo(userID, sourceID string, appI
 		return fmt.Errorf("cache manager not available")
 	}
 
-	log.Printf("Updating cache with app info for user: %s, source: %s", userID, sourceID)
+	glog.V(3).Infof("Updating cache with app info for user: %s, source: %s", userID, sourceID)
 
 	// Convert the app info to AppInfoLatestData directly, similar to localrepo.go
 	var latest types.AppInfoLatestData
@@ -514,9 +514,9 @@ func (dwr *DataWatcherRepo) updateCacheWithAppInfo(userID, sourceID string, appI
 		b, _ := json.Marshal(appInfo)
 
 		if err := json.Unmarshal(b, &latest); err == nil && latest.RawData != nil {
-			log.Printf("Successfully converted app info to AppInfoLatestData for app: %s", latest.RawData.Name)
+			glog.V(3).Infof("Successfully converted app info to AppInfoLatestData for app: %s", latest.RawData.Name)
 		} else {
-			log.Printf("Failed to convert app info to AppInfoLatestData: %v", err)
+			glog.Errorf("Failed to convert app info to AppInfoLatestData: %v", err)
 			// Fallback: create a basic AppInfoLatestData structure
 			return nil
 		}
@@ -524,11 +524,11 @@ func (dwr *DataWatcherRepo) updateCacheWithAppInfo(userID, sourceID string, appI
 
 	// Use SetLocalAppData to directly set the AppInfoLatestData structure
 	if err := dwr.cacheManager.SetLocalAppData(userID, sourceID, types.AppInfoLatestPending, latest); err != nil {
-		log.Printf("Failed to set app data in cache: %v", err)
+		glog.Errorf("Failed to set app data in cache: %v", err)
 		return fmt.Errorf("failed to set app data in cache: %w", err)
 	}
 
-	log.Printf("Successfully updated cache with app info for user: %s, source: %s", userID, sourceID)
+	glog.V(2).Infof("Successfully updated cache with app info for user: %s, source: %s", userID, sourceID)
 	return nil
 }
 
@@ -537,7 +537,7 @@ func (dwr *DataWatcherRepo) SetCacheManager(cacheManager *CacheManager) {
 	dwr.mu.Lock()
 	defer dwr.mu.Unlock()
 	dwr.cacheManager = cacheManager
-	log.Printf("Cache manager set for data watcher repository")
+	glog.V(3).Info("Cache manager set for data watcher repository")
 }
 
 // GetCacheManager returns the current cache manager
@@ -584,45 +584,45 @@ func (dwr *DataWatcherRepo) SetApiBaseURL(url string) {
 	dwr.mu.Lock()
 	defer dwr.mu.Unlock()
 	dwr.apiBaseURL = url
-	log.Printf("API base URL updated to: %s", url)
+	glog.V(3).Infof("API base URL updated to: %s", url)
 }
 
 // shouldUpdateAppInCache checks if an app should be updated in cache based on existence and version comparison
 func (dwr *DataWatcherRepo) shouldUpdateAppInCache(userID, sourceID, appName string, newAppInfo map[string]interface{}) bool {
 	if dwr.cacheManager == nil {
-		log.Printf("Cache manager is nil, should update app: %s", appName)
+		glog.V(3).Infof("Cache manager is nil, should update app: %s", appName)
 		return true
 	}
 
 	// Get user data from cache
 	userData := dwr.cacheManager.GetUserData(userID)
 	if userData == nil {
-		log.Printf("User data not found in cache for user: %s, should update app: %s", userID, appName)
+		glog.V(3).Infof("User data not found in cache for user: %s, should update app: %s", userID, appName)
 		return true
 	}
 
 	// Check if source exists
 	sourceData, exists := userData.Sources[sourceID]
 	if !exists {
-		log.Printf("Source %s not found in cache for user: %s, should update app: %s", sourceID, userID, appName)
+		glog.V(3).Infof("Source %s not found in cache for user: %s, should update app: %s", sourceID, userID, appName)
 		return true
 	}
 
 	// Extract version from new app info
 	newVersion := dwr.extractVersionFromAppInfo(newAppInfo)
 	if newVersion == "" {
-		log.Printf("Could not extract version from new app info for app: %s, should update", appName)
+		glog.V(3).Infof("Could not extract version from new app info for app: %s, should update", appName)
 		return true
 	}
 
-	log.Printf("New app version: %s for app: %s", newVersion, appName)
+	glog.V(2).Infof("New app version: %s for app: %s", newVersion, appName)
 
 	// Check in AppInfoLatest
 	for _, appInfo := range sourceData.AppInfoLatest {
 		if appInfo != nil && appInfo.RawData != nil {
 			if dwr.isSameApp(appInfo.RawData, appName) {
 				existingVersion := dwr.extractVersionFromAppInfoLatest(appInfo)
-				log.Printf("Found app in AppInfoLatest with version: %s", existingVersion)
+				glog.V(3).Infof("Found app in AppInfoLatest with version: %s", existingVersion)
 				return dwr.shouldUpdateVersion(existingVersion, newVersion)
 			}
 		}
@@ -632,7 +632,7 @@ func (dwr *DataWatcherRepo) shouldUpdateAppInCache(userID, sourceID, appName str
 	// for _, appState := range sourceData.AppStateLatest {
 	// 	if appState != nil && appState.Status.Name == appName {
 	// 		existingVersion := dwr.extractVersionFromAppState(appState)
-	// 		log.Printf("Found app in AppStateLatest with version: %s", existingVersion)
+	// 		glog.V(3).Infof("Found app in AppStateLatest with version: %s", existingVersion)
 	// 		return dwr.shouldUpdateVersion(existingVersion, newVersion)
 	// 	}
 	// }
@@ -642,13 +642,13 @@ func (dwr *DataWatcherRepo) shouldUpdateAppInCache(userID, sourceID, appName str
 		if appPending != nil && appPending.RawData != nil {
 			if dwr.isSameApp(appPending.RawData, appName) {
 				existingVersion := dwr.extractVersionFromAppInfoLatest(appPending)
-				log.Printf("Found app in AppInfoLatestPending with version: %s", existingVersion)
+				glog.V(3).Infof("Found app in AppInfoLatestPending with version: %s", existingVersion)
 				return dwr.shouldUpdateVersion(existingVersion, newVersion)
 			}
 		}
 	}
 
-	log.Printf("App %s not found in any cache data, should update", appName)
+	glog.V(2).Infof("App %s not found in any cache data, should update", appName)
 	return true
 }
 
@@ -718,23 +718,23 @@ func (dwr *DataWatcherRepo) extractVersionFromAppState(appState interface{}) str
 // shouldUpdateVersion compares two version strings and determines if an update is needed
 func (dwr *DataWatcherRepo) shouldUpdateVersion(existingVersion, newVersion string) bool {
 	if existingVersion == "" {
-		log.Printf("Existing version is empty, should update to: %s", newVersion)
+		glog.V(3).Infof("Existing version is empty, should update to: %s", newVersion)
 		return true
 	}
 
 	if newVersion == "" {
-		log.Printf("New version is empty, should not update from: %s", existingVersion)
+		glog.V(3).Infof("New version is empty, should not update from: %s", existingVersion)
 		return false
 	}
 
 	// Simple string comparison for now
 	// In a production environment, you might want to use semantic versioning comparison
 	if existingVersion != newVersion {
-		log.Printf("Version mismatch: existing=%s, new=%s, should update", existingVersion, newVersion)
+		glog.V(3).Infof("Version mismatch: existing=%s, new=%s, should update", existingVersion, newVersion)
 		return true
 	}
 
-	log.Printf("Version match: existing=%s, new=%s, no update needed", existingVersion, newVersion)
+	glog.V(2).Infof("Version match: existing=%s, new=%s, no update needed", existingVersion, newVersion)
 	return false
 }
 
@@ -742,7 +742,7 @@ func (dwr *DataWatcherRepo) shouldUpdateVersion(existingVersion, newVersion stri
 func (dwr *DataWatcherRepo) fetchImageInfoFromAPI(imageName string) (map[string]interface{}, error) {
 	// Make HTTP request to /images endpoint with imageName query parameter
 	url := fmt.Sprintf("http://%s/chart-repo/api/v2/images?imageName=%s", dwr.apiBaseURL, imageName)
-	log.Printf("Fetching image info from API: %s for image: %s", url, imageName)
+	glog.V(3).Infof("Fetching image info from API: %s for image: %s", url, imageName)
 
 	// Create HTTP request with context
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -796,7 +796,7 @@ func (dwr *DataWatcherRepo) updateImageInfoInCache(imageName string, updatedImag
 	// Get all users data from cache
 	allUsersData := dwr.cacheManager.GetAllUsersData()
 	if len(allUsersData) == 0 {
-		log.Printf("No users found in cache, skipping image info update")
+		glog.V(3).Infof("No users found in cache, skipping image info update")
 		return 0
 	}
 
@@ -841,7 +841,7 @@ func (dwr *DataWatcherRepo) updateImageInfoInAppInfoLatest(userID, sourceID stri
 			if imageInfo, exists := appInfo.AppInfo.ImageAnalysis.Images[imageName]; exists {
 				// Update the image info with new data
 				if err := dwr.updateSingleImageInfo(imageInfo, updatedImageInfo); err != nil {
-					log.Printf("Failed to update image info for app %s in AppInfoLatest: %v",
+					glog.Errorf("Failed to update image info for app %s in AppInfoLatest: %v",
 						appInfo.RawData.Name, err)
 					continue
 				}
@@ -850,7 +850,7 @@ func (dwr *DataWatcherRepo) updateImageInfoInAppInfoLatest(userID, sourceID stri
 				appInfo.Timestamp = time.Now().Unix()
 
 				updatedCount++
-				log.Printf("Updated image info for %s in AppInfoLatest for app %s (user: %s, source: %s), app timestamp updated to: %d",
+				glog.V(3).Infof("Updated image info for %s in AppInfoLatest for app %s (user: %s, source: %s), app timestamp updated to: %d",
 					imageName, appInfo.RawData.Name, userID, sourceID, appInfo.Timestamp)
 			}
 		}
@@ -873,7 +873,7 @@ func (dwr *DataWatcherRepo) updateImageInfoInAppInfoLatestPending(userID, source
 			if imageInfo, exists := pendingApp.AppInfo.ImageAnalysis.Images[imageName]; exists {
 				// Update the image info with new data
 				if err := dwr.updateSingleImageInfo(imageInfo, updatedImageInfo); err != nil {
-					log.Printf("Failed to update image info for app %s in AppInfoLatestPending: %v",
+					glog.Errorf("Failed to update image info for app %s in AppInfoLatestPending: %v",
 						pendingApp.RawData.Name, err)
 					continue
 				}
@@ -882,7 +882,7 @@ func (dwr *DataWatcherRepo) updateImageInfoInAppInfoLatestPending(userID, source
 				pendingApp.Timestamp = time.Now().Unix()
 
 				updatedCount++
-				log.Printf("Updated image info for %s in AppInfoLatestPending for app %s (user: %s, source: %s), app timestamp updated to: %d",
+				glog.V(3).Infof("Updated image info for %s in AppInfoLatestPending for app %s (user: %s, source: %s), app timestamp updated to: %d",
 					imageName, pendingApp.RawData.Name, userID, sourceID, pendingApp.Timestamp)
 			}
 		}
@@ -1020,7 +1020,7 @@ func (dwr *DataWatcherRepo) sendImageStateChangeToUser(userID, imageName string,
 	// Convert map[string]interface{} to *types.ImageInfo
 	imageInfo := dwr.convertMapToImageInfo(imageName, updatedImageInfo)
 	if imageInfo == nil {
-		log.Printf("Failed to convert updated image info to ImageInfo struct for user %s", userID)
+		glog.V(3).Infof("Failed to convert updated image info to ImageInfo struct for user %s", userID)
 		return
 	}
 
@@ -1034,9 +1034,9 @@ func (dwr *DataWatcherRepo) sendImageStateChangeToUser(userID, imageName string,
 
 	// Send the update via DataSender
 	if err := dwr.dataSender.SendImageInfoUpdate(update); err != nil {
-		log.Printf("Failed to send image state change message to user %s: %v", userID, err)
+		glog.Errorf("Failed to send image state change message to user %s: %v", userID, err)
 	} else {
-		log.Printf("Successfully sent image state change message to user: %s for image: %s", userID, imageName)
+		glog.V(2).Infof("Successfully sent image state change message to user: %s for image: %s", userID, imageName)
 	}
 }
 
