@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +12,8 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/task"
+
+	"github.com/golang/glog"
 )
 
 // StateCollector collects runtime state from various modules
@@ -40,7 +41,7 @@ func NewStateCollector(store *StateStore) *StateCollector {
 // SetTaskModule sets the task module reference
 func (c *StateCollector) SetTaskModule(tm *task.TaskModule) {
 	if !c.mu.TryLock() {
-		log.Printf("Failed to acquire lock for SetTaskModule, skipping update")
+		glog.Warning("[TryLock] Failed to acquire lock for SetTaskModule, skipping update")
 		return
 	}
 	defer c.mu.Unlock()
@@ -50,7 +51,7 @@ func (c *StateCollector) SetTaskModule(tm *task.TaskModule) {
 // SetAppInfoModule sets the app info module reference
 func (c *StateCollector) SetAppInfoModule(aim *appinfo.AppInfoModule) {
 	if !c.mu.TryLock() {
-		log.Printf("Failed to acquire lock for SetAppInfoModule, skipping update")
+		glog.Warning("[TryLock] Failed to acquire lock for SetAppInfoModule, skipping update")
 		return
 	}
 	defer c.mu.Unlock()
@@ -59,7 +60,7 @@ func (c *StateCollector) SetAppInfoModule(aim *appinfo.AppInfoModule) {
 
 // Start starts the state collector
 func (c *StateCollector) Start() error {
-	log.Println("Starting runtime state collector...")
+	glog.V(4).Info("Starting runtime state collector...")
 
 	// Start periodic collection (every 5 seconds)
 	c.collectTicker = time.NewTicker(5 * time.Second)
@@ -69,13 +70,13 @@ func (c *StateCollector) Start() error {
 	// Initial collection
 	c.collect()
 
-	log.Println("Runtime state collector started")
+	glog.V(4).Info("Runtime state collector started")
 	return nil
 }
 
 // Stop stops the state collector
 func (c *StateCollector) Stop() {
-	log.Println("Stopping runtime state collector...")
+	glog.V(4).Info("Stopping runtime state collector...")
 
 	if c.collectTicker != nil {
 		c.collectTicker.Stop()
@@ -84,7 +85,7 @@ func (c *StateCollector) Stop() {
 	c.cancel()
 	c.wg.Wait()
 
-	log.Println("Runtime state collector stopped")
+	glog.V(4).Info("Runtime state collector stopped")
 }
 
 // collectLoop runs the periodic collection loop
@@ -111,7 +112,7 @@ func (c *StateCollector) collect() {
 		appInfoModule = c.appInfoModule
 		c.mu.RUnlock()
 	} else {
-		log.Printf("Failed to acquire read lock for collect, skipping collection")
+		glog.Warning("[TryRLock] Failed to acquire read lock for collect, skipping collection")
 		return
 	}
 
@@ -278,7 +279,7 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 						// If state is empty but app is in AppStateLatest, it's installed and running
 						stage = StageRunning
 						health = "healthy"
-						log.Printf("[DEBUG] App %s (user: %s, source: %s): State is empty, setting to running", appName, userID, sourceID)
+						glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): State is empty, setting to running", appName, userID, sourceID)
 					} else if strings.Contains(appStateStr, "failed") ||
 						strings.Contains(appStateStr, "error") ||
 						strings.Contains(appStateStr, "canceled") ||
@@ -286,30 +287,30 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 						// Check failed/canceled states first (including downloadingCanceled)
 						stage = StageFailed
 						health = "unhealthy"
-						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains failed/canceled, setting to failed", appName, userID, sourceID, appState.Status.State)
+						glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): State '%s' contains failed/canceled, setting to failed", appName, userID, sourceID, appState.Status.State)
 					} else if strings.Contains(appStateStr, "stopped") {
 						stage = StageStopped
 						health = "unhealthy"
-						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains stopped, setting to stopped", appName, userID, sourceID, appState.Status.State)
+						glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): State '%s' contains stopped, setting to stopped", appName, userID, sourceID, appState.Status.State)
 					} else if strings.Contains(appStateStr, "running") {
 						stage = StageRunning
 						health = "healthy"
-						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains running, setting to running", appName, userID, sourceID, appState.Status.State)
+						glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): State '%s' contains running, setting to running", appName, userID, sourceID, appState.Status.State)
 					} else if strings.Contains(appStateStr, "downloading") ||
 						strings.Contains(appStateStr, "fetching") ||
 						strings.Contains(appStateStr, "syncing") {
 						stage = StageFetching
 						health = "unknown"
-						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains downloading/fetching/syncing, setting to fetching", appName, userID, sourceID, appState.Status.State)
+						glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): State '%s' contains downloading/fetching/syncing, setting to fetching", appName, userID, sourceID, appState.Status.State)
 					} else if strings.Contains(appStateStr, "installing") {
 						stage = StageInstalling
 						health = "unknown"
-						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' contains installing, setting to installing", appName, userID, sourceID, appState.Status.State)
+						glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): State '%s' contains installing, setting to installing", appName, userID, sourceID, appState.Status.State)
 					} else {
 						// Default to running if state is not recognized (app is installed)
 						stage = StageRunning
 						health = "healthy"
-						log.Printf("[DEBUG] App %s (user: %s, source: %s): State '%s' not recognized, defaulting to running", appName, userID, sourceID, appState.Status.State)
+						glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): State '%s' not recognized, defaulting to running", appName, userID, sourceID, appState.Status.State)
 					}
 
 					// First, check if there's pending data (downloading/syncing)
@@ -329,7 +330,7 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 									if stage == StageRunning {
 										stage = StageFetching
 										health = "unknown"
-										log.Printf("[DEBUG] App %s (user: %s, source: %s): Has pending data, changing stage from running to fetching", appName, userID, sourceID)
+										glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): Has pending data, changing stage from running to fetching", appName, userID, sourceID)
 									}
 									break
 								}
@@ -346,7 +347,7 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 							strings.Contains(progressLower, "syncing") {
 							stage = StageFetching
 							health = "unknown"
-							log.Printf("[DEBUG] App %s (user: %s, source: %s): Progress field indicates downloading, changing stage to fetching", appName, userID, sourceID)
+							glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): Progress field indicates downloading, changing stage to fetching", appName, userID, sourceID)
 						}
 					}
 
@@ -423,7 +424,7 @@ func (c *StateCollector) collectAppFlowStates(aim *appinfo.AppInfoModule) {
 						},
 					}
 
-					log.Printf("[DEBUG] App %s (user: %s, source: %s): Final stage=%s, health=%s, version=%s", appName, userID, sourceID, stage, health, version)
+					glog.V(3).Infof("[DEBUG] App %s (user: %s, source: %s): Final stage=%s, health=%s, version=%s", appName, userID, sourceID, stage, health, version)
 					c.store.UpdateAppState(appFlowState)
 				}
 			}
@@ -834,13 +835,13 @@ func (c *StateCollector) fetchChartRepoStatus(host, userID, sourceID string) *Ch
 	// Make request
 	resp, err := client.Get(url)
 	if err != nil {
-		log.Printf("Failed to fetch chart repo status from %s: %v", url, err)
+		glog.Errorf("Failed to fetch chart repo status from %s: %v", url, err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Chart repo status API returned non-OK status: %d", resp.StatusCode)
+		glog.Errorf("Chart repo status API returned non-OK status: %d", resp.StatusCode)
 		return nil
 	}
 
@@ -852,12 +853,12 @@ func (c *StateCollector) fetchChartRepoStatus(host, userID, sourceID string) *Ch
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-		log.Printf("Failed to decode chart repo status response: %v", err)
+		glog.Errorf("Failed to decode chart repo status response: %v", err)
 		return nil
 	}
 
 	if !apiResponse.Success {
-		log.Printf("Chart repo status API returned error: %s", apiResponse.Message)
+		glog.Errorf("Chart repo status API returned error: %s", apiResponse.Message)
 		return nil
 	}
 

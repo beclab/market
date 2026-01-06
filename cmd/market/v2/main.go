@@ -31,10 +31,10 @@ func createAppInfoConfigWithUsers(users []string) *appinfo.ModuleConfig {
 
 	// If we have extracted users, use them; otherwise fall back to default
 	if len(users) > 0 {
-		log.Printf("Using extracted users: %v", users)
+		glog.V(2).Infof("Using extracted users: %v", users)
 		config.User.UserList = users
 	} else {
-		log.Printf("No extracted users found, using default user list")
+		glog.V(3).Info("No extracted users found, using default user list")
 		// Keep the default user list from DefaultModuleConfig
 	}
 
@@ -48,15 +48,15 @@ func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
 
 	for userID, sourceData := range allUserAppStateData {
 		if len(sourceData) == 0 {
-			log.Println("No app state data found from pre-startup step")
+			glog.V(2).Info("No app state data found from pre-startup step")
 			return
 		}
 
-		log.Printf("Loading app state data for %d users", len(sourceData))
+		glog.V(2).Infof("Loading app state data for %d users", len(sourceData))
 
 		// For each user, load their app state data into the official source
 		for sourceID, appStateDataList := range sourceData {
-			log.Printf("Loading %d app states for user: %s, source: %s", len(appStateDataList), userID, sourceID)
+			glog.V(2).Infof("Loading %d app states for user: %s, source: %s", len(appStateDataList), userID, sourceID)
 
 			// Set app state data for the user's official source
 			err := appInfoModule.SetAppData(userID, sourceID, types.AppStateLatest, map[string]interface{}{
@@ -64,9 +64,9 @@ func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
 			})
 
 			if err != nil {
-				log.Printf("Failed to load app state data for user %s: %v", userID, err)
+				glog.Errorf("Failed to load app state data for user %s: %v", userID, err)
 			} else {
-				log.Printf("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
+				glog.V(2).Infof("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
 			}
 		}
 	}
@@ -84,11 +84,15 @@ func main() {
 
 	log.Println("Starting Market API Server on port 8080...")
 	glog.Info("glog initialized for debug logging")
+	glog.V(1).Info("Verbose logging level 1 enabled")
+	glog.V(2).Info("Verbose logging level 2 enabled")
+	glog.V(3).Info("Verbose logging level 3 enabled")
+	glog.V(4).Info("Verbose logging level 4 enabled")
 
 	// Check dependency service availability before proceeding
-	log.Println("About to call WaitForDependencyService...")
+	glog.V(2).Info("About to call WaitForDependencyService...")
 	utils.WaitForDependencyService()
-	log.Println("WaitForDependencyService completed")
+	glog.V(2).Info("WaitForDependencyService completed")
 
 	// Start systemenv watcher early and wait for remote service if available
 	{
@@ -96,17 +100,17 @@ func main() {
 		settings.StartSystemEnvWatcher(ctx)
 		// Wait up to 20s for OlaresRemoteService from CRD; continue on timeout
 		if err := settings.WaitForSystemRemoteService(ctx, 20*time.Second); err != nil {
-			log.Printf("SystemEnv watcher: %v; continuing startup with fallbacks", err)
+			glog.Errorf("SystemEnv watcher: %v; continuing startup with fallbacks", err)
 		}
 	}
 
 	// Upgrade flow: Check and update configurations and cache data (pre-execution)
-	log.Println("=== Pre-execution: Running upgrade flow ===")
+	glog.V(2).Info("=== Pre-execution: Running upgrade flow ===")
 	if err := utils.UpgradeFlow(); err != nil {
-		log.Printf("Warning: Upgrade flow failed: %v", err)
+		glog.Errorf("Warning: Upgrade flow failed: %v", err)
 		// Don't fail the startup, just log the warning
 	}
-	log.Println("=== End pre-execution upgrade flow ===")
+	glog.V(2).Info("=== End pre-execution upgrade flow ===")
 
 	// 0. Initialize Settings Module (Required for API)
 	redisHost := utils.GetEnvOrDefault("REDIS_HOST", "localhost")
@@ -115,26 +119,25 @@ func main() {
 	redisDBStr := utils.GetEnvOrDefault("REDIS_DB", "0")
 	redisDB, err := strconv.Atoi(redisDBStr)
 	if err != nil {
-		log.Fatalf("Invalid REDIS_DB value: %v", err)
+		glog.Exitf("Invalid REDIS_DB value: %v", err)
 	}
 
 	var redisClient settings.RedisClient
 	if !utils.IsPublicEnvironment() {
 		redisClient, err = settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
 		if err != nil {
-			log.Fatalf("Failed to create Redis client: %v", err)
+			glog.Exitf("Failed to create Redis client: %v", err)
 		}
 	}
 
 	// utils.SetRedisClient(redisClient.GetRawClient())
 
 	// Pre-startup step: Setup app service data with retry mechanism
-	log.Println("=== Pre-startup: Setting up app service data ===")
+	glog.V(2).Info("=== Pre-startup: Setting up app service data ===")
 	for {
 		err := utils.SetupAppServiceData()
 		if err != nil {
-			log.Printf("Failed to setup app service data: %v", err)
-			log.Println("Retrying in 10 seconds...")
+			glog.Errorf("Failed to setup app service data: %v, Retrying in 10 seconds...", err)
 			time.Sleep(10 * time.Second)
 			continue
 		}
@@ -153,24 +156,23 @@ func main() {
 			}
 
 			if userCount == 0 || appCount == 0 {
-				log.Printf("App service data not ready: user count = %d, app count = %d", userCount, appCount)
-				log.Println("Retrying in 10 seconds...")
+				glog.Warningf("App service data not ready: user count = %d, app count = %d, Retrying in 10 seconds...", userCount, appCount)
 				time.Sleep(10 * time.Second)
 				continue
 			}
 		}
 
-		log.Println("App service data setup completed successfully")
+		glog.V(2).Info("App service data setup completed successfully")
 		break
 	}
-	log.Println("=== End pre-startup step ===")
+	glog.V(2).Info("=== End pre-startup step ===")
 
 	// Initialize Settings Manager
 	settingsManager := settings.NewSettingsManager(redisClient)
 	if err := settingsManager.Initialize(); err != nil {
-		log.Fatalf("Failed to initialize Settings module: %v", err)
+		glog.Exitf("Failed to initialize Settings module: %v", err)
 	}
-	log.Println("Settings module started successfully")
+	glog.V(2).Info("Settings module started successfully")
 
 	// Set the settings manager for API access
 	api.SetSettingsManager(settingsManager)
@@ -178,61 +180,61 @@ func main() {
 	// 1. Initialize AppInfo Module (Required for cacheManager)
 	// Get extracted users from pre-startup step
 	extractedUsers := utils.GetExtractedUsers()
-	log.Printf("Using extracted users for AppInfo module: %v", extractedUsers)
+	glog.V(2).Infof("Using extracted users for AppInfo module: %v", extractedUsers)
 
 	// Create custom config with extracted users
 	appInfoConfig := createAppInfoConfigWithUsers(extractedUsers)
 	appInfoModule, err := appinfo.NewAppInfoModule(appInfoConfig)
 	if err != nil {
-		log.Fatalf("Failed to create AppInfo module: %v", err)
+		glog.Exitf("Failed to create AppInfo module: %v", err)
 	}
 
 	// Set the settings manager for AppInfo module to use
 	appInfoModule.SetSettingsManager(settingsManager)
 
 	if err := appInfoModule.Start(); err != nil {
-		log.Fatalf("Failed to start AppInfo module: %v", err)
+		glog.Exitf("Failed to start AppInfo module: %v", err)
 	}
-	log.Println("AppInfo module started successfully")
+	glog.V(2).Info("AppInfo module started successfully")
 
 	// Log StatusCorrectionChecker status
 	statusChecker := appInfoModule.GetStatusCorrectionChecker()
 	if statusChecker != nil {
-		log.Printf("StatusCorrectionChecker started successfully: %v", statusChecker.IsRunning())
+		glog.V(2).Infof("StatusCorrectionChecker started successfully: %v", statusChecker.IsRunning())
 	} else {
-		log.Println("Warning: StatusCorrectionChecker not available")
+		glog.V(2).Info("Warning: StatusCorrectionChecker not available")
 	}
 
 	// 1.5. Sync Market Source Configuration with Chart Repository Service
-	log.Println("=== Step 1.5: Syncing market source configuration with chart repository service ===")
+	glog.V(2).Info("=== Step 1.5: Syncing market source configuration with chart repository service ===")
 	if err := settings.SyncMarketSourceConfigWithChartRepo(redisClient, settingsManager); err != nil {
-		log.Printf("Warning: Failed to sync market source configuration: %v", err)
+		glog.Errorf("Warning: Failed to sync market source configuration: %v", err)
 		// Don't fail the startup, just log the warning
 	} else {
-		log.Println("Market source configuration sync completed successfully")
+		glog.V(2).Info("Market source configuration sync completed successfully")
 	}
-	log.Println("=== End Step 1.5 ===")
+	glog.V(2).Info("=== End Step 1.5 ===")
 
 	// Load app state data into user's official source
-	log.Println("Loading app state data into user's official source...")
+	glog.V(2).Info("Loading app state data into user's official source...")
 	loadAppStateDataToUserSource(appInfoModule)
-	log.Println("App state data loaded successfully")
+	glog.V(2).Info("App state data loaded successfully")
 
 	// Get cacheManager for HTTP server
-	log.Printf("Getting cache manager for HTTP server...")
+	glog.V(2).Info("Getting cache manager for HTTP server...")
 	cacheManager := appInfoModule.GetCacheManager()
 	cacheManager.SetSettingsManager(settingsManager)
 	settingsManager.SetCacheManager(cacheManager)
-	log.Printf("Cache manager obtained successfully: %v", cacheManager != nil)
+	glog.V(2).Infof("Cache manager obtained successfully: %v", cacheManager != nil)
 
 	// Set cache version getter for GetAppInfoLastInstalled to access app state
 	utils.SetCacheVersionGetter(cacheManager)
-	log.Println("Cache version getter set successfully")
+	glog.V(2).Info("Cache version getter set successfully")
 
 	// Get hydrator for HTTP server
-	log.Printf("Getting hydrator for HTTP server...")
+	glog.V(2).Info("Getting hydrator for HTTP server...")
 	hydrator := appInfoModule.GetHydrator()
-	log.Printf("Hydrator obtained successfully: %v", hydrator != nil)
+	glog.V(2).Infof("Hydrator obtained successfully: %v", hydrator != nil)
 
 	var taskModule *task.TaskModule
 	var historyModule *history.HistoryModule
@@ -240,14 +242,14 @@ func main() {
 		// 2. Initialize History Module
 		historyModule, err = history.NewHistoryModule()
 		if err != nil {
-			log.Fatalf("Failed to create History module: %v", err)
+			glog.Exitf("Failed to create History module: %v", err)
 		}
-		log.Println("History module started successfully")
+		glog.V(2).Info("History module started successfully")
 
 		// 3. Initialize Task Module
 		taskModule, err = task.NewTaskModule()
 		if err != nil {
-			log.Fatalf("Failed to create Task module: %v", err)
+			glog.Exitf("Failed to create Task module: %v", err)
 		}
 		// Set history module reference for task recording
 		taskModule.SetHistoryModule(historyModule)
@@ -256,35 +258,35 @@ func main() {
 		dataSender := appInfoModule.GetDataSender()
 		if dataSender != nil {
 			taskModule.SetDataSender(dataSender)
-			log.Println("Data sender set in Task module successfully")
+			glog.V(2).Info("Data sender set in Task module successfully")
 		} else {
-			log.Println("Warning: Data sender not available from AppInfo module, Task module will run without system notifications")
+			glog.V(2).Info("Warning: Data sender not available from AppInfo module, Task module will run without system notifications")
 		}
 
 		// Set settings manager for accessing Redis
 		if settingsManager != nil {
 			taskModule.SetSettingsManager(settingsManager)
-			log.Println("Settings manager set in Task module successfully")
+			glog.V(2).Info("Settings manager set in Task module successfully")
 		} else {
-			log.Println("Warning: Settings manager not available, Task module will run without Redis access")
+			glog.V(2).Info("Warning: Settings manager not available, Task module will run without Redis access")
 		}
 
-		log.Println("Task module started successfully")
+		glog.V(2).Info("Task module started successfully")
 
 		// Set task module reference in AppInfo module
 		appInfoModule.SetTaskModule(taskModule)
-		log.Println("Task module reference set in AppInfo module")
+		glog.V(2).Info("Task module reference set in AppInfo module")
 
 		// Set history module reference in AppInfo module
 		appInfoModule.SetHistoryModule(historyModule)
-		log.Println("History module reference set in AppInfo module")
+		glog.V(2).Info("History module reference set in AppInfo module")
 
 		// 4. Initialize Payment Module Task Manager
 		if dataSender != nil {
 			paymentnew.InitStateMachine(dataSender, settingsManager)
-			log.Println("Payment task manager initialized successfully")
+			glog.V(2).Info("Payment task manager initialized successfully")
 		} else {
-			log.Println("Warning: Data sender not available, payment task manager not initialized")
+			glog.V(2).Info("Warning: Data sender not available, payment task manager not initialized")
 		}
 
 	}
@@ -292,7 +294,7 @@ func main() {
 	// Initialize Runtime State Service
 	var runtimeStateService *runtimestate.RuntimeStateService
 	// if !utils.IsPublicEnvironment() {
-	log.Println("=== Initializing Runtime State Service ===")
+	glog.V(2).Info("=== Initializing Runtime State Service ===")
 	stateStore := runtimestate.NewStateStore()
 	stateCollector := runtimestate.NewStateCollector(stateStore)
 
@@ -307,73 +309,73 @@ func main() {
 
 	// Start the service
 	if err := runtimeStateService.Start(); err != nil {
-		log.Printf("Warning: Failed to start runtime state service: %v", err)
+		glog.Errorf("Warning: Failed to start runtime state service: %v", err)
 	} else {
-		log.Println("Runtime state service started successfully")
+		glog.V(2).Info("Runtime state service started successfully")
 	}
-	log.Println("=== End Runtime State Service initialization ===")
+	glog.V(2).Info("=== End Runtime State Service initialization ===")
 	// }
 
 	// Create and start the HTTP server
-	log.Printf("Preparing to create HTTP server...")
-	log.Printf("Server configuration before creation:")
-	log.Printf("  - Port: 8080")
-	log.Printf("  - Cache Manager: %v", cacheManager != nil)
-	log.Printf("  - Hydrator: %v", hydrator != nil)
-	log.Printf("  - AppInfo Module: %v", appInfoModule != nil)
-	log.Printf("  - Task Module: %v", taskModule != nil)
-	log.Printf("  - History Module: %v", historyModule != nil)
-	log.Printf("  - Runtime State Service: %v", runtimeStateService != nil)
+	glog.V(3).Info("Preparing to create HTTP server...")
+	glog.V(3).Info("Server configuration before creation:")
+	glog.V(3).Info("  - Port: 8080")
+	glog.V(3).Infof("  - Cache Manager: %v", cacheManager != nil)
+	glog.V(3).Infof("  - Hydrator: %v", hydrator != nil)
+	glog.V(3).Infof("  - AppInfo Module: %v", appInfoModule != nil)
+	glog.V(3).Infof("  - Task Module: %v", taskModule != nil)
+	glog.V(3).Infof("  - History Module: %v", historyModule != nil)
+	glog.V(3).Infof("  - Runtime State Service: %v", runtimeStateService != nil)
 
 	server := api.NewServer("8080", cacheManager, hydrator, taskModule, historyModule, runtimeStateService)
-	log.Printf("HTTP server instance created successfully")
-	// log.Printf("Task module instance ID: %s", taskModule.GetInstanceID())
+	glog.Info("HTTP server instance created successfully")
+	// glog.Infof("Task module instance ID: %s", taskModule.GetInstanceID())
 
 	// Lock to system thread
 	runtime.LockOSThread()
 
 	go func() {
-		log.Printf("Starting HTTP server goroutine...")
-		log.Printf("Server configuration in goroutine:")
-		log.Printf("  - Port: 8080")
-		log.Printf("  - Cache Manager: %v", cacheManager != nil)
-		log.Printf("  - Server instance: %v", server != nil)
+		glog.V(3).Info("Starting HTTP server goroutine...")
+		glog.V(3).Info("Server configuration in goroutine:")
+		glog.V(3).Info("  - Port: 8080")
+		glog.V(3).Infof("  - Cache Manager: %v", cacheManager != nil)
+		glog.V(3).Infof("  - Server instance: %v", server != nil)
 
 		if err := server.Start(); err != nil {
-			log.Printf("HTTP server failed to start: %v", err)
-			log.Printf("Error details: %+v", err)
+			glog.Errorf("HTTP server failed to start: %v", err)
+			glog.Errorf("Error details: %+v", err)
 			// Don't use log.Fatal here as it would terminate the program
 			// Instead, we'll let the main goroutine handle the shutdown
 		}
 	}()
 
-	log.Printf("HTTP server startup initiated")
-	log.Printf("Waiting for server to be ready...")
+	glog.V(2).Info("HTTP server startup initiated")
+	glog.V(2).Info("Waiting for server to be ready...")
 	time.Sleep(2 * time.Second) // Give the server a moment to start
-	log.Printf("Server startup sequence completed")
+	glog.V(2).Info("Server startup sequence completed")
 
-	log.Println("Starting server on port 8080")
+	glog.V(2).Info("Starting server on port 8080")
 
 	// Print available endpoints
-	log.Printf("Available endpoints:")
-	log.Println("  GET    /api/v2/market                    - Get market information")
-	log.Println("  GET    /api/v2/apps                      - Get specific application information (supports multiple queries)")
-	log.Println("  GET    /api/v2/apps/{id}/package         - Get rendered installation package for specific application")
-	log.Println("  PUT    /api/v2/apps/{id}/config          - Update specific application render configuration")
-	log.Println("  GET    /api/v2/logs                      - Query logs by specific conditions")
-	log.Println("  POST   /api/v2/apps/{id}/install         - Install application")
-	log.Println("  DELETE /api/v2/apps/{id}/install         - Cancel installation")
-	log.Println("  DELETE /api/v2/apps/{id}                 - Uninstall application")
-	log.Println("  POST   /api/v2/apps/upload               - Upload application installation package")
-	log.Println("  GET    /api/v2/settings/market-source    - Get market source configuration")
-	log.Println("  PUT    /api/v2/settings/market-source    - Set market source configuration")
+	glog.V(3).Info("Available endpoints:")
+	glog.V(3).Info("  GET    /api/v2/market                    - Get market information")
+	glog.V(3).Info("  GET    /api/v2/apps                      - Get specific application information (supports multiple queries)")
+	glog.V(3).Info("  GET    /api/v2/apps/{id}/package         - Get rendered installation package for specific application")
+	glog.V(3).Info("  PUT    /api/v2/apps/{id}/config          - Update specific application render configuration")
+	glog.V(3).Info("  GET    /api/v2/logs                      - Query logs by specific conditions")
+	glog.V(3).Info("  POST   /api/v2/apps/{id}/install         - Install application")
+	glog.V(3).Info("  DELETE /api/v2/apps/{id}/install         - Cancel installation")
+	glog.V(3).Info("  DELETE /api/v2/apps/{id}                 - Uninstall application")
+	glog.V(3).Info("  POST   /api/v2/apps/upload               - Upload application installation package")
+	glog.V(3).Info("  GET    /api/v2/settings/market-source    - Get market source configuration")
+	glog.V(3).Info("  PUT    /api/v2/settings/market-source    - Set market source configuration")
 	if !utils.IsPublicEnvironment() {
-		log.Println("  GET    /api/v2/runtime/state            - Get runtime state (apps, tasks, components)")
+		glog.V(3).Info("  GET    /api/v2/runtime/state            - Get runtime state (apps, tasks, components)")
 	}
 
 	if !utils.IsPublicEnvironment() {
 		// Add history record for successful market setup
-		log.Println("Recording market setup completion in history...")
+		glog.V(3).Info("Recording market setup completion in history...")
 		historyRecord := &history.HistoryRecord{
 			Type:     history.TypeSystem,
 			Message:  "market setup finished",
@@ -384,43 +386,43 @@ func main() {
 		}
 
 		if err := historyModule.StoreRecord(historyRecord); err != nil {
-			log.Printf("Warning: Failed to record market setup completion: %v", err)
+			glog.Errorf("Warning: Failed to record market setup completion: %v", err)
 		} else {
-			log.Printf("Successfully recorded market setup completion with ID: %d", historyRecord.ID)
+			glog.V(3).Infof("Successfully recorded market setup completion with ID: %d", historyRecord.ID)
 		}
 	}
 
-	log.Println("")
-	log.Println("Helm Repository endpoints (port 82):")
-	log.Println("  GET    /index.yaml                       - Get Helm repository index (requires X-Market-User and X-Market-Source headers)")
-	log.Println("  GET    /charts/{filename}.tgz            - Download chart package")
-	log.Println("  GET    /api/v1/charts                    - List all charts")
-	log.Println("  POST   /api/v1/charts                    - Upload chart package")
-	log.Println("  GET    /api/v1/charts/{name}             - Get chart information")
-	log.Println("  DELETE /api/v1/charts/{name}/{version}   - Delete chart version")
-	log.Println("  GET    /api/v1/charts/{name}/versions    - Get chart versions")
-	log.Println("  GET    /api/v1/charts/search             - Search charts")
-	log.Println("  GET    /api/v1/charts/{name}/{version}/metadata - Get chart metadata")
-	log.Println("  GET    /api/v1/health                    - Health check")
-	log.Println("  GET    /api/v1/metrics                   - Get metrics")
-	log.Println("  GET    /api/v1/config                    - Get repository configuration")
-	log.Println("  PUT    /api/v1/config                    - Update repository configuration")
-	log.Println("  POST   /api/v1/index/rebuild             - Rebuild index")
-	log.Println("")
-	log.Println("Example Helm Repository usage:")
-	log.Println("  curl -H 'X-Market-User: user1' -H 'X-Market-Source: web-console' http://localhost:82/index.yaml")
-	log.Println("  helm repo add myrepo http://localhost:82 --header 'X-Market-User=user1' --header 'X-Market-Source=web-console'")
-	log.Println("")
+	glog.V(3).Info("")
+	glog.V(3).Info("Helm Repository endpoints (port 82):")
+	glog.V(3).Info("  GET    /index.yaml                       - Get Helm repository index (requires X-Market-User and X-Market-Source headers)")
+	glog.V(3).Info("  GET    /charts/{filename}.tgz            - Download chart package")
+	glog.V(3).Info("  GET    /api/v1/charts                    - List all charts")
+	glog.V(3).Info("  POST   /api/v1/charts                    - Upload chart package")
+	glog.V(3).Info("  GET    /api/v1/charts/{name}             - Get chart information")
+	glog.V(3).Info("  DELETE /api/v1/charts/{name}/{version}   - Delete chart version")
+	glog.V(3).Info("  GET    /api/v1/charts/{name}/versions    - Get chart versions")
+	glog.V(3).Info("  GET    /api/v1/charts/search             - Search charts")
+	glog.V(3).Info("  GET    /api/v1/charts/{name}/{version}/metadata - Get chart metadata")
+	glog.V(3).Info("  GET    /api/v1/health                    - Health check")
+	glog.V(3).Info("  GET    /api/v1/metrics                   - Get metrics")
+	glog.V(3).Info("  GET    /api/v1/config                    - Get repository configuration")
+	glog.V(3).Info("  PUT    /api/v1/config                    - Update repository configuration")
+	glog.V(3).Info("  POST   /api/v1/index/rebuild             - Rebuild index")
+	glog.V(3).Info("")
+	glog.V(3).Info("Example Helm Repository usage:")
+	glog.V(3).Info("  curl -H 'X-Market-User: user1' -H 'X-Market-Source: web-console' http://localhost:82/index.yaml")
+	glog.V(3).Info("  helm repo add myrepo http://localhost:82 --header 'X-Market-User=user1' --header 'X-Market-Source=web-console'")
+	glog.V(3).Info("")
 
 	// // Create and start DataWatcherRepo for monitoring state changes
-	// log.Println("=== Creating DataWatcherRepo for state change monitoring ===")
+	// glog.Info("=== Creating DataWatcherRepo for state change monitoring ===")
 
 	// // Get Redis client from AppInfo module
 	// var redisClientForRepo *appinfo.RedisClient
 	// if !utils.IsPublicEnvironment() && appInfoModule != nil {
 	// 	redisClientForRepo = appInfoModule.GetRedisClient()
 	// } else {
-	// 	log.Println("Public environment detected or AppInfo module not available, skipping DataWatcherRepo creation")
+	// 	glog.Info("Public environment detected or AppInfo module not available, skipping DataWatcherRepo creation")
 	// }
 
 	// if redisClientForRepo != nil {
@@ -429,19 +431,19 @@ func main() {
 
 	// 	// Start DataWatcherRepo
 	// 	if err := dataWatcherRepo.Start(); err != nil {
-	// 		log.Printf("Warning: Failed to start DataWatcherRepo: %v", err)
+	// 		glog.Errorf("Warning: Failed to start DataWatcherRepo: %v", err)
 	// 	} else {
-	// 		log.Println("DataWatcherRepo started successfully for monitoring state changes")
+	// 		glog.Info("DataWatcherRepo started successfully for monitoring state changes")
 
 	// 		// Set DataWatcherRepo reference in AppInfo module if available
 	// 		if appInfoModule != nil {
 	// 			// Note: We need to add a method to set DataWatcherRepo in AppInfoModule
 	// 			// For now, we'll just log that it's created
-	// 			log.Println("DataWatcherRepo is ready to monitor image info updates and other state changes")
+	// 			glog.Info("DataWatcherRepo is ready to monitor image info updates and other state changes")
 	// 		}
 	// 	}
 	// }
-	// log.Println("=== End DataWatcherRepo creation ===")
+	// glog.Info("=== End DataWatcherRepo creation ===")
 
 	// Setup graceful shutdown
 	c := make(chan os.Signal, 1)
@@ -449,7 +451,7 @@ func main() {
 
 	// Wait for interrupt signal
 	<-c
-	log.Println("Shutting down gracefully...")
+	glog.V(3).Info("Shutting down gracefully...")
 
 	// Set a timeout for graceful shutdown
 	shutdownTimeout := 30 * time.Second
@@ -465,48 +467,48 @@ func main() {
 
 		// Stop all modules in reverse order
 		if runtimeStateService != nil {
-			log.Println("Stopping Runtime State Service...")
+			glog.V(3).Info("Stopping Runtime State Service...")
 			runtimeStateService.Stop()
 		}
 
-		log.Println("Stopping Task module...")
+		glog.V(3).Info("Stopping Task module...")
 		if taskModule != nil {
 			taskModule.Stop()
 		}
 
-		log.Println("Stopping History module...")
+		glog.V(3).Info("Stopping History module...")
 		if historyModule != nil {
 			if err := historyModule.Close(); err != nil {
-				log.Printf("Error stopping History module: %v", err)
+				glog.Errorf("Error stopping History module: %v", err)
 			}
 		}
 
-		log.Println("Stopping AppInfo module...")
+		glog.V(3).Info("Stopping AppInfo module...")
 		if appInfoModule != nil {
 			if err := appInfoModule.Stop(); err != nil {
-				log.Printf("Error stopping AppInfo module: %v", err)
+				glog.Errorf("Error stopping AppInfo module: %v", err)
 			}
 		}
 
-		log.Println("Stopping Settings module...")
+		glog.V(3).Info("Stopping Settings module...")
 		if redisClient != nil {
 			// Type assert to access Close method
 			if closer, ok := redisClient.(interface{ Close() error }); ok {
 				if err := closer.Close(); err != nil {
-					log.Printf("Error stopping Redis client: %v", err)
+					glog.Errorf("Error stopping Redis client: %v", err)
 				}
 			}
 		}
 
-		log.Println("Note: Helm Repository server will stop automatically when main process exits")
+		glog.V(3).Info("Note: Helm Repository server will stop automatically when main process exits")
 	}()
 
 	// Wait for shutdown completion or timeout
 	select {
 	case <-shutdownCtx.Done():
-		log.Printf("Shutdown timeout (%v) exceeded, forcing exit", shutdownTimeout)
+		glog.V(3).Infof("Shutdown timeout (%v) exceeded, forcing exit", shutdownTimeout)
 		os.Exit(1)
 	case <-shutdownComplete:
-		log.Println("All modules stopped. Goodbye!")
+		glog.V(3).Info("All modules stopped. Goodbye!")
 	}
 }

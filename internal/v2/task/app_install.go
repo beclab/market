@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 
 	"net/http"
 	"os"
 	"strings"
 
 	"market/internal/v2/settings"
+
+	"github.com/golang/glog"
 )
 
 // InstallOptions represents the options for app installation
@@ -42,7 +43,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	appName := task.AppName
 	user := task.User
 
-	log.Printf("Starting app installation: app=%s, user=%s, task_id=%s", appName, user, task.ID)
+	glog.V(2).Infof("Starting app installation: app=%s, user=%s, task_id=%s", appName, user, task.ID)
 
 	// Check if there's already a running or pending install task for the same app
 	tm.mu.RLock()
@@ -51,7 +52,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	for _, runningTask := range tm.runningTasks {
 		if runningTask.Type == InstallApp && runningTask.AppName == appName && runningTask.ID != task.ID {
 			tm.mu.RUnlock()
-			log.Printf("Installation failed: another install task is already running for app: %s, existing task ID: %s", appName, runningTask.ID)
+			glog.Warningf("Installation failed: another install task is already running for app: %s, existing task ID: %s", appName, runningTask.ID)
 			errorResult := map[string]interface{}{
 				"operation":        "install",
 				"app_name":         appName,
@@ -69,21 +70,21 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	token, ok := task.Metadata["token"].(string)
 	if !ok {
-		log.Printf("Missing token in task metadata for task: %s", task.ID)
+		glog.Warningf("Missing token in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
 	// Get app source from metadata
 	appSource, ok := task.Metadata["source"].(string)
 	if !ok {
-		log.Printf("Missing source in task metadata for task: %s", task.ID)
+		glog.Warningf("Missing source in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing source in task metadata")
 	}
 
 	// Get cfgType from metadata
 	cfgType, ok := task.Metadata["cfgType"].(string)
 	if !ok {
-		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
+		glog.Warningf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
 		cfgType = "app" // Default to app type
 	}
 
@@ -97,7 +98,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		apiSource = "market"
 	}
 
-	log.Printf("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
+	glog.V(2).Infof("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
@@ -114,16 +115,16 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	// } else {
 	// 	// Use regular app API for other types
 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)
-	log.Printf("Using regular app API for installation: %s", urlStr)
+	glog.V(3).Infof("Using regular app API for installation: %s", urlStr)
 	// }
 
-	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
+	glog.V(2).Infof("App service URL: %s for task: %s", urlStr, task.ID)
 
 	// Get envs from metadata
 	var envs []AppEnvVar
 	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
 		envs, _ = envsData.([]AppEnvVar)
-		log.Printf("Retrieved %d environment variables for task: %s", len(envs), task.ID)
+		glog.V(3).Infof("Retrieved %d environment variables for task: %s", len(envs), task.ID)
 	}
 
 	// Get VC from purchase receipt and inject into environment variables
@@ -132,7 +133,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		settingsManager = tm.settingsManager
 		tm.mu.RUnlock()
 	} else {
-		log.Printf("Failed to acquire read lock for settingsManager, skipping VC injection for task: %s", task.ID)
+		glog.Warningf("[TryRLock] Failed to acquire read lock for settingsManager, skipping VC injection for task: %s, user: %s, app: %s", task.ID, task.User, task.AppName)
 	}
 
 	if settingsManager != nil {
@@ -140,7 +141,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		if realIDRaw, ok := task.Metadata["realAppID"].(string); ok && strings.TrimSpace(realIDRaw) != "" {
 			vcAppID = strings.TrimSpace(realIDRaw)
 		}
-		log.Printf("App install VC lookup using appID=%s (display name %s) for task: %s", vcAppID, appName, task.ID)
+		glog.V(2).Infof("App install VC lookup using appID=%s (display name %s) for task: %s", vcAppID, appName, task.ID)
 
 		vc := getVCForInstall(settingsManager, user, vcAppID, task.Metadata)
 		if vc != "" {
@@ -150,7 +151,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 				if envs[i].EnvName == "VERIFIABLE_CREDENTIAL" {
 					envs[i].Value = vc
 					vcExists = true
-					log.Printf("Updated VERIFIABLE_CREDENTIAL in envs for task: %s", task.ID)
+					glog.V(2).Infof("Updated VERIFIABLE_CREDENTIAL in envs for task: %s", task.ID)
 					break
 				}
 			}
@@ -160,13 +161,13 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 					EnvName: "VERIFIABLE_CREDENTIAL",
 					Value:   vc,
 				})
-				log.Printf("Added VERIFIABLE_CREDENTIAL to envs for task: %s", task.ID)
+				glog.V(2).Infof("Added VERIFIABLE_CREDENTIAL to envs for task: %s", task.ID)
 			}
 		} else {
-			log.Printf("VC not found for app installation, skipping VERIFIABLE_CREDENTIAL injection for task: %s", task.ID)
+			glog.V(3).Infof("VC not found for app installation, skipping VERIFIABLE_CREDENTIAL injection for task: %s", task.ID)
 		}
 	} else {
-		log.Printf("Settings manager not available, skipping VC injection for task: %s", task.ID)
+		glog.V(3).Infof("Settings manager not available, skipping VC injection for task: %s", task.ID)
 	}
 
 	// Get images from metadata
@@ -187,10 +188,10 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 	ms, err := json.Marshal(installInfo)
 	if err != nil {
-		log.Printf("Failed to marshal install info for task %s: %v", task.ID, err)
+		glog.Errorf("Failed to marshal install info for task %s: %v", task.ID, err)
 		return "", err
 	}
-	log.Printf("Install request prepared: url=%s, installInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
+	glog.V(2).Infof("Install request prepared: url=%s, installInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
 
 	headers := map[string]string{
 		"X-Authorization": token,
@@ -201,10 +202,10 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	log.Printf("Sending HTTP request for app installation: task=%s", task.ID)
+	glog.V(2).Infof("Sending HTTP request for app installation: task=%s", task.ID)
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
-		log.Printf("HTTP request failed for app installation: task=%s, error=%v", task.ID, err)
+		glog.Errorf("HTTP request failed for app installation: task=%s, error=%v", task.ID, err)
 		// Create detailed error result
 		errorResult := map[string]interface{}{
 			"operation":  "install",
@@ -221,12 +222,12 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		return string(errorJSON), err
 	}
 
-	log.Printf("HTTP request completed successfully for app installation: task=%s, response_length=%d", task.ID, len(response))
+	glog.V(2).Infof("HTTP request completed successfully for app installation: task=%s, response_length=%d, resp=%s", task.ID, len(response), response)
 
 	// Parse response to extract opID if installation is successful
 	var responseData map[string]interface{}
 	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
-		log.Printf("Failed to parse response JSON for task %s: %v", task.ID, err)
+		glog.Errorf("Failed to parse response JSON for task %s: %v", task.ID, err)
 		// Create error result for JSON parsing failure
 		errorResult := map[string]interface{}{
 			"operation":    "install",
@@ -249,9 +250,9 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		if data, ok := responseData["data"].(map[string]interface{}); ok {
 			if opID, ok := data["opID"].(string); ok && opID != "" {
 				task.OpID = opID
-				log.Printf("Successfully extracted opID: %s for task: %s", opID, task.ID)
+				glog.V(3).Infof("Successfully extracted opID: %s for task: %s", opID, task.ID)
 			} else {
-				log.Printf("opID not found in response data for task: %s", task.ID)
+				glog.V(3).Infof("opID not found in response data for task: %s", task.ID)
 				// Return backend response with additional context
 				errorResult := map[string]interface{}{
 					"operation":        "install",
@@ -269,7 +270,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 				return string(errorJSON), fmt.Errorf("opID not found in response data")
 			}
 		} else {
-			log.Printf("Data field not found or not a map in response for task: %s", task.ID)
+			glog.V(3).Infof("Data field not found or not a map in response for task: %s", task.ID)
 			// Return backend response with additional context
 			errorResult := map[string]interface{}{
 				"operation":        "install",
@@ -287,7 +288,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 			return string(errorJSON), fmt.Errorf("data field not found or not a map in response")
 		}
 	} else {
-		log.Printf("Installation code is not 200 for task: %s, code: %v", task.ID, code)
+		glog.V(3).Infof("Installation code is not 200 for task: %s, code: %v", task.ID, code)
 		// Return backend response with additional context
 		errorResult := map[string]interface{}{
 			"operation":        "install",
@@ -319,7 +320,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		"status":           "success",
 	}
 	successJSON, _ := json.Marshal(successResult)
-	log.Printf("App installation completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
+	glog.V(2).Infof("App installation completed successfully: task=%s, result_length=%d, result=%s", task.ID, len(successJSON), string(successJSON))
 	return string(successJSON), nil
 }
 

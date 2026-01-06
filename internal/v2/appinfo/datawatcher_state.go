@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -18,6 +17,7 @@ import (
 	"market/internal/v2/task"
 	"market/internal/v2/utils"
 
+	"github.com/golang/glog"
 	"github.com/nats-io/nats.go"
 )
 
@@ -65,10 +65,10 @@ type AppStateMessage struct {
 
 // DelayedMessage represents a message that needs to be processed later
 type DelayedMessage struct {
-	msg        *nats.Msg
+	msg         *nats.Msg
 	appStateMsg AppStateMessage
-	retryCount int
-	nextRetry  time.Time
+	retryCount  int
+	nextRetry   time.Time
 }
 
 // DataWatcherState handles app state messages from NATS
@@ -141,11 +141,11 @@ func (dw *DataWatcherState) resolveInvisibleFlag(raw *bool, entranceName, appNam
 	// This matches the behavior during startup where we get invisible from spec.entrances
 	if dw != nil && appName != "" && userID != "" {
 		if specInvisible, err := dw.fetchInvisibleFromAppService(appName, userID, entranceName); err == nil {
-			log.Printf("DEBUG: resolveInvisibleFlag - fetched invisible=%t for entrance %s (app=%s, user=%s) from app-service API",
+			glog.V(3).Infof("DEBUG: resolveInvisibleFlag - fetched invisible=%t for entrance %s (app=%s, user=%s) from app-service API",
 				specInvisible, entranceName, appName, userID)
 			return specInvisible
 		} else {
-			log.Printf("DEBUG: resolveInvisibleFlag - failed to fetch invisible for entrance %s (app=%s, user=%s) from app-service: %v",
+			glog.Errorf("DEBUG: resolveInvisibleFlag - failed to fetch invisible for entrance %s (app=%s, user=%s) from app-service: %v",
 				entranceName, appName, userID, err)
 		}
 	}
@@ -162,14 +162,14 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 		if appCache, exists := dw.appServiceCache[cacheKey]; exists {
 			if invisible, found := appCache[entranceName]; found {
 				dw.appServiceCacheMutex.RUnlock()
-				log.Printf("DEBUG: fetchInvisibleFromAppService - using cached invisible=%t for entrance %s (app=%s, user=%s)",
+				glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - using cached invisible=%t for entrance %s (app=%s, user=%s)",
 					invisible, entranceName, appName, userID)
 				return invisible, nil
 			}
 		}
 		dw.appServiceCacheMutex.RUnlock()
 	} else {
-		log.Printf("DEBUG: fetchInvisibleFromAppService - read lock not available, skipping cache check for entrance %s (app=%s, user=%s)",
+		glog.Warningf("[TryRLock] DEBUG: fetchInvisibleFromAppService - read lock not available, skipping cache check for entrance %s (app=%s, user=%s)",
 			entranceName, appName, userID)
 	}
 
@@ -229,10 +229,10 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 					dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
 				}
 				dw.appServiceCacheMutex.Unlock()
-				log.Printf("DEBUG: fetchInvisibleFromAppService - fetched and cached invisible=%t for entrance %s (app=%s, user=%s)",
+				glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - fetched and cached invisible=%t for entrance %s (app=%s, user=%s)",
 					invisibleValue, entranceName, appName, userID)
 			} else {
-				log.Printf("DEBUG: fetchInvisibleFromAppService - write lock not available, skipping cache update for entrance %s (app=%s, user=%s)",
+				glog.Warningf("[TryLock] DEBUG: fetchInvisibleFromAppService - write lock not available, skipping cache update for entrance %s (app=%s, user=%s)",
 					entranceName, appName, userID)
 			}
 
@@ -270,28 +270,28 @@ func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule
 // SetTaskModule updates the task module reference without restarting subscriptions.
 func (dw *DataWatcherState) SetTaskModule(taskModule *task.TaskModule) {
 	dw.taskModule = taskModule
-	log.Println("DataWatcherState task module updated")
+	glog.V(3).Info("DataWatcherState task module updated")
 }
 
 // SetHistoryModule updates the history module reference without restarting subscriptions.
 func (dw *DataWatcherState) SetHistoryModule(historyModule *history.HistoryModule) {
 	dw.historyModule = historyModule
-	log.Println("DataWatcherState history module updated")
+	glog.V(3).Info("DataWatcherState history module updated")
 }
 
 // Start starts the data watcher
 func (dw *DataWatcherState) Start() error {
 
 	if utils.IsPublicEnvironment() {
-		log.Println("Public environment detected, DataWatcherState disabled")
+		glog.V(3).Info("Public environment detected, DataWatcherState disabled")
 		return nil
 	}
 
-	log.Println("Starting data watcher in production mode")
+	glog.V(2).Info("Starting data watcher in production mode")
 	// Start NATS connection in a goroutine
 	go func() {
 		if err := dw.startNatsConnection(); err != nil {
-			log.Printf("Error in NATS connection: %v", err)
+			glog.Errorf("Error in NATS connection: %v", err)
 		}
 	}()
 	// Start delayed message processor
@@ -305,7 +305,7 @@ func (dw *DataWatcherState) Stop() error {
 
 	if dw.sub != nil {
 		if err := dw.sub.Unsubscribe(); err != nil {
-			log.Printf("Error unsubscribing from NATS: %v", err)
+			glog.Errorf("Error unsubscribing from NATS: %v", err)
 		}
 	}
 
@@ -316,11 +316,11 @@ func (dw *DataWatcherState) Stop() error {
 	// Close history module
 	if dw.historyModule != nil {
 		if err := dw.historyModule.Close(); err != nil {
-			log.Printf("Error closing history module: %v", err)
+			glog.Errorf("Error closing history module: %v", err)
 		}
 	}
 
-	log.Println("Data watcher stopped")
+	glog.V(3).Info("Data watcher stopped")
 	return nil
 }
 
@@ -335,16 +335,16 @@ func (dw *DataWatcherState) startNatsConnection() error {
 
 	opts = append(opts,
 		nats.DisconnectHandler(func(nc *nats.Conn) {
-			log.Printf("[NATS] Disconnected from %s", nc.ConnectedUrl())
+			glog.V(2).Infof("[NATS] Disconnected from %s", nc.ConnectedUrl())
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			log.Printf("[NATS] Reconnected to %s", nc.ConnectedUrl())
+			glog.V(2).Infof("[NATS] Reconnected to %s", nc.ConnectedUrl())
 		}),
 		nats.ClosedHandler(func(nc *nats.Conn) {
-			log.Printf("[NATS] Connection closed: %v", nc.LastError())
+			glog.V(2).Infof("[NATS] Connection closed: %v", nc.LastError())
 		}),
 		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
-			log.Printf("[NATS] Error: %v", err)
+			glog.Errorf("[NATS] Error: %v", err)
 		}),
 		nats.MaxReconnects(60),
 		nats.ReconnectWait(2*time.Second),
@@ -356,7 +356,7 @@ func (dw *DataWatcherState) startNatsConnection() error {
 	}
 
 	dw.nc = nc
-	log.Printf("Connected to NATS at %s", natsURL)
+	glog.V(3).Infof("Connected to NATS at %s", natsURL)
 
 	// Subscribe to the subject
 	sub, err := nc.Subscribe(dw.subject, dw.handleMessage)
@@ -365,7 +365,7 @@ func (dw *DataWatcherState) startNatsConnection() error {
 	}
 
 	dw.sub = sub
-	log.Printf("Subscribed to NATS subject: %s", dw.subject)
+	glog.V(2).Infof("Subscribed to NATS subject: %s", dw.subject)
 
 	// Wait for context cancellation
 	<-dw.ctx.Done()
@@ -374,120 +374,120 @@ func (dw *DataWatcherState) startNatsConnection() error {
 
 // handleMessage processes incoming NATS messages
 func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
-	log.Printf("Received message from NATS subject %s: %s", msg.Subject, string(msg.Data))
+	glog.V(2).Infof("State - Received message from NATS subject %s: %s", msg.Subject, string(msg.Data))
 
 	var appStateMsg AppStateMessage
 	if err := json.Unmarshal(msg.Data, &appStateMsg); err != nil {
-		log.Printf("Error parsing JSON message: %v", err)
+		glog.Errorf("Error parsing JSON message: %v", err)
 		return
 	}
 
 	// Check if this is an install operation with running state
 	if appStateMsg.OpType == "install" && appStateMsg.State == "running" {
-		log.Printf("Detected install operation with running state for opID: %s, app: %s, user: %s",
+		glog.V(2).Infof("Detected install operation with running state for opID: %s, app: %s, user: %s",
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		// Call InstallTaskSucceed if task module is available
 		if dw.taskModule != nil {
 			if err := dw.taskModule.InstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
-				log.Printf("Failed to mark install task as succeeded for opID %s: %v", appStateMsg.OpID, err)
+				glog.Errorf("Failed to mark install task as succeeded for opID %s: %v", appStateMsg.OpID, err)
 			} else {
-				log.Printf("Successfully marked install task as succeeded for opID: %s, app: %s, user: %s",
+				glog.V(2).Infof("Successfully marked install task as succeeded for opID: %s, app: %s, user: %s",
 					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 			}
 		} else {
-			log.Printf("Task module not available, cannot mark install task as succeeded for opID: %s", appStateMsg.OpID)
+			glog.V(3).Infof("Task module not available, cannot mark install task as succeeded for opID: %s", appStateMsg.OpID)
 		}
 	}
 
 	// Check if this is an install operation with installFailed or downloadFailed state
 	if appStateMsg.OpType == "install" && (appStateMsg.State == "installFailed" || appStateMsg.State == "downloadFailed" || appStateMsg.State == "installCancelFailed" || appStateMsg.State == "downloadCancelFailed") {
-		log.Printf("Detected install operation with %s state for opID: %s, app: %s, user: %s",
+		glog.V(2).Infof("Detected install operation with %s state for opID: %s, app: %s, user: %s",
 			appStateMsg.State, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		// Call InstallTaskFailed if task module is available
 		if dw.taskModule != nil {
 			errorMsg := fmt.Sprintf("Installation failed for app %s", appStateMsg.Name)
 			if err := dw.taskModule.InstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
-				log.Printf("Failed to mark install task as failed for opID %s: %v", appStateMsg.OpID, err)
+				glog.Errorf("Failed to mark install task as failed for opID %s: %v", appStateMsg.OpID, err)
 			} else {
-				log.Printf("Successfully marked install task as failed for opID: %s, app: %s, user: %s",
+				glog.V(2).Infof("Successfully marked install task as failed for opID: %s, app: %s, user: %s",
 					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 			}
 		} else {
-			log.Printf("Task module not available, cannot mark install task as failed for opID: %s", appStateMsg.OpID)
+			glog.V(3).Infof("Task module not available, cannot mark install task as failed for opID: %s", appStateMsg.OpID)
 		}
 	}
 
 	// Check if this is an install operation with installCanceled state
 	if appStateMsg.OpType == "install" && (appStateMsg.State == "installCanceled" || appStateMsg.State == "installingCanceled") {
-		log.Printf("Detected install operation with installCanceled state for opID: %s, app: %s, user: %s",
+		glog.V(2).Infof("Detected install operation with installCanceled state for opID: %s, app: %s, user: %s",
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		// Call CancelInstallTaskSucceed if task module is available
 		if dw.taskModule != nil {
 			if err := dw.taskModule.CancelInstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
-				log.Printf("Failed to mark cancel install task as succeeded for opID %s: %v", appStateMsg.OpID, err)
+				glog.Errorf("Failed to mark cancel install task as succeeded for opID %s: %v", appStateMsg.OpID, err)
 			} else {
-				log.Printf("Successfully marked cancel install task as succeeded for opID: %s, app: %s, user: %s",
+				glog.V(2).Infof("Successfully marked cancel install task as succeeded for opID: %s, app: %s, user: %s",
 					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 			}
 		} else {
-			log.Printf("Task module not available, cannot mark cancel install task as succeeded for opID: %s", appStateMsg.OpID)
+			glog.V(3).Infof("Task module not available, cannot mark cancel install task as succeeded for opID: %s", appStateMsg.OpID)
 		}
 	}
 
 	// Check if this is an install operation with installCancelFailed or downloadCancelFailed state
 	if appStateMsg.OpType == "install" && (appStateMsg.State == "installCancelFailed" || appStateMsg.State == "downloadCancelFailed") {
-		log.Printf("Detected install operation with %s state for opID: %s, app: %s, user: %s",
+		glog.V(2).Infof("Detected install operation with %s state for opID: %s, app: %s, user: %s",
 			appStateMsg.State, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		// Call CancelInstallTaskFailed if task module is available
 		if dw.taskModule != nil {
 			errorMsg := fmt.Sprintf("Cancel installation failed for app %s", appStateMsg.Name)
 			if err := dw.taskModule.CancelInstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
-				log.Printf("Failed to mark cancel install task as failed for opID %s: %v", appStateMsg.OpID, err)
+				glog.Errorf("Failed to mark cancel install task as failed for opID %s: %v", appStateMsg.OpID, err)
 			} else {
-				log.Printf("Successfully marked cancel install task as failed for opID: %s, app: %s, user: %s",
+				glog.V(2).Infof("Successfully marked cancel install task as failed for opID: %s, app: %s, user: %s",
 					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 			}
 		} else {
-			log.Printf("Task module not available, cannot mark cancel install task as failed for opID: %s", appStateMsg.OpID)
+			glog.V(3).Infof("Task module not available, cannot mark cancel install task as failed for opID: %s", appStateMsg.OpID)
 		}
 	}
 
 	// Check if this is an uninstall operation with uninstalled state
 	if appStateMsg.OpType == "uninstall" && appStateMsg.State == "uninstalled" {
-		log.Printf("Detected uninstall operation with uninstalled state for opID: %s, app: %s, user: %s",
+		glog.V(3).Infof("Detected uninstall operation with uninstalled state for opID: %s, app: %s, user: %s",
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		if dw.taskModule != nil {
 			if err := dw.taskModule.UninstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
-				log.Printf("Failed to mark uninstall task as succeeded for opID %s: %v", appStateMsg.OpID, err)
+				glog.Errorf("Failed to mark uninstall task as succeeded for opID %s: %v", appStateMsg.OpID, err)
 			} else {
-				log.Printf("Successfully marked uninstall task as succeeded for opID: %s, app: %s, user: %s",
+				glog.V(2).Infof("Successfully marked uninstall task as succeeded for opID: %s, app: %s, user: %s",
 					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 			}
 		} else {
-			log.Printf("Task module not available, cannot mark uninstall task as succeeded for opID: %s", appStateMsg.OpID)
+			glog.V(2).Infof("Task module not available, cannot mark uninstall task as succeeded for opID: %s", appStateMsg.OpID)
 		}
 	}
 
 	// Check if this is an uninstall operation with uninstallFailed state
 	if appStateMsg.OpType == "uninstall" && appStateMsg.State == "uninstallFailed" {
-		log.Printf("Detected uninstall operation with uninstallFailed state for opID: %s, app: %s, user: %s",
+		glog.V(3).Infof("Detected uninstall operation with uninstallFailed state for opID: %s, app: %s, user: %s",
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		if dw.taskModule != nil {
 			errorMsg := fmt.Sprintf("Uninstallation failed for app %s", appStateMsg.Name)
 			if err := dw.taskModule.UninstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
-				log.Printf("Failed to mark uninstall task as failed for opID %s: %v", appStateMsg.OpID, err)
+				glog.Errorf("Failed to mark uninstall task as failed for opID %s: %v", appStateMsg.OpID, err)
 			} else {
-				log.Printf("Successfully marked uninstall task as failed for opID: %s, app: %s, user: %s",
+				glog.V(2).Infof("Successfully marked uninstall task as failed for opID: %s, app: %s, user: %s",
 					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 			}
 		} else {
-			log.Printf("Task module not available, cannot mark uninstall task as failed for opID: %s", appStateMsg.OpID)
+			glog.V(3).Infof("Task module not available, cannot mark uninstall task as failed for opID: %s", appStateMsg.OpID)
 		}
 	}
 
@@ -495,19 +495,19 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 	// Or if task is not found in memory and we need to wait for database persistence
 	if appStateMsg.OpType == "install" && appStateMsg.State == "pending" {
 		if dw.taskModule != nil {
-			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(appStateMsg.Name, appStateMsg.User)
+			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(appStateMsg.Name, appStateMsg.User) // + install & pending
 			if !lockAcquired {
 				// If we can't acquire the lock, delay processing to be safe
 				// This avoids blocking NATS message processing
-				log.Printf("Delaying pending state message for app=%s, user=%s, opID=%s - failed to acquire lock",
+				glog.V(2).Infof("Delaying pending state message for app=%s, user=%s, opID=%s - failed to acquire lock",
 					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
-				dw.addDelayedMessage(msg, appStateMsg)
+				dw.addDelayedMessage(msg, appStateMsg) // + install & pending
 				return
 			}
 			if hasPendingTask {
 				// If there are pending/running install tasks, delay processing this message
 				// This avoids matching to the wrong source when a new install starts
-				log.Printf("Delaying pending state message for app=%s, user=%s, opID=%s - found pending/running install task",
+				glog.V(2).Infof("Delaying pending state message for app=%s, user=%s, opID=%s - found pending/running install task",
 					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
 				dw.addDelayedMessage(msg, appStateMsg)
 				return
@@ -535,13 +535,13 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 				err = db.QueryRow(query, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
 				if err != nil {
 					// Task not found in database, delay to wait for task to be persisted
-					log.Printf("Delaying pending state message for app=%s, user=%s, opID=%s - task not found in DB, waiting for persistence",
+					glog.Errorf("Delaying pending state message for app=%s, user=%s, opID=%s - task not found in DB, waiting for persistence",
 						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
 					dw.addDelayedMessage(msg, appStateMsg)
 					return
 				}
 				// Task found in database, can proceed (storeStateToCache will use OpID to query from DB)
-				log.Printf("Found task with OpID=%s in database for pending state message (app=%s, user=%s), proceeding with processing",
+				glog.V(2).Infof("Found task with OpID=%s in database for pending state message (app=%s, user=%s), proceeding with processing",
 					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 			}
 		}
@@ -549,17 +549,16 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 
 	userData := dw.cacheManager.getUserData(appStateMsg.User)
 	if userData == nil {
-		log.Printf("User data not found for user %s", appStateMsg.User)
+		glog.V(3).Infof("User data not found for user %s", appStateMsg.User)
 		return
 	}
 
 	for _, sourceData := range userData.Sources {
 		for _, appState := range sourceData.AppStateLatest {
-			if appState.Status.Name == appStateMsg.Name &&
-				appState.Status.State == appStateMsg.State {
+			if appState.Status.Name == appStateMsg.Name { // && appState.Status.State == appStateMsg.State
 
 				if (appStateMsg.EntranceStatuses == nil || len(appStateMsg.EntranceStatuses) == 0) && appState.Status.Progress == appStateMsg.Progress {
-					log.Printf("App state message is the same as the cached app state message for app %s, user %s, source %s",
+					glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s",
 						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
 					return
 				}
@@ -571,12 +570,12 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 
 					if err1 == nil && err2 == nil {
 						if statusTime.After(createTime) {
-							log.Printf("Cached app state is newer than incoming message for app %s, user %s, source %s. Skipping update.",
+							glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s. Skipping update.",
 								appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
 							return
 						}
 					} else {
-						log.Printf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
+						glog.Errorf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
 							appState.Status.StatusTime, appStateMsg.CreateTime, err1, err2)
 					}
 				}
@@ -585,20 +584,20 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 	}
 
 	// Process the message
-	dw.processMessageInternal(msg, appStateMsg)
+	dw.processMessageInternal(msg, appStateMsg) // + handler message
 }
 
 // storeHistoryRecord stores the app state message as a history record
 func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage string) {
 	if dw.historyModule == nil {
-		log.Printf("History module not available, skipping record storage")
+		glog.V(3).Infof("History module not available, skipping record storage")
 		return
 	}
 
 	// Special handling for downloading state - check progress difference
 	if msg.State == "downloading" {
 		if dw.shouldSkipDownloadingMessage(msg) {
-			log.Printf("Skipping downloading message for app %s, user %s - progress difference is within 10", msg.Name, msg.User)
+			glog.V(3).Infof("Skipping downloading message for app %s, user %s - progress difference is within 10", msg.Name, msg.User)
 			return
 		}
 	}
@@ -613,9 +612,9 @@ func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage s
 	}
 
 	if err := dw.historyModule.StoreRecord(record); err != nil {
-		log.Printf("Failed to store history record: %v", err)
+		glog.Errorf("Failed to store history record: %v", err)
 	} else {
-		log.Printf("Stored history record for app %s with user %s and ID %d", msg.Name, msg.User, record.ID)
+		glog.V(3).Infof("Stored history record for app %s with user %s and ID %d", msg.Name, msg.User, record.ID)
 	}
 }
 
@@ -645,38 +644,40 @@ func isFailedOrCanceledState(state string) bool {
 // storeStateToCache stores the app state message to cache as AppStateLatestData
 func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	if dw.cacheManager == nil {
-		log.Printf("Cache manager not available, skipping cache storage")
+		glog.V(3).Infof("Cache manager not available, skipping cache storage")
 		return
 	}
 
 	userID := msg.User
 	if userID == "" {
-		log.Printf("User ID is empty, skipping cache storage for app %s", msg.Name)
+		glog.V(3).Infof("User ID is empty, skipping cache storage for app %s", msg.Name)
 		return
 	}
 
 	// Preload existing invisible flags to avoid overwriting when upstream omits the field.
 	existingInvisible := dw.getExistingEntranceInvisibleMap(userID, msg.Name)
 	if len(existingInvisible) > 0 {
-		log.Printf("DEBUG: storeStateToCache - found %d existing invisible flags in cache for app %s (user=%s)",
+		glog.V(2).Infof("DEBUG: storeStateToCache - found %d existing invisible flags in cache for app %s (user=%s)",
 			len(existingInvisible), msg.Name, userID)
 		for name, val := range existingInvisible {
-			log.Printf("DEBUG: storeStateToCache - cached invisible[%s]=%t", name, val)
+			glog.V(3).Infof("DEBUG: storeStateToCache - cached invisible[%s]=%t", name, val)
 		}
 	} else {
-		log.Printf("DEBUG: storeStateToCache - no existing invisible flags found in cache for app %s (user=%s)",
+		glog.V(3).Infof("DEBUG: storeStateToCache - no existing invisible flags found in cache for app %s (user=%s)",
 			msg.Name, userID)
 	}
 
 	// Add debug logging for entranceStatuses
-	log.Printf("DEBUG: storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
+	if len(msg.EntranceStatuses) > 0 {
+		glog.V(2).Infof("DEBUG: storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
+	}
 	for i, entrance := range msg.EntranceStatuses {
 		upstreamValue := "nil"
 		if entrance.Invisible != nil {
 			upstreamValue = fmt.Sprintf("%t", *entrance.Invisible)
 		}
 		invisible := dw.resolveInvisibleFlag(entrance.Invisible, entrance.Name, msg.Name, userID, existingInvisible)
-		log.Printf("DEBUG: storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, UpstreamInvisible=%s, ResolvedInvisible=%t",
+		glog.V(3).Infof("DEBUG: storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, UpstreamInvisible=%s, ResolvedInvisible=%t",
 			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, upstreamValue, invisible)
 	}
 
@@ -731,9 +732,9 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	}
 
 	// Add debug logging for stateData
-	log.Printf("DEBUG: storeStateToCache - stateData keys: %v", getMapKeys(stateData))
+	glog.V(2).Infof("DEBUG: storeStateToCache - stateData keys: %v", getMapKeys(stateData))
 	if entranceStatusesVal, ok := stateData["entranceStatuses"]; ok {
-		log.Printf("DEBUG: storeStateToCache - entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
+		glog.V(3).Infof("DEBUG: storeStateToCache - entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 	}
 
 	sourceID := ""
@@ -753,7 +754,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			_, src, found, _ := dw.taskModule.GetTaskByOpID(msg.OpID)
 			if found && src != "" {
 				sourceID = src
-				log.Printf("Found task with source=%s by OpID=%s for app=%s, user=%s (prioritized OpID lookup)",
+				glog.V(3).Infof("Found task with source=%s by OpID=%s for app=%s, user=%s (prioritized OpID lookup)",
 					src, msg.OpID, msg.Name, userID)
 			} else {
 				// Task not found in memory, try to query from database (task might be completed)
@@ -779,7 +780,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 						if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
 							if s, ok := metadataMap["source"].(string); ok && s != "" {
 								sourceID = s
-								log.Printf("Found task with source=%s by OpID=%s from database (status=%d, created_at=%s) for app=%s, user=%s (prioritized OpID lookup)",
+								glog.V(3).Infof("Found task with source=%s by OpID=%s from database (status=%d, created_at=%s) for app=%s, user=%s (prioritized OpID lookup)",
 									sourceID, msg.OpID, taskStatus, taskCreatedAt.Format(time.RFC3339), msg.Name, userID)
 							}
 						}
@@ -818,7 +819,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 								statusTime = parsedTime
 							} else {
 								// If parsing fails, use zero time (will be sorted to the end)
-								log.Printf("Failed to parse StatusTime for app %s in source %s: %v", msg.Name, srcID, err)
+								glog.Errorf("Failed to parse StatusTime for app %s in source %s: %v", msg.Name, srcID, err)
 								statusTime = time.Time{}
 							}
 						}
@@ -835,9 +836,9 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			if len(candidates) > 0 {
 				// Log all candidates before sorting for debugging
 				if len(candidates) > 1 {
-					log.Printf("Found %d candidate records for app=%s, user=%s:", len(candidates), msg.Name, userID)
+					glog.V(3).Infof("Found %d candidate records for app=%s, user=%s:", len(candidates), msg.Name, userID)
 					for i, cand := range candidates {
-						log.Printf("  Candidate[%d]: sourceID=%s, state=%s, statusTime=%s",
+						glog.V(3).Infof("  Candidate[%d]: sourceID=%s, state=%s, statusTime=%s",
 							i, cand.sourceID, cand.appState.Status.State, cand.statusTime.Format(time.RFC3339))
 					}
 				}
@@ -848,16 +849,16 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 				// Use the newest record
 				sourceID = candidates[0].sourceID
 				if len(candidates) > 1 {
-					log.Printf("Found sourceID=%s from cache (newest of %d records) for app=%s, user=%s, state=%s, statusTime=%s",
+					glog.V(3).Infof("Found sourceID=%s from cache (newest of %d records) for app=%s, user=%s, state=%s, statusTime=%s",
 						sourceID, len(candidates), msg.Name, userID, candidates[0].appState.Status.State, candidates[0].statusTime.Format(time.RFC3339))
 				} else {
-					log.Printf("Found sourceID=%s from cache for app=%s, user=%s, state=%s, statusTime=%s",
+					glog.V(3).Infof("Found sourceID=%s from cache for app=%s, user=%s, state=%s, statusTime=%s",
 						sourceID, msg.Name, userID, candidates[0].appState.Status.State, candidates[0].statusTime.Format(time.RFC3339))
 				}
 			}
 		}
 	} else {
-		log.Printf("Skipping cache lookup for sourceID due to failed/canceled state: %s for app=%s, user=%s",
+		glog.V(3).Infof("Skipping cache lookup for sourceID due to failed/canceled state: %s for app=%s, user=%s",
 			msg.State, msg.Name, userID)
 	}
 
@@ -868,7 +869,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			_, src, found, _ := dw.taskModule.GetTaskByOpID(msg.OpID)
 			if found && src != "" {
 				sourceID = src
-				log.Printf("Found task with source=%s by OpID=%s for app=%s, user=%s", src, msg.OpID, msg.Name, userID)
+				glog.V(3).Infof("Found task with source=%s by OpID=%s for app=%s, user=%s", src, msg.OpID, msg.Name, userID)
 			} else {
 				// Task not found in memory, try to query from database (task might be completed)
 				db, err := utils.GetTaskStoreForQuery()
@@ -893,7 +894,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 						if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
 							if s, ok := metadataMap["source"].(string); ok && s != "" {
 								sourceID = s
-								log.Printf("Found task with source=%s by OpID=%s from database (status=%d, created_at=%s) for app=%s, user=%s",
+								glog.V(3).Infof("Found task with source=%s by OpID=%s from database (status=%d, created_at=%s) for app=%s, user=%s",
 									sourceID, msg.OpID, taskStatus, taskCreatedAt.Format(time.RFC3339), msg.Name, userID)
 							}
 						}
@@ -906,7 +907,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			_, src, found, _ := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
 			if found && src != "" {
 				sourceID = src
-				log.Printf("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
+				glog.V(3).Infof("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
 			}
 		}
 	}
@@ -947,7 +948,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 				if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
 					if s, ok := metadataMap["source"].(string); ok && s != "" {
 						sourceID = s
-						log.Printf("Found source=%s from task database (status=%d, created_at=%s) for app=%s, user=%s",
+						glog.V(3).Infof("Found source=%s from task database (status=%d, created_at=%s) for app=%s, user=%s",
 							sourceID, taskStatus, taskCreatedAt.Format(time.RFC3339), msg.Name, userID)
 					}
 				}
@@ -956,26 +957,26 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	}
 
 	if sourceID == "" {
-		log.Printf("[ERROR] Cannot determine sourceID for app state: user=%s, app=%s, state=%s. Ignore this message.", userID, msg.Name, msg.State)
+		glog.V(3).Infof("[ERROR] Cannot determine sourceID for app state: user=%s, app=%s, state=%s. Ignore this message.", userID, msg.Name, msg.State)
 		return
 	}
 
 	if err := dw.cacheManager.SetAppData(userID, sourceID, AppStateLatest, stateData); err != nil {
-		log.Printf("Failed to store app state to cache: %v", err)
+		glog.Errorf("Failed to store app state to cache: %v", err)
 	} else {
-		log.Printf("Successfully stored app state to cache for user=%s, source=%s, app=%s, state=%s",
+		glog.V(2).Infof("Successfully stored app state to cache for user=%s, source=%s, app=%s, state=%s",
 			userID, sourceID, msg.Name, msg.State)
 
 		// Call ForceCalculateAllUsersHash for hash calculation after successful cache update
 		if dw.dataWatcher != nil {
-			log.Printf("Triggering hash recalculation for all users after cache update")
+			glog.V(3).Infof("Triggering hash recalculation for all users after cache update")
 			if err := dw.dataWatcher.ForceCalculateAllUsersHash(); err != nil {
-				log.Printf("Failed to force calculate all users hash: %v", err)
+				glog.Errorf("Failed to force calculate all users hash: %v", err)
 			} else {
-				log.Printf("Successfully triggered hash recalculation for all users")
+				glog.V(2).Infof("Successfully triggered hash recalculation for all users")
 			}
 		} else {
-			log.Printf("DataWatcher not available, skipping hash recalculation")
+			glog.V(3).Infof("DataWatcher not available, skipping hash recalculation")
 		}
 	}
 }
@@ -991,30 +992,31 @@ func getMapKeys(m map[string]interface{}) []string {
 
 // printAppStateMessage prints the app state message details
 func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
-	log.Printf("=== App State Message ===")
-	log.Printf("Event ID: %s", msg.EventID)
-	log.Printf("Create Time: %s", msg.CreateTime)
-	log.Printf("Name: %s", msg.Name)
-	log.Printf("Raw App Name: %s", msg.RawAppName)
-	log.Printf("Title: %s", msg.Title)
-	log.Printf("State: %s", msg.State)
-	log.Printf("Progress: %s", msg.Progress)
-	log.Printf("Operation Type: %s", msg.OpType)
-	log.Printf("Operation ID: %s", msg.OpID)
-	log.Printf("User: %s", msg.User)
-	log.Printf("Entrance Statuses:")
+	// todo merge msg
+	glog.V(2).Info("=== App State Message ===")
+	glog.V(2).Infof("Event ID: %s", msg.EventID)
+	glog.V(2).Infof("Create Time: %s", msg.CreateTime)
+	glog.V(2).Infof("Name: %s", msg.Name)
+	glog.V(2).Infof("Raw App Name: %s", msg.RawAppName)
+	glog.V(2).Infof("Title: %s", msg.Title)
+	glog.V(2).Infof("State: %s", msg.State)
+	glog.V(2).Infof("Progress: %s", msg.Progress)
+	glog.V(2).Infof("Operation Type: %s", msg.OpType)
+	glog.V(2).Infof("Operation ID: %s", msg.OpID)
+	glog.V(2).Infof("User: %s", msg.User)
+	glog.V(2).Info("Entrance Statuses:")
 	for i, status := range msg.EntranceStatuses {
-		log.Printf("  [%d] Name: %s, State: %s, Status Time: %s, Reason: %s",
+		glog.V(2).Infof("  [%d] Name: %s, State: %s, Status Time: %s, Reason: %s",
 			i, status.Name, status.State, status.StatusTime, status.Reason)
 	}
 	if len(msg.SharedEntrances) > 0 {
-		log.Printf("Shared Entrances:")
+		glog.V(2).Info("Shared Entrances:")
 		for i, entrance := range msg.SharedEntrances {
-			log.Printf("  [%d] Name: %s, Host: %s, Port: %d, URL: %s, Invisible: %t",
+			glog.V(2).Infof("  [%d] Name: %s, Host: %s, Port: %d, URL: %s, Invisible: %t",
 				i, entrance.Name, entrance.Host, entrance.Port, entrance.URL, entrance.Invisible)
 		}
 	}
-	log.Printf("========================")
+	glog.V(2).Info("========================")
 }
 
 // isDevEnvironment checks if we're running in development environment
@@ -1037,7 +1039,7 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 	appName := msg.Name
 
 	if dw.historyModule == nil {
-		log.Printf("History module not available, cannot compare with DB, proceeding with message storage")
+		glog.V(3).Infof("History module not available, cannot compare with DB, proceeding with message storage")
 		return false
 	}
 
@@ -1052,7 +1054,7 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 
 	records, err := dw.historyModule.QueryRecords(cond)
 	if err != nil {
-		log.Printf("Failed to query history records for app %s, user %s: %v", appName, userID, err)
+		glog.Errorf("Failed to query history records for app %s, user %s: %v", appName, userID, err)
 		return false
 	}
 
@@ -1063,7 +1065,7 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 		}
 		var lastMsg AppStateMessage
 		if err := json.Unmarshal([]byte(rec.Extended), &lastMsg); err != nil {
-			log.Printf("Failed to unmarshal extended history for record %d: %v", rec.ID, err)
+			glog.Errorf("Failed to unmarshal extended history for record %d: %v", rec.ID, err)
 			continue
 		}
 		if lastMsg.Name != appName || lastMsg.User != userID {
@@ -1080,7 +1082,7 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 		cachedProgressFloat, err1 := strconv.ParseFloat(cachedProgress, 64)
 		newProgressFloat, err2 := strconv.ParseFloat(newProgress, 64)
 		if err1 != nil || err2 != nil {
-			log.Printf("Failed to parse progress values: cached=%s, new=%s, err1=%v, err2=%v", cachedProgress, newProgress, err1, err2)
+			glog.Errorf("Failed to parse progress values: cached=%s, new=%s, err1=%v, err2=%v", cachedProgress, newProgress, err1, err2)
 			return false
 		}
 
@@ -1090,16 +1092,16 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 		}
 
 		if progressDiff <= 10.0 {
-			log.Printf("Progress difference is %.2f (within 10.0), skipping message for app %s", progressDiff, appName)
+			glog.V(3).Infof("Progress difference is %.2f (within 10.0), skipping message for app %s", progressDiff, appName)
 			return true
 		}
 
-		log.Printf("Progress difference is %.2f (greater than 10.0), proceeding with message storage for app %s", progressDiff, appName)
+		glog.V(3).Infof("Progress difference is %.2f (greater than 10.0), proceeding with message storage for app %s", progressDiff, appName)
 		return false
 	}
 
 	// No previous downloading record found in DB
-	log.Printf("No previous downloading record found in DB for app %s, user %s, proceeding with message storage", appName, userID)
+	glog.V(3).Infof("No previous downloading record found in DB for app %s, user %s, proceeding with message storage", appName, userID)
 	return false
 }
 
@@ -1109,14 +1111,14 @@ func (dw *DataWatcherState) addDelayedMessage(msg *nats.Msg, appStateMsg AppStat
 	defer dw.delayedMessagesMutex.Unlock()
 
 	delayedMsg := &DelayedMessage{
-		msg:        msg,
+		msg:         msg,
 		appStateMsg: appStateMsg,
-		retryCount: 0,
-		nextRetry:  time.Now().Add(2 * time.Second), // First retry after 2 seconds
+		retryCount:  0,
+		nextRetry:   time.Now().Add(2 * time.Second), // First retry after 2 seconds
 	}
 
 	dw.delayedMessages = append(dw.delayedMessages, delayedMsg)
-	log.Printf("Added delayed message to queue: app=%s, user=%s, opID=%s, queue_size=%d",
+	glog.V(3).Infof("Added delayed message to queue: app=%s, user=%s, opID=%s, queue_size=%d",
 		appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, len(dw.delayedMessages))
 }
 
@@ -1153,7 +1155,7 @@ func (dw *DataWatcherState) processDelayedMessagesBatch() {
 
 		if delayedMsg.retryCount >= maxRetries {
 			// Max retries reached, process anyway
-			log.Printf("Max retries reached for delayed message: app=%s, user=%s, opID=%s, processing anyway",
+			glog.Warningf("Max retries reached for delayed message: app=%s, user=%s, opID=%s, processing anyway",
 				delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID)
 			dw.processMessageInternal(delayedMsg.msg, delayedMsg.appStateMsg)
 			continue
@@ -1167,7 +1169,7 @@ func (dw *DataWatcherState) processDelayedMessagesBatch() {
 				delayedMsg.retryCount++
 				delayedMsg.nextRetry = now.Add(2 * time.Second)
 				remaining = append(remaining, delayedMsg)
-				log.Printf("Retrying delayed message later (lock not acquired): app=%s, user=%s, opID=%s, retry_count=%d",
+				glog.Warningf("Retrying delayed message later (lock not acquired): app=%s, user=%s, opID=%s, retry_count=%d",
 					delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
 				continue
 			}
@@ -1176,14 +1178,14 @@ func (dw *DataWatcherState) processDelayedMessagesBatch() {
 				delayedMsg.retryCount++
 				delayedMsg.nextRetry = now.Add(2 * time.Second)
 				remaining = append(remaining, delayedMsg)
-				log.Printf("Retrying delayed message later: app=%s, user=%s, opID=%s, retry_count=%d",
+				glog.Warningf("Retrying delayed message later: app=%s, user=%s, opID=%s, retry_count=%d",
 					delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
 				continue
 			}
 		}
 
 		// No pending tasks, process the message
-		log.Printf("Processing delayed message: app=%s, user=%s, opID=%s, retry_count=%d",
+		glog.V(2).Infof("Processing delayed message: app=%s, user=%s, opID=%s, retry_count=%d",
 			delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
 		dw.processMessageInternal(delayedMsg.msg, delayedMsg.appStateMsg)
 	}

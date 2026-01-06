@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"market/internal/v2/history"
 	"market/internal/v2/utils"
 
+	"github.com/golang/glog"
 	"github.com/nats-io/nats.go"
 )
 
@@ -46,13 +46,13 @@ func NewDataWatcherUser() *DataWatcherUser {
 // SetHistoryModule sets the history module reference
 func (dw *DataWatcherUser) SetHistoryModule(historyModule *history.HistoryModule) {
 	dw.historyModule = historyModule
-	log.Printf("History module reference set in DataWatcherUser")
+	glog.V(3).Infof("History module reference set in DataWatcherUser")
 }
 
 // Start initializes and starts the data watcher
 func (dw *DataWatcherUser) Start(ctx context.Context) error {
 	if utils.IsPublicEnvironment() {
-		log.Printf("Public environment detected, DataWatcherUser disabled")
+		glog.V(3).Infof("Public environment detected, DataWatcherUser disabled")
 		return nil
 	}
 
@@ -61,11 +61,11 @@ func (dw *DataWatcherUser) Start(ctx context.Context) error {
 
 	// Check if history module is available
 	if dw.historyModule == nil {
-		log.Printf("Warning: History module not available in DataWatcherUser, some functionality may be limited")
+		glog.V(3).Infof("Warning: History module not available in DataWatcherUser, some functionality may be limited")
 	}
 
 	if dw.isDev {
-		log.Printf("Running in development mode, NATS connection disabled")
+		glog.V(3).Infof("Running in development mode, NATS connection disabled")
 		go dw.simulateMessages(ctx)
 		return nil
 	}
@@ -78,7 +78,7 @@ func (dw *DataWatcherUser) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to messages: %w", err)
 	}
 
-	log.Printf("DataWatcherUser started successfully, listening on subject: %s", dw.subject)
+	glog.V(2).Infof("DataWatcherUser started successfully, listening on subject: %s", dw.subject)
 
 	// Keep the connection alive until context is cancelled
 	go func() {
@@ -97,13 +97,13 @@ func (dw *DataWatcherUser) Stop() {
 
 	if dw.historyModule != nil {
 		if err := dw.historyModule.Close(); err != nil {
-			log.Printf("Error closing history module: %v", err)
+			glog.Errorf("Error closing history module: %v", err)
 		}
 	}
 
 	if dw.conn != nil {
 		dw.conn.Close()
-		log.Printf("NATS connection closed")
+		glog.V(3).Infof("NATS connection closed")
 	}
 }
 
@@ -127,16 +127,16 @@ func (dw *DataWatcherUser) connectToNATS() error {
 	opts := []nats.Option{
 		nats.Name("DataWatcherUser"),
 		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			log.Printf("[NATS] Disconnected: %v", err)
+			glog.Errorf("[NATS] Disconnected: %v", err)
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			log.Printf("[NATS] Reconnected to %v", nc.ConnectedUrl())
+			glog.V(3).Infof("[NATS] Reconnected to %v", nc.ConnectedUrl())
 		}),
 		nats.ClosedHandler(func(nc *nats.Conn) {
-			log.Printf("[NATS] Connection closed")
+			glog.V(3).Infof("[NATS] Connection closed")
 		}),
 		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
-			log.Printf("[NATS] Error: %v", err)
+			glog.V(3).Infof("[NATS] Error: %v", err)
 		}),
 		nats.MaxReconnects(60),
 		nats.ReconnectWait(2 * time.Second),
@@ -153,7 +153,7 @@ func (dw *DataWatcherUser) connectToNATS() error {
 		return fmt.Errorf("failed to connect to NATS server at %s: %w", natsURL, err)
 	}
 
-	log.Printf("Connected to NATS server at %s", natsURL)
+	glog.V(2).Infof("Connected to NATS server at %s", natsURL)
 	return nil
 }
 
@@ -171,21 +171,22 @@ func (dw *DataWatcherUser) subscribeToMessages() error {
 		return fmt.Errorf("failed to subscribe to subject %s: %w", dw.subject, err)
 	}
 
-	log.Printf("Subscribed to NATS subject: %s", dw.subject)
+	glog.V(2).Infof("Subscribed to NATS subject: %s", dw.subject)
 	return nil
 }
 
 // processMessage processes incoming NATS messages
 func (dw *DataWatcherUser) processMessage(data []byte) {
+	glog.V(2).Infof("User - Received message from NATS subject %s: %s", string(data))
 	var message UserStateMessage
 
 	if err := json.Unmarshal(data, &message); err != nil {
-		log.Printf("Error unmarshaling message: %v, raw data: %s", err, string(data))
+		glog.Errorf("Error unmarshaling message: %v, raw data: %s", err, string(data))
 		return
 	}
 
 	// Print the received message
-	log.Printf("Received app state message - EventType: %s, Username: %s, Timestamp: %s",
+	glog.V(3).Infof("Received app state message - EventType: %s, Username: %s, Timestamp: %s",
 		message.EventType, message.Username, message.Timestamp)
 
 	// Write to history
@@ -200,9 +201,9 @@ func (dw *DataWatcherUser) processMessage(data []byte) {
 		}
 
 		if err := dw.historyModule.StoreRecord(historyRecord); err != nil {
-			log.Printf("Failed to store history record: %v", err)
+			glog.Errorf("Failed to store history record: %v", err)
 		} else {
-			log.Printf("Successfully stored user state message to history for user: %s", message.Username)
+			glog.V(2).Infof("Successfully stored user state message to history for user: %s", message.Username)
 		}
 	}
 }
@@ -221,7 +222,7 @@ func (dw *DataWatcherUser) simulateMessages(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("Stopping message simulation")
+			glog.V(4).Info("Stopping message simulation")
 			return
 		case <-ticker.C:
 			dw.generateRandomMessage(eventTypes, usernames)
@@ -239,11 +240,11 @@ func (dw *DataWatcherUser) generateRandomMessage(eventTypes, usernames []string)
 
 	messageData, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("Error marshaling simulated message: %v", err)
+		glog.Errorf("Error marshaling simulated message: %v", err)
 		return
 	}
 
-	log.Printf("Simulated message generated")
+	glog.V(2).Info("Simulated message generated")
 	dw.processMessage(messageData)
 }
 

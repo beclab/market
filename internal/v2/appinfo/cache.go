@@ -3,7 +3,6 @@ package appinfo
 import (
 	"context"
 	"fmt"
-	"log"
 	"market/internal/v2/types"
 	"sync"
 	"time"
@@ -117,7 +116,7 @@ func (cm *CacheManager) GetUserDataNoLock(userID string) *UserData {
 func (cm *CacheManager) GetUserDataWithFallback(userID string) *UserData {
 	if !cm.mutex.TryRLock() {
 		// Lock not available immediately, return nil to avoid blocking
-		log.Printf("GetUserData: Read lock not available for user %s, returning nil", userID)
+		glog.Warningf("[TryRLock] GetUserData: Read lock not available for user %s, returning nil", userID)
 		return nil
 	}
 	defer cm.mutex.RUnlock()
@@ -134,7 +133,7 @@ func (cm *CacheManager) GetUserDataWithFallback(userID string) *UserData {
 func (cm *CacheManager) GetAllUsersDataWithFallback() map[string]*UserData {
 	if !cm.mutex.TryRLock() {
 		// Lock not available immediately, return empty map to avoid blocking
-		log.Printf("GetAllUsersData: Read lock not available, returning empty map")
+		glog.Warning("[TryRLock] GetAllUsersData: Read lock not available, returning empty map")
 		return make(map[string]*UserData)
 	}
 	defer cm.mutex.RUnlock()
@@ -176,7 +175,7 @@ func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheMan
 	// Initialize data sender
 	dataSender, err := NewDataSender()
 	if err != nil {
-		glog.Warningf("Failed to initialize DataSender: %v", err)
+		glog.Errorf("Failed to initialize DataSender: %v", err)
 		// Continue without data sender
 	}
 
@@ -200,7 +199,7 @@ func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheMan
 
 // Start initializes the cache by loading data from Redis and starts the sync worker
 func (cm *CacheManager) Start() error {
-	glog.Infof("Starting cache manager")
+	glog.V(3).Infof("Starting cache manager")
 
 	// Load cache data from Redis if ClearCache is false
 	if !cm.userConfig.ClearCache {
@@ -210,10 +209,10 @@ func (cm *CacheManager) Start() error {
 				glog.Errorf("Failed to load cache from Redis: %v", err)
 				return err
 			}
-			glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
+			glog.V(4).Infof("[LOCK] cm.mutex.Lock() @81 Start")
 			lockStart := time.Now()
 			cm.mutex.Lock()
-			glog.Infof("[LOCK] cm.mutex.Lock() @81 Success (wait=%v)", time.Since(lockStart))
+			glog.V(4).Infof("[LOCK] cm.mutex.Lock() @81 Success (wait=%v)", time.Since(lockStart))
 			_wd := cm.startLockWatchdog("@81:loadCache")
 			cm.cache = cache
 			cm.mutex.Unlock()
@@ -221,7 +220,7 @@ func (cm *CacheManager) Start() error {
 		}
 
 	} else {
-		glog.Infof("ClearCache is enabled, clearing Redis data and starting with empty cache")
+		glog.V(3).Infof("ClearCache is enabled, clearing Redis data and starting with empty cache")
 
 		if !utils.IsPublicEnvironment() {
 			// Clear all Redis data
@@ -231,10 +230,10 @@ func (cm *CacheManager) Start() error {
 			}
 		}
 
-		glog.Infof("[LOCK] cm.mutex.Lock() @81 Start")
+		glog.V(4).Infof("[LOCK] cm.mutex.Lock() @81 Start")
 		lockStart := time.Now()
 		cm.mutex.Lock()
-		glog.Infof("[LOCK] cm.mutex.Lock() @81 Success (wait=%v)", time.Since(lockStart))
+		glog.V(4).Infof("[LOCK] cm.mutex.Lock() @81 Success (wait=%v)", time.Since(lockStart))
 		_wd := cm.startLockWatchdog("@81:newCache")
 		cm.cache = NewCacheData()
 		cm.mutex.Unlock()
@@ -243,17 +242,17 @@ func (cm *CacheManager) Start() error {
 
 	// Ensure all users from userConfig.UserList have their data structures initialized
 	if cm.userConfig != nil && len(cm.userConfig.UserList) > 0 {
-		glog.Infof("Initializing data structures for configured users")
+		glog.V(3).Infof("Initializing data structures for configured users")
 
-		glog.Infof("[LOCK] cm.mutex.Lock() @102 Start")
+		glog.V(4).Infof("[LOCK] cm.mutex.Lock() @102 Start")
 		lockStart := time.Now()
 		cm.mutex.Lock()
-		glog.Infof("[LOCK] cm.mutex.Lock() @102 Success (wait=%v)", time.Since(lockStart))
+		glog.V(4).Infof("[LOCK] cm.mutex.Lock() @102 Success (wait=%v)", time.Since(lockStart))
 		_wd := cm.startLockWatchdog("@102:initUsers")
 		newUsers := make([]string, 0)
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
-				glog.Infof("Creating data structure for new user: %s", userID)
+				glog.V(3).Infof("Creating data structure for new user: %s", userID)
 				cm.cache.Users[userID] = NewUserData()
 				newUsers = append(newUsers, userID)
 			}
@@ -261,14 +260,14 @@ func (cm *CacheManager) Start() error {
 		cm.mutex.Unlock()
 		_wd()
 
-		glog.Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
+		glog.V(2).Infof("User data structure initialization completed for %d users", len(cm.userConfig.UserList))
 
 	}
 
-	glog.Infof("[LOCK] cm.mutex.Lock() @114 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @114 Start")
 	lockStart := time.Now()
 	cm.mutex.Lock()
-	glog.Infof("[LOCK] cm.mutex.Lock() @114 Success (wait=%v)", time.Since(lockStart))
+	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @114 Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@114:setRunning")
 	cm.isRunning = true
 	cm.mutex.Unlock()
@@ -281,18 +280,18 @@ func (cm *CacheManager) Start() error {
 	cm.cleanupTicker = time.NewTicker(5 * time.Minute)
 	go cm.cleanupWorker()
 
-	glog.Infof("Cache manager started successfully")
+	glog.V(3).Infof("Cache manager started successfully")
 	return nil
 }
 
 // Stop stops the cache manager and sync worker
 func (cm *CacheManager) Stop() {
-	glog.Infof("Stopping cache manager")
+	glog.V(4).Infof("Stopping cache manager")
 
-	glog.Infof("[LOCK] cm.mutex.Lock() @129 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @129 Start")
 	lockStart := time.Now()
 	cm.mutex.Lock()
-	glog.Infof("[LOCK] cm.mutex.Lock() @129 Success (wait=%v)", time.Since(lockStart))
+	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @129 Success (wait=%v)", time.Since(lockStart))
 	if cm.isRunning {
 		cm.isRunning = false
 		cm.stopChannel <- true
@@ -302,22 +301,22 @@ func (cm *CacheManager) Stop() {
 	// Close state monitor
 	if cm.stateMonitor != nil {
 		cm.stateMonitor.Close()
-		glog.Infof("State monitor closed")
+		glog.V(4).Infof("State monitor closed")
 	}
 
-	glog.Infof("Cache manager stopped")
+	glog.V(4).Infof("Cache manager stopped")
 }
 
 // syncWorker processes sync requests in the background
 func (cm *CacheManager) syncWorker() {
-	glog.Infof("Sync worker started")
+	glog.V(4).Infof("Sync worker started")
 
 	for {
 		select {
 		case syncReq := <-cm.syncChannel:
 			cm.processSyncRequest(syncReq)
 		case <-cm.stopChannel:
-			glog.Infof("Sync worker stopped")
+			glog.V(4).Infof("Sync worker stopped")
 			return
 		}
 	}
@@ -352,9 +351,9 @@ func (cm *CacheManager) processSyncRequest(req SyncRequest) {
 
 // GetUserData retrieves user data from cache
 func (cm *CacheManager) GetUserData(userID string) *UserData {
-	glog.Infof("[LOCK] cm.mutex.TryRLock() @184 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @184 Start")
 	if !cm.mutex.TryRLock() {
-		glog.Warningf("GetUserData: Read lock not available for user %s, returning nil", userID)
+		glog.Warningf("[TryRLock] GetUserData: Read lock not available for user %s, returning nil", userID)
 		return nil
 	}
 	defer cm.mutex.RUnlock()
@@ -369,9 +368,9 @@ func (cm *CacheManager) getUserData(userID string) *UserData {
 
 // GetSourceData retrieves source data from cache
 func (cm *CacheManager) GetSourceData(userID, sourceID string) *SourceData {
-	glog.Infof("[LOCK] cm.mutex.TryRLock() @197 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @197 Start")
 	if !cm.mutex.TryRLock() {
-		glog.Warningf("GetSourceData: Read lock not available for user %s, source %s, returning nil", userID, sourceID)
+		glog.Warningf("[TryRLock] GetSourceData: Read lock not available for user %s, source %s, returning nil", userID, sourceID)
 		return nil
 	}
 	defer cm.mutex.RUnlock()
@@ -421,13 +420,13 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 
 // SetHydrationNotifier sets the hydration notifier for real-time updates
 func (cm *CacheManager) setHydrationNotifierInternal(notifier HydrationNotifier) {
-	glog.Infof("[LOCK] cm.mutex.Lock() @216 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @216 Start")
 	lockStart := time.Now()
 	cm.mutex.Lock()
-	glog.Infof("[LOCK] cm.mutex.Lock() @216 Success (wait=%v)", time.Since(lockStart))
+	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @216 Success (wait=%v)", time.Since(lockStart))
 	defer cm.mutex.Unlock()
 	cm.hydrationNotifier = notifier
-	glog.Infof("Hydration notifier set successfully")
+	glog.V(4).Infof("Hydration notifier set successfully")
 }
 
 // SetHydrationNotifier sets the hydration notifier for real-time updates
@@ -469,25 +468,25 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 		if existingAppState != nil && existingAppState.Status.Name == newAppState.Status.Name {
 			// Preserve rawAppName from existing state if new state doesn't have it
 			if newAppState.Status.RawAppName == "" && existingAppState.Status.RawAppName != "" {
-				glog.Infof("New app state for %s has empty RawAppName, preserving old RawAppName: %s", newAppState.Status.Name, existingAppState.Status.RawAppName)
+				glog.V(3).Infof("New app state for %s has empty RawAppName, preserving old RawAppName: %s", newAppState.Status.Name, existingAppState.Status.RawAppName)
 				newAppState.Status.RawAppName = existingAppState.Status.RawAppName
 			}
 
 			// Preserve title from existing state if new state doesn't have it
 			if newAppState.Status.Title == "" && existingAppState.Status.Title != "" {
-				glog.Infof("New app state for %s has empty Title, preserving old Title: %s", newAppState.Status.Name, existingAppState.Status.Title)
+				glog.V(3).Infof("New app state for %s has empty Title, preserving old Title: %s", newAppState.Status.Name, existingAppState.Status.Title)
 				newAppState.Status.Title = existingAppState.Status.Title
 			}
 
 			// Preserve SharedEntrances if new state lacks them but cache has some
 			if len(newAppState.Status.SharedEntrances) == 0 && len(existingAppState.Status.SharedEntrances) > 0 {
-				glog.Infof("New app state for %s has empty SharedEntrances, preserving old shared entrances", newAppState.Status.Name)
+				glog.V(3).Infof("New app state for %s has empty SharedEntrances, preserving old shared entrances", newAppState.Status.Name)
 				newAppState.Status.SharedEntrances = existingAppState.Status.SharedEntrances
 			}
 
 			// If new app state has empty EntranceStatuses, preserve the old ones
 			if len(newAppState.Status.EntranceStatuses) == 0 && len(existingAppState.Status.EntranceStatuses) > 0 {
-				glog.Infof("New app state for %s has empty EntranceStatuses, preserving old entrance statuses", newAppState.Status.Name)
+				glog.V(3).Infof("New app state for %s has empty EntranceStatuses, preserving old entrance statuses", newAppState.Status.Name)
 				newAppState.Status.EntranceStatuses = existingAppState.Status.EntranceStatuses
 
 				// Check if main state has changed - if yes, let pendingNotifications handle it to avoid duplicate push
@@ -523,21 +522,21 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 						}
 
 						if err := cm.dataSender.SendAppInfoUpdate(update); err != nil {
-							glog.Warningf("Force push state update for app %s failed: %v", newAppState.Status.Name, err)
+							glog.Errorf("Force push state update for app %s failed: %v", newAppState.Status.Name, err)
 						} else {
-							glog.Infof("Force pushed state update for app %s due to EntranceStatuses fallback (only metadata changed)", newAppState.Status.Name)
+							glog.V(3).Infof("Force pushed state update for app %s due to EntranceStatuses fallback (only metadata changed)", newAppState.Status.Name)
 						}
 					}
 				} else {
 					// Main state or progress has changed, pendingNotifications will handle the notification
 					// No need to force push here to avoid duplicate
-					glog.Infof("Skipping force push for app %s - state/progress changed, will be handled by pendingNotifications", newAppState.Status.Name)
+					glog.V(3).Infof("Skipping force push for app %s - state/progress changed, will be handled by pendingNotifications", newAppState.Status.Name)
 				}
 			}
 
 			// Update existing app state
 			sourceData.AppStateLatest[i] = newAppState
-			glog.V(2).Infof("Updated existing app state for app: %s", newAppState.Status.Name)
+			glog.V(3).Infof("Updated existing app state for app: %s", newAppState.Status.Name)
 			found = true
 			break
 		}
@@ -551,13 +550,13 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 }
 
 func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @269 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @269 Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("setAppDataInternal: Write lock not available for user %s, source %s, type %v, skipping", userID, sourceID, dataType)
+		glog.Warningf("[TryLock] setAppDataInternal: Write lock not available for user %s, source %s, type %v, skipping", userID, sourceID, dataType)
 		return fmt.Errorf("write lock not available")
 	}
 	cm.updateLockStats("lock")
-	glog.Infof("[LOCK] cm.mutex.TryLock() @269 Success")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @269 Success")
 	// Watchdog: warn if write lock is held >1s
 	watchdogFired := make(chan struct{}, 1)
 	timer := time.AfterFunc(1*time.Second, func() {
@@ -584,7 +583,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	defer func() {
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
-		glog.Infof("[LOCK] cm.mutex.Unlock() @269 End")
+		glog.V(4).Infof("[LOCK] cm.mutex.Unlock() @269 End")
 		if timer.Stop() {
 			// timer stopped before firing; try to drain channel if any
 			select {
@@ -594,16 +593,16 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		}
 
 		// Send notifications after the global lock is released to avoid deadlocks
-		glog.Infof("DEBUG: Processing %d pending notifications", len(pendingNotifications))
+		glog.V(4).Infof("DEBUG: Processing %d pending notifications", len(pendingNotifications))
 		if cm.stateMonitor != nil {
-			glog.Infof("DEBUG: State monitor is available for processing notifications")
+			glog.V(4).Infof("DEBUG: State monitor is available for processing notifications")
 			for i, p := range pendingNotifications {
-				glog.Infof("DEBUG: Processing notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
+				glog.V(4).Infof("DEBUG: Processing notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
 				if p.appName == "" || p.state == nil {
 					glog.Warningf("DEBUG: Skipping notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
 					continue
 				}
-				glog.Infof("DEBUG: Calling NotifyStateChange for app=%s", p.appName)
+				glog.V(4).Infof("DEBUG: Calling NotifyStateChange for app=%s", p.appName)
 				if err := cm.stateMonitor.NotifyStateChange(
 					p.userID, p.sourceID, p.appName,
 					p.state,
@@ -612,13 +611,13 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 					p.hasChanged,
 					p.changeReason,
 				); err != nil {
-					glog.Warningf("Failed to check and notify state change for app %s: %v", p.appName, err)
+					glog.Errorf("Failed to check and notify state change for app %s: %v", p.appName, err)
 				} else {
-					glog.Infof("DEBUG: Successfully processed notification for app=%s", p.appName)
+					glog.V(2).Infof("DEBUG: Successfully processed notification for app=%s", p.appName)
 				}
 			}
 		} else {
-			glog.Warningf("DEBUG: State monitor is nil, cannot process %d pending notifications", len(pendingNotifications))
+			glog.V(3).Infof("DEBUG: State monitor is nil, cannot process %d pending notifications", len(pendingNotifications))
 		}
 	}()
 
@@ -667,10 +666,10 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 	// Log image analysis information if present
 	if imageAnalysis, hasImageAnalysis := data["image_analysis"]; hasImageAnalysis {
-		glog.Infof("Setting app data with image analysis for user=%s, source=%s, type=%s", userID, sourceID, dataType)
+		glog.V(3).Infof("Setting app data with image analysis for user=%s, source=%s, type=%s", userID, sourceID, dataType)
 		if analysisMap, ok := imageAnalysis.(map[string]interface{}); ok {
 			if totalImages, ok := analysisMap["total_images"].(int); ok {
-				glog.Infof("App data includes %d Docker images", totalImages)
+				glog.V(3).Infof("App data includes %d Docker images", totalImages)
 			}
 		}
 	}
@@ -683,25 +682,25 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	case AppStateLatest:
 		// Check if this is a list of app states
 		if appStatesData, hasAppStates := data["app_states"].([]*types.AppStateLatestData); hasAppStates {
-			glog.Infof("DEBUG: Processing batch of %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
+			glog.V(2).Infof("DEBUG: Processing batch of %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
 			// Collect state change notifications for each app state (send after unlock)
 			if cm.stateMonitor != nil {
-				glog.Infof("DEBUG: State monitor available for batch processing")
+				glog.V(3).Infof("DEBUG: State monitor available for batch processing")
 				for i, appState := range appStatesData {
 					if appState == nil {
-						glog.Warningf("DEBUG: App state %d is nil, skipping", i)
+						glog.V(4).Infof("DEBUG: App state %d is nil, skipping", i)
 						continue
 					}
 					appName := appState.Status.Name
 					if appName == "" {
-						glog.Warningf("DEBUG: App state %d has empty name, skipping", i)
+						glog.V(4).Infof("DEBUG: App state %d has empty name, skipping", i)
 						continue
 					}
-					glog.Infof("DEBUG: Adding batch pending notification for app=%s (index=%d)", appName, i)
+					glog.V(3).Infof("DEBUG: Adding batch pending notification for app=%s (index=%d)", appName, i)
 
 					// Check if state has changed before creating notification
 					hasChanged, changeReason := cm.stateMonitor.HasStateChanged(appName, appState, sourceData.AppStateLatest)
-					glog.Infof("DEBUG: Batch state change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
+					glog.V(3).Infof("DEBUG: Batch state change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
 
 					pendingNotifications = append(pendingNotifications, pendingNotify{
 						userID:       userID,
@@ -713,10 +712,10 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						hasChanged:   hasChanged,
 						changeReason: changeReason,
 					})
-					glog.Infof("DEBUG: Added batch pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
+					glog.V(3).Infof("DEBUG: Added batch pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
 				}
 			} else {
-				glog.Warningf("DEBUG: State monitor is nil, skipping batch pending notifications for %d app states", len(appStatesData))
+				glog.V(3).Infof("DEBUG: State monitor is nil, skipping batch pending notifications for %d app states", len(appStatesData))
 			}
 
 			// Update each app state individually using name matching
@@ -725,7 +724,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 					cm.updateAppStateLatest(userID, sourceID, sourceData, appState)
 				}
 			}
-			glog.Infof("Updated %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
+			glog.V(2).Infof("Updated %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
 
 			// After batch updateAppStateLatest, check if any EntranceStatuses were preserved and force push was sent
 			// If so, remove the corresponding pending notifications to avoid duplicate push
@@ -782,7 +781,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 					filteredNotifications := make([]pendingNotify, 0, len(pendingNotifications))
 					for _, notify := range pendingNotifications {
 						if notify.changeReason == "entrance statuses changed" && forcePushedApps[notify.appName] {
-							glog.Infof("Removing duplicate batch pending notification for app=%s (force push already sent)", notify.appName)
+							glog.V(3).Infof("Removing duplicate batch pending notification for app=%s (force push already sent)", notify.appName)
 							continue
 						}
 						filteredNotifications = append(filteredNotifications, notify)
@@ -811,11 +810,11 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			// Collect single state change notification (send after unlock)
 			if cm.stateMonitor != nil {
 				appName := appData.Status.Name
-				glog.Infof("DEBUG: State monitor available, appName=%s, appData=%v", appName, appData != nil)
+				glog.V(2).Infof("DEBUG: State monitor available, appName=%s, appData=%v", appName, appData != nil)
 				if appName != "" {
 					// Check if state has changed before creating notification
 					hasChanged, changeReason := cm.stateMonitor.HasStateChanged(appName, appData, sourceData.AppStateLatest)
-					glog.Infof("DEBUG: State change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
+					glog.V(4).Infof("DEBUG: State change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
 
 					pendingNotifications = append(pendingNotifications, pendingNotify{
 						userID:       userID,
@@ -827,17 +826,17 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						hasChanged:   hasChanged,
 						changeReason: changeReason,
 					})
-					glog.Infof("DEBUG: Added pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
+					glog.V(2).Infof("DEBUG: Added pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
 				} else {
-					glog.Warningf("DEBUG: AppName is empty, skipping pending notification")
+					glog.V(3).Infof("DEBUG: AppName is empty, skipping pending notification")
 				}
 			} else {
-				glog.Warningf("DEBUG: State monitor is nil, skipping pending notification for app=%s", appData.Status.Name)
+				glog.V(3).Infof("DEBUG: State monitor is nil, skipping pending notification for app=%s", appData.Status.Name)
 			}
 
 			// Update or add the app state using name matching
 			cm.updateAppStateLatest(userID, sourceIDFromRecord, sourceData, appData)
-			glog.Infof("Updated single app state for user=%s, source=%s", userID, sourceIDFromRecord)
+			glog.V(2).Infof("Updated single app state for user=%s, source=%s", userID, sourceIDFromRecord)
 
 			// After updateAppStateLatest, check if EntranceStatuses was preserved and force push was sent
 			// If so, remove the corresponding pending notification to avoid duplicate push
@@ -877,7 +876,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 							if !mainStateChanged && !progressChanged {
 								// EntranceStatuses was preserved, main state/progress didn't change,
 								// and force push was already sent in updateAppStateLatest, so remove this notification
-								glog.Infof("Removing duplicate pending notification for app=%s (force push already sent)", appData.Status.Name)
+								glog.V(3).Infof("Removing duplicate pending notification for app=%s (force push already sent)", appData.Status.Name)
 								pendingNotifications = pendingNotifications[:lastIdx]
 							}
 						}
@@ -898,12 +897,12 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		// This ensures we don't accumulate old data when hash doesn't match
 		originalCount := len(sourceData.AppInfoLatestPending)
 		sourceData.AppInfoLatestPending = sourceData.AppInfoLatestPending[:0] // Clear the slice
-		glog.Infof("Cleared %d existing AppInfoLatestPending entries for user=%s, source=%s", originalCount, userID, sourceID)
+		glog.V(3).Infof("Cleared %d existing AppInfoLatestPending entries for user=%s, source=%s", originalCount, userID, sourceID)
 
 		// Check if this is a complete market data structure
 		if appsData, hasApps := data["apps"].(map[string]interface{}); hasApps {
 			// This is complete market data, extract individual apps
-			glog.Infof("Processing complete market data with %d apps for user=%s, source=%s", len(appsData), userID, sourceID)
+			glog.V(3).Infof("Processing complete market data with %d apps for user=%s, source=%s", len(appsData), userID, sourceID)
 
 			// Also store the "others" data (hash, version, topics, etc.)
 			others := &types.Others{}
@@ -946,8 +945,8 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			// Process each individual app
 			for appID, appDataInterface := range appsData {
 				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
-					glog.Infof("DEBUG: CALL POINT 1 - Processing app %s for user=%s, source=%s", appID, userID, sourceID)
-					glog.Infof("DEBUG: CALL POINT 1 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
+					glog.V(3).Infof("DEBUG: CALL POINT 1 - Processing app %s for user=%s, source=%s", appID, userID, sourceID)
+					glog.V(3).Infof("DEBUG: CALL POINT 1 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
 					appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
 					if appData != nil {
 						appData.Timestamp = time.Now().Unix()
@@ -959,37 +958,37 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				}
 			}
 
-			glog.Infof("Successfully processed %d apps from market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
+			glog.V(3).Infof("Successfully processed %d apps from market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
 		} else {
 			// This might be market data with nested apps structure, try to extract apps
-			glog.Infof("DEBUG: CALL POINT 2 - Processing potential market data for user=%s, source=%s", userID, sourceID)
-			glog.Infof("DEBUG: CALL POINT 2 - Data before processing: %+v", data)
+			glog.V(3).Infof("DEBUG: CALL POINT 2 - Processing potential market data for user=%s, source=%s", userID, sourceID)
+			glog.V(3).Infof("DEBUG: CALL POINT 2 - Data before processing: %+v", data)
 
 			// Check if this is market data with nested structure
 			if dataSection, hasData := data["data"].(map[string]interface{}); hasData {
 				if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
 					// This is market data with apps - process each app individually
-					glog.Infof("DEBUG: CALL POINT 2 - Found nested apps structure with %d apps", len(appsData))
+					glog.V(3).Infof("DEBUG: CALL POINT 2 - Found nested apps structure with %d apps", len(appsData))
 					for appID, appDataInterface := range appsData {
 						if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
-							glog.Infof("DEBUG: CALL POINT 2 - Processing app %s", appID)
+							glog.V(3).Infof("DEBUG: CALL POINT 2 - Processing app %s", appID)
 							appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
 							if appData != nil {
 								appData.Timestamp = time.Now().Unix()
 								sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
-								glog.V(2).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
+								glog.V(3).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
 							} else {
 								glog.Warningf("Failed to create app data for app %s (user=%s, source=%s)", appID, userID, sourceID)
 							}
 						}
 					}
-					glog.Infof("Successfully processed %d apps from nested market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
+					glog.V(2).Infof("Successfully processed %d apps from nested market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
 				} else {
 					glog.Warningf("Market data found but no apps section for user=%s, source=%s", userID, sourceID)
 				}
 			} else {
 				// This might be actual single app data, try to process directly
-				glog.Infof("DEBUG: CALL POINT 2 - Trying as single app data for user=%s, source=%s", userID, sourceID)
+				glog.V(3).Infof("DEBUG: CALL POINT 2 - Trying as single app data for user=%s, source=%s", userID, sourceID)
 				appData := NewAppInfoLatestPendingDataFromLegacyData(data)
 				if appData == nil {
 					glog.Warningf("Failed to create AppInfoLatestPendingData from data for user=%s, source=%s - not recognized as app data or market data", userID, sourceID)
@@ -998,23 +997,23 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 				appData.Timestamp = time.Now().Unix()
 				sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
-				glog.Infof("Successfully processed single app data for user=%s, source=%s", userID, sourceID)
+				glog.V(2).Infof("Successfully processed single app data for user=%s, source=%s", userID, sourceID)
 			}
 		}
 
-		glog.Infof("Updated AppInfoLatestPending list with %d new entries for user=%s, source=%s",
+		glog.V(2).Infof("Updated AppInfoLatestPending list with %d new entries for user=%s, source=%s",
 			len(sourceData.AppInfoLatestPending), userID, sourceID)
 
 		// Notify hydrator about pending data update for immediate task creation
 		if cm.hydrationNotifier != nil && len(sourceData.AppInfoLatestPending) > 0 {
-			glog.Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
+			glog.V(3).Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
 			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
 		}
 	case types.AppRenderFailed:
 		// Handle render failed data - this is typically set by the hydrator when tasks fail
 		if failedAppData, hasFailedApp := data["failed_app"].(*types.AppRenderFailedData); hasFailedApp {
 			sourceData.AppRenderFailed = append(sourceData.AppRenderFailed, failedAppData)
-			glog.Infof("Added render failed app for user=%s, source=%s, app=%s, reason=%s",
+			glog.V(3).Infof("Added render failed app for user=%s, source=%s, app=%s, reason=%s",
 				userID, sourceID, failedAppData.RawData.AppID, failedAppData.FailureReason)
 		} else {
 			glog.Warningf("Invalid render failed data format for user=%s, source=%s", userID, sourceID)
@@ -1029,7 +1028,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		Type:     SyncSource,
 	})
 
-	glog.Infof("Set app data for user=%s, source=%s, type=%s", userID, sourceID, dataType)
+	glog.V(2).Infof("Set app data for user=%s, source=%s, type=%s", userID, sourceID, dataType)
 	return nil
 }
 
@@ -1045,19 +1044,19 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 }
 
 func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @SetLocalAppData Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @SetLocalAppData Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("setLocalAppDataInternal: Write lock not available for user %s, source %s, type %v, skipping", userID, sourceID, dataType)
+		glog.Warningf("[TryLock] setLocalAppDataInternal: Write lock not available for user %s, source %s, type %v, skipping", userID, sourceID, dataType)
 		return fmt.Errorf("write lock not available")
 	}
 	cm.updateLockStats("lock")
-	glog.Infof("[LOCK] cm.mutex.TryLock() @SetLocalAppData Success")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @SetLocalAppData Success")
 	_wd := cm.startLockWatchdog("@SetLocalAppData")
 
 	defer func() {
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
-		glog.Infof("[LOCK] cm.mutex.Unlock() @SetLocalAppData End")
+		glog.V(4).Infof("[LOCK] cm.mutex.Unlock() @SetLocalAppData End")
 		_wd()
 	}()
 
@@ -1114,7 +1113,7 @@ func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataTyp
 		Type:     SyncSource,
 	})
 
-	glog.Infof("SetLocalAppData: added AppInfoLatestPending for user=%s, source=%s", userID, sourceID)
+	glog.V(2).Infof("SetLocalAppData: added AppInfoLatestPending for user=%s, source=%s", userID, sourceID)
 	return nil
 }
 
@@ -1129,9 +1128,9 @@ func (cm *CacheManager) SetLocalAppData(userID, sourceID string, dataType AppDat
 
 // GetAppData retrieves app data from cache using single global lock
 func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
-	glog.Infof("[LOCK] cm.mutex.TryRLock() @543 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @543 Start")
 	if !cm.mutex.TryRLock() {
-		glog.Warningf("GetAppData: Read lock not available for user %s, source %s, type %v, returning nil", userID, sourceID, dataType)
+		glog.Warningf("[TryRLock] GetAppData: Read lock not available for user %s, source %s, type %v, returning nil", userID, sourceID, dataType)
 		return nil
 	}
 	defer cm.mutex.RUnlock()
@@ -1158,12 +1157,12 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 
 // RemoveUserData removes user data from cache and Redis
 func (cm *CacheManager) removeUserDataInternal(userID string) error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @568 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @568 Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("removeUserDataInternal: Write lock not available for user %s, skipping", userID)
+		glog.Warningf("[TryLock] removeUserDataInternal: Write lock not available for user %s, skipping", userID)
 		return fmt.Errorf("write lock not available")
 	}
-	glog.Infof("[LOCK] cm.mutex.TryLock() @568 Success")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @568 Success")
 	_wd := cm.startLockWatchdog("@568:removeUser")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1176,7 +1175,7 @@ func (cm *CacheManager) removeUserDataInternal(userID string) error {
 		Type:   DeleteUser,
 	})
 
-	glog.Infof("Removed user data for user=%s", userID)
+	glog.V(3).Infof("Removed user data for user=%s", userID)
 	return nil
 }
 
@@ -1192,17 +1191,17 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 
 // AddUser adds a new user to the cache
 func (cm *CacheManager) addUserInternal(userID string) error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @AddUser Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @AddUser Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("addUserInternal: Write lock not available for user %s, skipping", userID)
+		glog.Warningf("[TryLock] addUserInternal: Write lock not available for user %s, skipping", userID)
 		return fmt.Errorf("write lock not available")
 	}
-	glog.Infof("[LOCK] cm.mutex.TryLock() @AddUser Success")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @AddUser Success")
 	_wd := cm.startLockWatchdog("@AddUser")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
 	if _, exists := cm.cache.Users[userID]; exists {
-		glog.Infof("User %s already exists in cache", userID)
+		glog.V(4).Infof("User %s already exists in cache", userID)
 		return nil
 	}
 
@@ -1215,7 +1214,7 @@ func (cm *CacheManager) addUserInternal(userID string) error {
 			for _, src := range sourcesConfig.Sources {
 
 				userData.Sources[src.ID] = types.NewSourceDataWithType(types.SourceDataType(src.Type))
-				glog.Infof("Initialized source %s for user %s", src.ID, userID)
+				glog.V(3).Infof("Initialized source %s for user %s", src.ID, userID)
 			}
 		} else {
 			glog.Warningf("settingsManager.GetMarketSources() returned nil, no sources initialized for user %s", userID)
@@ -1225,7 +1224,7 @@ func (cm *CacheManager) addUserInternal(userID string) error {
 	}
 
 	cm.cache.Users[userID] = userData
-	glog.Infof("User %s added to cache with %d sources", userID, len(userData.Sources))
+	glog.V(2).Infof("User %s added to cache with %d sources", userID, len(userData.Sources))
 
 	if cm.isRunning {
 		cm.requestSync(SyncRequest{
@@ -1248,9 +1247,9 @@ func (cm *CacheManager) AddUser(userID string) error {
 
 // GetCacheStats returns cache statistics using single global lock
 func (cm *CacheManager) GetCacheStats() map[string]interface{} {
-	glog.Infof("[LOCK] cm.mutex.TryRLock() @586 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @586 Start")
 	if !cm.mutex.TryRLock() {
-		glog.Warningf("GetCacheStats: Read lock not available, returning empty stats")
+		glog.Warning("[TryRLock] GetCacheStats: Read lock not available, returning empty stats")
 		return map[string]interface{}{"error": "lock not available"}
 	}
 	defer cm.mutex.RUnlock()
@@ -1295,19 +1294,19 @@ func (cm *CacheManager) ForceSync() error {
 	cm.lastForceSync = now
 	cm.forceSyncMutex.Unlock()
 
-	glog.Infof("Force syncing all cache data to Redis")
+	glog.V(2).Infof("Force syncing all cache data to Redis")
 
 	// 1. Quickly obtain a data snapshot to minimize lock holding time
 	var userDataSnapshot map[string]*UserData
 	func() {
-		glog.Infof("[LOCK] cm.mutex.TryRLock() @617 Start")
+		glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @617 Start")
 		if !cm.mutex.TryRLock() {
-			glog.Warningf("ForceSync: Read lock not available, returning error")
+			glog.Warning("[TryRLock] ForceSync: Read lock not available, returning error")
 			return
 		}
 		defer func() {
 			cm.mutex.RUnlock()
-			glog.Infof("[LOCK] cm.mutex.RUnlock() @617 End")
+			glog.V(4).Infof("[LOCK] cm.mutex.RUnlock() @617 End")
 		}()
 
 		// Quickly copy data to minimize lock holding time
@@ -1343,7 +1342,7 @@ func (cm *CacheManager) ForceSync() error {
 		if err != nil {
 			return err
 		}
-		glog.Infof("Force sync completed successfully")
+		glog.V(3).Infof("Force sync completed successfully")
 		return nil
 	case <-ctx.Done():
 		glog.Errorf("Force sync timed out after 5 seconds")
@@ -1381,7 +1380,7 @@ func (cm *CacheManager) GetForceSyncCooldown() time.Duration {
 // GetAllUsersData returns all users data from cache using single global lock
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 	if !cm.mutex.TryRLock() {
-		glog.Warningf("GetAllUsersData: Read lock not available, returning empty map")
+		glog.Warning("[TryRLock] GetAllUsersData: Read lock not available, returning empty map")
 		return make(map[string]*UserData)
 	}
 	defer cm.mutex.RUnlock()
@@ -1406,14 +1405,14 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 
 // HasUserStateDataForSource checks if any user has non-empty state data for a specific source
 func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
-	glog.Infof("[LOCK] cm.mutex.TryRLock() @HasUserStateDataForSource Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @HasUserStateDataForSource Start")
 	if !cm.mutex.TryRLock() {
-		glog.Warningf("HasUserStateDataForSource: Read lock not available for source %s, returning false", sourceID)
+		glog.Warningf("[TryRLock] HasUserStateDataForSource: Read lock not available for source %s, returning false", sourceID)
 		return false
 	}
 	defer func() {
 		cm.mutex.RUnlock()
-		glog.Infof("[LOCK] cm.mutex.RUnlock() @HasUserStateDataForSource End")
+		glog.V(4).Infof("[LOCK] cm.mutex.RUnlock() @HasUserStateDataForSource End")
 	}()
 
 	if cm.cache == nil {
@@ -1425,24 +1424,24 @@ func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
 		if sourceData, exists := userData.Sources[sourceID]; exists {
 			// Check if any of the state-related data is non-empty
 			if len(sourceData.AppStateLatest) > 0 {
-				glog.Infof("Found non-empty state data for user %s in source %s", userID, sourceID)
+				glog.V(3).Infof("Found non-empty state data for user %s in source %s", userID, sourceID)
 				return true
 			}
 		}
 	}
 
-	glog.Infof("No user state data found for source: %s", sourceID)
+	glog.V(2).Infof("No user state data found for source: %s", sourceID)
 	return false
 }
 
 // UpdateUserConfig updates the user configuration and ensures all users have data structures
 func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @660 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @660 Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("updateUserConfigInternal: Write lock not available, skipping")
+		glog.Warning("[TryLock] updateUserConfigInternal: Write lock not available, skipping")
 		return fmt.Errorf("write lock not available")
 	}
-	glog.Infof("[LOCK] cm.mutex.TryLock() @660 Success")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @660 Success")
 	_wd := cm.startLockWatchdog("@660:updateUserConfig")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1450,7 +1449,7 @@ func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) erro
 		return fmt.Errorf("user config cannot be nil")
 	}
 
-	glog.Infof("Updating user configuration")
+	glog.V(3).Infof("Updating user configuration")
 
 	// oldUserConfig := cm.userConfig // Commented out as it's only used in optional removal logic
 	cm.userConfig = newUserConfig
@@ -1459,7 +1458,7 @@ func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) erro
 	if len(newUserConfig.UserList) > 0 {
 		for _, userID := range newUserConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
-				glog.Infof("Creating data structure for newly configured user: %s", userID)
+				glog.V(3).Infof("Creating data structure for newly configured user: %s", userID)
 				userData := NewUserData()
 				cm.cache.Users[userID] = userData
 
@@ -1496,7 +1495,7 @@ func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) erro
 		}
 	*/
 
-	glog.Infof("User configuration updated successfully")
+	glog.V(2).Infof("User configuration updated successfully")
 	return nil
 }
 
@@ -1512,12 +1511,12 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 
 // SyncUserListToCache ensures all users from current userConfig have initialized data structures
 func (cm *CacheManager) syncUserListToCacheInternal() error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @718 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @718 Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("syncUserListToCacheInternal: Write lock not available, skipping")
+		glog.Warning("[TryLock] syncUserListToCacheInternal: Write lock not available, skipping")
 		return fmt.Errorf("write lock not available")
 	}
-	glog.Infof("[LOCK] cm.mutex.TryLock() @718 Success")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @718 Success")
 	_wd := cm.startLockWatchdog("@718:syncUserList")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1526,13 +1525,13 @@ func (cm *CacheManager) syncUserListToCacheInternal() error {
 		return nil
 	}
 
-	glog.Infof("Syncing user list to cache")
+	glog.V(3).Infof("Syncing user list to cache")
 
 	newUsersCount := 0
 	newUsersList := make([]string, 0)
 	for _, userID := range cm.userConfig.UserList {
 		if _, exists := cm.cache.Users[userID]; !exists {
-			glog.Infof("Adding missing user to cache: %s", userID)
+			glog.V(4).Infof("Adding missing user to cache: %s", userID)
 			userData := NewUserData()
 			cm.cache.Users[userID] = userData
 			newUsersCount++
@@ -1548,7 +1547,7 @@ func (cm *CacheManager) syncUserListToCacheInternal() error {
 		}
 	}
 
-	glog.Infof("User list sync completed, added %d new users", newUsersCount)
+	glog.V(2).Infof("User list sync completed, added %d new users", newUsersCount)
 
 	return nil
 }
@@ -1565,9 +1564,9 @@ func (cm *CacheManager) SyncUserListToCache() error {
 
 // CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
 func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @751 Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @751 Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("CleanupInvalidPendingData: Write lock not available, skipping cleanup")
+		glog.Warning("[TryLock] CleanupInvalidPendingData: Write lock not available, skipping cleanup")
 		return 0
 	}
 	_wd := cm.startLockWatchdog("@751:cleanupInvalidPending")
@@ -1608,7 +1607,7 @@ func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
 				if isValid {
 					cleanedPendingData = append(cleanedPendingData, pendingData)
 				} else {
-					glog.Infof("Removing invalid pending data entry for user=%s, source=%s (missing identifiers)", userID, sourceID)
+					glog.V(3).Infof("Removing invalid pending data entry for user=%s, source=%s (missing identifiers)", userID, sourceID)
 					totalCleaned++
 				}
 			}
@@ -1617,7 +1616,7 @@ func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
 			sourceData.AppInfoLatestPending = cleanedPendingData
 
 			if originalCount != len(cleanedPendingData) {
-				glog.Infof("Cleaned %d invalid pending data entries for user=%s, source=%s",
+				glog.V(3).Infof("Cleaned %d invalid pending data entries for user=%s, source=%s",
 					originalCount-len(cleanedPendingData), userID, sourceID)
 
 				// Trigger sync to Redis to persist the cleanup
@@ -1633,7 +1632,7 @@ func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
 	}
 
 	if totalCleaned > 0 {
-		glog.Infof("Cleanup completed: removed %d invalid pending data entries across all users", totalCleaned)
+		glog.V(2).Infof("Cleanup completed: removed %d invalid pending data entries across all users", totalCleaned)
 	}
 
 	return totalCleaned
@@ -1657,10 +1656,10 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 			select {
 			case result <- cleaned:
 			case <-cancel:
-				glog.Warningf("CleanupInvalidPendingData: Operation cancelled before sending result")
+				glog.V(4).Info("CleanupInvalidPendingData: Operation cancelled before sending result")
 			}
 		case <-cancel:
-			glog.Warningf("CleanupInvalidPendingData: Operation cancelled")
+			glog.V(4).Info("CleanupInvalidPendingData: Operation cancelled")
 		}
 	}()
 
@@ -1669,7 +1668,7 @@ func (cm *CacheManager) CleanupInvalidPendingData() int {
 		return cleaned
 	case <-time.After(5 * time.Second):
 		close(cancel) // Cancel the goroutine
-		glog.Warningf("CleanupInvalidPendingData timeout, returning 0")
+		glog.V(4).Info("CleanupInvalidPendingData timeout, returning 0")
 		return 0
 	}
 }
@@ -1684,9 +1683,9 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 
 	// Add debug logging for input data
 	if entranceStatusesVal, ok := data["entranceStatuses"]; ok {
-		glog.Infof("DEBUG: enhanceAppStateDataWithUrls - input entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
+		glog.V(2).Infof("DEBUG: enhanceAppStateDataWithUrls - input entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 	} else {
-		glog.Infof("DEBUG: enhanceAppStateDataWithUrls - no entranceStatuses found in input data")
+		glog.V(3).Info("DEBUG: enhanceAppStateDataWithUrls - no entranceStatuses found in input data")
 	}
 
 	// Extract app name for URL fetching
@@ -1702,7 +1701,7 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 	}
 
 	if appName == "" {
-		glog.Warningf("Cannot determine app name for URL enhancement")
+		glog.V(3).Infof("Cannot determine app name for URL enhancement")
 		return enhancedData
 	}
 
@@ -1731,12 +1730,12 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 
 			// If running entrances have empty URLs, try to fetch them from app-service
 			if hasRunningWithEmptyUrl {
-				glog.Infof("Running entrances %v have empty URLs for app %s - attempting to fetch URLs from app-service", runningEntrancesWithoutUrl, appName)
+				glog.V(4).Infof("Running entrances %v have empty URLs for app %s - attempting to fetch URLs from app-service", runningEntrancesWithoutUrl, appName)
 
 				// Fetch entrance URLs from app-service
 				entranceUrls, err := utils.FetchAppEntranceUrls(appName, user)
 				if err != nil {
-					glog.Warningf("Failed to fetch entrance URLs for app %s: %v - returning empty entrance statuses", appName, err)
+					glog.Errorf("Failed to fetch entrance URLs for app %s: %v - returning empty entrance statuses", appName, err)
 					enhancedData["entranceStatuses"] = []interface{}{}
 					return enhancedData
 				}
@@ -1753,9 +1752,9 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 						if state == "running" && (!hasUrl || url == "") {
 							if fetchedUrl, exists := entranceUrls[name]; exists && fetchedUrl != "" {
 								entranceMap["url"] = fetchedUrl
-								glog.Infof("Updated entrance %s URL for app %s: %s", name, appName, fetchedUrl)
+								glog.V(2).Infof("Updated entrance %s URL for app %s: %s", name, appName, fetchedUrl)
 							} else {
-								glog.Warningf("Running entrance %s for app %s still has no URL after fetching - skipping", name, appName)
+								glog.V(3).Infof("Running entrance %s for app %s still has no URL after fetching - skipping", name, appName)
 								continue // Skip this entrance
 							}
 						}
@@ -1765,13 +1764,13 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 				}
 
 				enhancedData["entranceStatuses"] = updatedEntrances
-				glog.Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
+				glog.V(3).Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
 				return enhancedData
 			}
 
 			// If no running entrances with empty URLs, return as is
 			enhancedData["entranceStatuses"] = entranceStatuses
-			glog.Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
+			glog.V(2).Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
 			return enhancedData
 		}
 	}
@@ -1781,11 +1780,11 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 
 // GetLockStats returns current lock statistics for monitoring
 func (cm *CacheManager) GetLockStats() map[string]interface{} {
-	glog.V(2).Infof("[LOCK] cm.lockStats.Lock() GetLockStats Start")
+	glog.V(4).Infof("[LOCK] cm.lockStats.Lock() GetLockStats Start")
 	cm.lockStats.Lock()
 	defer func() {
 		cm.lockStats.Unlock()
-		glog.V(2).Infof("[LOCK] cm.lockStats.Unlock() GetLockStats End")
+		glog.V(4).Infof("[LOCK] cm.lockStats.Unlock() GetLockStats End")
 	}()
 
 	stats := make(map[string]interface{})
@@ -1817,47 +1816,47 @@ func (cm *CacheManager) GetLockStats() map[string]interface{} {
 
 // DumpLockInfo prints lock stats and all goroutine stacks for diagnosing lock holders
 func (cm *CacheManager) DumpLockInfo(reason string) {
-	log.Printf("LOCK DIAG: reason=%s", reason)
+	glog.V(4).Infof("LOCK DIAG: reason=%s", reason)
 	// Print current lock stats snapshot
 	stats := cm.GetLockStats()
-	log.Printf("LOCK DIAG: stats=%v", stats)
+	glog.V(4).Infof("LOCK DIAG: stats=%v", stats)
 
 	// Dump all goroutine stacks to identify who might be holding the lock
 	// Note: This is safe but can be large; only used on timeouts.
 	buf := make([]byte, 1<<20)
 	n := runtime.Stack(buf, true)
-	log.Printf("LOCK DIAG: goroutine dump (%d bytes)\n%s", n, string(buf[:n]))
+	glog.V(4).Infof("LOCK DIAG: goroutine dump (%d bytes)\n%s", n, string(buf[:n]))
 }
 
 // updateLockStats updates lock statistics
 func (cm *CacheManager) updateLockStats(lockType string) {
-	glog.V(2).Infof("[LOCK] cm.lockStats.Lock() Start")
+	glog.V(4).Infof("[LOCK] cm.lockStats.Lock() Start")
 	cm.lockStats.Lock()
 	defer func() {
 		cm.lockStats.Unlock()
-		glog.V(2).Infof("[LOCK] cm.lockStats.Unlock() End")
+		glog.V(4).Infof("[LOCK] cm.lockStats.Unlock() End")
 	}()
 
 	now := time.Now()
 	if lockType == "lock" {
 		cm.lockStats.lastLockTime = now
 		cm.lockStats.lockCount++
-		glog.V(2).Infof("[LOCK] Lock stats updated - lock count: %d", cm.lockStats.lockCount)
+		glog.V(4).Infof("[LOCK] Lock stats updated - lock count: %d", cm.lockStats.lockCount)
 	} else if lockType == "unlock" {
 		cm.lockStats.lastUnlockTime = now
 		cm.lockStats.unlockCount++
 		if !cm.lockStats.lastLockTime.IsZero() {
 			cm.lockStats.lockDuration = now.Sub(cm.lockStats.lastLockTime)
 		}
-		glog.V(2).Infof("[LOCK] Lock stats updated - unlock count: %d, duration: %v", cm.lockStats.unlockCount, cm.lockStats.lockDuration)
+		glog.V(4).Infof("[LOCK] Lock stats updated - unlock count: %d, duration: %v", cm.lockStats.unlockCount, cm.lockStats.lockDuration)
 	}
 }
 
 // RemoveAppStateData removes a specific app from AppStateLatest for a user and source
 func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName string) error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @RemoveAppStateData Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @RemoveAppStateData Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("RemoveAppStateData: Write lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appName)
+		glog.Warningf("[TryLock] RemoveAppStateData: Write lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appName)
 		return fmt.Errorf("write lock not available")
 	}
 	_wd := cm.startLockWatchdog("@RemoveAppStateData")
@@ -1887,14 +1886,14 @@ func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName str
 	sourceData.AppStateLatest = newList
 
 	if len(newList) < originalCount {
-		glog.Infof("Removed app %s from AppStateLatest for user=%s, source=%s", appName, userID, sourceID)
+		glog.V(2).Infof("Removed app %s from AppStateLatest for user=%s, source=%s", appName, userID, sourceID)
 		cm.requestSync(SyncRequest{
 			UserID:   userID,
 			SourceID: sourceID,
 			Type:     SyncSource,
 		})
 	} else {
-		glog.Infof("App %s not found in AppStateLatest for user=%s, source=%s", appName, userID, sourceID)
+		glog.V(3).Infof("App %s not found in AppStateLatest for user=%s, source=%s", appName, userID, sourceID)
 	}
 
 	return nil
@@ -1912,12 +1911,12 @@ func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) err
 
 // RemoveAppInfoLatestData removes a specific app from AppInfoLatest for a user and source
 func (cm *CacheManager) removeAppInfoLatestDataInternal(userID, sourceID, appName string) error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @RemoveAppInfoLatestData Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @RemoveAppInfoLatestData Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("removeAppInfoLatestDataInternal: Write lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appName)
+		glog.Warningf("[TryLock] removeAppInfoLatestDataInternal: Write lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appName)
 		return fmt.Errorf("write lock not available")
 	}
-	glog.Infof("[LOCK] cm.mutex.TryLock() @RemoveAppInfoLatestData Success")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @RemoveAppInfoLatestData Success")
 	_wd := cm.startLockWatchdog("@RemoveAppInfoLatestData")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1968,14 +1967,14 @@ func (cm *CacheManager) removeAppInfoLatestDataInternal(userID, sourceID, appNam
 	sourceData.AppInfoLatest = newList
 
 	if len(newList) < originalCount {
-		glog.Infof("Removed app %s from AppInfoLatest for user=%s, source=%s", appName, userID, sourceID)
+		glog.V(2).Infof("Removed app %s from AppInfoLatest for user=%s, source=%s", appName, userID, sourceID)
 		cm.requestSync(SyncRequest{
 			UserID:   userID,
 			SourceID: sourceID,
 			Type:     SyncSource,
 		})
 	} else {
-		glog.Infof("App %s not found in AppInfoLatest for user=%s, source=%s", appName, userID, sourceID)
+		glog.V(3).Infof("App %s not found in AppInfoLatest for user=%s, source=%s", appName, userID, sourceID)
 	}
 
 	return nil
@@ -2003,12 +2002,12 @@ func (cm *CacheManager) GetSettingsManager() *settings.SettingsManager {
 
 // SyncMarketSourcesToCache synchronizes market sources to all users in cache
 func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.MarketSource) error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @SyncMarketSourcesToCache Start")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @SyncMarketSourcesToCache Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("syncMarketSourcesToCacheInternal: Write lock not available, skipping")
+		glog.Warningf("[TryLock] syncMarketSourcesToCacheInternal: Write lock not available, skipping")
 		return fmt.Errorf("write lock not available")
 	}
-	glog.Infof("[LOCK] cm.mutex.TryLock() @SyncMarketSourcesToCache Success")
+	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @SyncMarketSourcesToCache Success")
 	_wd := cm.startLockWatchdog("@SyncMarketSourcesToCache")
 	defer func() {
 		cm.mutex.Unlock()
@@ -2020,7 +2019,7 @@ func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.Mar
 		return fmt.Errorf("cache manager is not running")
 	}
 
-	glog.Infof("Syncing %d market sources to cache for all users", len(sources))
+	glog.V(3).Infof("Syncing %d market sources to cache for all users", len(sources))
 
 	// Create a map of source IDs for quick lookup
 	sourceIDMap := make(map[string]*settings.MarketSource)
@@ -2030,7 +2029,7 @@ func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.Mar
 
 	// Update all users in cache
 	for userID, userData := range cm.cache.Users {
-		glog.Infof("Updating market sources for user: %s", userID)
+		glog.V(3).Infof("Updating market sources for user: %s", userID)
 
 		// Remove sources that no longer exist
 		var sourcesToRemove []string
@@ -2046,14 +2045,14 @@ func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.Mar
 		// Remove non-existent sources
 		for _, sourceID := range sourcesToRemove {
 			delete(userData.Sources, sourceID)
-			glog.Infof("Removed source %s from user %s", sourceID, userID)
+			glog.V(3).Infof("Removed source %s from user %s", sourceID, userID)
 		}
 
 		// Add new sources that don't exist for this user
 		for _, source := range sources {
 			if _, exists := userData.Sources[source.ID]; !exists {
 				userData.Sources[source.ID] = types.NewSourceDataWithType(types.SourceDataType(source.Type))
-				glog.Infof("Added new source %s (%s) for user %s", source.Name, source.ID, userID)
+				glog.V(3).Infof("Added new source %s (%s) for user %s", source.Name, source.ID, userID)
 			}
 		}
 
@@ -2066,7 +2065,7 @@ func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.Mar
 		}
 	}
 
-	glog.Infof("Successfully synced market sources to cache for all users")
+	glog.V(2).Infof("Successfully synced market sources to cache for all users")
 	return nil
 }
 
@@ -2081,12 +2080,12 @@ func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSourc
 }
 
 func (cm *CacheManager) resynceUserInternal() error {
-	glog.Infof("[LOCK] cm.mutex.TryLock() @resynceUserInternal Start")
+	glog.V(4).Info("[LOCK] cm.mutex.TryLock() @resynceUserInternal Start")
 	if !cm.mutex.TryLock() {
-		glog.Warningf("resynceUserInternal: Write lock not available, skipping")
+		glog.Warning("[TryLock] resynceUserInternal: Write lock not available, skipping")
 		return fmt.Errorf("write lock not available")
 	}
-	glog.Infof("[LOCK] cm.mutex.TryLock() @resynceUserInternal Success")
+	glog.V(4).Info("[LOCK] cm.mutex.TryLock() @resynceUserInternal Success")
 	_wd := cm.startLockWatchdog("@resynceUserInternal")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -2106,7 +2105,7 @@ func (cm *CacheManager) resynceUserInternal() error {
 					userData.Sources[source.ID] = types.NewSourceDataWithType(types.SourceDataType(source.Type))
 				}
 				cm.cache.Users[userID] = userData
-				log.Printf("INFO: User %s has been added to cache and all sources initialized", userID)
+				glog.V(3).Infof("INFO: User %s has been added to cache and all sources initialized", userID)
 			}
 		}
 	}
@@ -2124,23 +2123,23 @@ func (cm *CacheManager) ResynceUser() error {
 
 // cleanupWorker processes periodic cleanup of AppRenderFailed data
 func (cm *CacheManager) cleanupWorker() {
-	log.Printf("INFO: Starting AppRenderFailed cleanup worker")
+	glog.V(3).Info("INFO: Starting AppRenderFailed cleanup worker")
 
 	for range cm.cleanupTicker.C {
 		if !cm.isRunning {
-			log.Printf("INFO: CacheManager stopped, cleanup worker exiting")
+			glog.V(3).Info("INFO: CacheManager stopped, cleanup worker exiting")
 			break
 		}
 
 		cm.ClearAppRenderFailedData()
 	}
 
-	log.Printf("INFO: AppRenderFailed cleanup worker stopped")
+	glog.V(3).Info("INFO: AppRenderFailed cleanup worker stopped")
 }
 
 // ClearAppRenderFailedData clears all AppRenderFailed data for all users and sources
 func (cm *CacheManager) ClearAppRenderFailedData() {
-	log.Printf("INFO: Starting periodic cleanup of AppRenderFailed data")
+	glog.V(3).Info("INFO: Starting periodic cleanup of AppRenderFailed data")
 
 	start := time.Now()
 	// 1) Short lock phase: collect keys to be cleaned and count the number
@@ -2148,17 +2147,17 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	targets := make([]target, 0, 128)
 	counts := make(map[target]int)
 
-	log.Printf("INFO: [Cleanup] Attempting to acquire read lock for scan phase")
+	glog.V(3).Info("INFO: [Cleanup] Attempting to acquire read lock for scan phase")
 	if !cm.mutex.TryRLock() {
-		log.Printf("INFO: [Cleanup] Read lock not available for scan phase, skipping cleanup")
+		glog.Warning("[TryRLock] INFO: [Cleanup] Read lock not available for scan phase, skipping cleanup")
 		return
 	}
 	scanLockAcquiredAt := time.Now()
-	log.Printf("INFO: [Cleanup] Read lock acquired (scan). Hold minimal time")
+	glog.V(3).Info("INFO: [Cleanup] Read lock acquired (scan). Hold minimal time")
 
 	if cm.cache == nil {
 		cm.mutex.RUnlock()
-		log.Printf("WARN: Cache is nil, skipping AppRenderFailed cleanup")
+		glog.V(4).Info("WARN: Cache is nil, skipping AppRenderFailed cleanup")
 		return
 	}
 
@@ -2174,18 +2173,18 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 
 	// 2) Release read lock after scan
 	cm.mutex.RUnlock()
-	log.Printf("INFO: [Cleanup] Released read lock after scan (held %v), targets=%d", time.Since(scanLockAcquiredAt), len(targets))
+	glog.V(3).Infof("INFO: [Cleanup] Released read lock after scan (held %v), targets=%d", time.Since(scanLockAcquiredAt), len(targets))
 
 	// 3) Processing phase: Use batch processing to avoid lock contention
 	totalCleared := 0
 
 	if len(targets) == 0 {
-		log.Printf("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
+		glog.V(3).Infof("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
 		return
 	}
 
 	// Use single write lock to batch process all targets to avoid lock contention
-	log.Printf("INFO: [Cleanup] Processing %d targets in batch mode", len(targets))
+	glog.V(2).Infof("INFO: [Cleanup] Processing %d targets in batch mode", len(targets))
 
 	// Use short timeout to quickly acquire write lock to avoid writer starvation
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
@@ -2226,20 +2225,20 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 					if originalCount > 0 {
 						sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
 						totalCleared += originalCount
-						log.Printf("INFO: [Cleanup] Cleared %d AppRenderFailed entries for user=%s, source=%s", originalCount, t.userID, t.sourceID)
+						glog.V(3).Infof("INFO: [Cleanup] Cleared %d AppRenderFailed entries for user=%s, source=%s", originalCount, t.userID, t.sourceID)
 					}
 				}
 			}
 		}
 
 	case <-lockFailed:
-		log.Printf("DEBUG: [Cleanup] Failed to acquire write lock quickly, skipping cleanup to avoid reader starvation")
+		glog.Error("DEBUG: [Cleanup] Failed to acquire write lock quickly, skipping cleanup to avoid reader starvation")
 		return
 	}
 
 	if totalCleared > 0 {
-		log.Printf("INFO: Periodic cleanup completed, cleared %d total AppRenderFailed entries in %v", totalCleared, time.Since(start))
+		glog.V(2).Infof("INFO: Periodic cleanup completed, cleared %d total AppRenderFailed entries in %v", totalCleared, time.Since(start))
 	} else {
-		log.Printf("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
+		glog.V(3).Infof("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
 	}
 }

@@ -3,19 +3,20 @@ package api
 import (
 	"encoding/json"
 	"html/template"
-	"log"
 	"net/http"
 	"strings"
 
 	"market/internal/v2/runtime"
+
+	"github.com/golang/glog"
 )
 
 // getRuntimeState handles GET /api/v2/runtime/state
 func (s *Server) getRuntimeState(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/runtime/state - Getting runtime state")
+	glog.V(2).Info("GET /api/v2/runtime/state - Getting runtime state")
 
 	if s.runtimeStateService == nil {
-		log.Println("Runtime state service not initialized")
+		glog.V(3).Info("Runtime state service not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Runtime state service not available", nil)
 		return
 	}
@@ -39,7 +40,7 @@ func (s *Server) getRuntimeState(w http.ResponseWriter, r *http.Request) {
 		snapshot = s.runtimeStateService.GetSnapshot()
 	}
 
-	log.Printf("Runtime state retrieved: %d apps, %d tasks, %d components",
+	glog.V(2).Infof("Runtime state retrieved: %d apps, %d tasks, %d components",
 		len(snapshot.AppStates), len(snapshot.Tasks), len(snapshot.Components))
 
 	s.sendResponse(w, http.StatusOK, true, "Runtime state retrieved successfully", snapshot)
@@ -48,10 +49,10 @@ func (s *Server) getRuntimeState(w http.ResponseWriter, r *http.Request) {
 // getRuntimeDashboard handles GET /api/v2/runtime/dashboard
 // Returns an HTML page with all runtime state information
 func (s *Server) getRuntimeDashboard(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/runtime/dashboard - Getting runtime dashboard")
+	glog.V(2).Info("GET /api/v2/runtime/dashboard - Getting runtime dashboard")
 
 	if s.runtimeStateService == nil {
-		log.Println("Runtime state service not initialized")
+		glog.V(3).Info("Runtime state service not initialized")
 		http.Error(w, "Runtime state service not available", http.StatusInternalServerError)
 		return
 	}
@@ -66,20 +67,20 @@ func (s *Server) getRuntimeDashboard(w http.ResponseWriter, r *http.Request) {
 	// Convert snapshot to JSON for JavaScript consumption
 	snapshotJSON, err := json.Marshal(snapshot)
 	if err != nil {
-		log.Printf("Failed to marshal snapshot: %v", err)
+		glog.Errorf("Failed to marshal snapshot: %v", err)
 		http.Error(w, "Failed to serialize snapshot", http.StatusInternalServerError)
 		return
 	}
 
 	// Debug: log all app states to verify stage field
 	if snapshot != nil && len(snapshot.AppStates) > 0 {
-		log.Printf("[DEBUG] Dashboard - Total apps: %d", len(snapshot.AppStates))
+		glog.V(3).Infof("[DEBUG] Dashboard - Total apps: %d", len(snapshot.AppStates))
 		for key, appState := range snapshot.AppStates {
 			if appState != nil {
-				log.Printf("[DEBUG] Dashboard - App key: %s, AppName: %s, Stage: %s (type: %T), Health: %s",
+				glog.V(3).Infof("[DEBUG] Dashboard - App key: %s, AppName: %s, Stage: %s (type: %T), Health: %s",
 					key, appState.AppName, appState.Stage, appState.Stage, appState.Health)
 			} else {
-				log.Printf("[DEBUG] Dashboard - App key: %s, AppState is nil", key)
+				glog.V(3).Infof("[DEBUG] Dashboard - App key: %s, AppState is nil", key)
 			}
 		}
 	}
@@ -2469,10 +2470,10 @@ func generateDashboardHTML(snapshotJSON string) string {
 // getRuntimeDashboardApp handles GET /api/v2/runtime/dashboard-app
 // Returns an HTML page showing app processing flow status
 func (s *Server) getRuntimeDashboardApp(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/runtime/dashboard-app - Getting app processing flow dashboard")
+	glog.V(2).Info("GET /api/v2/runtime/dashboard-app - Getting app processing flow dashboard")
 
 	if s.runtimeStateService == nil {
-		log.Println("Runtime state service not initialized")
+		glog.V(3).Info("Runtime state service not initialized")
 		http.Error(w, "Runtime state service not available", http.StatusInternalServerError)
 		return
 	}
@@ -2487,7 +2488,7 @@ func (s *Server) getRuntimeDashboardApp(w http.ResponseWriter, r *http.Request) 
 	// Convert snapshot to JSON for JavaScript consumption
 	snapshotJSON, err := json.Marshal(snapshot)
 	if err != nil {
-		log.Printf("Failed to marshal snapshot: %v", err)
+		glog.Errorf("Failed to marshal snapshot: %v", err)
 		http.Error(w, "Failed to serialize snapshot", http.StatusInternalServerError)
 		return
 	}

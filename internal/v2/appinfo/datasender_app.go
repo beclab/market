@@ -3,13 +3,13 @@ package appinfo
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
+	"github.com/golang/glog"
 	"github.com/nats-io/nats.go"
 )
 
@@ -34,12 +34,12 @@ func NewDataSender() (*DataSender, error) {
 	// Check if we're in development environment
 	env := os.Getenv("GO_ENV")
 	if env == "development" || env == "dev" {
-		log.Println("Development environment detected, NATS data sender disabled")
+		glog.V(2).Info("Development environment detected, NATS data sender disabled")
 		return &DataSender{enabled: false}, nil
 	}
 
 	if utils.IsPublicEnvironment() {
-		log.Println("Public environment detected, NATS data sender disabled")
+		glog.V(2).Info("Public environment detected, NATS data sender disabled")
 		return &DataSender{enabled: false}, nil
 	}
 
@@ -58,16 +58,16 @@ func NewDataSender() (*DataSender, error) {
 		nats.PingInterval(30*time.Second),
 		nats.MaxPingsOutstanding(5),
 		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			log.Printf("NATS disconnected: %v", err)
+			glog.Errorf("NATS disconnected: %v", err)
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			log.Printf("NATS reconnected to %s", nc.ConnectedUrl())
+			glog.V(3).Infof("NATS reconnected to %s", nc.ConnectedUrl())
 		}),
 		nats.ClosedHandler(func(nc *nats.Conn) {
-			log.Printf("NATS connection closed")
+			glog.V(3).Info("NATS connection closed")
 		}),
 		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
-			log.Printf("NATS error: %v", err)
+			glog.Errorf("NATS error: %v", err)
 		}),
 	)
 
@@ -75,7 +75,7 @@ func NewDataSender() (*DataSender, error) {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
-	log.Printf("Connected to NATS server at %s:%s", config.Host, config.Port)
+	glog.V(3).Infof("Connected to NATS server at %s:%s", config.Host, config.Port)
 
 	return &DataSender{
 		conn:    conn,
@@ -98,7 +98,7 @@ func loadConfig() Config {
 // SendAppInfoUpdate sends app info update to NATS
 func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
 	if !ds.enabled {
-		log.Println("NATS data sender is disabled, skipping message send")
+		glog.V(3).Info("NATS data sender is disabled, skipping message send")
 		return nil
 	}
 
@@ -115,7 +115,15 @@ func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
 	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
 
 	// Log before sending
-	log.Printf("Sending app info update to NATS subject '%s': %s", subject, string(data))
+	if glog.V(2) {
+		if len(string(data)) > 100 {
+			glog.V(2).Infof("Sending app info update to NATS subject '%s': %s", subject, string(data)[:200])
+		} else {
+			glog.V(2).Infof("Sending app info update to NATS subject '%s': %s", subject, string(data)[:100])
+		}
+	} else {
+		glog.V(3).Infof("Sending app info update to NATS subject '%s': %s", subject, string(data))
+	}
 
 	// Send message to NATS
 	err = ds.conn.Publish(subject, data)
@@ -123,14 +131,14 @@ func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
 		return fmt.Errorf("failed to publish message to NATS: %w", err)
 	}
 
-	log.Printf("Successfully sent app info update to NATS")
+	glog.V(2).Info("Successfully sent app info update to NATS")
 	return nil
 }
 
 // SendMarketSystemUpdate sends market system update to NATS
 func (ds *DataSender) SendMarketSystemUpdate(update types.MarketSystemUpdate) error {
 	if !ds.enabled {
-		log.Println("NATS data sender is disabled, skipping market system update message send")
+		glog.V(3).Info("NATS data sender is disabled, skipping market system update message send")
 		return nil
 	}
 
@@ -148,7 +156,7 @@ func (ds *DataSender) SendMarketSystemUpdate(update types.MarketSystemUpdate) er
 	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
 
 	// Log before sending
-	log.Printf("Sending market system update to NATS subject '%s': %s", subject, string(data))
+	glog.V(2).Infof("Sending market system update to NATS subject '%s': %s", subject, string(data))
 
 	// Send message to NATS
 	err = ds.conn.Publish(subject, data)
@@ -156,14 +164,14 @@ func (ds *DataSender) SendMarketSystemUpdate(update types.MarketSystemUpdate) er
 		return fmt.Errorf("failed to publish market system update message to NATS: %w", err)
 	}
 
-	log.Printf("Successfully sent market system update to NATS")
+	glog.V(3).Info("Successfully sent market system update to NATS")
 	return nil
 }
 
 // SendImageInfoUpdate sends image info update to NATS
 func (ds *DataSender) SendImageInfoUpdate(update types.ImageInfoUpdate) error {
 	if !ds.enabled {
-		log.Println("NATS data sender is disabled, skipping image info update message send")
+		glog.V(3).Info("NATS data sender is disabled, skipping image info update message send")
 		return nil
 	}
 
@@ -181,7 +189,7 @@ func (ds *DataSender) SendImageInfoUpdate(update types.ImageInfoUpdate) error {
 	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
 
 	// Log before sending
-	log.Printf("Sending image info update to NATS subject '%s': %s", subject, string(data))
+	glog.V(2).Infof("Sending image info update to NATS subject '%s': %s", subject, string(data))
 
 	// Send message to NATS
 	err = ds.conn.Publish(subject, data)
@@ -189,14 +197,14 @@ func (ds *DataSender) SendImageInfoUpdate(update types.ImageInfoUpdate) error {
 		return fmt.Errorf("failed to publish image info update message to NATS: %w", err)
 	}
 
-	log.Printf("Successfully sent image info update to NATS")
+	glog.V(2).Info("Successfully sent image info update to NATS")
 	return nil
 }
 
 // SendSignNotificationUpdate sends sign notification update to NATS
 func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUpdate) error {
 	if !ds.enabled {
-		log.Println("NATS data sender is disabled, skipping sign notification update message send")
+		glog.V(3).Info("NATS data sender is disabled, skipping sign notification update message send")
 		return nil
 	}
 
@@ -215,7 +223,7 @@ func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUp
 	subject := "os.users"
 
 	// Log before sending
-	log.Printf("Sending sign notification update to NATS subject '%s': %s", subject, string(data))
+	glog.V(2).Infof("Sending sign notification update to NATS subject '%s': %s", subject, string(data))
 
 	// Send message to NATS
 	err = ds.conn.Publish(subject, data)
@@ -223,7 +231,7 @@ func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUp
 		return fmt.Errorf("failed to publish sign notification update message to NATS: %w", err)
 	}
 
-	log.Printf("Successfully sent sign notification update to NATS")
+	glog.V(2).Info("Successfully sent sign notification update to NATS")
 	return nil
 }
 
@@ -231,7 +239,7 @@ func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUp
 func (ds *DataSender) Close() {
 	if ds.conn != nil && ds.enabled {
 		ds.conn.Close()
-		log.Println("NATS connection closed")
+		glog.V(3).Info("NATS connection closed")
 	}
 }
 

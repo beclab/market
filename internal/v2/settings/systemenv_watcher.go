@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
@@ -73,13 +74,13 @@ func StartSystemEnvWatcher(ctx context.Context) {
 		go factory.Start(stopCh)
 		// wait for sync
 		if !cache.WaitForCacheSync(stopCh, informer.HasSynced) {
-			log.Printf("SystemEnv watcher: cache sync failed")
+			glog.Error("SystemEnv watcher: cache sync failed")
 		} else {
-			log.Printf("SystemEnv watcher: started")
+			glog.V(3).Info("SystemEnv watcher: started")
 		}
 		// tie lifetime to ctx
 		<-ctx.Done()
-		log.Printf("SystemEnv watcher: context done, stopping")
+		glog.V(3).Info("SystemEnv watcher: context done, stopping")
 	}()
 }
 
@@ -119,7 +120,7 @@ func handleSystemEnv(obj interface{}) {
 	if old == newValue {
 		return
 	}
-	log.Printf("SystemEnv watcher: OlaresRemoteService updated from %s to %s", old, newValue)
+	glog.V(2).Infof("SystemEnv watcher: OlaresRemoteService updated from %s to %s", old, newValue)
 	setCachedSystemRemoteService(newValue)
 }
 
@@ -134,7 +135,7 @@ func WaitForSystemRemoteService(ctx context.Context, timeout time.Duration) erro
 
 	for {
 		if v := getCachedSystemRemoteService(); v != "" {
-			log.Printf("SystemEnv watcher: OlaresRemoteService ready: %s", v)
+			glog.V(3).Infof("SystemEnv watcher: OlaresRemoteService ready: %s", v)
 			return nil
 		}
 		select {

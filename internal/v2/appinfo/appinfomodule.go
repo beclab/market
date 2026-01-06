@@ -135,7 +135,7 @@ func NewAppInfoModule(config *ModuleConfig) (*AppInfoModule, error) {
 		isStarted: false,
 	}
 
-	glog.Infof("AppInfo module created successfully")
+	glog.V(3).Info("AppInfo module created successfully")
 	return module, nil
 }
 
@@ -148,7 +148,7 @@ func (m *AppInfoModule) Start() error {
 		return fmt.Errorf("module is already started")
 	}
 
-	glog.Infof("Starting AppInfo module...")
+	glog.V(3).Info("Starting AppInfo module...")
 
 	// Initialize Redis client if enabled
 	if m.config.EnableCache {
@@ -166,9 +166,9 @@ func (m *AppInfoModule) Start() error {
 		}
 		// After cache manager is initialized, correct cache data with chart repo
 		if err := m.correctCacheWithChartRepo(); err != nil {
-			glog.Warningf("Failed to correct cache with chart repo: %v", err)
+			glog.Errorf("Failed to correct cache with chart repo: %v", err)
 		} else {
-			glog.Infof("Cache correction with chart repo completed successfully")
+			glog.V(3).Info("Cache correction with chart repo completed successfully")
 		}
 	}
 
@@ -230,7 +230,7 @@ func (m *AppInfoModule) Start() error {
 	}
 
 	m.isStarted = true
-	glog.Infof("AppInfo module started successfully")
+	glog.V(2).Info("AppInfo module started successfully")
 	return nil
 }
 
@@ -243,7 +243,7 @@ func (m *AppInfoModule) Stop() error {
 		return nil
 	}
 
-	glog.Infof("Stopping AppInfo module...")
+	glog.V(3).Info("Stopping AppInfo module...")
 
 	// Stop components in reverse order
 	if m.hydrator != nil {
@@ -265,7 +265,7 @@ func (m *AppInfoModule) Stop() error {
 	// Stop DataWatcherUser
 	if m.dataWatcherUser != nil {
 		m.dataWatcherUser.Stop()
-		glog.Infof("DataWatcherUser stopped")
+		glog.V(4).Info("DataWatcherUser stopped")
 	}
 
 	// Stop DataWatcherRepo
@@ -273,20 +273,20 @@ func (m *AppInfoModule) Stop() error {
 		if err := m.dataWatcherRepo.Stop(); err != nil {
 			glog.Errorf("Failed to stop DataWatcherRepo: %v", err)
 		} else {
-			glog.Infof("DataWatcherRepo stopped")
+			glog.V(4).Info("DataWatcherRepo stopped")
 		}
 	}
 
 	// Stop StatusCorrectionChecker
 	if m.statusCorrectionChecker != nil {
 		m.statusCorrectionChecker.Stop()
-		glog.Infof("StatusCorrectionChecker stopped")
+		glog.V(4).Infof("StatusCorrectionChecker stopped")
 	}
 
 	// Close DataSender
 	if m.dataSender != nil {
 		m.dataSender.Close()
-		glog.Infof("DataSender closed")
+		glog.V(4).Info("DataSender closed")
 	}
 
 	if m.syncer != nil {
@@ -296,7 +296,7 @@ func (m *AppInfoModule) Stop() error {
 	// Stop cache manager
 	if m.cacheManager != nil {
 		m.cacheManager.Stop()
-		glog.Infof("Cache manager stopped")
+		glog.V(4).Info("Cache manager stopped")
 	}
 
 	// Close Redis client
@@ -304,7 +304,7 @@ func (m *AppInfoModule) Stop() error {
 		if err := m.redisClient.Close(); err != nil {
 			glog.Errorf("Failed to close Redis client: %v", err)
 		} else {
-			glog.Infof("Redis client closed")
+			glog.V(4).Info("Redis client closed")
 		}
 	}
 
@@ -312,7 +312,7 @@ func (m *AppInfoModule) Stop() error {
 	m.cancel()
 
 	m.isStarted = false
-	glog.Infof("AppInfo module stopped successfully")
+	glog.V(3).Info("AppInfo module stopped successfully")
 	return nil
 }
 
@@ -380,7 +380,7 @@ func (m *AppInfoModule) GetRedisConfig() *RedisConfig {
 func (m *AppInfoModule) IsStarted() bool {
 	// Boolean read is atomic, but we need to ensure consistency with Start/Stop operations
 	if !m.mutex.TryRLock() {
-		glog.Warningf("AppInfoModule.IsStarted: Read lock not available, returning false")
+		glog.Warning("[TryRLock] AppInfoModule.IsStarted: Read lock not available, returning false")
 		return false
 	}
 	defer m.mutex.RUnlock()
@@ -391,7 +391,7 @@ func (m *AppInfoModule) IsStarted() bool {
 func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	// Need read lock to ensure consistent snapshot of all component states
 	if !m.mutex.TryRLock() {
-		glog.Warningf("AppInfoModule.GetModuleStatus: Read lock not available, returning error status")
+		glog.Warning("[TryRLock] AppInfoModule.GetModuleStatus: Read lock not available, returning error status")
 		return map[string]interface{}{
 			"error":  "lock not available",
 			"status": "unknown",
@@ -461,7 +461,7 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 
 // initRedisClient initializes the Redis client
 func (m *AppInfoModule) initRedisClient() error {
-	glog.Infof("Initializing Redis client...")
+	glog.V(3).Info("Initializing Redis client...")
 
 	client, err := NewRedisClient(m.config.Redis)
 	if err != nil {
@@ -469,13 +469,13 @@ func (m *AppInfoModule) initRedisClient() error {
 	}
 
 	m.redisClient = client
-	glog.Infof("Redis client initialized successfully")
+	glog.V(2).Info("Redis client initialized successfully")
 	return nil
 }
 
 // initCacheManager initializes the cache manager
 func (m *AppInfoModule) initCacheManager() error {
-	glog.Infof("Initializing cache manager...")
+	glog.V(3).Info("Initializing cache manager...")
 
 	if !utils.IsPublicEnvironment() {
 		if m.redisClient == nil {
@@ -490,13 +490,13 @@ func (m *AppInfoModule) initCacheManager() error {
 		return fmt.Errorf("failed to start cache manager: %w", err)
 	}
 
-	glog.Infof("Cache manager initialized successfully")
+	glog.V(2).Info("Cache manager initialized successfully")
 	return nil
 }
 
 // initSyncer initializes the syncer
 func (m *AppInfoModule) initSyncer() error {
-	glog.Infof("Initializing syncer...")
+	glog.V(3).Info("Initializing syncer...")
 
 	if m.cacheManager == nil {
 		return fmt.Errorf("cache manager is required for syncer")
@@ -514,7 +514,7 @@ func (m *AppInfoModule) initSyncer() error {
 	// Set cache manager reference for hydration notifications
 	if m.cacheManager != nil {
 		m.syncer.SetCacheManager(m.cacheManager)
-		glog.Infof("Cache manager reference set in syncer for hydration notifications")
+		glog.V(3).Info("Cache manager reference set in syncer for hydration notifications")
 	}
 
 	// Start syncer
@@ -522,13 +522,13 @@ func (m *AppInfoModule) initSyncer() error {
 		return fmt.Errorf("failed to start syncer: %w", err)
 	}
 
-	glog.Infof("Syncer initialized successfully")
+	glog.V(2).Info("Syncer initialized successfully")
 	return nil
 }
 
 // initHydrator initializes the hydrator
 func (m *AppInfoModule) initHydrator() error {
-	glog.Infof("Initializing hydrator...")
+	glog.V(3).Info("Initializing hydrator...")
 
 	if m.cacheManager == nil {
 		return fmt.Errorf("cache manager is required for hydrator")
@@ -554,13 +554,13 @@ func (m *AppInfoModule) initHydrator() error {
 		return fmt.Errorf("failed to start hydrator: %w", err)
 	}
 
-	glog.Infof("Hydrator initialized successfully")
+	glog.V(2).Info("Hydrator initialized successfully")
 	return nil
 }
 
 // initDataWatcher initializes the DataWatcher
 func (m *AppInfoModule) initDataWatcher() error {
-	glog.Infof("Initializing DataWatcher...")
+	glog.V(3).Info("Initializing DataWatcher...")
 
 	if m.cacheManager == nil {
 		return fmt.Errorf("cache manager is required for DataWatcher")
@@ -573,11 +573,11 @@ func (m *AppInfoModule) initDataWatcher() error {
 	// Initialize DataSender for system notifications
 	dataSender, err := NewDataSender()
 	if err != nil {
-		glog.Warningf("Failed to initialize DataSender: %v, DataWatcher will run without system notifications", err)
+		glog.Errorf("Failed to initialize DataSender: %v, DataWatcher will run without system notifications", err)
 		dataSender = nil
 	} else {
 		m.dataSender = dataSender
-		glog.Infof("DataSender initialized successfully")
+		glog.V(3).Info("DataSender initialized successfully")
 	}
 
 	// Create DataWatcher instance
@@ -588,13 +588,13 @@ func (m *AppInfoModule) initDataWatcher() error {
 		return fmt.Errorf("failed to start DataWatcher: %w", err)
 	}
 
-	glog.Infof("DataWatcher initialized successfully")
+	glog.V(2).Info("DataWatcher initialized successfully")
 	return nil
 }
 
 // initDataWatcherState initializes the DataWatcherState
 func (m *AppInfoModule) initDataWatcherState() error {
-	glog.Infof("Initializing DataWatcherState...")
+	glog.V(3).Info("Initializing DataWatcherState...")
 
 	// Create DataWatcherState instance with cache manager, task module, history module, and data watcher
 	m.dataWatcherState = NewDataWatcherState(m.cacheManager, m.taskModule, m.historyModule, m.dataWatcher)
@@ -604,13 +604,13 @@ func (m *AppInfoModule) initDataWatcherState() error {
 		return fmt.Errorf("failed to start DataWatcherState: %w", err)
 	}
 
-	glog.Infof("DataWatcherState initialized successfully")
+	glog.V(2).Info("DataWatcherState initialized successfully")
 	return nil
 }
 
 // initDataWatcherUser initializes the DataWatcherUser
 func (m *AppInfoModule) initDataWatcherUser() error {
-	glog.Infof("Initializing DataWatcherUser...")
+	glog.V(3).Info("Initializing DataWatcherUser...")
 
 	// Create DataWatcherUser instance
 	m.dataWatcherUser = NewDataWatcherUser()
@@ -618,9 +618,9 @@ func (m *AppInfoModule) initDataWatcherUser() error {
 	// Set history module reference if available
 	if m.historyModule != nil {
 		m.dataWatcherUser.SetHistoryModule(m.historyModule)
-		glog.Infof("History module reference set in DataWatcherUser")
+		glog.V(3).Info("History module reference set in DataWatcherUser")
 	} else {
-		glog.Warningf("History module not available when initializing DataWatcherUser")
+		glog.Warning("History module not available when initializing DataWatcherUser")
 	}
 
 	// Start DataWatcherUser
@@ -628,13 +628,13 @@ func (m *AppInfoModule) initDataWatcherUser() error {
 		return fmt.Errorf("failed to start DataWatcherUser: %w", err)
 	}
 
-	glog.Infof("DataWatcherUser initialized successfully")
+	glog.V(2).Info("DataWatcherUser initialized successfully")
 	return nil
 }
 
 // initDataWatcherRepo initializes the DataWatcherRepo
 func (m *AppInfoModule) initDataWatcherRepo() error {
-	glog.Infof("Initializing DataWatcherRepo...")
+	glog.V(3).Info("Initializing DataWatcherRepo...")
 
 	if m.redisClient == nil {
 		return fmt.Errorf("redis client is required for DataWatcherRepo")
@@ -652,13 +652,13 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 		return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
 	}
 
-	glog.Infof("DataWatcherRepo initialized successfully")
+	glog.V(2).Info("DataWatcherRepo initialized successfully")
 	return nil
 }
 
 // initStatusCorrectionChecker initializes the StatusCorrectionChecker
 func (m *AppInfoModule) initStatusCorrectionChecker() error {
-	glog.Infof("Initializing StatusCorrectionChecker...")
+	glog.V(3).Info("Initializing StatusCorrectionChecker...")
 
 	if m.cacheManager == nil {
 		return fmt.Errorf("cache manager is required for StatusCorrectionChecker")
@@ -671,7 +671,7 @@ func (m *AppInfoModule) initStatusCorrectionChecker() error {
 		return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
 	}
 
-	glog.Infof("StatusCorrectionChecker initialized successfully")
+	glog.V(2).Info("StatusCorrectionChecker initialized successfully")
 	return nil
 }
 
@@ -684,7 +684,7 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 	}
 	chartRepoBaseURL := chartRepoHost + "/chart-repo/api/v2"
 
-	glog.Infof("Correcting cache with chart repo data via %s...", chartRepoBaseURL)
+	glog.V(3).Infof("Correcting cache with chart repo data via %s...", chartRepoBaseURL)
 
 	// Only use /repo/data GET, and expect a structure like { user_data: { sources: { sourceID: { app_info_latest: [...] } } } }
 	type AppSimpleInfo struct {
@@ -751,9 +751,9 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 	}
 
 	// Add detailed lock logs for diagnosis
-	glog.Infof("[LOCK] m.cacheManager.mutex.TryLock() @appinfomodule:cleanup Start")
+	glog.V(3).Infof("[LOCK] m.cacheManager.mutex.TryLock() @appinfomodule:cleanup Start")
 	if !m.cacheManager.mutex.TryLock() {
-		glog.Warningf("AppInfoModule cleanup: CacheManager write lock not available, skipping cleanup")
+		glog.Warning("[TryLock] AppInfoModule cleanup: CacheManager write lock not available, skipping cleanup")
 		return nil
 	}
 	defer m.cacheManager.mutex.Unlock()
@@ -777,18 +777,18 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 						newLatest = append(newLatest, app)
 					} else {
 						removedCount++
-						glog.Infof("Removed app from cache: user=%s source=%s appID=%s", userID, sourceID, appID)
+						glog.V(3).Infof("Removed app from cache: user=%s source=%s appID=%s", userID, sourceID, appID)
 					}
 				} else {
 					// If appID is empty, treat as invalid and remove
 					removedCount++
-					glog.Infof("Removed app from cache (empty appID): user=%s source=%s", userID, sourceID)
+					glog.V(3).Infof("Removed app from cache (empty appID): user=%s source=%s", userID, sourceID)
 				}
 			}
 			sourceData.AppInfoLatest = newLatest
 		}
 	}
-	glog.Infof("Cache correction finished, removed %d apps not in chart repo", removedCount)
+	glog.V(2).Infof("Cache correction finished, removed %d apps not in chart repo", removedCount)
 	return nil
 }
 
@@ -1180,7 +1180,7 @@ func (m *AppInfoModule) ValidateUserAccess(userID string) error {
 		if !m.config.User.GuestEnabled {
 			return fmt.Errorf("user '%s' is not authorized to access the system", userID)
 		}
-		glog.Infof("Guest user '%s' granted access", userID)
+		glog.V(3).Infof("Guest user '%s' granted access", userID)
 	}
 
 	return nil
@@ -1239,7 +1239,7 @@ func (m *AppInfoModule) UpdateUserConfig(newUserConfig *UserConfig) error {
 		return fmt.Errorf("user config cannot be nil")
 	}
 
-	glog.Infof("Updating module user configuration")
+	glog.V(3).Info("Updating module user configuration")
 
 	// Update module configuration
 	m.config.User = newUserConfig
@@ -1251,7 +1251,7 @@ func (m *AppInfoModule) UpdateUserConfig(newUserConfig *UserConfig) error {
 		}
 	}
 
-	glog.Infof("Module user configuration updated successfully")
+	glog.V(2).Info("Module user configuration updated successfully")
 	return nil
 }
 
@@ -1277,7 +1277,7 @@ func (m *AppInfoModule) RefreshUserDataStructures() error {
 		return fmt.Errorf("module is not started")
 	}
 
-	glog.Infof("Refreshing user data structures")
+	glog.V(3).Info("Refreshing user data structures")
 
 	// First sync user list to cache
 	if err := m.SyncUserListToCache(); err != nil {
@@ -1288,11 +1288,11 @@ func (m *AppInfoModule) RefreshUserDataStructures() error {
 	// Cache manager pointer access is atomic
 	if m.cacheManager != nil {
 		if err := m.cacheManager.ForceSync(); err != nil {
-			glog.Warningf("Failed to force sync after refreshing user data structures: %v", err)
+			glog.Errorf("Failed to force sync after refreshing user data structures: %v", err)
 		}
 	}
 
-	glog.Infof("User data structures refreshed successfully")
+	glog.V(3).Info("User data structures refreshed successfully")
 	return nil
 }
 
@@ -1332,7 +1332,7 @@ func (m *AppInfoModule) CleanupInvalidData() (int, error) {
 	}
 
 	cleanedCount := m.cacheManager.CleanupInvalidPendingData()
-	glog.Infof("Cleaned up %d invalid pending data entries", cleanedCount)
+	glog.V(3).Infof("Cleaned up %d invalid pending data entries", cleanedCount)
 
 	return cleanedCount, nil
 }
@@ -1356,7 +1356,7 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 	}
 
 	if !m.cacheManager.mutex.TryRLock() {
-		glog.Warningf("AppInfoModule: CacheManager read lock not available, skipping operation")
+		glog.Warning("[TryRLock] AppInfoModule: CacheManager read lock not available, skipping operation")
 		return map[string]interface{}{
 			"error":  "lock not available",
 			"status": "unknown",
@@ -1472,7 +1472,7 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.taskModule = taskModule
-	glog.Infof("Task module reference set in AppInfo module")
+	glog.V(3).Info("Task module reference set in AppInfo module")
 
 	if m.dataWatcherState != nil {
 		m.dataWatcherState.SetTaskModule(taskModule)
@@ -1480,7 +1480,7 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 
 	if m.statusCorrectionChecker != nil {
 		m.statusCorrectionChecker.SetTaskModule(taskModule)
-		glog.Infof("Task module reference set in StatusCorrectionChecker")
+		glog.V(2).Info("Task module reference set in StatusCorrectionChecker")
 	}
 }
 
@@ -1489,7 +1489,7 @@ func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.historyModule = historyModule
-	glog.Infof("History module reference set in AppInfo module")
+	glog.V(3).Info("History module reference set in AppInfo module")
 
 	if m.dataWatcherState != nil {
 		m.dataWatcherState.SetHistoryModule(historyModule)
@@ -1497,12 +1497,12 @@ func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
 
 	if m.dataWatcherUser != nil {
 		m.dataWatcherUser.SetHistoryModule(m.historyModule)
-		glog.Infof("History module reference updated in DataWatcherUser")
+		glog.V(2).Info("History module reference updated in DataWatcherUser")
 	}
 
 	if m.statusCorrectionChecker != nil {
 		m.statusCorrectionChecker.SetHistoryModule(historyModule)
-		glog.Infof("History module reference set in StatusCorrectionChecker")
+		glog.V(2).Info("History module reference set in StatusCorrectionChecker")
 	}
 }
 
@@ -1517,7 +1517,7 @@ func (m *AppInfoModule) SetSettingsManager(settingsManager *settings.SettingsMan
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.settingsManager = settingsManager
-	glog.Infof("Settings manager set in AppInfo module")
+	glog.V(2).Info("Settings manager set in AppInfo module")
 }
 
 // GetSettingsManager returns the settings manager instance

@@ -8,29 +8,31 @@ import (
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
+
+	"github.com/golang/glog"
 )
 
 // getVCFromPurchaseReceipt attempts to get VC from purchase receipt in Redis
 // Returns VC string if found, empty string otherwise
 func getVCFromPurchaseReceipt(settingsManager *settings.SettingsManager, userID, appID, productID, developerName string) string {
 	if settingsManager == nil {
-		log.Printf("Settings manager is nil, cannot get VC from purchase receipt")
+		glog.V(3).Infof("Settings manager is nil, cannot get VC from purchase receipt")
 		return ""
 	}
 
 	rc := settingsManager.GetRedisClient()
 	if rc == nil {
-		log.Printf("Redis client is nil, cannot get VC from purchase receipt")
+		glog.V(3).Infof("Redis client is nil, cannot get VC from purchase receipt")
 		return ""
 	}
 
-	log.Printf("getVCFromPurchaseReceipt: start lookup user=%s app=%s product=%s developer=%s", userID, appID, productID, developerName)
+	glog.V(2).Infof("getVCFromPurchaseReceipt: start lookup user=%s app=%s product=%s developer=%s", userID, appID, productID, developerName)
 
 	// Try to get VC from payment state machine first
 	if globalStateMachine := paymentnew.GetStateMachine(); globalStateMachine != nil && productID != "" {
 		if state, err := globalStateMachine.LoadState(userID, appID, productID); err == nil && state != nil {
 			if state.VC != "" {
-				log.Printf("Found VC from payment state for user=%s app=%s product=%s", userID, appID, productID)
+				glog.V(3).Infof("Found VC from payment state for user=%s app=%s product=%s", userID, appID, productID)
 				return state.VC
 			}
 		}
@@ -45,18 +47,18 @@ func getVCFromPurchaseReceipt(settingsManager *settings.SettingsManager, userID,
 			var purchaseInfo types.PurchaseInfo
 			if err := json.Unmarshal([]byte(val), &purchaseInfo); err == nil {
 				if purchaseInfo.VC != "" {
-					log.Printf("Found VC from purchase receipt for user=%s app=%s product=%s", userID, appID, productID)
+					glog.V(2).Infof("Found VC from purchase receipt for user=%s app=%s product=%s", userID, appID, productID)
 					return purchaseInfo.VC
 				}
 			} else {
 				// If not JSON, assume raw VC string
-				log.Printf("Found VC (raw string) from purchase receipt for user=%s app=%s product=%s", userID, appID, productID)
+				glog.V(2).Infof("Found VC (raw string) from purchase receipt for user=%s app=%s product=%s", userID, appID, productID)
 				return val
 			}
 		}
 	}
 
-	log.Printf("VC not found for user=%s app=%s product=%s developer=%s", userID, appID, productID, developerName)
+	glog.V(2).Infof("VC not found for user=%s app=%s product=%s developer=%s", userID, appID, productID, developerName)
 	return ""
 }
 
@@ -76,7 +78,7 @@ func getVCForInstall(settingsManager *settings.SettingsManager, userID, appID st
 		developerName = developerNameData
 	}
 
-	log.Printf("getVCForInstall: metadata snapshot user=%s app=%s productID=%s developer=%s", userID, appID, productID, developerName)
+	glog.V(3).Infof("getVCForInstall: metadata snapshot user=%s app=%s productID=%s developer=%s", userID, appID, productID, developerName)
 
 	// If we have productID, try to get from payment state machine or purchase receipt
 	if productID != "" {
@@ -88,13 +90,13 @@ func getVCForInstall(settingsManager *settings.SettingsManager, userID, appID st
 	if globalStateMachine := paymentnew.GetStateMachine(); globalStateMachine != nil {
 		if state, err := globalStateMachine.LoadState(userID, appID, appID); err == nil && state != nil {
 			if state.VC != "" {
-				log.Printf("Found VC from payment state (using appID as productID) for user=%s app=%s", userID, appID)
+				glog.V(2).Infof("Found VC from payment state (using appID as productID) for user=%s app=%s", userID, appID)
 				return state.VC
 			}
 		}
 	}
 
-	log.Printf("VC not found for user=%s app=%s (productID not available in metadata)", userID, appID)
+	glog.V(2).Infof("VC not found for user=%s app=%s (productID not available in metadata)", userID, appID)
 	return ""
 }
 

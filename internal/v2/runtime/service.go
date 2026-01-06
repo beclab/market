@@ -1,8 +1,9 @@
 package runtime
 
 import (
-	"log"
 	"strings"
+
+	"github.com/golang/glog"
 )
 
 // RuntimeStateService provides access to runtime state
@@ -200,13 +201,13 @@ func (s *RuntimeStateService) GetAppsByUser(userID string) []*AppFlowState {
 
 // Start starts the service
 func (s *RuntimeStateService) Start() error {
-	log.Println("Starting runtime state service...")
+	glog.V(3).Info("Starting runtime state service...")
 	return s.collector.Start()
 }
 
 // Stop stops the service
 func (s *RuntimeStateService) Stop() {
-	log.Println("Stopping runtime state service...")
+	glog.V(3).Info("Stopping runtime state service...")
 	s.collector.Stop()
 }
 

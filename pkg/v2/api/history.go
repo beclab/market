@@ -1,21 +1,22 @@
 package api
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 
 	"market/internal/v2/history"
 	"market/internal/v2/utils"
+
+	"github.com/golang/glog"
 )
 
 // 5. Query logs by specific conditions
 func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/logs - Querying logs")
+	glog.V(2).Info("GET /api/v2/logs - Querying logs")
 
 	// Check if history module is available
 	if s.historyModule == nil {
-		log.Println("History module not available")
+		glog.V(3).Info("History module not available")
 		s.sendResponse(w, http.StatusServiceUnavailable, false, "History service not available", nil)
 		return
 	}
@@ -26,14 +27,14 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 	// Get user information from request
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
 
 	// Get query parameters
 	queryParams := r.URL.Query()
-	log.Printf("Log query parameters: %v", queryParams)
+	glog.V(2).Infof("Log query parameters: %v", queryParams)
 
 	// Parse start parameter (offset)
 	start := 0
@@ -41,7 +42,7 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 		if parsedStart, err := strconv.Atoi(startStr); err == nil && parsedStart >= 0 {
 			start = parsedStart
 		} else {
-			log.Printf("Invalid start parameter: %s", startStr)
+			glog.V(3).Infof("Invalid start parameter: %s", startStr)
 			s.sendResponse(w, http.StatusBadRequest, false, "Invalid start parameter", nil)
 			return
 		}
@@ -53,7 +54,7 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 		if parsedSize, err := strconv.Atoi(sizeStr); err == nil && parsedSize > 0 && parsedSize <= 1000 {
 			size = parsedSize
 		} else {
-			log.Printf("Invalid size parameter: %s (must be 1-1000)", sizeStr)
+			glog.V(3).Infof("Invalid size parameter: %s (must be 1-1000)", sizeStr)
 			s.sendResponse(w, http.StatusBadRequest, false, "Invalid size parameter (must be 1-1000)", nil)
 			return
 		}
@@ -79,7 +80,7 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 		if startTime, err := strconv.ParseInt(startTimeStr, 10, 64); err == nil {
 			condition.StartTime = startTime
 		} else {
-			log.Printf("Invalid start_time parameter: %s", startTimeStr)
+			glog.V(3).Infof("Invalid start_time parameter: %s", startTimeStr)
 			s.sendResponse(w, http.StatusBadRequest, false, "Invalid start_time parameter", nil)
 			return
 		}
@@ -89,7 +90,7 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 		if endTime, err := strconv.ParseInt(endTimeStr, 10, 64); err == nil {
 			condition.EndTime = endTime
 		} else {
-			log.Printf("Invalid end_time parameter: %s", endTimeStr)
+			glog.V(3).Infof("Invalid end_time parameter: %s", endTimeStr)
 			s.sendResponse(w, http.StatusBadRequest, false, "Invalid end_time parameter", nil)
 			return
 		}
@@ -98,7 +99,7 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 	// Query records from history module
 	records, err := s.historyModule.QueryRecords(condition)
 	if err != nil {
-		log.Printf("Failed to query history records: %v", err)
+		glog.Errorf("Failed to query history records: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to query logs", nil)
 		return
 	}
@@ -106,7 +107,7 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 	// Get total count for pagination info
 	totalCount, err := s.historyModule.GetRecordCount(condition)
 	if err != nil {
-		log.Printf("Failed to get total count: %v", err)
+		glog.Errorf("Failed to get total count: %v", err)
 		// Continue without total count
 		totalCount = 0
 	}
@@ -120,6 +121,6 @@ func (s *Server) queryLogs(w http.ResponseWriter, r *http.Request) {
 		"requested_size": size,
 	}
 
-	log.Printf("Successfully retrieved %d history records (start: %d, size: %d)", len(records), start, size)
+	glog.V(2).Infof("Successfully retrieved %d history records (start: %d, size: %d)", len(records), start, size)
 	s.sendResponse(w, http.StatusOK, true, "Logs retrieved successfully", responseData)
 }

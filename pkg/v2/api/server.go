@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"market/internal/v2/runtime"
 	"market/internal/v2/task"
 
+	"github.com/golang/glog"
 	"github.com/gorilla/mux"
 )
 
@@ -30,12 +30,12 @@ type Server struct {
 
 // NewServer creates a new server instance
 func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinfo.Hydrator, taskModule *task.TaskModule, historyModule *history.HistoryModule, runtimeStateService *runtime.RuntimeStateService) *Server {
-	log.Printf("Creating new server instance with port: %s", port)
-	log.Printf("Cache manager provided: %v", cacheManager != nil)
-	log.Printf("Hydrator provided: %v", hydrator != nil)
-	log.Printf("Task module provided: %v", taskModule != nil)
-	log.Printf("History module provided: %v", historyModule != nil)
-	log.Printf("Runtime state service provided: %v", runtimeStateService != nil)
+	glog.V(2).Infof("Creating new server instance with port: %s", port)
+	glog.V(3).Infof("Cache manager provided: %v", cacheManager != nil)
+	glog.V(3).Infof("Hydrator provided: %v", hydrator != nil)
+	glog.V(3).Infof("Task module provided: %v", taskModule != nil)
+	glog.V(3).Infof("History module provided: %v", historyModule != nil)
+	glog.V(3).Infof("Runtime state service provided: %v", runtimeStateService != nil)
 
 	// Create LocalRepo instance
 	localRepo := appinfo.NewLocalRepo(cacheManager)
@@ -43,7 +43,7 @@ func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinf
 		localRepo.SetTaskModule(taskModule)
 	}
 
-	log.Printf("Creating router...")
+	glog.V(3).Infof("Creating router...")
 	s := &Server{
 		router:              mux.NewRouter(),
 		port:                port,
@@ -55,11 +55,11 @@ func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinf
 		runtimeStateService: runtimeStateService,
 	}
 
-	log.Printf("Server struct created successfully")
+	glog.V(2).Info("Server struct created successfully")
 
-	log.Printf("Setting up routes...")
+	glog.V(3).Info("Setting up routes...")
 	s.setupRoutes()
-	log.Printf("Routes setup completed")
+	glog.V(3).Info("Routes setup completed")
 
 	return s
 }
@@ -68,214 +68,214 @@ func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinf
 func (s *Server) setupRoutes() {
 	// API version prefix
 	api := s.router.PathPrefix("/app-store/api/v2").Subrouter()
-	log.Printf("Setting up API routes with prefix: /app-store/api/v2")
+	glog.V(3).Info("Setting up API routes with prefix: /app-store/api/v2")
 
 	// 1. Get market debug memory information
 	api.HandleFunc("/market/debug-memory", s.getMarketInfo).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/market/debug-memory")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/market/debug-memory")
 
 	// Market hash endpoint
 	api.HandleFunc("/market/hash", s.getMarketHash).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/market/hash")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/market/hash")
 
 	// Market data endpoint
 	api.HandleFunc("/market/data", s.getMarketData).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/market/data")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/market/data")
 
 	// Market state endpoint
 	api.HandleFunc("/market/state", s.getMarketState).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/market/state")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/market/state")
 
 	// 2. Get specific application information (supports multiple queries)
 	api.HandleFunc("/apps", s.getAppsInfo).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/apps")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps")
 
 	// 3. Get rendered installation package for specific application (single app only)
 	api.HandleFunc("/apps/{id}/package", s.getAppPackage).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/package")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/apps/{id}/package")
 
 	// 4. Update specific application render configuration (single app only)
 	api.HandleFunc("/apps/{id}/config", s.updateAppConfig).Methods("PUT")
-	log.Printf("Route configured: PUT /app-store/api/v2/apps/{id}/config")
+	glog.V(3).Info("Route configured: PUT /app-store/api/v2/apps/{id}/config")
 
 	// 5. Query logs by specific conditions
 	api.HandleFunc("/logs", s.queryLogs).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/logs")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/logs")
 
 	// 6. Install application (single)
 	api.HandleFunc("/apps/{id}/install", s.installApp).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/apps/{id}/install")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps/{id}/install")
 
 	// 6.1. Clone application (single)
 	api.HandleFunc("/apps/{id}/clone", s.cloneApp).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/apps/{id}/clone")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps/{id}/clone")
 
 	// 7. Cancel installation (single)
 	api.HandleFunc("/apps/{id}/install", s.cancelInstall).Methods("DELETE")
-	log.Printf("Route configured: DELETE /app-store/api/v2/apps/{id}/install")
+	glog.V(3).Info("Route configured: DELETE /app-store/api/v2/apps/{id}/install")
 
 	// 8. Upgrade application (single)
 	api.HandleFunc("/apps/{id}/upgrade", s.upgradeApp).Methods("PUT")
-	log.Printf("Route configured: PUT /app-store/api/v2/apps/{id}/upgrade")
+	glog.V(3).Info("Route configured: PUT /app-store/api/v2/apps/{id}/upgrade")
 
 	// 9. Uninstall application (single)
 	api.HandleFunc("/apps/{id}", s.uninstallApp).Methods("DELETE")
-	log.Printf("Route configured: DELETE /app-store/api/v2/apps/{id}")
+	glog.V(3).Info("Route configured: DELETE /app-store/api/v2/apps/{id}")
 
 	// 10. Upload application installation package
 	api.HandleFunc("/apps/upload", s.uploadAppPackage).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/apps/upload")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps/upload")
 
 	// 11. Open application
 	api.HandleFunc("/apps/open", s.openApp).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/apps/open")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps/open")
 
 	// 12. Resume application
 	api.HandleFunc("/apps/resume", s.resumeApp).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/apps/resume")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps/resume")
 
 	// 13. Stop application
 	api.HandleFunc("/apps/stop", s.stopApp).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/apps/stop")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps/stop")
 
 	// Settings endpoints
 	// 14. Get market source configuration
 	api.HandleFunc("/settings/market-source", s.getMarketSource).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/settings/market-source")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/settings/market-source")
 
 	// 15. Add market source configuration
 	api.HandleFunc("/settings/market-source", s.addMarketSource).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/settings/market-source")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/settings/market-source")
 
 	// 16. Delete market source configuration
 	api.HandleFunc("/settings/market-source/{id}", s.deleteMarketSource).Methods("DELETE")
-	log.Printf("Route configured: DELETE /app-store/api/v2/settings/market-source/{id}")
+	glog.V(3).Info("Route configured: DELETE /app-store/api/v2/settings/market-source/{id}")
 
 	// 17. Get market settings
 	api.HandleFunc("/settings/market-settings", s.getMarketSettings).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/settings/market-settings")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/settings/market-settings")
 
 	// 18. Update market settings
 	api.HandleFunc("/settings/market-settings", s.updateMarketSettings).Methods("PUT")
-	log.Printf("Route configured: PUT /app-store/api/v2/settings/market-settings")
+	glog.V(3).Info("Route configured: PUT /app-store/api/v2/settings/market-settings")
 
 	// 19. Get system status aggregation
 	api.HandleFunc("/settings/system-status", s.getSystemStatus).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/settings/system-status")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/settings/system-status")
 
 	// Diagnostic endpoints
 	// 18. Get cache and Redis diagnostic information
 	api.HandleFunc("/diagnostic", s.getDiagnostic).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/diagnostic")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/diagnostic")
 
 	// 19. Force reload cache data from Redis
 	api.HandleFunc("/reload", s.forceReloadFromRedis).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/reload")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/reload")
 
 	// 20. Cleanup invalid pending data
 	api.HandleFunc("/cleanup", s.cleanupInvalidPendingData).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/cleanup")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/cleanup")
 
 	// 21. Get application version history
 	api.HandleFunc("/apps/version-history", s.getAppVersionHistory).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/apps/version-history")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps/version-history")
 
 	// 22. Delete local source application
 	api.HandleFunc("/local-apps/delete", s.deleteLocalApp).Methods("DELETE")
-	log.Printf("Route configured: DELETE /app-store/api/v2/local-apps/delete")
+	glog.V(3).Info("Route configured: DELETE /app-store/api/v2/local-apps/delete")
 
 	// 23. Submit signature for payment processing
 	api.HandleFunc("/payment/submit-signature", s.submitSignature).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/payment/submit-signature")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/payment/submit-signature")
 
 	// 24. Check app payment status
 	// New route with source parameter (recommended)
 	api.HandleFunc("/sources/{source}/apps/{id}/payment-status", s.getAppPaymentStatus).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/sources/{source}/apps/{id}/payment-status")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/sources/{source}/apps/{id}/payment-status")
 
 	// 24.1 Purchase app
 	api.HandleFunc("/sources/{source}/apps/{id}/purchase", s.purchaseApp).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/sources/{source}/apps/{id}/purchase")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/sources/{source}/apps/{id}/purchase")
 
 	// 24.2 Restore purchase
 	api.HandleFunc("/sources/{source}/apps/{id}/restore-purchase", s.restorePurchase).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/sources/{source}/apps/{id}/restore-purchase")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/sources/{source}/apps/{id}/restore-purchase")
 
 	// Legacy route for backward compatibility (searches all sources)
 	api.HandleFunc("/apps/{id}/payment-status", s.getAppPaymentStatusLegacy).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/apps/{id}/payment-status (legacy)")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/apps/{id}/payment-status (legacy)")
 
 	// 25. Start payment polling after frontend payment completion
 	api.HandleFunc("/payment/start-polling", s.startPaymentPolling).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/payment/start-polling")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/payment/start-polling")
 
 	// 26. Frontend signals payment readiness
 	api.HandleFunc("/payment/frontend-start", s.startFrontendPayment).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/payment/frontend-start")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/payment/frontend-start")
 
 	// 26.1 Resend VC to LarePass for persistence
 	api.HandleFunc("/payment/resend-vc", s.resendPaymentVC).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/payment/resend-vc")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/payment/resend-vc")
 
 	// 27. Fetch signature callback (from LarePass)
 	api.HandleFunc("/payment/fetch-signature-callback", s.fetchSignatureCallback).Methods("POST")
-	log.Printf("Route configured: POST /app-store/api/v2/payment/fetch-signature-callback")
+	glog.V(3).Info("Route configured: POST /app-store/api/v2/payment/fetch-signature-callback")
 
 	// 28. Get runtime state
 	api.HandleFunc("/runtime/state", s.getRuntimeState).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/runtime/state")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/runtime/state")
 
 	// 29. Get runtime dashboard (HTML page)
 	api.HandleFunc("/runtime/dashboard", s.getRuntimeDashboard).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/runtime/dashboard")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/runtime/dashboard")
 
 	// 30. Get runtime dashboard-app (HTML page for app processing flow)
 	api.HandleFunc("/runtime/dashboard-app", s.getRuntimeDashboardApp).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/runtime/dashboard-app")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/runtime/dashboard-app")
 
 	// 31. Get payment state machine states
 	api.HandleFunc("/payment/states", s.getPaymentStates).Methods("GET")
-	log.Printf("Route configured: GET /app-store/api/v2/payment/states")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/payment/states")
 
-	log.Printf("All routes configured successfully")
+	glog.V(2).Info("All routes configured successfully")
 }
 
 // Start starts the HTTP server
 func (s *Server) Start() error {
-	log.Printf("Starting server on port %s", s.port)
-	log.Printf("Server configuration:")
-	log.Printf("  - Port: %s", s.port)
-	log.Printf("  - Cache Manager: %v", s.cacheManager != nil)
-	log.Printf("  - Hydrator: %v", s.hydrator != nil)
-	log.Printf("  - History Module: %v", s.historyModule != nil)
+	glog.V(2).Infof("Starting server on port %s", s.port)
+	glog.V(3).Infof("Server configuration:")
+	glog.V(3).Infof("  - Port: %s", s.port)
+	glog.V(3).Infof("  - Cache Manager: %v", s.cacheManager != nil)
+	glog.V(3).Infof("  - Hydrator: %v", s.hydrator != nil)
+	glog.V(3).Infof("  - History Module: %v", s.historyModule != nil)
 
 	// Check if port is available
 	addr := ":" + s.port
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Printf("Port %s is not available: %v", s.port, err)
+		glog.Errorf("Port %s is not available: %v", s.port, err)
 		return fmt.Errorf("port %s is not available: %v", s.port, err)
 	}
 	listener.Close()
-	log.Printf("Port %s is available", s.port)
+	glog.V(3).Infof("Port %s is available", s.port)
 
 	// Add middleware for request logging
 	s.router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			log.Printf("Request started: %s %s", r.Method, r.URL.Path)
+			glog.V(2).Infof("Request started: %s %s", r.Method, r.URL.Path)
 
 			next.ServeHTTP(w, r)
 
 			duration := time.Since(start)
-			log.Printf("Request completed: %s %s (took %v)", r.Method, r.URL.Path, duration)
+			glog.V(3).Infof("Request completed: %s %s (took %v)", r.Method, r.URL.Path, duration)
 		})
 	})
 
-	log.Printf("Server routes configured and ready to accept connections")
+	glog.V(2).Infof("Server routes configured and ready to accept connections")
 	err = http.ListenAndServe(addr, s.router)
 	if err != nil {
-		log.Printf("Failed to start HTTP server: %v", err)
+		glog.Errorf("Failed to start HTTP server: %v", err)
 		return err
 	}
 	return nil
@@ -283,11 +283,11 @@ func (s *Server) Start() error {
 
 // Close gracefully closes the server and its resources
 func (s *Server) Close() error {
-	log.Println("Closing server resources")
+	glog.V(3).Info("Closing server resources")
 
 	if s.historyModule != nil {
 		if err := s.historyModule.Close(); err != nil {
-			log.Printf("Error closing history module: %v", err)
+			glog.Errorf("Error closing history module: %v", err)
 			return err
 		}
 	}
@@ -314,19 +314,18 @@ func (s *Server) sendResponse(w http.ResponseWriter, statusCode int, success boo
 	}
 
 	// Add debug logging for JSON serialization
-	log.Printf("DEBUG: sendResponse - StatusCode: %d, Success: %v, Message: %s", statusCode, success, message)
-	log.Printf("DEBUG: sendResponse - Data type: %T", data)
+	glog.V(3).Infof("DEBUG: sendResponse - StatusCode: %d, Success: %v, Message: %s", statusCode, success, message)
+	glog.V(3).Infof("DEBUG: sendResponse - Data type: %T", data)
 
 	// Try to marshal the response to check for JSON errors
 	jsonData, err := json.Marshal(response)
 	if err != nil {
-		log.Printf("ERROR: JSON marshaling failed: %v", err)
+		glog.Errorf("ERROR: JSON marshaling failed: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("DEBUG: sendResponse - JSON data length: %d bytes", len(jsonData))
-	log.Printf("DEBUG: sendResponse - JSON data preview: %s", string(jsonData[:min(len(jsonData), 200)]))
+	glog.V(3).Infof("DEBUG: sendResponse - JSON data length: %d bytes, JSON data preview: %s", len(jsonData), string(jsonData[:min(len(jsonData), 200)]))
 
 	// Write the JSON data directly
 	w.Write(jsonData)

@@ -188,7 +188,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		return
 	}
 
-	glog.Infof("Fetched status for %d applications and middlewares from app-service", len(latestStatus))
+	glog.V(2).Infof("Fetched status for %d applications and middlewares from app-service", len(latestStatus))
 
 	// Get current status from cache
 	cachedStatus := scc.getCachedStatus()
@@ -197,13 +197,13 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		return
 	}
 
-	glog.Infof("Found cached status for %d applications and middlewares", len(cachedStatus))
+	glog.V(2).Infof("Found cached status for %d applications and middlewares", len(cachedStatus))
 
 	// Compare and detect changes
 	changes := scc.compareStatus(latestStatus, cachedStatus)
 
 	if len(changes) > 0 {
-		glog.Infof("Detected %d status changes, applying corrections", len(changes))
+		glog.V(2).Infof("Detected %d status changes, applying corrections", len(changes))
 		scc.applyCorrections(changes, latestStatus)
 
 		// After applying corrections, recalculate and update user data hash for all affected users.
@@ -216,7 +216,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		for userID := range affectedUsers {
 			userData := scc.cacheManager.GetUserData(userID)
 			if userData == nil {
-				glog.Warningf("StatusCorrectionChecker: userData not found for user %s, skip hash calculation", userID)
+				glog.V(3).Infof("StatusCorrectionChecker: userData not found for user %s, skip hash calculation", userID)
 				continue
 			}
 			// Generate snapshot for hash calculation (reuse logic from DataWatcher)
@@ -231,14 +231,14 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 				continue
 			}
 			// Write back hash with lock
-			glog.Infof("[LOCK] scc.cacheManager.mutex.TryLock() @status_correction:updateHash Start")
+			glog.V(3).Infof("[LOCK] scc.cacheManager.mutex.TryLock() @status_correction:updateHash Start")
 			if !scc.cacheManager.mutex.TryLock() {
-				glog.Warningf("StatusCorrectionChecker: CacheManager write lock not available for hash update, skipping")
+				glog.Warning("[TryLock] StatusCorrectionChecker: CacheManager write lock not available for hash update, skipping")
 				continue
 			}
 			userData.Hash = newHash
 			scc.cacheManager.mutex.Unlock()
-			glog.Infof("StatusCorrectionChecker: user %s hash updated to %s", userID, newHash)
+			glog.V(2).Infof("StatusCorrectionChecker: user %s hash updated to %s", userID, newHash)
 		}
 		// Force sync after hash update
 		if err := scc.cacheManager.ForceSync(); err != nil {
@@ -249,13 +249,13 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		scc.correctionCount += int64(len(changes))
 		scc.mutex.Unlock()
 	} else {
-		glog.Infof("No status changes detected")
+		glog.V(3).Info("No status changes detected")
 	}
 
 	// Check and correct task statuses
 	scc.checkAndCorrectTaskStatuses(latestStatus)
 
-	glog.Infof("Status check cycle #%d completed in %v", scc.checkCount, time.Since(startTime))
+	glog.V(2).Infof("Status check cycle #%d completed in %v", scc.checkCount, time.Since(startTime))
 }
 
 // fetchLatestStatus fetches the latest status from app-service
@@ -797,7 +797,7 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 	for _, change := range changes {
 		switch change.ChangeType {
 		case "app_disappeared":
-			glog.Infof("App disappeared detected: %s (user: %s, source: %s, last state: %s) - fixing in cache",
+			glog.V(2).Infof("App disappeared detected: %s (user: %s, source: %s, last state: %s) - fixing in cache",
 				change.AppName, change.UserID, change.SourceID, change.OldState)
 			if scc.historyModule != nil {
 				record := &history.HistoryRecord{
@@ -809,19 +809,19 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					Extended: "",
 				}
 				if err := scc.historyModule.StoreRecord(record); err != nil {
-					glog.Warningf("Failed to store app disappeared history record: %v", err)
+					glog.Errorf("Failed to store app disappeared history record: %v", err)
 				}
 			}
 			if err := scc.cacheManager.RemoveAppStateData(change.UserID, change.SourceID, change.AppName); err != nil {
 				glog.Errorf("Failed to remove disappeared app %s from cache (user: %s, source: %s): %v",
 					change.AppName, change.UserID, change.SourceID, err)
 			} else {
-				glog.Infof("Successfully removed disappeared app %s from cache (user: %s, source: %s)",
+				glog.V(2).Infof("Successfully removed disappeared app %s from cache (user: %s, source: %s)",
 					change.AppName, change.UserID, change.SourceID)
 			}
 			if scc.taskModule != nil {
 				if err := scc.taskModule.UninstallTaskSucceed("", change.AppName, change.UserID); err != nil {
-					glog.Warningf("Failed to mark uninstall task as succeeded for app %s (user: %s): %v", change.AppName, change.UserID, err)
+					glog.Errorf("Failed to mark uninstall task as succeeded for app %s (user: %s): %v", change.AppName, change.UserID, err)
 				}
 			}
 
@@ -834,10 +834,10 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 			if appToUpdate == nil {
-				glog.Warningf("Could not find appeared app %s for user %s in latest status", change.AppName, change.UserID)
+				glog.V(3).Infof("Could not find appeared app %s for user %s in latest status", change.AppName, change.UserID)
 				continue
 			}
-			glog.Infof("New app appeared detected: %s (user: %s, state: %s) - fixing in cache",
+			glog.V(2).Infof("New app appeared detected: %s (user: %s, state: %s) - fixing in cache",
 				change.AppName, change.UserID, appToUpdate.Status.State)
 			if scc.historyModule != nil {
 				record := &history.HistoryRecord{
@@ -849,7 +849,7 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					Extended: "",
 				}
 				if err := scc.historyModule.StoreRecord(record); err != nil {
-					glog.Warningf("Failed to store app appeared history record: %v", err)
+					glog.Errorf("Failed to store app appeared history record: %v", err)
 				}
 			}
 			// Dynamically determine sourceID
@@ -877,13 +877,13 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 
 			if scc.taskModule != nil {
 				if err := scc.taskModule.InstallTaskSucceed("", change.AppName, change.UserID); err != nil {
-					glog.Warningf("Failed to mark install task as succeeded for app %s (user: %s): %v", change.AppName, change.UserID, err)
+					glog.Errorf("Failed to mark install task as succeeded for app %s (user: %s): %v", change.AppName, change.UserID, err)
 				}
 			}
 
 			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
-				glog.Warningf("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
+				glog.V(3).Infof("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
 			stateData := scc.createStateDataFromAppStateData(appStateData)
@@ -891,7 +891,7 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
-				glog.Infof("Successfully added appeared app %s to cache (user: %s, source: %s)",
+				glog.V(2).Infof("Successfully added appeared app %s to cache (user: %s, source: %s)",
 					change.AppName, change.UserID, sourceID)
 			}
 
@@ -904,10 +904,10 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 			if appToUpdate == nil {
-				glog.Warningf("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
+				glog.V(3).Infof("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
 				continue
 			}
-			glog.Infof("State change detected for app %s (user: %s, source: %s): %s -> %s - fixing in cache",
+			glog.V(2).Infof("State change detected for app %s (user: %s, source: %s): %s -> %s - fixing in cache",
 				change.AppName, change.UserID, change.SourceID, change.OldState, change.NewState)
 			if scc.historyModule != nil {
 				record := &history.HistoryRecord{
@@ -919,13 +919,13 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					Extended: "",
 				}
 				if err := scc.historyModule.StoreRecord(record); err != nil {
-					glog.Warningf("Failed to store state change history record: %v", err)
+					glog.Errorf("Failed to store state change history record: %v", err)
 				}
 			}
 
 			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
-				glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
+				glog.V(3).Infof("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
 			stateData := scc.createStateDataFromAppStateData(appStateData)
@@ -933,20 +933,20 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
-				glog.Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
+				glog.V(2).Infof("Successfully updated cache with corrected status for app %s (user: %s, source: %s)",
 					change.AppName, change.UserID, sourceID)
 			}
 
 		case "duplicate_prune":
-			glog.Infof("Pruning duplicate app %s (user: %s, source: %s), kept latest elsewhere; last state: %s",
+			glog.V(2).Infof("Pruning duplicate app %s (user: %s, source: %s), kept latest elsewhere; last state: %s",
 				change.AppName, change.UserID, change.SourceID, change.OldState)
 			if scc.cacheManager != nil {
 				if err := scc.cacheManager.RemoveAppStateData(change.UserID, change.SourceID, change.AppName); err != nil {
-					glog.Warningf("Failed to remove AppStateLatest for duplicate app %s (user: %s, source: %s): %v",
+					glog.Errorf("Failed to remove AppStateLatest for duplicate app %s (user: %s, source: %s): %v",
 						change.AppName, change.UserID, change.SourceID, err)
 				}
 				if err := scc.cacheManager.RemoveAppInfoLatestData(change.UserID, change.SourceID, change.AppName); err != nil {
-					glog.Warningf("Failed to remove AppInfoLatest for duplicate app %s (user: %s, source: %s): %v",
+					glog.Errorf("Failed to remove AppInfoLatest for duplicate app %s (user: %s, source: %s): %v",
 						change.AppName, change.UserID, change.SourceID, err)
 				}
 			}
@@ -960,10 +960,10 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 			if appToUpdate == nil {
-				glog.Warningf("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
+				glog.V(3).Infof("Could not find app %s for user %s in latest status", change.AppName, change.UserID)
 				continue
 			}
-			glog.Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running - fixing in cache",
+			glog.V(2).Infof("State inconsistency detected for app %s (user: %s, source: %s): app state is %s but all entrances are running - fixing in cache",
 				change.AppName, change.UserID, change.SourceID, appToUpdate.Status.State)
 			if scc.historyModule != nil {
 				record := &history.HistoryRecord{
@@ -975,13 +975,13 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 					Extended: "",
 				}
 				if err := scc.historyModule.StoreRecord(record); err != nil {
-					glog.Warningf("Failed to store state inconsistency history record: %v", err)
+					glog.Errorf("Failed to store state inconsistency history record: %v", err)
 				}
 			}
 
 			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
 			if appStateData == nil {
-				glog.Warningf("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
+				glog.V(3).Infof("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
 			appStateData.Status.State = "running"
@@ -990,12 +990,12 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				glog.Errorf("Failed to update cache with corrected state for inconsistent app %s (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
-				glog.Infof("Successfully corrected inconsistent state for app %s (user: %s, source: %s): %s -> running",
+				glog.V(2).Infof("Successfully corrected inconsistent state for app %s (user: %s, source: %s): %s -> running",
 					change.AppName, change.UserID, sourceID, change.OldState)
 			}
 
 		default:
-			glog.Warningf("Unknown change type: %s for app %s (user: %s)", change.ChangeType, change.AppName, change.UserID)
+			glog.V(3).Infof("Unknown change type: %s for app %s (user: %s)", change.ChangeType, change.AppName, change.UserID)
 		}
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"market/internal/v2/utils"
 
 	"github.com/emicklei/go-restful/v3"
+	"github.com/golang/glog"
 	"github.com/gorilla/mux"
 )
 
@@ -136,7 +136,7 @@ type MarketStateResponse struct {
 
 // 1. Get market information
 func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/market - Getting market information")
+	glog.V(2).Info("GET /api/v2/market - Getting market information")
 
 	// Add timeout context
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -144,7 +144,7 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 
 	// Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Println("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -161,7 +161,7 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Panic in getMarketInfo: %v", r)
+				glog.Errorf("Panic in getMarketInfo: %v", r)
 				resultChan <- result{err: fmt.Errorf("internal error occurred")}
 			}
 		}()
@@ -169,14 +169,14 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 		// Get all users data from cache
 		allUsersData := s.cacheManager.GetAllUsersData()
 		if allUsersData == nil {
-			log.Println("Warning: GetAllUsersData returned nil")
+			glog.V(3).Info("Warning: GetAllUsersData returned nil")
 			allUsersData = make(map[string]*types.UserData)
 		}
 
 		// Get cache statistics
 		cacheStats := s.cacheManager.GetCacheStats()
 		if cacheStats == nil {
-			log.Println("Warning: GetCacheStats returned nil")
+			glog.V(3).Info("Warning: GetCacheStats returned nil")
 			cacheStats = make(map[string]interface{})
 		}
 
@@ -196,24 +196,24 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 	// Wait for result or timeout
 	select {
 	case <-ctx.Done():
-		log.Printf("Request timeout or cancelled for /api/v2/market")
+		glog.V(3).Info("Request timeout or cancelled for /api/v2/market")
 		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
 		return
 	case res := <-resultChan:
 		if res.err != nil {
-			log.Printf("Error retrieving market information: %v", res.err)
+			glog.Errorf("Error retrieving market information: %v", res.err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market information", nil)
 			return
 		}
 
-		log.Printf("Market information retrieved successfully: %d users", res.data.TotalUsers)
+		glog.V(2).Infof("Market information retrieved successfully: %d users", res.data.TotalUsers)
 		s.sendResponse(w, http.StatusOK, true, "Market information retrieved successfully", res.data)
 	}
 }
 
 // 2. Get specific application information (supports multiple queries)
 func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
-	log.Println("POST /api/v2/apps - Getting apps information")
+	glog.V(2).Info("POST /api/v2/apps - Getting apps information")
 
 	// Add timeout context
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -221,7 +221,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 
 	// Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Println("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -230,16 +230,16 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for apps request: %s", userID)
+	glog.V(2).Infof("Retrieved user ID for apps request: %s", userID)
 
 	// Step 2: Parse JSON request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Failed to read request body: %v", err)
+		glog.Errorf("Failed to read request body: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
 		return
 	}
@@ -247,18 +247,18 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 
 	var request AppsInfoRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		log.Printf("Failed to parse JSON request: %v", err)
+		glog.Errorf("Failed to parse JSON request: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
 		return
 	}
 
 	if len(request.Apps) == 0 {
-		log.Printf("Empty apps array in request")
+		glog.V(3).Info("Empty apps array in request")
 		s.sendResponse(w, http.StatusBadRequest, false, "Apps array cannot be empty", nil)
 		return
 	}
 
-	log.Printf("Received request for %d apps from user %s", len(request.Apps), userID)
+	glog.V(2).Infof("Received request for %d apps from user %s", len(request.Apps), userID)
 
 	// Create a channel to receive the result
 	type result struct {
@@ -271,7 +271,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Panic in getAppsInfo: %v", r)
+				glog.Errorf("Panic in getAppsInfo: %v", r)
 				resultChan <- result{err: fmt.Errorf("internal error occurred")}
 			}
 		}()
@@ -279,7 +279,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		// Get user data from cache
 		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
-			log.Printf("User data not found for user: %s", userID)
+			glog.V(3).Infof("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}
 			return
 		}
@@ -289,12 +289,12 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 
 		// Step 4: Find AppInfoLatestData for each requested app
 		for _, appQuery := range request.Apps {
-			log.Printf("Searching for app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
+			glog.V(3).Infof("Searching for app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
 
 			// Check if source exists
 			sourceData, exists := userData.Sources[appQuery.SourceDataName]
 			if !exists {
-				log.Printf("Source data not found: %s for user: %s", appQuery.SourceDataName, userID)
+				glog.V(3).Infof("Source data not found: %s for user: %s", appQuery.SourceDataName, userID)
 				notFoundApps = append(notFoundApps, appQuery)
 				continue
 			}
@@ -326,9 +326,8 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 
 				// Match the requested app ID or name
 				if appID == appQuery.AppID || (appInfoData.RawData != nil && appInfoData.RawData.Name == appQuery.AppID) {
-					log.Printf("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
+					glog.V(3).Infof("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
 
-					// 使用 safe copy，避免循环引用
 					safeCopy := s.createSafeAppInfoLatestCopy(appInfoData)
 					foundApps = append(foundApps, safeCopy)
 					found = true
@@ -337,7 +336,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if !found {
-				log.Printf("App not found: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
+				glog.V(3).Infof("App not found: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
 				notFoundApps = append(notFoundApps, appQuery)
 			}
 		}
@@ -350,19 +349,19 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		if len(notFoundApps) > 0 {
 			response["not_found"] = notFoundApps
 		}
-		log.Printf("Apps info retrieval completed: %d found, %d not found", len(foundApps), len(notFoundApps))
+		glog.V(2).Infof("Apps info retrieval completed: %d found, %d not found", len(foundApps), len(notFoundApps))
 		resultChan <- result{response: response}
 	}()
 
 	// Wait for result or timeout
 	select {
 	case <-ctx.Done():
-		log.Printf("Request timeout or cancelled for /api/v2/apps")
+		glog.V(3).Info("Request timeout or cancelled for /api/v2/apps")
 		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - apps retrieval took too long", nil)
 		return
 	case res := <-resultChan:
 		if res.err != nil {
-			log.Printf("Error retrieving apps information: %v", res.err)
+			glog.Errorf("Error retrieving apps information: %v", res.err)
 			if res.err.Error() == "user data not found" {
 				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 			} else {
@@ -371,17 +370,17 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Apps information retrieved successfully for user: %s", userID)
+		glog.V(2).Infof("Apps information retrieved successfully for user: %s", userID)
 
 		// Add debug logging to check response data
 		if apps, ok := res.response["apps"]; ok {
-			log.Printf("DEBUG: - Total apps found: %d", len(apps.([]map[string]interface{})))
+			glog.V(3).Infof("DEBUG: - Total apps found: %d", len(apps.([]map[string]interface{})))
 		}
 		if total, ok := res.response["total_count"]; ok {
-			log.Printf("DEBUG: - Total count: %d", total)
+			glog.V(3).Infof("DEBUG: - Total count: %d", total)
 		}
 		if notFound, ok := res.response["not_found"]; ok {
-			log.Printf("DEBUG: - Not found count: %d", len(notFound.([]AppQueryInfo)))
+			glog.V(3).Infof("DEBUG: - Not found count: %d", len(notFound.([]AppQueryInfo)))
 		}
 
 		s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", res.response)
@@ -392,7 +391,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getAppPackage(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["id"]
-	log.Printf("GET /api/v2/apps/%s/package - Getting rendered package for app", appID)
+	glog.V(2).Infof("GET /api/v2/apps/%s/package - Getting rendered package for app", appID)
 
 	// TODO: Implement business logic for getting rendered app package
 
@@ -403,7 +402,7 @@ func (s *Server) getAppPackage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateAppConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["id"]
-	log.Printf("PUT /api/v2/apps/%s/config - Updating app config", appID)
+	glog.V(2).Infof("PUT /api/v2/apps/%s/config - Updating app config", appID)
 
 	// TODO: Parse request body and implement business logic for updating app config
 
@@ -412,28 +411,28 @@ func (s *Server) updateAppConfig(w http.ResponseWriter, r *http.Request) {
 
 // 9. Upload application installation package
 func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
-	log.Println("POST /api/v2/apps/upload - Uploading app package")
+	glog.V(2).Info("POST /api/v2/apps/upload - Uploading app package")
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for upload request: %s", userID)
+	glog.V(2).Infof("Retrieved user ID for upload request: %s", userID)
 
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Printf("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
 
 	// Step 3: Parse multipart form data
 	if err := r.ParseMultipartForm(32 << 20); err != nil { // 32MB max
-		log.Printf("Failed to parse multipart form: %v", err)
+		glog.Errorf("Failed to parse multipart form: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Failed to parse form data", nil)
 		return
 	}
@@ -441,7 +440,7 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 	// Step 4: Get uploaded file
 	file, header, err := r.FormFile("chart")
 	if err != nil {
-		log.Printf("Failed to get uploaded file: %v", err)
+		glog.Errorf("Failed to get uploaded file: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "No chart file found in request", nil)
 		return
 	}
@@ -449,14 +448,14 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 
 	// Step 5: Validate file
 	if header == nil {
-		log.Printf("File header is nil")
+		glog.V(3).Info("File header is nil")
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid file header", nil)
 		return
 	}
 
 	// Check file size (max 100MB)
 	if header.Size > 100<<20 {
-		log.Printf("File too large: %d bytes", header.Size)
+		glog.V(3).Infof("File too large: %d bytes", header.Size)
 		s.sendResponse(w, http.StatusBadRequest, false, "File too large (max 100MB)", nil)
 		return
 	}
@@ -465,7 +464,7 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 	filename := header.Filename
 	if !strings.HasSuffix(strings.ToLower(filename), ".tgz") &&
 		!strings.HasSuffix(strings.ToLower(filename), ".tar.gz") {
-		log.Printf("Invalid file extension: %s", filename)
+		glog.V(3).Infof("Invalid file extension: %s", filename)
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid file format (must be .tgz or .tar.gz)", nil)
 		return
 	}
@@ -473,7 +472,7 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 	// Step 6: Read file content
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		log.Printf("Failed to read file content: %v", err)
+		glog.Errorf("Failed to read file content: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to read file content", nil)
 		return
 	}
@@ -490,12 +489,12 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 	// Step 9: Process the uploaded package using LocalRepo
 	appInfo, err := s.localRepo.UploadAppPackage(userID, sourceID, fileBytes, filename, token)
 	if err != nil {
-		log.Printf("Failed to process uploaded package: %v", err)
+		glog.Errorf("Failed to process uploaded package: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, fmt.Sprintf("Failed to process package: %v", err), nil)
 		return
 	}
 
-	log.Printf("Successfully uploaded and processed chart package: %s for user: %s", filename, userID)
+	glog.V(2).Infof("Successfully uploaded and processed chart package: %s for user: %s", filename, userID)
 
 	// Prepare response with app information
 	responseData := map[string]interface{}{
@@ -517,6 +516,7 @@ func (s *Server) uploadAppPackage(w http.ResponseWriter, r *http.Request) {
 			"developer":    appInfo.Developer,
 			"rating":       appInfo.Rating,
 			"target":       appInfo.Target,
+			"app_labels":   appInfo.AppLabels,
 			"create_time":  appInfo.CreateTime,
 			"update_time":  appInfo.UpdateTime,
 		},
@@ -590,15 +590,13 @@ func extractAppDataFromPending(pendingData *types.AppInfoLatestPendingData) map[
 
 // Get market hash information
 func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/market/hash - Getting market hash")
-
 	// Add timeout context
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	// Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Println("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -609,11 +607,11 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	// Get user information from request using utils module
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for hash request: %s", userID)
+	glog.V(2).Infof("GET /api/v2/market/hash - Getting market hash, user: %s", userID)
 
 	// Create a channel to receive the result
 	type result struct {
@@ -626,7 +624,7 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Panic in getMarketHash: %v", r)
+				glog.Errorf("Panic in getMarketHash: %v", r)
 				resultChan <- result{err: fmt.Errorf("internal error occurred")}
 			}
 		}()
@@ -634,11 +632,11 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 		// Get user data from cache with fallback (non-blocking)
 		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
-			log.Printf("User data not found for user: %s, attempting to resync user data", userID)
+			glog.Warningf("User data not found for user: %s, attempting to resync user data", userID)
 
 			// Try to resync user data to fix missing user information
 			if err := s.cacheManager.ResynceUser(); err != nil {
-				log.Printf("Failed to resync user data for user %s: %v", userID, err)
+				glog.Errorf("Failed to resync user data for user %s: %v", userID, err)
 				resultChan <- result{err: fmt.Errorf("failed to resync user data: %v", err)}
 				return
 			}
@@ -646,17 +644,17 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 			// Try to get user data again after resync
 			userData = s.cacheManager.GetUserDataNoLock(userID)
 			if userData == nil {
-				log.Printf("User data still not found for user: %s after resync", userID)
+				glog.Warningf("User data still not found for user: %s after resync", userID)
 				resultChan <- result{err: fmt.Errorf("user data not found even after resync")}
 				return
 			}
 
-			log.Printf("Successfully retrieved user data for user: %s after resync", userID)
+			glog.V(2).Infof("Successfully retrieved user data for user: %s after resync", userID)
 		}
 
 		// Get hash from user data
 		hash := userData.Hash
-		log.Printf("Retrieved hash for user %s: %s", userID, hash)
+		glog.V(2).Infof("Retrieved hash for user %s: %s", userID, hash)
 
 		resultChan <- result{hash: hash}
 	}()
@@ -664,7 +662,7 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	// Wait for result or timeout
 	select {
 	case <-ctx.Done():
-		log.Printf("Request timeout or cancelled for /api/v2/market/hash")
+		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/hash")
 		// On timeout, dump lock info to find who holds the lock
 		if s.cacheManager != nil {
 			s.cacheManager.DumpLockInfo("getMarketHash timeout")
@@ -673,7 +671,7 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 		return
 	case res := <-resultChan:
 		if res.err != nil {
-			log.Printf("Error retrieving market hash: %v", res.err)
+			glog.Errorf("Error retrieving market hash: %v", res.err)
 			if res.err.Error() == "user data not found" {
 				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 			} else if strings.Contains(res.err.Error(), "failed to resync user data") {
@@ -691,7 +689,7 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 			"hash": res.hash,
 		}
 
-		log.Printf("Market hash retrieved successfully for user: %s", userID)
+		glog.V(3).Infof("Market hash retrieved successfully for user: %s", userID)
 		s.sendResponse(w, http.StatusOK, true, "Market hash retrieved successfully", hashData)
 	}
 }
@@ -699,7 +697,7 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 // Get market state information (only AppStateLatest data)
 func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 	requestStart := time.Now()
-	log.Printf("GET /api/v2/market/state - Getting market state, request start: %v", requestStart)
+	glog.V(2).Infof("GET /api/v2/market/state - Getting market state, request start: %v", requestStart)
 
 	// Add timeout context
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -707,7 +705,7 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 
 	// Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Println("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -719,11 +717,11 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 	authStart := time.Now()
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
+	glog.V(3).Infof("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
 
 	// Create a channel to receive the result
 	type result struct {
@@ -736,7 +734,7 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Panic in getMarketState: %v", r)
+				glog.Errorf("Panic in getMarketState: %v", r)
 				resultChan <- result{err: fmt.Errorf("internal error occurred")}
 			}
 		}()
@@ -745,16 +743,16 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		userData := s.cacheManager.GetUserData(userID)
 		if userData == nil {
-			log.Printf("User data not found for user: %s", userID)
+			glog.V(3).Infof("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}
 			return
 		}
-		log.Printf("GetUserData took %v for user: %s", time.Since(start), userID)
+		glog.V(3).Infof("GetUserData took %v for user: %s", time.Since(start), userID)
 
 		// Check if we're still within timeout before filtering
 		select {
 		case <-ctx.Done():
-			log.Printf("Context cancelled during user data retrieval for user: %s", userID)
+			glog.V(3).Infof("Context cancelled during user data retrieval for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("request cancelled")}
 			return
 		default:
@@ -764,11 +762,11 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 		filterStart := time.Now()
 		filteredUserData := s.filterUserDataForStateWithTimeout(ctx, userData)
 		if filteredUserData == nil {
-			log.Printf("Data filtering timed out or failed for user: %s", userID)
+			glog.V(3).Infof("Data filtering timed out or failed for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("data filtering timeout")}
 			return
 		}
-		log.Printf("Data filtering took %v for user: %s", time.Since(filterStart), userID)
+		glog.V(3).Infof("Data filtering took %v for user: %s", time.Since(filterStart), userID)
 
 		// Prepare response data
 		responseData := MarketStateResponse{
@@ -783,12 +781,12 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 	// Wait for result or timeout
 	select {
 	case <-ctx.Done():
-		log.Printf("Request timeout or cancelled for /api/v2/market/state")
+		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/state")
 		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
 		return
 	case res := <-resultChan:
 		if res.err != nil {
-			log.Printf("Error retrieving market state: %v", res.err)
+			glog.Errorf("Error retrieving market state: %v", res.err)
 			if res.err.Error() == "user data not found" {
 				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 			} else {
@@ -797,7 +795,7 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Market state retrieved successfully for user: %s", userID)
+		glog.V(2).Infof("Market state retrieved successfully for user: %s", userID)
 		s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", res.data)
 	}
 }
@@ -805,7 +803,7 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 // Get market data information
 func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 	requestStart := time.Now()
-	log.Printf("GET /api/v2/market/data - Getting market data, request start: %v", requestStart)
+	glog.V(3).Infof("GET /api/v2/market/data - Getting market data, request start: %v", requestStart)
 
 	// Add timeout context
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -813,7 +811,7 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 
 	// Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Println("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -825,11 +823,11 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 	authStart := time.Now()
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
+	glog.V(3).Infof("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
 
 	// Create a channel to receive the result
 	type result struct {
@@ -842,7 +840,7 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Panic in getMarketData: %v", r)
+				glog.Errorf("Panic in getMarketData: %v", r)
 				resultChan <- result{err: fmt.Errorf("internal error occurred")}
 			}
 		}()
@@ -851,16 +849,16 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		userData := s.cacheManager.GetUserDataNoLock(userID)
 		if userData == nil {
-			log.Printf("User data not found for user: %s", userID)
+			glog.V(3).Infof("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}
 			return
 		}
-		log.Printf("GetUserData took %v for user: %s", time.Since(start), userID)
+		glog.V(3).Infof("GetUserData took %v for user: %s", time.Since(start), userID)
 
 		// Check if we're still within timeout before filtering
 		select {
 		case <-ctx.Done():
-			log.Printf("Context cancelled during user data retrieval for user: %s", userID)
+			glog.V(3).Infof("Context cancelled during user data retrieval for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("request cancelled")}
 			return
 		default:
@@ -870,11 +868,11 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 		filterStart := time.Now()
 		filteredUserData := s.filterUserDataWithTimeout(ctx, userData)
 		if filteredUserData == nil {
-			log.Printf("Data filtering timed out or failed for user: %s", userID)
+			glog.V(3).Infof("Data filtering timed out or failed for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("data filtering timeout")}
 			return
 		}
-		log.Printf("Data filtering took %v for user: %s", time.Since(filterStart), userID)
+		glog.V(3).Infof("Data filtering took %v for user: %s", time.Since(filterStart), userID)
 
 		// Prepare response data
 		responseData := MarketDataResponse{
@@ -889,12 +887,12 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 	// Wait for result or timeout
 	select {
 	case <-ctx.Done():
-		log.Printf("Request timeout or cancelled for /api/v2/market/data")
+		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/data")
 		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
 		return
 	case res := <-resultChan:
 		if res.err != nil {
-			log.Printf("Error retrieving market data: %v", res.err)
+			glog.Errorf("Error retrieving market data: %v", res.err)
 			if res.err.Error() == "user data not found" {
 				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 			} else {
@@ -903,7 +901,7 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Market data retrieved successfully for user: %s", userID)
+		glog.V(2).Infof("Market data retrieved successfully for user: %s", userID)
 		s.sendResponse(w, http.StatusOK, true, "Market data retrieved successfully", res.data)
 	}
 }
@@ -932,7 +930,7 @@ func (s *Server) filterUserDataWithTimeout(ctx context.Context, userData *types.
 		return nil
 	}
 
-	log.Printf("DEBUG: Starting filterUserDataWithTimeout with single global lock approach")
+	glog.V(3).Infof("DEBUG: Starting filterUserDataWithTimeout with single global lock approach")
 
 	// Use single lock for all data access to avoid deadlocks
 	filteredUserData := &FilteredUserData{
@@ -943,7 +941,7 @@ func (s *Server) filterUserDataWithTimeout(ctx context.Context, userData *types.
 	// Check timeout
 	select {
 	case <-ctx.Done():
-		log.Printf("Context cancelled before data processing")
+		glog.V(3).Infof("Context cancelled before data processing")
 		return nil
 	default:
 	}
@@ -953,7 +951,7 @@ func (s *Server) filterUserDataWithTimeout(ctx context.Context, userData *types.
 		// Check timeout
 		select {
 		case <-ctx.Done():
-			log.Printf("Context cancelled during source processing: %s", sourceID)
+			glog.V(3).Infof("Context cancelled during source processing: %s", sourceID)
 			return nil
 		default:
 		}
@@ -965,7 +963,7 @@ func (s *Server) filterUserDataWithTimeout(ctx context.Context, userData *types.
 		}
 	}
 
-	log.Printf("DEBUG: Completed filterUserDataWithTimeout with %d sources processed", len(filteredUserData.Sources))
+	glog.V(4).Infof("DEBUG: Completed filterUserDataWithTimeout with %d sources processed", len(filteredUserData.Sources))
 	return filteredUserData
 }
 
@@ -1011,10 +1009,10 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 					// Check if SupportArch is empty, try to get it from RawData or AppInfo
 					if len(appInfoData.AppSimpleInfo.SupportArch) == 0 {
 						if appInfoData.RawData != nil && len(appInfoData.RawData.SupportArch) > 0 {
-							log.Printf("DEBUG: Found SupportArch in RawData: %+v", appInfoData.RawData.SupportArch)
+							glog.V(3).Infof("DEBUG: Found SupportArch in RawData: %+v", appInfoData.RawData.SupportArch)
 							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.RawData.SupportArch...)
 						} else if appInfoData.AppInfo != nil && appInfoData.AppInfo.AppEntry != nil && len(appInfoData.AppInfo.AppEntry.SupportArch) > 0 {
-							log.Printf("DEBUG: Found SupportArch in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.SupportArch)
+							glog.V(3).Infof("DEBUG: Found SupportArch in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.SupportArch)
 							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.AppInfo.AppEntry.SupportArch...)
 						}
 					}
@@ -1022,15 +1020,15 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 					// Check if Categories is empty, try to get it from RawData or AppInfo
 					if len(appInfoData.AppSimpleInfo.Categories) == 0 {
 						if appInfoData.RawData != nil && len(appInfoData.RawData.Categories) > 0 {
-							log.Printf("DEBUG: Found Categories in RawData: %+v", appInfoData.RawData.Categories)
+							glog.V(3).Infof("DEBUG: Found Categories in RawData: %+v", appInfoData.RawData.Categories)
 							appInfoData.AppSimpleInfo.Categories = append([]string{}, appInfoData.RawData.Categories...)
 						} else if appInfoData.AppInfo != nil && appInfoData.AppInfo.AppEntry != nil && len(appInfoData.AppInfo.AppEntry.Categories) > 0 {
-							log.Printf("DEBUG: Found Categories in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.Categories)
+							glog.V(3).Infof("DEBUG: Found Categories in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.Categories)
 							appInfoData.AppSimpleInfo.Categories = append([]string{}, appInfoData.AppInfo.AppEntry.Categories...)
 						}
 					}
 
-					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo)
+					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo, appInfoData.AppInfo.AppEntry)
 					// log.Printf("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
 				}
 
@@ -1054,7 +1052,7 @@ func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData
 		return nil
 	}
 
-	log.Printf("DEBUG: Starting filterUserDataForStateWithTimeout with single global lock approach")
+	glog.V(3).Infof("DEBUG: Starting filterUserDataForStateWithTimeout with single global lock approach")
 
 	// Use single lock for all data access to avoid deadlocks
 	filteredUserData := &FilteredUserDataForState{
@@ -1065,7 +1063,7 @@ func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData
 	// Check timeout
 	select {
 	case <-ctx.Done():
-		log.Printf("Context cancelled before data processing")
+		glog.V(3).Infof("Context cancelled before data processing")
 		return nil
 	default:
 	}
@@ -1075,7 +1073,7 @@ func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData
 		// Check timeout
 		select {
 		case <-ctx.Done():
-			log.Printf("Context cancelled during source processing: %s", sourceID)
+			glog.V(3).Infof("Context cancelled during source processing: %s", sourceID)
 			return nil
 		default:
 		}
@@ -1087,7 +1085,7 @@ func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData
 		}
 	}
 
-	log.Printf("DEBUG: Completed filterUserDataForStateWithTimeout with %d sources processed", len(filteredUserData.Sources))
+	glog.V(2).Infof("DEBUG: Completed filterUserDataForStateWithTimeout with %d sources processed", len(filteredUserData.Sources))
 	return filteredUserData
 }
 
@@ -1107,11 +1105,11 @@ func (s *Server) convertSourceDataToFilteredForState(sourceData *types.SourceDat
 
 // 5. Diagnostic endpoint for cache and Redis analysis
 func (s *Server) getDiagnostic(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/diagnostic - Getting cache and Redis diagnostic information")
+	glog.V(2).Info("GET /api/v2/diagnostic - Getting cache and Redis diagnostic information")
 
 	// Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Println("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -1119,7 +1117,7 @@ func (s *Server) getDiagnostic(w http.ResponseWriter, r *http.Request) {
 	// Perform diagnostic analysis
 	err := s.cacheManager.DiagnoseCacheAndRedis()
 	if err != nil {
-		log.Printf("Diagnostic failed: %v", err)
+		glog.Errorf("Diagnostic failed: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Diagnostic failed", nil)
 		return
 	}
@@ -1138,17 +1136,17 @@ func (s *Server) getDiagnostic(w http.ResponseWriter, r *http.Request) {
 		"is_running":    cacheStats["is_running"],
 	}
 
-	log.Println("Diagnostic information retrieved successfully")
+	glog.V(2).Info("Diagnostic information retrieved successfully")
 	s.sendResponse(w, http.StatusOK, true, "Diagnostic information retrieved successfully", diagnosticInfo)
 }
 
 // 6. Force reload from Redis endpoint
 func (s *Server) forceReloadFromRedis(w http.ResponseWriter, r *http.Request) {
-	log.Println("POST /api/v2/reload - Force reloading cache data from Redis")
+	glog.V(2).Info("POST /api/v2/reload - Force reloading cache data from Redis")
 
 	// Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Println("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -1156,22 +1154,22 @@ func (s *Server) forceReloadFromRedis(w http.ResponseWriter, r *http.Request) {
 	// Force reload from Redis
 	err := s.cacheManager.ForceReloadFromRedis()
 	if err != nil {
-		log.Printf("Force reload failed: %v", err)
+		glog.Errorf("Force reload failed: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Force reload failed", nil)
 		return
 	}
 
-	log.Println("Cache data reloaded successfully from Redis")
+	glog.V(2).Info("Cache data reloaded successfully from Redis")
 	s.sendResponse(w, http.StatusOK, true, "Cache data reloaded successfully from Redis", nil)
 }
 
 // 7. Cleanup invalid pending data endpoint
 func (s *Server) cleanupInvalidPendingData(w http.ResponseWriter, r *http.Request) {
-	log.Println("POST /api/v2/cleanup - Cleaning up invalid pending data")
+	glog.V(2).Info("POST /api/v2/cleanup - Cleaning up invalid pending data")
 
 	// Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Println("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -1179,7 +1177,7 @@ func (s *Server) cleanupInvalidPendingData(w http.ResponseWriter, r *http.Reques
 	// Cleanup invalid pending data
 	cleanedCount := s.cacheManager.CleanupInvalidPendingData()
 
-	log.Printf("Cleanup completed: removed %d invalid pending data entries", cleanedCount)
+	glog.V(2).Infof("Cleanup completed: removed %d invalid pending data entries", cleanedCount)
 	s.sendResponse(w, http.StatusOK, true, "Cleanup completed successfully", map[string]interface{}{
 		"cleaned_count": cleanedCount,
 	})
@@ -1316,7 +1314,7 @@ func (s *Server) createSafeAppInfoLatestCopy(data *types.AppInfoLatestData) map[
 
 	// Include AppSimpleInfo if it exists
 	if data.AppSimpleInfo != nil {
-		safeCopy["app_simple_info"] = s.createSafeAppSimpleInfoCopy(data.AppSimpleInfo)
+		safeCopy["app_simple_info"] = s.createSafeAppSimpleInfoCopy(data.AppSimpleInfo, data.AppInfo.AppEntry)
 	}
 
 	return safeCopy
@@ -1441,7 +1439,7 @@ func (s *Server) createSafeSupportClientCopy(sc interface{}) interface{} {
 		// If it's map[string]string, return directly
 		return v
 	default:
-		log.Printf("WARNING: SupportClient has unexpected type: %T", sc)
+		glog.V(3).Infof("WARNING: SupportClient has unexpected type: %T", sc)
 		return nil
 	}
 }
@@ -1463,7 +1461,7 @@ func (s *Server) createSafePermissionCopy(perm interface{}) interface{} {
 		}
 		return safeCopy
 	default:
-		log.Printf("WARNING: Permission has unexpected type: %T", perm)
+		glog.V(3).Infof("WARNING: Permission has unexpected type: %T", perm)
 		return nil
 	}
 }
@@ -1485,7 +1483,7 @@ func (s *Server) createSafeMiddlewareCopy(mw interface{}) interface{} {
 		}
 		return safeCopy
 	default:
-		log.Printf("WARNING: Middleware has unexpected type: %T", mw)
+		glog.V(3).Infof("WARNING: Middleware has unexpected type: %T", mw)
 		return nil
 	}
 }
@@ -1507,7 +1505,7 @@ func (s *Server) createSafeI18nCopy(i18n interface{}) interface{} {
 		}
 		return safeCopy
 	default:
-		log.Printf("WARNING: I18n has unexpected type: %T", i18n)
+		glog.V(3).Infof("WARNING: I18n has unexpected type: %T", i18n)
 		return nil
 	}
 }
@@ -1535,7 +1533,7 @@ func (s *Server) createSafeMetadataCopy(metadata interface{}) interface{} {
 		}
 		return safeCopy
 	default:
-		log.Printf("WARNING: Metadata has unexpected type: %T", metadata)
+		glog.V(3).Infof("WARNING: Metadata has unexpected type: %T", metadata)
 		return nil
 	}
 }
@@ -1665,12 +1663,12 @@ func (s *Server) createSafeLayerInfoCopy(layer *types.LayerInfo) map[string]inte
 }
 
 // createSafeAppSimpleInfoCopy creates a safe copy of AppSimpleInfo to avoid circular references
-func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[string]interface{} {
+func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo, entry *types.ApplicationInfoEntry) map[string]interface{} {
 	if info == nil {
 		return nil
 	}
 
-	return map[string]interface{}{
+	var data = map[string]interface{}{
 		"app_id":          info.AppID,
 		"app_name":        info.AppName,
 		"app_icon":        info.AppIcon,
@@ -1680,6 +1678,11 @@ func (s *Server) createSafeAppSimpleInfoCopy(info *types.AppSimpleInfo) map[stri
 		"categories":      info.Categories,
 		"support_arch":    info.SupportArch,
 	}
+	if len(entry.AppLabels) > 0 {
+		data["app_labels"] = entry.AppLabels
+	}
+
+	return data
 }
 
 // createSafeOthersCopy creates a safe copy of Others data to avoid circular references
@@ -1858,24 +1861,24 @@ type DeleteLocalAppRequest struct {
 
 // deleteLocalApp handles DELETE /api/v2/apps/delete
 func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
-	log.Println("DELETE /api/v2/apps/delete - Deleting upload source application")
+	glog.V(2).Info("DELETE /api/v2/apps/delete - Deleting upload source application")
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
 	token := utils.GetTokenFromRequest(restfulReq)
 
 	// userID := "saidevgp03"
-	log.Printf("Retrieved user ID for delete request: %s", userID)
+	glog.V(3).Infof("Retrieved user ID for delete request: %s", userID)
 
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Printf("Cache manager is not initialized")
+		glog.V(3).Info("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -1883,7 +1886,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	// Step 3: Parse JSON request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Failed to read request body: %v", err)
+		glog.Errorf("Failed to read request body: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
 		return
 	}
@@ -1891,37 +1894,37 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 
 	var request DeleteLocalAppRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		log.Printf("Failed to parse JSON request: %v", err)
+		glog.Errorf("Failed to parse JSON request: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
 		return
 	}
 
 	// Step 4: Validate request parameters
 	if request.AppName == "" {
-		log.Printf("App name is required")
+		glog.V(3).Info("App name is required")
 		s.sendResponse(w, http.StatusBadRequest, false, "App name is required", nil)
 		return
 	}
 
 	if request.AppVersion == "" {
-		log.Printf("App version is required")
+		glog.V(3).Info("App version is required")
 		s.sendResponse(w, http.StatusBadRequest, false, "App version is required", nil)
 		return
 	}
 
-	log.Printf("Received delete request for app: %s, version: %s from user: %s", request.AppName, request.AppVersion, userID)
+	glog.V(2).Infof("Received delete request for app: %s, version: %s from user: %s", request.AppName, request.AppVersion, userID)
 
 	// Step 5: Check if app exists in upload source
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
-		log.Printf("User data not found for user: %s", userID)
+		glog.V(3).Infof("User data not found for user: %s", userID)
 		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 		return
 	}
 
 	sourceData, exists := userData.Sources["upload"]
 	if !exists {
-		log.Printf("upload source not found for user: %s", userID)
+		glog.V(3).Infof("upload source not found for user: %s", userID)
 		s.sendResponse(w, http.StatusNotFound, false, "upload source not found", nil)
 		return
 	}
@@ -1960,14 +1963,14 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !appExists {
-		log.Printf("App %s version %s not found in upload source for user: %s", request.AppName, request.AppVersion, userID)
+		glog.V(3).Infof("App %s version %s not found in upload source for user: %s", request.AppName, request.AppVersion, userID)
 		s.sendResponse(w, http.StatusNotFound, false, "App not found in upload source", nil)
 		return
 	}
 
 	// Step 6.5: Check if app is uninstalled in upload source (including clone apps)
 	// Only allow deletion if the app is uninstalled or not found in AppStateLatest
-	log.Printf("Checking if app %s is uninstalled in upload source for user: %s", request.AppName, userID)
+	glog.V(3).Infof("Checking if app %s is uninstalled in upload source for user: %s", request.AppName, userID)
 	appInstalled := false
 	var installedAppName string
 
@@ -1992,9 +1995,9 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 
 			if matchesApp {
 				// Treat installFailed same as uninstalled so deletion can proceed
-				if appState.Status.State != "uninstalled" && appState.Status.State != "installFailed" && appState.Status.State != "downloadFailed" && appState.Status.State != "installingCanceled" {
+				if appState.Status.State != "uninstalled" && appState.Status.State != "installFailed" && appState.Status.State != "downloadFailed" && appState.Status.State != "installingCanceled" && appState.Status.State != "downloadingCanceled" {
 					appInstalled = true
-					log.Printf("App %s (or its clone %s) is still installed in upload source with state: %s",
+					glog.V(2).Infof("App %s (or its clone %s) is still installed in upload source with state: %s",
 						request.AppName, installedAppName, appState.Status.State)
 					break
 				}
@@ -2003,7 +2006,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if appInstalled {
-		log.Printf("Cannot delete app %s: app (or its clone %s) is still installed in upload source",
+		glog.V(2).Infof("Cannot delete app %s: app (or its clone %s) is still installed in upload source",
 			request.AppName, installedAppName)
 		s.sendResponse(w, http.StatusBadRequest, false,
 			fmt.Sprintf("Cannot delete app: app (or its clone %s) is still installed. Please uninstall it first.",
@@ -2011,12 +2014,12 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("App %s is uninstalled in upload source, proceeding with deletion", request.AppName)
+	glog.V(3).Infof("App %s is uninstalled in upload source, proceeding with deletion", request.AppName)
 
 	// Step 7: Delete chart files using LocalRepo
 	// Delete chart package file
 	if err := s.localRepo.DeleteApp(userID, request.AppName, request.AppVersion, token); err != nil {
-		log.Printf("Failed to delete chart package: %v", err)
+		glog.Errorf("Failed to delete chart package: %v", err)
 		// Continue with deletion even if chart file doesn't exist
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to delete chart package", nil)
 		return
@@ -2024,13 +2027,13 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 
 	// Step 8: Remove app from AppStateLatest
 	if err := s.cacheManager.RemoveAppStateData(userID, "upload", request.AppName); err != nil {
-		log.Printf("Failed to remove app from AppStateLatest: %v", err)
+		glog.Errorf("Failed to remove app from AppStateLatest: %v", err)
 		// Continue with deletion even if app state doesn't exist
 	}
 
 	// Step 9: Remove app from AppInfoLatest
 	if err := s.cacheManager.RemoveAppInfoLatestData(userID, "upload", request.AppName); err != nil {
-		log.Printf("Failed to remove app from AppInfoLatest: %v", err)
+		glog.Errorf("Failed to remove app from AppInfoLatest: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to remove app from cache", nil)
 		return
 	}
@@ -2038,7 +2041,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	// Step 10: Send deletion notification
 	dataSender, err := appinfo.NewDataSender()
 	if err != nil {
-		log.Printf("Failed to create data sender: %v", err)
+		glog.Errorf("Failed to create data sender: %v", err)
 		// Don't fail the request if data sender creation fails
 	} else {
 		update := &types.MarketSystemUpdate{
@@ -2054,7 +2057,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := dataSender.SendMarketSystemUpdate(*update); err != nil {
-			log.Printf("Failed to send deletion notification: %v", err)
+			glog.Errorf("Failed to send deletion notification: %v", err)
 			// Don't fail the request if notification fails
 		}
 
@@ -2062,7 +2065,7 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		dataSender.Close()
 	}
 
-	log.Printf("Successfully deleted app: %s version: %s from upload source for user: %s", request.AppName, request.AppVersion, userID)
+	glog.V(2).Infof("Successfully deleted app: %s version: %s from upload source for user: %s", request.AppName, request.AppVersion, userID)
 
 	// Step 11: Prepare response
 	responseData := map[string]interface{}{
@@ -2085,24 +2088,24 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	appID := vars["id"]
 	source := vars["source"]
 
-	log.Printf("GET /api/v2/sources/%s/apps/%s/payment-status - Getting app payment status", source, appID)
+	glog.V(2).Infof("GET /api/v2/sources/%s/apps/%s/payment-status - Getting app payment status", source, appID)
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for payment status request: %s", userID)
+	glog.V(3).Infof("Retrieved user ID for payment status request: %s", userID)
 
 	// Read X-Forwarded-Host for downstream callbacks
 	xForwardedHost := r.Header.Get("X-Forwarded-Host")
 
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Printf("Cache manager is not initialized")
+		glog.V(3).Infof("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -2110,7 +2113,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	// Step 3: Get user data from cache
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
-		log.Printf("User data not found for user: %s", userID)
+		glog.V(3).Infof("User data not found for user: %s", userID)
 		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 		return
 	}
@@ -2118,17 +2121,17 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	// Step 4: Find app in specified source
 	foundApp, sourceID := s.findAppInUserDataWithSource(userData, appID, source)
 	if foundApp == nil {
-		log.Printf("App not found: %s in source: %s for user: %s", appID, source, userID)
+		glog.V(3).Infof("App not found: %s in source: %s for user: %s", appID, source, userID)
 		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("App not found in source '%s'", source), nil)
 		return
 	}
 
-	log.Printf("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
+	glog.V(2).Infof("Found app: %s in source: %s for user: %s", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
 	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, xForwardedHost, foundApp.AppInfo)
 	if err != nil {
-		log.Printf("Failed to process payment status: %v", err)
+		glog.Errorf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
 		return
 	}
@@ -2149,10 +2152,10 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	// Add token_info if available
 	if len(result.TokenInfo) > 0 {
 		responseData["token_info"] = result.TokenInfo
-		log.Printf("getAppPaymentStatus: Added token_info to response (count=%d)", len(result.TokenInfo))
+		glog.V(3).Infof("getAppPaymentStatus: Added token_info to response (count=%d)", len(result.TokenInfo))
 	}
 
-	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s", appID, sourceID, userID, result.Status)
+	glog.V(2).Infof("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s", appID, sourceID, userID, result.Status)
 	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
 }
 
@@ -2165,17 +2168,17 @@ func (s *Server) purchaseApp(w http.ResponseWriter, r *http.Request) {
 	appID := vars["id"]
 	source := vars["source"]
 
-	log.Printf("POST /api/v2/sources/%s/apps/%s/purchase - Purchase app", source, appID)
+	glog.V(2).Infof("POST /api/v2/sources/%s/apps/%s/purchase - Purchase app", source, appID)
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for purchase request: %s", userID)
+	glog.V(2).Infof("Retrieved user ID for purchase request: %s", userID)
 
 	// Read X-Forwarded-Host (needed for user DID resolution)
 	xForwardedHost := r.Header.Get("X-Forwarded-Host")
@@ -2198,7 +2201,7 @@ func (s *Server) purchaseApp(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Call payment module purchase API
 	result, err := paymentnew.PurchaseApp(userID, appID, source, xForwardedHost, appInfoLatest.AppInfo)
 	if err != nil {
-		log.Printf("Failed to start purchase: %v", err)
+		glog.Errorf("Failed to start purchase: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to start purchase", nil)
 		return
 	}
@@ -2220,17 +2223,17 @@ func (s *Server) restorePurchase(w http.ResponseWriter, r *http.Request) {
 	appID := vars["id"]
 	source := vars["source"]
 
-	log.Printf("POST /api/v2/sources/%s/apps/%s/restore-purchase - Restore purchase", source, appID)
+	glog.V(2).Infof("POST /api/v2/sources/%s/apps/%s/restore-purchase - Restore purchase", source, appID)
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for restore purchase request: %s", userID)
+	glog.V(2).Infof("Retrieved user ID for restore purchase request: %s", userID)
 
 	// Read X-Forwarded-Host (needed for signature callbacks and user DID resolution)
 	xForwardedHost := r.Header.Get("X-Forwarded-Host")
@@ -2253,7 +2256,7 @@ func (s *Server) restorePurchase(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Call payment module restore purchase API
 	result, err := paymentnew.RestorePurchase(userID, appID, source, xForwardedHost, appInfoLatest.AppInfo)
 	if err != nil {
-		log.Printf("Failed to restore purchase: %v", err)
+		glog.Errorf("Failed to restore purchase: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to restore purchase", nil)
 		return
 	}
@@ -2274,24 +2277,24 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	vars := mux.Vars(r)
 	appID := vars["id"]
 
-	log.Printf("GET /api/v2/apps/%s/payment-status - Getting app payment status (legacy, searching all sources)", appID)
+	glog.V(2).Infof("GET /api/v2/apps/%s/payment-status - Getting app payment status (legacy, searching all sources)", appID)
 
 	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for payment status request: %s", userID)
+	glog.V(2).Infof("Retrieved user ID for payment status request: %s", userID)
 
 	// Read X-Forwarded-Host for downstream callbacks
 	xForwardedHost := r.Header.Get("X-Forwarded-Host")
 
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
-		log.Printf("Cache manager is not initialized")
+		glog.V(3).Infof("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -2299,7 +2302,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	// Step 3: Get user data from cache
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
-		log.Printf("User data not found for user: %s", userID)
+		glog.V(3).Infof("User data not found for user: %s", userID)
 		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 		return
 	}
@@ -2307,17 +2310,17 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	// Step 4: Find app in all sources (legacy behavior)
 	foundApp, sourceID := s.findAppInUserData(userData, appID)
 	if foundApp == nil {
-		log.Printf("App not found: %s for user: %s", appID, userID)
+		glog.V(3).Infof("App not found: %s for user: %s", appID, userID)
 		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
 		return
 	}
 
-	log.Printf("Found app: %s in source: %s for user: %s (legacy search)", appID, sourceID, userID)
+	glog.V(2).Infof("Found app: %s in source: %s for user: %s (legacy search)", appID, sourceID, userID)
 
 	// Step 5: Process payment status using payment module
 	result, err := paymentnew.GetPaymentStatus(userID, appID, sourceID, xForwardedHost, foundApp.AppInfo)
 	if err != nil {
-		log.Printf("Failed to process payment status: %v", err)
+		glog.Errorf("Failed to process payment status: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to process payment status", nil)
 		return
 	}
@@ -2338,10 +2341,10 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	// Add token_info if available
 	if len(result.TokenInfo) > 0 {
 		responseData["token_info"] = result.TokenInfo
-		log.Printf("getAppPaymentStatusLegacy: Added token_info to response (count=%d)", len(result.TokenInfo))
+		glog.V(3).Infof("getAppPaymentStatusLegacy: Added token_info to response (count=%d)", len(result.TokenInfo))
 	}
 
-	log.Printf("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s (legacy)", appID, sourceID, userID, result.Status)
+	glog.V(2).Infof("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s (legacy)", appID, sourceID, userID, result.Status)
 	s.sendResponse(w, http.StatusOK, true, "App payment status retrieved successfully", responseData)
 }
 
@@ -2353,7 +2356,7 @@ func (s *Server) findAppInUserData(userData *types.UserData, appID string) (*typ
 // getPaymentStates handles GET /api/v2/payment/states
 // Returns all payment state machine states for monitoring/debugging
 func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
-	log.Println("GET /api/v2/payment/states - Getting payment state machine states")
+	glog.V(2).Info("GET /api/v2/payment/states - Getting payment state machine states")
 
 	// Get all payment states
 	states := paymentnew.ListPaymentStates()
@@ -2402,24 +2405,24 @@ func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
 				if userData != nil {
 					if app, _ := s.findAppInUserDataWithSource(userData, state.AppID, state.SourceID); app != nil && app.AppInfo != nil {
 						appInfo = app.AppInfo
-						log.Printf("getPaymentStates: Found appInfo for user=%s app=%s source=%s", state.UserID, state.AppID, state.SourceID)
+						glog.V(2).Infof("getPaymentStates: Found appInfo for user=%s app=%s source=%s", state.UserID, state.AppID, state.SourceID)
 					} else {
-						log.Printf("getPaymentStates: AppInfo not found in cache for user=%s app=%s source=%s", state.UserID, state.AppID, state.SourceID)
+						glog.V(3).Infof("getPaymentStates: AppInfo not found in cache for user=%s app=%s source=%s", state.UserID, state.AppID, state.SourceID)
 					}
 				} else {
-					log.Printf("getPaymentStates: UserData not found for user=%s", state.UserID)
+					glog.V(3).Infof("getPaymentStates: UserData not found for user=%s", state.UserID)
 				}
 			} else {
-				log.Printf("getPaymentStates: Cannot get appInfo - cacheManager=%v, userID=%s, appID=%s", s.cacheManager != nil, state.UserID, state.AppID)
+				glog.V(3).Infof("getPaymentStates: Cannot get appInfo - cacheManager=%v, userID=%s, appID=%s", s.cacheManager != nil, state.UserID, state.AppID)
 			}
 
 			// Extract token info for all states
 			tokenInfo := paymentnew.GetTokenInfoForState(context.Background(), state, appInfo, settingsManager)
 			if len(tokenInfo) > 0 {
 				stateData["token_info"] = tokenInfo
-				log.Printf("getPaymentStates: Added token_info (count=%d) for user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+				glog.V(2).Infof("getPaymentStates: Added token_info (count=%d) for user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
 			} else {
-				log.Printf("getPaymentStates: No token_info extracted for user=%s app=%s product=%s (appInfo=%v, developerName=%s, settingsManager=%v)", state.UserID, state.AppID, state.ProductID, appInfo != nil, state.DeveloperName, settingsManager != nil)
+				glog.V(3).Infof("getPaymentStates: No token_info extracted for user=%s app=%s product=%s (appInfo=%v, developerName=%s, settingsManager=%v)", state.UserID, state.AppID, state.ProductID, appInfo != nil, state.DeveloperName, settingsManager != nil)
 			}
 
 			statesData[key] = stateData
@@ -2432,7 +2435,7 @@ func (s *Server) getPaymentStates(w http.ResponseWriter, r *http.Request) {
 		"timestamp":    time.Now(),
 	}
 
-	log.Printf("Payment states retrieved: %d states", len(statesData))
+	glog.V(2).Infof("Payment states retrieved: %d states", len(statesData))
 	s.sendResponse(w, http.StatusOK, true, "Payment states retrieved successfully", responseData)
 }
 
@@ -2444,14 +2447,14 @@ func (s *Server) findAppInUserDataWithSource(userData *types.UserData, appID str
 
 // startPaymentPolling handles POST /api/v2/payment/start-polling
 func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
-	log.Println("POST /api/v2/payment/start-polling - Starting payment polling")
+	glog.V(2).Info("POST /api/v2/payment/start-polling - Starting payment polling")
 
 	// Get X-Forwarded-Host header value (required for callback URL)
 	xForwardedHost := r.Header.Get("X-Forwarded-Host")
-	log.Printf("X-Forwarded-Host header value: %s", xForwardedHost)
+	glog.V(3).Infof("X-Forwarded-Host header value: %s", xForwardedHost)
 
 	if xForwardedHost == "" {
-		log.Printf("ERROR: X-Forwarded-Host header is missing in request")
+		glog.V(3).Infof("ERROR: X-Forwarded-Host header is missing in request")
 		s.sendResponse(w, http.StatusBadRequest, false, "X-Forwarded-Host header is required", nil)
 		return
 	}
@@ -2460,16 +2463,16 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for payment polling request: %s", userID)
+	glog.V(3).Infof("Retrieved user ID for payment polling request: %s", userID)
 
 	// Step 2: Parse JSON request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Failed to read request body: %v", err)
+		glog.Errorf("Failed to read request body: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
 		return
 	}
@@ -2477,19 +2480,19 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 
 	var request paymentPollingRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		log.Printf("Failed to parse JSON request: %v", err)
+		glog.Errorf("Failed to parse JSON request: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
 		return
 	}
 
 	// Step 3: Validate required fields (source_id, app_id, tx_hash, product_id)
 	if strings.TrimSpace(request.SourceID) == "" || strings.TrimSpace(request.AppID) == "" || strings.TrimSpace(request.TxHash) == "" || strings.TrimSpace(request.ProductID) == "" {
-		log.Printf("Missing required fields in payment polling request")
+		glog.V(3).Infof("Missing required fields in payment polling request")
 		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source_id, app_id, tx_hash, product_id", nil)
 		return
 	}
 
-	log.Printf("Received payment polling request for user: %s, source: %s, app: %s, product_id: %s, tx_hash: %s",
+	glog.V(2).Infof("Received payment polling request for user: %s, source: %s, app: %s, product_id: %s, tx_hash: %s",
 		userID, request.SourceID, request.AppID, request.ProductID, request.TxHash)
 
 	// Derive AppInfoLatest from cache
@@ -2514,7 +2517,7 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 		xForwardedHost,
 		appInfoLatest,
 	); err != nil {
-		log.Printf("Failed to start payment polling: %v", err)
+		glog.Errorf("Failed to start payment polling: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to start payment polling", nil)
 		return
 	}
@@ -2526,17 +2529,17 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 		Status:  "polling",
 	}
 
-	log.Printf("Payment polling started successfully for user: %s, source: %s, app: %s", userID, request.SourceID, request.AppID)
+	glog.V(2).Infof("Payment polling started successfully for user: %s, source: %s, app: %s", userID, request.SourceID, request.AppID)
 	s.sendResponse(w, http.StatusOK, true, "Payment polling started successfully", response)
 }
 
 // startFrontendPayment handles POST /api/v2/payment/frontend-start
 func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
-	log.Println("POST /api/v2/payment/frontend-start - Frontend signals payment readiness")
+	glog.V(2).Info("POST /api/v2/payment/frontend-start - Frontend signals payment readiness")
 
 	xForwardedHost := r.Header.Get("X-Forwarded-Host")
 	if xForwardedHost == "" {
-		log.Printf("ERROR: X-Forwarded-Host header is missing in frontend payment start request")
+		glog.V(3).Infof("ERROR: X-Forwarded-Host header is missing in frontend payment start request")
 		s.sendResponse(w, http.StatusBadRequest, false, "X-Forwarded-Host header is required", nil)
 		return
 	}
@@ -2544,15 +2547,15 @@ func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for frontend payment start request: %s", userID)
+	glog.V(3).Infof("Retrieved user ID for frontend payment start request: %s", userID)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Failed to read request body: %v", err)
+		glog.Errorf("Failed to read request body: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
 		return
 	}
@@ -2560,40 +2563,40 @@ func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
 
 	var request frontendPaymentStartRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		log.Printf("Failed to parse JSON request: %v", err)
+		glog.Errorf("Failed to parse JSON request: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
 		return
 	}
 
 	if strings.TrimSpace(request.SourceID) == "" || strings.TrimSpace(request.AppID) == "" {
-		log.Printf("Missing required fields in frontend payment start request: source_id=%s app_id=%s", request.SourceID, request.AppID)
+		glog.V(3).Infof("Missing required fields in frontend payment start request: source_id=%s app_id=%s", request.SourceID, request.AppID)
 		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source_id, app_id", nil)
 		return
 	}
 
 	productID := strings.TrimSpace(request.ProductID)
 	if productID == "" {
-		log.Printf("Missing product_id in frontend payment start request for user: %s, app: %s, source: %s", userID, request.AppID, request.SourceID)
+		glog.V(3).Infof("Missing product_id in frontend payment start request for user: %s, app: %s, source: %s", userID, request.AppID, request.SourceID)
 		s.sendResponse(w, http.StatusBadRequest, false, "Missing required field: product_id", nil)
 		return
 	}
 
 	if s.cacheManager == nil {
-		log.Printf("Cache manager is not initialized")
+		glog.V(3).Infof("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
 
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
-		log.Printf("User data not found for user: %s", userID)
+		glog.V(3).Infof("User data not found for user: %s", userID)
 		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 		return
 	}
 
 	appInfoLatest, _ := s.findAppInUserDataWithSource(userData, request.AppID, request.SourceID)
 	if appInfoLatest == nil || appInfoLatest.AppInfo == nil {
-		log.Printf("App info not found for user: %s, app: %s, source: %s", userID, request.AppID, request.SourceID)
+		glog.V(3).Infof("App info not found for user: %s, app: %s, source: %s", userID, request.AppID, request.SourceID)
 		s.sendResponse(w, http.StatusNotFound, false, "App info not found in cache", nil)
 		return
 	}
@@ -2608,7 +2611,7 @@ func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
 
 	result, err := paymentnew.StartFrontendPayment(userID, request.AppID, request.SourceID, productID, xForwardedHost, appInfoLatest.AppInfo, frontendData)
 	if err != nil {
-		log.Printf("Failed to start frontend payment: %v", err)
+		glog.Errorf("Failed to start frontend payment: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to update payment state", nil)
 		return
 	}
@@ -2629,20 +2632,20 @@ func (s *Server) startFrontendPayment(w http.ResponseWriter, r *http.Request) {
 // resendPaymentVC handles POST /api/v2/payment/resend-vc
 // When payment is already confirmed, it re-sends VC to LarePass with topic save_payment_vc.
 func (s *Server) resendPaymentVC(w http.ResponseWriter, r *http.Request) {
-	log.Println("POST /api/v2/payment/resend-vc - Resend payment VC to LarePass")
+	glog.V(3).Info("POST /api/v2/payment/resend-vc - Resend payment VC to LarePass")
 
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
-		log.Printf("Failed to get user from request: %v", err)
+		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	log.Printf("Retrieved user ID for resend vc request: %s", userID)
+	glog.V(2).Infof("Retrieved user ID for resend vc request: %s", userID)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Failed to read request body: %v", err)
+		glog.Errorf("Failed to read request body: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Failed to read request body", nil)
 		return
 	}
@@ -2650,20 +2653,20 @@ func (s *Server) resendPaymentVC(w http.ResponseWriter, r *http.Request) {
 
 	var req resendPaymentVCRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("Failed to parse JSON request: %v", err)
+		glog.Errorf("Failed to parse JSON request: %v", err)
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
 		return
 	}
 
 	productID := strings.TrimSpace(req.ProductID)
 	if productID == "" {
-		log.Printf("Missing product_id in resend vc request")
+		glog.V(3).Infof("Missing product_id in resend vc request")
 		s.sendResponse(w, http.StatusBadRequest, false, "Missing required field: product_id", nil)
 		return
 	}
 
 	if err := paymentnew.ResendPaymentVCToLarePass(userID, productID); err != nil {
-		log.Printf("ResendPaymentVCToLarePass failed for user=%s product=%s: %v", userID, productID, err)
+		glog.Errorf("ResendPaymentVCToLarePass failed for user=%s product=%s: %v", userID, productID, err)
 		s.sendResponse(w, http.StatusBadRequest, false, fmt.Sprintf("Failed to resend VC: %v", err), nil)
 		return
 	}

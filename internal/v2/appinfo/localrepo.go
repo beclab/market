@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -13,6 +12,8 @@ import (
 
 	"market/internal/v2/task"
 	"market/internal/v2/types"
+
+	"github.com/golang/glog"
 )
 
 const (
@@ -245,7 +246,7 @@ func (lr *LocalRepo) SetTaskModule(taskModule *task.TaskModule) {
 
 // UploadAppPackage processes an uploaded chart package by calling chart repo service API
 func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte, filename string, token string) (*types.ApplicationInfoEntry, error) {
-	log.Printf("Processing uploaded chart package via chart repo service: %s for user: %s, source: %s", filename, userID, sourceID)
+	glog.V(3).Infof("Processing uploaded chart package via chart repo service: %s for user: %s, source: %s", filename, userID, sourceID)
 
 	// Get chart repo service host from environment variable
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
@@ -325,7 +326,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 		return nil, fmt.Errorf("chart repo service returned error: %s", response.Message)
 	}
 
-	log.Printf("Successfully processed chart package via chart repo service: %s", filename)
+	glog.V(2).Infof("Successfully processed chart package via chart repo service: %s", filename)
 
 	// var appDataMap map[string]interface{}
 	var latest types.AppInfoLatestData
@@ -345,7 +346,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 
 	// if appDataMap != nil {
 	if err := lr.cacheManager.SetLocalAppData(userID, "upload", types.AppInfoLatestPending, latest); err != nil {
-		log.Printf("Warning: Failed to add app data to cache: %v", err)
+		glog.Errorf("Warning: Failed to add app data to cache: %v", err)
 	}
 	// }
 
@@ -353,18 +354,18 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 }
 
 func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string) error {
-	log.Printf("Deleting app: %s, version: %s, user: %s", appName, appVersion, userID)
+	glog.V(2).Infof("Deleting app: %s, version: %s, user: %s", appName, appVersion, userID)
 
 	// Check if the app is currently being installed
 	if lr.taskModule != nil {
 		taskType, source, found, completed := lr.taskModule.GetLatestTaskByAppNameAndUser(appName, userID)
 		if found && !completed && taskType == "install" && source == "upload" {
-			log.Printf("Cannot delete app %s: app is currently being installed (task type: %s, source: %s)", appName, taskType, source)
+			glog.V(3).Infof("Cannot delete app %s: app is currently being installed (task type: %s, source: %s)", appName, taskType, source)
 			return fmt.Errorf("cannot delete app %s: app is currently being installed", appName)
 		}
-		log.Printf("App %s installation check passed: found=%v, completed=%v, taskType=%s, source=%s", appName, found, completed, taskType, source)
+		glog.V(3).Infof("App %s installation check passed: found=%v, completed=%v, taskType=%s, source=%s", appName, found, completed, taskType, source)
 	} else {
-		log.Printf("Task module not available, skipping installation status check for app: %s", appName)
+		glog.V(3).Infof("Task module not available, skipping installation status check for app: %s", appName)
 	}
 
 	// Get chart repo service host from environment variable
@@ -429,6 +430,6 @@ func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string)
 		return fmt.Errorf("chart repo service returned error: %s", response.Message)
 	}
 
-	log.Printf("Successfully deleted app %s version %s for user %s", appName, appVersion, userID)
+	glog.V(2).Infof("Successfully deleted app %s version %s for user %s", appName, appVersion, userID)
 	return nil
 }

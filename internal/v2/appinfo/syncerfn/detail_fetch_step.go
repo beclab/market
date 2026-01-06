@@ -3,13 +3,14 @@ package syncerfn
 import (
 	"context"
 	"fmt"
-	"log"
 	"reflect"
 	"strings"
 	"time"
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
+
+	"github.com/golang/glog"
 )
 
 // Label constants for filtering apps
@@ -67,15 +68,15 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("PANIC in DetailFetchStep.Execute: %v", r)
+			glog.Errorf("PANIC in DetailFetchStep.Execute: %v", r)
 			data.AddError(fmt.Errorf("panic in DetailFetchStep.Execute: %v", r))
 		}
 	}()
 
-	log.Printf("Executing %s for %d apps in batches of %d", d.GetStepName(), len(data.AppIDs), d.BatchSize)
+	glog.V(2).Infof("Executing %s for %d apps in batches of %d", d.GetStepName(), len(data.AppIDs), d.BatchSize)
 
 	if len(data.AppIDs) == 0 {
-		log.Printf("No app IDs to fetch details for")
+		glog.V(3).Info("No app IDs to fetch details for")
 		return nil
 	}
 
@@ -85,7 +86,7 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	errorCount := 0
 	overallStartTime := time.Now()
 
-	log.Printf("Starting detail fetch with %d total batches", totalBatches)
+	glog.V(2).Infof("Starting detail fetch with %d total batches", totalBatches)
 
 	for i := 0; i < len(data.AppIDs); i += d.BatchSize {
 		batchNumber := (i / d.BatchSize) + 1
@@ -98,13 +99,13 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 		batchStartTime := time.Now()
 		progressPercent := float64(batchNumber) / float64(totalBatches) * 100
 
-		log.Printf("Processing batch %d/%d (%.1f%% complete) with %d apps: %v",
+		glog.V(3).Infof("Processing batch %d/%d (%.1f%% complete) with %d apps: %v",
 			batchNumber, totalBatches, progressPercent, len(batch), batch)
 
 		// Check context cancellation before processing each batch
 		select {
 		case <-ctx.Done():
-			log.Printf("Context cancelled during batch %d/%d processing", batchNumber, totalBatches)
+			glog.V(3).Infof("Context cancelled during batch %d/%d processing", batchNumber, totalBatches)
 			return fmt.Errorf("detail fetch cancelled: %w", ctx.Err())
 		default:
 		}
@@ -115,7 +116,7 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 
 		for retry := 0; retry < maxRetries; retry++ {
 			if retry > 0 {
-				log.Printf("Retrying batch %d/%d (attempt %d/%d)", batchNumber, totalBatches, retry+1, maxRetries)
+				glog.V(3).Infof("Retrying batch %d/%d (attempt %d/%d)", batchNumber, totalBatches, retry+1, maxRetries)
 				// Add exponential backoff delay
 				backoffDelay := time.Duration(retry) * 2 * time.Second
 				select {
@@ -135,7 +136,7 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 
 			// Log retry attempt
 			if retry < maxRetries-1 {
-				log.Printf("Batch %d/%d failed, will retry: %d successful, %d errors",
+				glog.V(2).Infof("Batch %d/%d failed, will retry: %d successful, %d errors",
 					batchNumber, totalBatches, batchSuccessCount, batchErrorCount)
 			}
 		}
@@ -145,15 +146,15 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 
 		batchDuration := time.Since(batchStartTime)
 		// Log batch completion with timing
-		log.Printf("Batch %d/%d completed in %v: %d successful, %d errors",
+		glog.V(2).Infof("Batch %d/%d completed in %v: %d successful, %d errors",
 			batchNumber, totalBatches, batchDuration, batchSuccessCount, batchErrorCount)
 
 		// Add a small delay between batches to avoid overwhelming the API
 		if batchNumber < totalBatches {
-			log.Printf("Waiting 200ms before processing next batch...")
+			glog.V(3).Infof("Waiting 200ms before processing next batch...")
 			select {
 			case <-ctx.Done():
-				log.Printf("Context cancelled during batch delay")
+				glog.V(3).Infof("Context cancelled during batch delay")
 				return fmt.Errorf("detail fetch cancelled during batch delay: %w", ctx.Err())
 			case <-time.After(200 * time.Millisecond): // Increased delay to 200ms
 				// Continue to next batch
@@ -162,7 +163,7 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	}
 
 	overallDuration := time.Since(overallStartTime)
-	log.Printf("Completed detail fetch in %v: %d successful, %d errors, total %d apps",
+	glog.V(2).Infof("Completed detail fetch in %v: %d successful, %d errors, total %d apps",
 		overallDuration, successCount, errorCount, len(data.AppIDs))
 
 	// Final cleanup: Check all remaining apps in LatestData.Data.Apps for suspend/remove labels
@@ -179,12 +180,12 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 func (d *DetailFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 	// Skip if hashes match or no app IDs
 	if data.HashMatches {
-		log.Printf("Skipping %s - hashes match, no sync required", d.GetStepName())
+		glog.V(3).Infof("Skipping %s - hashes match, no sync required", d.GetStepName())
 		return true
 	}
 
 	if len(data.AppIDs) == 0 {
-		log.Printf("Skipping %s - no app IDs to fetch details for", d.GetStepName())
+		glog.V(3).Infof("Skipping %s - no app IDs to fetch details for", d.GetStepName())
 		return true
 	}
 
@@ -196,7 +197,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("PANIC in fetchAppsBatch: %v", r)
+			glog.Errorf("PANIC in fetchAppsBatch: %v", r)
 			data.AddError(fmt.Errorf("panic in fetchAppsBatch: %v", r))
 		}
 	}()
@@ -206,13 +207,13 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	if marketSource == nil {
 		errMsg := fmt.Errorf("no market source available in sync context for detail fetch")
 		data.AddError(errMsg)
-		log.Printf("ERROR: %v", errMsg)
+		glog.Errorf("ERROR: %v", errMsg)
 		return 0, len(appIDs)
 	}
 
 	// Build complete URL from market source base URL and endpoint path
 	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
-	log.Printf("Fetching details for batch from: %s", detailURL)
+	glog.V(3).Infof("Fetching details for batch from: %s", detailURL)
 
 	request := types.AppsInfoRequest{
 		AppIds:  appIDs,
@@ -227,7 +228,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	defer cancel()
 
 	requestStartTime := time.Now()
-	log.Printf("Sending batch request for %d apps...", len(appIDs))
+	glog.V(3).Infof("Sending batch request for %d apps...", len(appIDs))
 
 	resp, err := data.Client.R().
 		SetContext(requestCtx).
@@ -240,19 +241,19 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	if err != nil {
 		errMsg := fmt.Errorf("failed to fetch batch details for apps %v from %s: %w", appIDs, detailURL, err)
 		data.AddError(errMsg)
-		log.Printf("ERROR: %v (request took %v)", errMsg, requestDuration)
+		glog.Errorf("ERROR: %v (request took %v)", errMsg, requestDuration)
 		return 0, len(appIDs)
 	}
 
 	// Log response status for debugging
-	log.Printf("Batch request completed with status: %d for apps: %v (request took %v)",
+	glog.V(2).Infof("Batch request completed with status: %d for apps: %v (request took %v)",
 		resp.StatusCode(), appIDs, requestDuration)
 
 	// Handle different status codes
 	switch resp.StatusCode() {
 	case 200:
 		// Success - process the apps and replace simplified data with detailed data
-		log.Printf("Processing successful response for batch with %d apps", len(appIDs))
+		glog.V(2).Infof("Processing successful response for batch with %d apps", len(appIDs))
 
 		// CRITICAL: Get sourceID BEFORE acquiring mutex lock to avoid deadlock
 		// GetMarketSource() uses RLock() internally, and calling it while holding Lock()
@@ -264,7 +265,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		}
 
 		data.mutex.Lock()
-		log.Printf("Acquired mutex lock for batch processing")
+		glog.V(3).Infof("Acquired mutex lock for batch processing")
 
 		// Collect apps that need to be removed from cache to avoid nested locks
 		appsToRemove := make([]struct {
@@ -274,13 +275,13 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 		// Extract apps from raw response
 		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
-			log.Printf("Found %d apps in response data", len(appsData))
+			glog.V(3).Infof("Found %d apps in response data", len(appsData))
 			// Update the original LatestData with detailed information
 			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
-				log.Printf("Processing %d apps in LatestData", len(appsData))
+				glog.V(3).Infof("Processing %d apps in LatestData", len(appsData))
 
 				for appID, appData := range appsData {
-					log.Printf("Processing app %s in batch", appID)
+					glog.V(3).Infof("Processing app %s in batch", appID)
 					if appInfoMap, ok := appData.(map[string]interface{}); ok {
 						// Check for Suspend or Remove labels before processing the app
 						shouldSkip := false
@@ -301,7 +302,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 										if d.isAppInstalled(appName, sourceID, data) {
 											shouldRemoveFromCache = false
 											appInstalled = true
-											log.Printf("App %s is suspended but still installed, keeping cache entry", appName)
+											glog.V(3).Infof("App %s is suspended but still installed, keeping cache entry", appName)
 										}
 
 										if shouldRemoveFromCache {
@@ -322,7 +323,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 							if shouldRemoveFromCache {
 								// Remove from LatestData immediately when no installation is active
 								delete(data.LatestData.Data.Apps, appID)
-								
+
 								// Also remove ALL versions of this app from LatestData.Data.Apps (by name)
 								if appName != "" {
 									for otherAppID, otherAppData := range data.LatestData.Data.Apps {
@@ -338,11 +339,11 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 								// and merge with original data only when chartrepo fields are empty/null
 								// This ensures chartrepo's rendered data is preserved
 								originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
-								
+
 								// Use mergeAppData to intelligently merge chartrepo data with original data
 								// This will use chartrepo data when available, and fall back to original when chartrepo is empty/null
 								mergedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
-								
+
 								// Ensure appLabels contains suspend/remove label from chartrepo response
 								if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
 									mergedAppData["appLabels"] = chartrepoLabels
@@ -365,7 +366,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 										}
 									}
 								}
-								
+
 								// Update LatestData with merged data (chartrepo data as base, original as fallback)
 								data.LatestData.Data.Apps[appID] = mergedAppData
 								data.DetailedApps[appID] = mergedAppData
@@ -373,7 +374,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 							continue
 						}
 
-						log.Printf("Processing app %s data replacement", appID)
+						glog.V(3).Infof("Processing app %s data replacement", appID)
 
 						// Preserve appLabels from original data if detail API doesn't return it
 						// This handles the case where DataFetchStep has suspend/remove labels
@@ -464,27 +465,27 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 						// Also store in DetailedApps for backward compatibility
 						data.DetailedApps[appID] = detailedAppData
 
-						// log.Printf("DetailedAppData: %v", detailedAppData)
+						// glog.V(3).Infof("DetailedAppData: %v", detailedAppData)
 
 						// Log the main app information with more details
-						log.Printf("Replaced app data with details - ID: %s, Name: %s, Version: %s",
+						glog.V(3).Infof("Replaced app data with details - ID: %s, Name: %s, Version: %s",
 							appInfoMap["id"], appInfoMap["name"], appInfoMap["version"])
-						log.Printf("App %s data replacement completed", appID)
+						glog.V(3).Infof("App %s data replacement completed", appID)
 					} else {
-						log.Printf("Warning: App %s data is not a map", appID)
+						glog.V(3).Infof("Warning: App %s data is not a map", appID)
 					}
 				}
-				log.Printf("Finished processing all apps in LatestData")
+				glog.V(3).Info("Finished processing all apps in LatestData")
 			} else {
-				log.Printf("WARNING: LatestData or LatestData.Data.Apps is nil")
+				glog.V(3).Info("WARNING: LatestData or LatestData.Data.Apps is nil")
 			}
 		} else {
-			log.Printf("WARNING: No apps data found in response")
+			glog.V(3).Info("WARNING: No apps data found in response")
 		}
 
-		log.Printf("Releasing mutex lock for batch processing")
+		glog.V(3).Info("Releasing mutex lock for batch processing")
 		data.mutex.Unlock()
-		log.Printf("Mutex lock released successfully")
+		glog.V(3).Info("Mutex lock released successfully")
 
 		// Now remove apps from cache after releasing the main lock to avoid nested locks
 		for _, appToRemove := range appsToRemove {
@@ -503,10 +504,10 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		}
 
 		if errorCount > 0 {
-			log.Printf("WARNING: Apps not found in batch: %v", rawResponse["not_found"])
+			glog.V(3).Infof("WARNING: Apps not found in batch: %v", rawResponse["not_found"])
 		}
 
-		log.Printf("Successfully fetched and replaced details for %d/%d apps in batch", successCount, len(appIDs))
+		glog.V(2).Infof("Successfully fetched and replaced details for %d/%d apps in batch", successCount, len(appIDs))
 		return successCount, errorCount
 
 	case 202:
@@ -517,7 +518,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		}
 		errMsg := fmt.Errorf("data is being loaded for version %s, batch: %v - %s", d.Version, appIDs, message)
 		data.AddError(errMsg)
-		log.Printf("WARNING: %v", errMsg)
+		glog.Errorf("WARNING: %v", errMsg)
 		// Return all apps as errors for 202 status
 		return 0, len(appIDs)
 
@@ -525,14 +526,14 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		// Bad Request
 		errMsg := fmt.Errorf("bad request for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
 		data.AddError(errMsg)
-		log.Printf("ERROR: %v", errMsg)
+		glog.Errorf("ERROR: %v", errMsg)
 		return 0, len(appIDs)
 
 	case 429:
 		// Rate limit exceeded - this is a retryable error
 		errMsg := fmt.Errorf("rate limit exceeded for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
 		data.AddError(errMsg)
-		log.Printf("ERROR: %v", errMsg)
+		glog.Errorf("ERROR: %v", errMsg)
 		// Return all apps as errors for rate limiting - will trigger retry
 		return 0, len(appIDs)
 
@@ -540,7 +541,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		// Server errors - these are retryable
 		errMsg := fmt.Errorf("server error for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
 		data.AddError(errMsg)
-		log.Printf("ERROR: %v", errMsg)
+		glog.Errorf("ERROR: %v", errMsg)
 		// Return all apps as errors for server errors - will trigger retry
 		return 0, len(appIDs)
 
@@ -548,48 +549,49 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		// Other errors
 		errMsg := fmt.Errorf("detail API for batch %v to %s returned status %d", appIDs, detailURL, resp.StatusCode())
 		data.AddError(errMsg)
-		log.Printf("ERROR: %v", errMsg)
+		glog.Errorf("ERROR: %v", errMsg)
 		return 0, len(appIDs)
 	}
 }
 
 // removeAppFromCache removes an app from cache for all users
 func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string]interface{}, data *SyncContext) {
+	appName, ok := appInfoMap["name"].(string)
+	if !ok || appName == "" {
+		glog.V(3).Infof("Warning: Cannot remove app from cache - app name is empty for app: %s", appID)
+		return
+	}
+
 	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("PANIC in removeAppFromCache: %v", r)
+			glog.Errorf("PANIC in removeAppFromCache: %v, id: %s, name: %s", r, appID, appName)
 		}
 	}()
 
-	log.Printf("Starting to remove app %s from cache", appID)
+	glog.V(2).Infof("Starting to remove app %s %s from cache", appID, appName)
 
 	// Get app name for matching - when an app is suspended, remove ALL versions of that app
-	appName, ok := appInfoMap["name"].(string)
-	if !ok || appName == "" {
-		log.Printf("Warning: Cannot remove app from cache - app name is empty for app: %s", appID)
-		return
-	}
 
 	// Get source ID from market source
 	source := data.GetMarketSource()
 	if source == nil {
-		log.Printf("Warning: MarketSource is nil, cannot remove app %s from cache", appID)
+		glog.V(3).Infof("Warning: MarketSource is nil, cannot remove app %s %s from cache", appID, appName)
 		return
 	}
 	// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
 	sourceID := source.ID
-	log.Printf("Removing all versions of app %s (name: %s) from cache for source: %s (sourceID=%s)", appID, appName, source.Name, sourceID)
+	glog.V(2).Infof("Removing all versions of app %s (name: %s) from cache for source: %s (sourceID=%s)", appID, appName, source.Name, sourceID)
 
 	if data.CacheManager == nil {
-		log.Printf("Warning: CacheManager is nil, cannot remove app from cache")
+		glog.V(3).Infof("Warning: CacheManager is nil, cannot remove app from cache")
 		return
 	}
 
 	// Step 1: Use try read lock to find all data that needs to be removed
-	log.Printf("Step 1: Attempting to acquire read lock to find data for removal")
+	glog.V(2).Infof("Step 1: Attempting to acquire read lock to find data for removal")
 	if !data.CacheManager.TryRLock() {
-		log.Printf("Warning: Read lock not available for app removal, skipping: %s", appID)
+		glog.Warningf("[TryRLock] Warning: Read lock not available for app removal, skipping: %s %s", appID, appName)
 		return
 	}
 
@@ -605,7 +607,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 	var removals []RemovalData
 
-	log.Printf("Processing %d users for app removal (read phase)", len(data.Cache.Users))
+	glog.V(2).Infof("Processing %d users for app removal (read phase)", len(data.Cache.Users))
 
 	for userID, userData := range data.Cache.Users {
 		sourceData, sourceExists := userData.Sources[sourceID]
@@ -627,7 +629,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 			if latestApp.RawData.Name != appName {
 				newLatestList = append(newLatestList, latestApp)
 			} else {
-				log.Printf("Removing app version %s (name: %s) from AppInfoLatest", latestApp.RawData.Version, appName)
+				glog.V(3).Infof("Removing app version %s (name: %s) from AppInfoLatest", latestApp.RawData.Version, appName)
 			}
 		}
 
@@ -641,7 +643,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 			if pendingApp.RawData.Name != appName {
 				newPendingList = append(newPendingList, pendingApp)
 			} else {
-				log.Printf("Removing pending app version %s (name: %s) from AppInfoLatestPending", pendingApp.RawData.Version, appName)
+				glog.V(3).Infof("Removing pending app version %s (name: %s) from AppInfoLatestPending", pendingApp.RawData.Version, appName)
 			}
 		}
 
@@ -658,20 +660,22 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		}
 	}
 
-	log.Printf("Step 1 completed: Found %d users with data to remove", len(removals))
+	if len(removals) > 0 {
+		glog.V(2).Infof("Step 1 completed: Found %d users with data to remove", len(removals))
+	}
 
 	// Release read lock before acquiring write lock (must release manually since we need to acquire write lock)
 	data.CacheManager.RUnlock()
 
 	// Step 2: Use try write lock to quickly update the data
 	if len(removals) == 0 {
-		log.Printf("No data found to remove for app: %s", appID)
+		glog.V(3).Infof("No data found to remove for app: %s", appID)
 		return
 	}
 
-	log.Printf("Step 2: Attempting to acquire write lock to update data")
+	glog.V(2).Info("Step 2: Attempting to acquire write lock to update data")
 	if !data.CacheManager.TryLock() {
-		log.Printf("Warning: Write lock not available for app removal, skipping: %s", appID)
+		glog.Warningf("[TryLock] Warning: Write lock not available for app removal, skipping: %s %s", appID, appName)
 		return
 	}
 	defer data.CacheManager.Unlock()
@@ -692,7 +696,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		sourceData.AppInfoLatest = removal.newLatestList
 		sourceData.AppInfoLatestPending = removal.newPendingList
 
-		log.Printf("Updated user: %s, source: %s, app: %s (latest: %d->%d, pending: %d->%d)",
+		glog.V(3).Infof("Updated user: %s, source: %s, app: %s (latest: %d->%d, pending: %d->%d)",
 			removal.userID, removal.sourceID, appName,
 			removal.originalLatestCount, len(removal.newLatestList),
 			removal.originalPendingCount, len(removal.newPendingList))
@@ -704,7 +708,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		})
 	}
 
-	log.Printf("App removal from cache completed for app: %s", appID)
+	glog.V(3).Infof("App removal from cache completed for app: %s %s", appID, appName)
 
 	// Trigger sync to Redis for all affected users and sources after releasing the lock
 	// Use reflection to access the private requestSync method
@@ -720,7 +724,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 		requestSyncMethod := cmValue.MethodByName("requestSync")
 		if !requestSyncMethod.IsValid() {
-			log.Printf("Warning: Cannot find requestSync method in CacheManager, sync to Redis will be handled by StoreCompleteDataToPending")
+			glog.V(3).Infof("Warning: Cannot find requestSync method in CacheManager, sync to Redis will be handled by StoreCompleteDataToPending")
 			return
 		}
 
@@ -741,7 +745,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 			// Call requestSync method
 			requestSyncMethod.Call([]reflect.Value{syncRequestValue})
-			log.Printf("Triggered sync to Redis for user: %s, source: %s, app: %s", syncReq.userID, syncReq.sourceID, appName)
+			glog.V(3).Infof("Triggered sync to Redis for user: %s, source: %s, app: %s", syncReq.userID, syncReq.sourceID, appName)
 		}
 	}()
 }
@@ -854,14 +858,14 @@ func (d *DetailFetchStep) mergeAppData(originalAppData interface{}, appInfoMap m
 	// Start with detail API data
 	detailedAppData := map[string]interface{}{
 		// Basic fields
-		"id":        appInfoMap["id"],
-		"name":      appInfoMap["name"],
-		"cfgType":   appInfoMap["cfgType"],
-		"chartName": appInfoMap["chartName"],
-		"icon":      appInfoMap["icon"],
-		"appID":     appInfoMap["appID"],
-		"version":   appInfoMap["version"],
-		"categories": appInfoMap["categories"],
+		"id":          appInfoMap["id"],
+		"name":        appInfoMap["name"],
+		"cfgType":     appInfoMap["cfgType"],
+		"chartName":   appInfoMap["chartName"],
+		"icon":        appInfoMap["icon"],
+		"appID":       appInfoMap["appID"],
+		"version":     appInfoMap["version"],
+		"categories":  appInfoMap["categories"],
 		"versionName": appInfoMap["versionName"],
 
 		// Extended fields
@@ -872,7 +876,7 @@ func (d *DetailFetchStep) mergeAppData(originalAppData interface{}, appInfoMap m
 		"developer":      appInfoMap["developer"],
 		"requiredMemory": appInfoMap["requiredMemory"],
 		"requiredDisk":   appInfoMap["requiredDisk"],
-		"supportClient": appInfoMap["supportClient"],
+		"supportClient":  appInfoMap["supportClient"],
 		"supportArch":    appInfoMap["supportArch"],
 		"requiredGPU":    appInfoMap["requiredGPU"],
 		"requiredCPU":    appInfoMap["requiredCPU"],
@@ -1004,7 +1008,7 @@ func (d *DetailFetchStep) isAppInstalled(appName, sourceID string, data *SyncCon
 
 	// English comment: use try read lock to safely inspect installation states
 	if !data.CacheManager.TryRLock() {
-		log.Printf("Warning: Read lock not available for isAppInstalled check, returning false")
+		glog.Warningf("[TryRLock] Warning: Read lock not available for isAppInstalled check, returning false, source: %s, name: %s", sourceID, appName)
 		return false
 	}
 	defer data.CacheManager.RUnlock()

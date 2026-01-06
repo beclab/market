@@ -3,13 +3,14 @@ package syncerfn
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
+
+	"github.com/golang/glog"
 )
 
 // DataFetchStep implements the second step: fetch latest data from remote
@@ -33,13 +34,13 @@ func (d *DataFetchStep) GetStepName() string {
 
 // Execute performs the data fetching logic
 func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
-	log.Printf("Executing %s", d.GetStepName())
+	glog.V(2).Infof("Executing %s", d.GetStepName())
 
 	// Get version from SyncContext for API request
 	version := data.GetVersion()
 	if version == "" {
 		version = "1.12.3" // fallback version
-		log.Printf("No version provided in context, using default: %s", version)
+		glog.V(3).Infof("No version provided in context, using default: %s", version)
 	}
 
 	// Get current market source from context
@@ -50,7 +51,7 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 
 	// Build complete URL from market source base URL and endpoint path
 	dataURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DataEndpointPath)
-	log.Printf("Using data URL: %s", dataURL)
+	glog.V(2).Infof("Using data URL: %s", dataURL)
 
 	if strings.HasPrefix(dataURL, "file://") {
 		return nil
@@ -86,7 +87,7 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 	// Extract and update Others data
 	d.extractAndUpdateOthers(data)
 
-	log.Printf("Fetched latest data with %d app IDs, version: %s",
+	glog.V(2).Infof("Fetched latest data with %d app IDs, version: %s",
 		len(data.AppIDs), data.GetVersion())
 
 	return nil
@@ -97,7 +98,7 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 	// Get current market source - only check data for this specific source
 	marketSource := data.GetMarketSource()
 	if marketSource == nil {
-		log.Printf("Executing %s - no market source available in sync context", d.GetStepName())
+		glog.V(3).Infof("Executing %s - no market source available in sync context", d.GetStepName())
 		return false
 	}
 
@@ -114,7 +115,7 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 				if sourceData, exists := userData.Sources[sourceID]; exists {
 					if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
 						hasExistingData = true
-						log.Printf("Found existing data for source:%s user:%s (pending:%d latest:%d)",
+						glog.V(2).Infof("Found existing data for source:%s user:%s (pending:%d latest:%d)",
 							sourceID, userID, len(sourceData.AppInfoLatestPending), len(sourceData.AppInfoLatest))
 						break
 					}
@@ -129,7 +130,7 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 				if sourceData, exists := userData.Sources[sourceID]; exists {
 					if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
 						hasExistingData = true
-						log.Printf("Found existing data for source:%s user:%s (pending:%d latest:%d)",
+						glog.V(2).Infof("Found existing data for source:%s user:%s (pending:%d latest:%d)",
 							sourceID, userID, len(sourceData.AppInfoLatestPending), len(sourceData.AppInfoLatest))
 						break
 					}
@@ -141,15 +142,15 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 
 	// Skip only if hashes match AND we have existing data for THIS specific source
 	if data.HashMatches && hasExistingData {
-		log.Printf("Skipping %s for source %s - hashes match and existing data found, no sync required", d.GetStepName(), sourceID)
+		glog.V(3).Infof("Skipping %s for source %s - hashes match and existing data found, no sync required", d.GetStepName(), sourceID)
 		return true
 	}
 
 	// Force execution if no existing data for this source, even if hashes match
 	if !hasExistingData {
-		log.Printf("Executing %s for source %s - no existing data found for this source, forcing data fetch", d.GetStepName(), sourceID)
+		glog.V(3).Infof("Executing %s for source %s - no existing data found for this source, forcing data fetch", d.GetStepName(), sourceID)
 	} else if !data.HashMatches {
-		log.Printf("Executing %s for source %s - hashes don't match, sync required", d.GetStepName(), sourceID)
+		glog.V(3).Infof("Executing %s for source %s - hashes don't match, sync required", d.GetStepName(), sourceID)
 	}
 
 	return false
@@ -159,9 +160,9 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 func (d *DataFetchStep) extractAndSetVersion(data *SyncContext) {
 	if data.LatestData != nil && data.LatestData.Version != "" {
 		data.SetVersion(data.LatestData.Version)
-		log.Printf("Updated version from response: %s", data.LatestData.Version)
+		glog.V(2).Infof("Updated version from response: %s", data.LatestData.Version)
 	} else {
-		log.Printf("No version found in response or version is empty")
+		glog.V(3).Infof("No version found in response or version is empty")
 	}
 }
 
@@ -172,7 +173,7 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 
 	// Check if we have valid response data
 	if data.LatestData == nil || data.LatestData.Data.Apps == nil {
-		log.Printf("Warning: no apps data found in response")
+		glog.V(3).Infof("Warning: no apps data found in response")
 		return
 	}
 
@@ -183,7 +184,7 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 	if isDevelopmentEnvironment() {
 		originalCount := len(appsMap)
 		if originalCount > 200 {
-			log.Printf("Development environment detected, limiting original apps data to 2 (original count: %d)", originalCount)
+			glog.V(2).Infof("Development environment detected, limiting original apps data to 2 (original count: %d)", originalCount)
 
 			// Create a new map with only the first 2 apps
 			limitedAppsMap := make(map[string]interface{})
@@ -212,7 +213,7 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 		}
 	}
 
-	log.Printf("Extracted %d app IDs from response", len(data.AppIDs))
+	glog.V(2).Infof("Extracted %d app IDs from response", len(data.AppIDs))
 
 	// Log first few app IDs for debugging
 	if len(data.AppIDs) > 0 {
@@ -220,7 +221,7 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 		if len(data.AppIDs) < maxLog {
 			maxLog = len(data.AppIDs)
 		}
-		log.Printf("First %d app IDs: %v", maxLog, data.AppIDs[:maxLog])
+		glog.V(2).Infof("First %d app IDs: %v", maxLog, data.AppIDs[:maxLog])
 	}
 }
 
@@ -241,10 +242,10 @@ func getMapKeys(m map[string]interface{}) []string {
 
 // extractAndUpdateOthers extracts and updates Others data in SourceData
 func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
-	log.Printf("DEBUG: Starting extractAndUpdateOthers")
+	glog.V(2).Info("DEBUG: Starting extractAndUpdateOthers")
 	// Check if we have valid response data
 	if data.LatestData == nil {
-		log.Printf("Warning: no latest data found for Others extraction")
+		glog.V(3).Infof("Warning: no latest data found for Others extraction")
 		return
 	}
 
@@ -286,33 +287,33 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 
 	// Extract recommends data
 	if data.LatestData.Data.Recommends != nil {
-		log.Printf("DEBUG: Processing recommends data, count: %d", len(data.LatestData.Data.Recommends))
+		glog.V(2).Infof("DEBUG: Processing recommends data, count: %d", len(data.LatestData.Data.Recommends))
 		for i, recommendData := range data.LatestData.Data.Recommends {
 			if recommendMap, ok := recommendData.(map[string]interface{}); ok {
-				log.Printf("DEBUG: Processing recommend[%d], keys: %v", i, getMapKeys(recommendMap))
+				glog.V(3).Infof("DEBUG: Processing recommend[%d], keys: %v", i, getMapKeys(recommendMap))
 				if dataField, exists := recommendMap["data"]; exists {
-					log.Printf("DEBUG: Recommend[%d] has data field, type: %T, value: %+v", i, dataField, dataField)
+					glog.V(3).Infof("DEBUG: Recommend[%d] has data field, type: %T, value: %+v", i, dataField, dataField)
 				} else {
-					log.Printf("DEBUG: Recommend[%d] missing data field", i)
+					glog.V(3).Infof("DEBUG: Recommend[%d] missing data field", i)
 				}
 				recommend := d.mapToRecommend(recommendMap)
 				if recommend != nil {
-					log.Printf("DEBUG: Recommend[%d] mapped successfully, has Data: %v", i, recommend.Data != nil)
+					glog.V(3).Infof("DEBUG: Recommend[%d] mapped successfully, has Data: %v", i, recommend.Data != nil)
 					if recommend.Data != nil {
-						log.Printf("DEBUG: Recommend[%d] Data.Title count: %d, Data.Description count: %d",
+						glog.V(3).Infof("DEBUG: Recommend[%d] Data.Title count: %d, Data.Description count: %d",
 							i, len(recommend.Data.Title), len(recommend.Data.Description))
 					}
 					others.Recommends = append(others.Recommends, recommend)
 				} else {
-					log.Printf("DEBUG: Recommend[%d] mapping failed", i)
+					glog.V(3).Infof("DEBUG: Recommend[%s] mapping failed", i)
 				}
 			} else {
-				log.Printf("DEBUG: Recommend[%d] is not a map, type: %T", i, recommendData)
+				glog.V(3).Infof("DEBUG: Recommend[%s] is not a map, type: %T", i, recommendData)
 			}
 		}
-		log.Printf("DEBUG: Extracted %d recommends from response", len(others.Recommends))
+		glog.V(3).Infof("DEBUG: Extracted %d recommends from response", len(others.Recommends))
 	} else {
-		log.Printf("DEBUG: No recommends data found in response")
+		glog.V(3).Infof("DEBUG: No recommends data found in response")
 	}
 
 	// Extract pages data
@@ -350,19 +351,19 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 		for k := range data.LatestData.Data.Tags {
 			keys = append(keys, k)
 		}
-		log.Printf("DEBUG: Processing tags data, type: %T, keys: %v", data.LatestData.Data.Tags, keys)
+		glog.V(3).Infof("DEBUG: Processing tags data, type: %T, keys: %v", data.LatestData.Data.Tags, keys)
 		for tagKey, tagData := range data.LatestData.Data.Tags {
 			if tagMap, ok := tagData.(map[string]interface{}); ok {
 				tag := d.mapToTag(tagMap)
 				if tag != nil {
 					others.Tags = append(others.Tags, tag)
-					log.Printf("DEBUG: Added tag %s to others", tagKey)
+					glog.V(3).Infof("DEBUG: Added tag %s to others", tagKey)
 				}
 			}
 		}
-		log.Printf("DEBUG: Extracted %d tags from response", len(others.Tags))
+		glog.V(3).Infof("DEBUG: Extracted %d tags from response", len(others.Tags))
 	} else {
-		log.Printf("DEBUG: No tags data found in response")
+		glog.V(3).Infof("DEBUG: No tags data found in response")
 	}
 
 	// Update Others in the cache for current source
@@ -370,21 +371,21 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 		d.updateOthersInCache(data, others)
 	}
 
-	log.Printf("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest, %d tags",
+	glog.V(3).Infof("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest, %d tags",
 		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages), len(others.Tops), len(others.Latest), len(others.Tags))
 
 	// Log detailed summary of recommends data
 	if len(others.Recommends) > 0 {
-		log.Printf("DEBUG: Final recommends summary - total: %d", len(others.Recommends))
+		glog.V(3).Infof("DEBUG: Final recommends summary - total: %d", len(others.Recommends))
 		for i, rec := range others.Recommends {
-			log.Printf("DEBUG: Final recommend[%d] '%s', has Data: %v", i, rec.Name, rec.Data != nil)
+			glog.V(3).Infof("DEBUG: Final recommend[%d] '%s', has Data: %v", i, rec.Name, rec.Data != nil)
 			if rec.Data != nil {
-				log.Printf("DEBUG: Final recommend[%d] Data.Title count: %d, Data.Description count: %d",
+				glog.V(3).Infof("DEBUG: Final recommend[%d] Data.Title count: %d, Data.Description count: %d",
 					i, len(rec.Data.Title), len(rec.Data.Description))
 			}
 		}
 	} else {
-		log.Printf("DEBUG: No recommends data in final Others structure")
+		glog.V(3).Infof("DEBUG: No recommends data in final Others structure")
 	}
 }
 
@@ -525,42 +526,42 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 	}
 
 	// Handle Data field
-	log.Printf("DEBUG: mapToRecommend - checking for data field, available keys: %v", getMapKeys(m))
+	glog.V(3).Infof("DEBUG: mapToRecommend - checking for data field, available keys: %v", getMapKeys(m))
 	if dataField, ok := m["data"].(map[string]interface{}); ok {
-		log.Printf("DEBUG: mapToRecommend - found data field, type: %T, keys: %v", dataField, getMapKeys(dataField))
+		glog.V(3).Infof("DEBUG: mapToRecommend - found data field, type: %T, keys: %v", dataField, getMapKeys(dataField))
 		recommend.Data = &types.RecommendData{}
 
 		if title, ok := dataField["title"].(map[string]interface{}); ok {
-			log.Printf("DEBUG: mapToRecommend - found title field, keys: %v", getMapKeys(title))
+			glog.V(3).Infof("DEBUG: mapToRecommend - found title field, keys: %v", getMapKeys(title))
 			recommend.Data.Title = make(map[string]string)
 			for k, v := range title {
 				if str, ok := v.(string); ok {
 					recommend.Data.Title[k] = str
 				} else {
-					log.Printf("DEBUG: mapToRecommend - title[%s] is not string, type: %T, value: %v", k, v, v)
+					glog.V(3).Infof("DEBUG: mapToRecommend - title[%s] is not string, type: %T, value: %v", k, v, v)
 				}
 			}
-			log.Printf("DEBUG: mapToRecommend - processed title, count: %d", len(recommend.Data.Title))
+			glog.V(3).Infof("DEBUG: mapToRecommend - processed title, count: %d", len(recommend.Data.Title))
 		} else {
-			log.Printf("DEBUG: mapToRecommend - title field not found or not a map")
+			glog.V(3).Infof("DEBUG: mapToRecommend - title field not found or not a map")
 		}
 
 		if description, ok := dataField["description"].(map[string]interface{}); ok {
-			log.Printf("DEBUG: mapToRecommend - found description field, keys: %v", getMapKeys(description))
+			glog.V(3).Infof("DEBUG: mapToRecommend - found description field, keys: %v", getMapKeys(description))
 			recommend.Data.Description = make(map[string]string)
 			for k, v := range description {
 				if str, ok := v.(string); ok {
 					recommend.Data.Description[k] = str
 				} else {
-					log.Printf("DEBUG: mapToRecommend - description[%s] is not string, type: %T, value: %v", k, v, v)
+					glog.V(3).Infof("DEBUG: mapToRecommend - description[%s] is not string, type: %T, value: %v", k, v, v)
 				}
 			}
-			log.Printf("DEBUG: mapToRecommend - processed description, count: %d", len(recommend.Data.Description))
+			glog.V(3).Infof("DEBUG: mapToRecommend - processed description, count: %d", len(recommend.Data.Description))
 		} else {
-			log.Printf("DEBUG: mapToRecommend - description field not found or not a map")
+			glog.V(3).Infof("DEBUG: mapToRecommend - description field not found or not a map")
 		}
 	} else {
-		log.Printf("DEBUG: mapToRecommend - data field not found or not a map, type: %T", m["data"])
+		glog.V(3).Infof("DEBUG: mapToRecommend - data field not found or not a map, type: %T", m["data"])
 	}
 
 	// Handle Source field
@@ -568,7 +569,7 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 		recommend.Source = source
 	}
 
-	log.Printf("DEBUG: mapToRecommend - final result, has Data: %v", recommend.Data != nil)
+	glog.V(3).Infof("DEBUG: mapToRecommend - final result, has Data: %v", recommend.Data != nil)
 	return recommend
 }
 
@@ -673,10 +674,10 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 		systemUserID := "system"
 		data.Cache.Users[systemUserID] = types.NewUserData()
 		userIDs = append(userIDs, systemUserID)
-		log.Printf("No existing users found, created system user as fallback")
+		glog.V(3).Infof("No existing users found, created system user as fallback")
 	}
 
-	log.Printf("Updating Others data for %d users: %v, sourceID: %s", len(userIDs), userIDs, sourceID)
+	glog.V(3).Infof("Updating Others data for %d users: %v, sourceID: %s", len(userIDs), userIDs, sourceID)
 
 	// Update Others for each user
 	for _, userID := range userIDs {
@@ -698,22 +699,22 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 
 		// Log details about the saved recommends data
 		if sourceData.Others != nil && len(sourceData.Others.Recommends) > 0 {
-			log.Printf("DEBUG: Saved %d recommends to cache for user %s, source %s",
+			glog.V(3).Infof("DEBUG: Saved %d recommends to cache for user %s, source %s",
 				len(sourceData.Others.Recommends), userID, sourceID)
 			for i, rec := range sourceData.Others.Recommends {
-				log.Printf("DEBUG: Saved recommend[%d] '%s', has Data: %v",
+				glog.V(3).Infof("DEBUG: Saved recommend[%d] '%s', has Data: %v",
 					i, rec.Name, rec.Data != nil)
 				if rec.Data != nil {
-					log.Printf("DEBUG: Saved recommend[%d] Data.Title count: %d, Data.Description count: %d",
+					glog.V(3).Infof("DEBUG: Saved recommend[%d] Data.Title count: %d, Data.Description count: %d",
 						i, len(rec.Data.Title), len(rec.Data.Description))
 				}
 			}
 		} else {
-			log.Printf("DEBUG: No recommends data saved to cache for user %s, source %s", userID, sourceID)
+			glog.V(3).Infof("DEBUG: No recommends data saved to cache for user %s, source %s", userID, sourceID)
 		}
 
-		log.Printf("Updated Others data in cache for user %s, source %s", userID, sourceID)
+		glog.V(3).Infof("Updated Others data in cache for user %s, source %s", userID, sourceID)
 	}
 
-	log.Printf("Successfully updated Others data for all %d users, source %s", len(userIDs), sourceID)
+	glog.V(2).Infof("Successfully updated Others data for all %d users, source %s", len(userIDs), sourceID)
 }
