@@ -108,8 +108,8 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 				if err := s.writeAppDataToCache(task, appData); err != nil {
 					glog.Errorf("Warning: failed to write app_data to cache: %v", err)
 				} else {
-					glog.V(3).Infof("Successfully wrote app_data to cache for user=%s, source=%s, app=%s",
-						task.UserID, task.SourceID, task.AppID)
+					glog.V(3).Infof("Successfully wrote app_data to cache for user=%s, source=%s, app=%s, appName=%s",
+						task.UserID, task.SourceID, task.AppID, task.AppName)
 				}
 			}
 		}
@@ -161,13 +161,13 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 			appInfoLatest.Values = parsedValues
 		}
 	} else {
-		return fmt.Errorf("app_data is not in expected format")
+		return fmt.Errorf("app_data is not in expected format, app=%s, appName=%s", task.AppID, task.AppName)
 	}
 
 	// Now acquire the lock for cache operations
 	if task.CacheManager != nil {
 		if !task.CacheManager.TryLock() {
-			return fmt.Errorf("write lock not available for cache update, user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+			return fmt.Errorf("write lock not available for cache update, user=%s, source=%s, app=%s, appName=%s", task.UserID, task.SourceID, task.AppID, task.AppName)
 		}
 		defer task.CacheManager.Unlock()
 	}
@@ -175,7 +175,7 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	// Find the pendingData in cache
 	pendingData := s.findPendingDataFromCache(task)
 	if pendingData == nil {
-		return fmt.Errorf("pendingData not found in cache for user=%s, source=%s, app=%s", task.UserID, task.SourceID, task.AppID)
+		return fmt.Errorf("pendingData not found in cache for user=%s, source=%s, app=%s, appName=%s", task.UserID, task.SourceID, task.AppID, task.AppName)
 	}
 
 	// Fix version history data
