@@ -1,8 +1,9 @@
 package utils
 
 import (
-	"log"
 	"market/internal/v2/types"
+
+	"github.com/golang/glog"
 )
 
 // FindAppInUserData is a utility function to find an app in user data by app ID
@@ -104,13 +105,13 @@ func FindAppInUserDataWithSource(userData *types.UserData, appID string, source 
 					availableSources = append(availableSources, src)
 				}
 			}
-			log.Printf("Source '%s' not found in user data. Available sources: %v", source, availableSources)
+			glog.Infof("Source '%s' not found in user data. Available sources: %v", source, availableSources)
 			return nil, ""
 		}
 
 		// Log if source exists but has no apps
 		if sourceData == nil || sourceData.AppInfoLatest == nil || len(sourceData.AppInfoLatest) == 0 {
-			log.Printf("Source '%s' exists but has no apps in AppInfoLatest", source)
+			glog.Infof("Source '%s' exists but has no apps in AppInfoLatest", source)
 			return nil, ""
 		}
 
@@ -120,7 +121,7 @@ func FindAppInUserDataWithSource(userData *types.UserData, appID string, source 
 		}
 
 		// Log when app not found but source and apps exist
-		log.Printf("App '%s' not found in source '%s' (source has %d apps)", appID, source, len(sourceData.AppInfoLatest))
+		glog.Infof("App '%s' not found in source '%s' (source has %d apps)", appID, source, len(sourceData.AppInfoLatest))
 		return nil, ""
 	}
 

@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"log"
 	"time"
 
 	"market/internal/v2/types"
@@ -44,7 +43,7 @@ func (sm *StateMonitor) NotifyStateChange(
 		return nil
 	}
 
-	log.Printf("State change detected for app %s (user=%s, source=%s), reason: %s",
+	glog.V(2).Infof("State change detected for app %s (user=%s, source=%s), reason: %s",
 		appName, userID, sourceID, changeReason)
 
 	// Find corresponding AppInfoLatestData

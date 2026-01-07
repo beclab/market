@@ -3,7 +3,6 @@ package task
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
@@ -126,12 +125,12 @@ func getVCForClone(settingsManager *settings.SettingsManager, userID, rawAppName
 	if globalStateMachine := paymentnew.GetStateMachine(); globalStateMachine != nil {
 		if state, err := globalStateMachine.LoadState(userID, rawAppName, rawAppName); err == nil && state != nil {
 			if state.VC != "" {
-				log.Printf("Found VC from payment state (using rawAppName as productID) for user=%s rawAppName=%s", userID, rawAppName)
+				glog.Infof("Found VC from payment state (using rawAppName as productID) for user=%s rawAppName=%s", userID, rawAppName)
 				return state.VC
 			}
 		}
 	}
 
-	log.Printf("VC not found for user=%s rawAppName=%s (productID not available in metadata)", userID, rawAppName)
+	glog.Infof("VC not found for user=%s rawAppName=%s (productID not available in metadata)", userID, rawAppName)
 	return ""
 }

@@ -115,14 +115,10 @@ func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
 	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
 
 	// Log before sending
-	if glog.V(2) {
-		if len(string(data)) > 100 {
-			glog.V(2).Infof("Sending app info update to NATS subject '%s': %s", subject, string(data)[:200])
-		} else {
-			glog.V(2).Infof("Sending app info update to NATS subject '%s': %s", subject, string(data)[:100])
-		}
+	if len(string(data)) > 500 {
+		glog.V(2).Infof("App - Sending app info update to NATS subject '%s': %s", subject, string(data)[:500])
 	} else {
-		glog.V(3).Infof("Sending app info update to NATS subject '%s': %s", subject, string(data))
+		glog.V(2).Infof("App - Sending app info update to NATS subject '%s': %s", subject, string(data))
 	}
 
 	// Send message to NATS
@@ -131,7 +127,7 @@ func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
 		return fmt.Errorf("failed to publish message to NATS: %w", err)
 	}
 
-	glog.V(2).Info("Successfully sent app info update to NATS")
+	glog.V(4).Info("Successfully sent app info update to NATS")
 	return nil
 }
 
@@ -156,7 +152,11 @@ func (ds *DataSender) SendMarketSystemUpdate(update types.MarketSystemUpdate) er
 	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
 
 	// Log before sending
-	glog.V(2).Infof("Sending market system update to NATS subject '%s': %s", subject, string(data))
+	if len(string(data)) > 300 {
+		glog.V(2).Infof("Market - Sending market system update to NATS subject '%s': %s", subject, string(data)[:300])
+	} else {
+		glog.V(2).Infof("Market - Sending market system update to NATS subject '%s': %s", subject, string(data))
+	}
 
 	// Send message to NATS
 	err = ds.conn.Publish(subject, data)
@@ -164,7 +164,7 @@ func (ds *DataSender) SendMarketSystemUpdate(update types.MarketSystemUpdate) er
 		return fmt.Errorf("failed to publish market system update message to NATS: %w", err)
 	}
 
-	glog.V(3).Info("Successfully sent market system update to NATS")
+	glog.V(4).Info("Successfully sent market system update to NATS")
 	return nil
 }
 
@@ -189,7 +189,7 @@ func (ds *DataSender) SendImageInfoUpdate(update types.ImageInfoUpdate) error {
 	subject := fmt.Sprintf("%s.%s", ds.subject, update.User)
 
 	// Log before sending
-	glog.V(2).Infof("Sending image info update to NATS subject '%s': %s", subject, string(data))
+	glog.V(3).Infof("Image - Sending image info update to NATS subject '%s': %s", subject, string(data))
 
 	// Send message to NATS
 	err = ds.conn.Publish(subject, data)
@@ -197,7 +197,7 @@ func (ds *DataSender) SendImageInfoUpdate(update types.ImageInfoUpdate) error {
 		return fmt.Errorf("failed to publish image info update message to NATS: %w", err)
 	}
 
-	glog.V(2).Info("Successfully sent image info update to NATS")
+	glog.V(4).Info("Successfully sent image info update to NATS")
 	return nil
 }
 
@@ -223,7 +223,7 @@ func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUp
 	subject := "os.users"
 
 	// Log before sending
-	glog.V(2).Infof("Sending sign notification update to NATS subject '%s': %s", subject, string(data))
+	glog.V(2).Infof("Sign - Sending sign notification update to NATS subject '%s': %s", subject, string(data))
 
 	// Send message to NATS
 	err = ds.conn.Publish(subject, data)
@@ -231,7 +231,7 @@ func (ds *DataSender) SendSignNotificationUpdate(update types.SignNotificationUp
 		return fmt.Errorf("failed to publish sign notification update message to NATS: %w", err)
 	}
 
-	glog.V(2).Info("Successfully sent sign notification update to NATS")
+	glog.V(4).Info("Successfully sent sign notification update to NATS")
 	return nil
 }
 

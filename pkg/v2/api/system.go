@@ -582,7 +582,7 @@ func (s *Server) resumeApp(w http.ResponseWriter, r *http.Request) {
 	restfulReq := &restful.Request{Request: r}
 	token := utils.GetTokenFromRequest(restfulReq)
 	// if token == "" {
-	// 	log.Println("Access token not found")
+	// 	glog.Warning("Access token not found")
 	// 	s.sendResponse(w, http.StatusUnauthorized, false, "Access token not found", nil)
 	// 	return
 	// }
@@ -744,7 +744,7 @@ func (s *Server) stopApp(w http.ResponseWriter, r *http.Request) {
 	restfulReq := &restful.Request{Request: r}
 	token := utils.GetTokenFromRequest(restfulReq)
 	// if token == "" {
-	// 	log.Println("Access token not found")
+	// 	glog.Warning("Access token not found")
 	// 	s.sendResponse(w, http.StatusUnauthorized, false, "Access token not found", nil)
 	// 	return
 	// }
@@ -810,7 +810,7 @@ func (s *Server) getMarketSettings(w http.ResponseWriter, r *http.Request) {
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	glog.V(2).Infof("Retrieved user ID for market settings request: %s", userID)
+	glog.V(4).Infof("Retrieved user ID for market settings request: %s", userID)
 
 	settings, err := settingsManager.GetMarketSettings(userID)
 	if err != nil {
@@ -841,7 +841,7 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	glog.V(2).Infof("Retrieved user ID for market settings update request: %s", userID)
+	glog.V(4).Infof("Retrieved user ID for market settings update request: %s", userID)
 
 	var settings settings.MarketSettings
 	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {

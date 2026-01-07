@@ -1036,7 +1036,7 @@ func (dwr *DataWatcherRepo) sendImageStateChangeToUser(userID, imageName string,
 	if err := dwr.dataSender.SendImageInfoUpdate(update); err != nil {
 		glog.Errorf("Failed to send image state change message to user %s: %v", userID, err)
 	} else {
-		glog.V(2).Infof("Successfully sent image state change message to user: %s for image: %s", userID, imageName)
+		glog.V(3).Infof("Successfully sent image state change message to user: %s for image: %s", userID, imageName)
 	}
 }
 

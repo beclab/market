@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/json"
-	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -689,8 +688,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 
 	// If no valid name found, return nil
 	if name == "" {
-		log.Printf("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field")
-		log.Printf("ERROR: Available fields in data: %v", getMapKeys(data))
+		glog.Error("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field, Available fields in data: %v", getMapKeys(data))
 		return nil, ""
 	}
 
@@ -980,7 +978,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	}
 	// If version is still empty, log error and return nil
 	// if version == "" {
-	// 	log.Printf("ERROR: NewAppStateLatestData - version is empty, cannot create AppStateLatestData")
+	// 	glog.Error("ERROR: NewAppStateLatestData - version is empty, cannot create AppStateLatestData")
 	// 	return nil
 	// }
 
@@ -1458,11 +1456,11 @@ func getCurrentTimestamp() int64 {
 // NewAppInfoLatestPendingDataFromLegacyData creates AppInfoLatestPendingData from a single app data
 func NewAppInfoLatestPendingDataFromLegacyData(appData map[string]interface{}) *AppInfoLatestPendingData {
 	// Add debug logging to inspect input data
-	// log.Printf("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
+	// glog.Infof("DEBUG: NewAppInfoLatestPendingDataFromLegacyData called with appData: %+v", appData)
 	// if appData != nil {
-	// 	log.Printf("DEBUG: appData length: %d", len(appData))
+	// 	glog.Infof("DEBUG: appData length: %d", len(appData))
 	// 	for key, value := range appData {
-	// 		log.Printf("DEBUG: appData[%s] = %v (type: %T)", key, value, value)
+	// 		glog.V(3).Infof("DEBUG: appData[%s] = %v (type: %T)", key, value, value)
 	// 	}
 	// }
 

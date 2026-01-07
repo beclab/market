@@ -3,10 +3,11 @@ package task
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/golang/glog"
 )
 
 // UpgradeOptions represents the options for app upgrade.
@@ -30,32 +31,32 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	// Check if this is a clone app upgrade
 	rawAppName, isCloneApp := task.Metadata["rawAppName"].(string)
 	if isCloneApp && rawAppName != "" {
-		log.Printf("Starting clone app upgrade: cloneAppName=%s, rawAppName=%s, user=%s, task_id=%s", appName, rawAppName, user, task.ID)
+		glog.Infof("Starting clone app upgrade: cloneAppName=%s, rawAppName=%s, user=%s, task_id=%s", appName, rawAppName, user, task.ID)
 	} else {
-		log.Printf("Starting app upgrade: app=%s, user=%s, task_id=%s", appName, user, task.ID)
+		glog.Infof("Starting app upgrade: app=%s, user=%s, task_id=%s", appName, user, task.ID)
 	}
 
 	token, ok := task.Metadata["token"].(string)
 	if !ok {
-		log.Printf("Missing token in task metadata for task: %s", task.ID)
+		glog.Warningf("Missing token in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
 	source, ok := task.Metadata["source"].(string)
 	if !ok {
-		log.Printf("undefine source for task: %s", task.ID)
+		glog.Warningf("undefine source for task: %s", task.ID)
 	}
 
 	// Get cfgType from metadata
 	// cfgType, ok := task.Metadata["cfgType"].(string)
 	if !ok {
-		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
+		glog.Warningf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
 		// cfgType = "app" // Default to app type
 	}
 
 	version, ok := task.Metadata["version"].(string)
 	if !ok {
-		log.Printf("Missing version in task metadata for task: %s", task.ID)
+		glog.Warningf("Missing version in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing version in task metadata for upgrade")
 	}
 
@@ -73,24 +74,24 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	var urlStr string
 	// if cfgType == "recommend" {
 	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/upgrade", appServiceHost, appServicePort, appName)
-	// 	log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+	// 	glog.Infof("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
 	// } else {
 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
 	if isCloneApp && rawAppName != "" {
-		log.Printf("App service URL for clone app upgrade: %s (cloneAppName=%s, rawAppName=%s) for task: %s, version: %s", urlStr, appName, rawAppName, task.ID, version)
+		glog.Infof("App service URL for clone app upgrade: %s (cloneAppName=%s, rawAppName=%s) for task: %s, version: %s", urlStr, appName, rawAppName, task.ID, version)
 	} else {
-		log.Printf("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
+		glog.Infof("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
 	}
 
 	// }
 
-	log.Printf("App source: %s, API source: %s: %s for task: %s", source, apiSource, task.ID)
+	glog.Infof("App source: %s, API source: %s: %s for task: %s", source, apiSource, task.ID)
 
 	// Get envs from metadata
 	var envs []AppEnvVar
 	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
 		envs, _ = envsData.([]AppEnvVar)
-		log.Printf("Retrieved %d environment variables for task: %s", len(envs), task.ID)
+		glog.Infof("Retrieved %d environment variables for task: %s", len(envs), task.ID)
 	}
 
 	upgradeInfo := &UpgradeOptions{
@@ -104,10 +105,10 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	}
 	ms, err := json.Marshal(upgradeInfo)
 	if err != nil {
-		log.Printf("Failed to marshal upgrade info for task %s: %v", task.ID, err)
+		glog.Errorf("Failed to marshal upgrade info for task %s: %v", task.ID, err)
 		return "", err
 	}
-	log.Printf("Upgrade request prepared: url=%s, upgradeInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
+	glog.Infof("Upgrade request prepared: url=%s, upgradeInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
 
 	headers := map[string]string{
 		"Accept":          "*/*",
@@ -119,10 +120,10 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	log.Printf("Sending HTTP request for app upgrade: task=%s, version=%s", task.ID, version)
+	glog.Infof("Sending HTTP request for app upgrade: task=%s, version=%s", task.ID, version)
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
-		log.Printf("HTTP request failed for app upgrade: task=%s, error=%v", task.ID, err)
+		glog.Errorf("HTTP request failed for app upgrade: task=%s, error=%v", task.ID, err)
 		// Create detailed error result
 		errorResult := map[string]interface{}{
 			"operation": "upgrade",
@@ -139,7 +140,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		return string(errorJSON), err
 	}
 
-	log.Printf("HTTP request completed successfully for app upgrade: task=%s, response_length=%d", task.ID, len(response))
+	glog.Infof("HTTP request completed successfully for app upgrade: task=%s, response_length=%d", task.ID, len(response))
 
 	// Create success result
 	successResult := map[string]interface{}{
@@ -154,6 +155,6 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		"status":    "success",
 	}
 	successJSON, _ := json.Marshal(successResult)
-	log.Printf("App upgrade completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
+	glog.Infof("App upgrade completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
 	return string(successJSON), nil
 }

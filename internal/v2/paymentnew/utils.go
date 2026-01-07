@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/golang/glog"
 
 	"market/internal/v2/settings"
 	"market/internal/v2/types"
@@ -103,10 +103,10 @@ func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, err
 	endpoint := fmt.Sprintf("%s/api/grpc/AuthService/ActivateAndGrant", baseURL)
 
 	// Log the endpoint being called
-	log.Printf("=== QueryVCFromDeveloper Request ===")
-	log.Printf("Developer Name: %s", developerName)
-	log.Printf("Request Endpoint: %s", endpoint)
-	log.Printf("===================================")
+	glog.Info("=== QueryVCFromDeveloper Request ===")
+	glog.Infof("Developer Name: %s", developerName)
+	glog.Infof("Request Endpoint: %s", endpoint)
+	glog.Info("===================================")
 
 	// Create HTTP client with timeout
 	httpClient := resty.New()
@@ -123,13 +123,13 @@ func queryVCFromDeveloper(jws string, developerName string) (*VCQueryResult, err
 	}
 
 	// Log complete response for debugging
-	log.Printf("=== QueryVCFromDeveloper Response ===")
-	log.Printf("Status Code: %d", resp.StatusCode())
-	log.Printf("Status: %s", resp.Status())
-	log.Printf("Response Headers: %+v", resp.Header())
-	log.Printf("Response Body: %s", string(resp.Body()))
-	log.Printf("Response Time: %v", resp.Time())
-	log.Printf("===================================")
+	glog.Info("=== QueryVCFromDeveloper Response ===")
+	glog.Infof("Status Code: %d", resp.StatusCode())
+	glog.Infof("Status: %s", resp.Status())
+	glog.Infof("Response Headers: %+v", resp.Header())
+	glog.Infof("Response Body: %s", string(resp.Body()))
+	glog.Infof("Response Time: %v", resp.Time())
+	glog.Info("===================================")
 
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 		return nil, fmt.Errorf("AuthService returned non-2xx status: %d, body: %s", resp.StatusCode(), string(resp.Body()))
@@ -243,7 +243,7 @@ func getManifestSchemaIDs(productID, developerName string) (manifestSchemaIDs, e
 	// Check cache first
 	if cached, ok := manifestIdCache.Load(cacheKey); ok {
 		if ids, ok := cached.(manifestSchemaIDs); ok && ids.ManifestId != "" {
-			log.Printf("getManifestSchemaIDs: Using cached ids for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
+			glog.Infof("getManifestSchemaIDs: Using cached ids for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
 				productID, developerName, ids.ManifestId, ids.PresentationDefinitionId, ids.ApplicationVerifiableCredentialId)
 			return ids, nil
 		}
@@ -262,7 +262,7 @@ func getManifestSchemaIDs(productID, developerName string) (manifestSchemaIDs, e
 	// Double-check cache after acquiring lock (another goroutine might have fetched it)
 	if cached, ok := manifestIdCache.Load(cacheKey); ok {
 		if ids, ok := cached.(manifestSchemaIDs); ok && ids.ManifestId != "" {
-			log.Printf("getManifestSchemaIDs: Using cached ids (after lock) for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
+			glog.Infof("getManifestSchemaIDs: Using cached ids (after lock) for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
 				productID, developerName, ids.ManifestId, ids.PresentationDefinitionId, ids.ApplicationVerifiableCredentialId)
 			return ids, nil
 		}
@@ -279,7 +279,7 @@ func getManifestSchemaIDs(productID, developerName string) (manifestSchemaIDs, e
 	// Store in cache
 	if ids.ManifestId != "" {
 		manifestIdCache.Store(cacheKey, ids)
-		log.Printf("getManifestSchemaIDs: Cached ids for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
+		glog.Infof("getManifestSchemaIDs: Cached ids for productID=%s, developerName=%s: manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s",
 			productID, developerName, ids.ManifestId, ids.PresentationDefinitionId, ids.ApplicationVerifiableCredentialId)
 	}
 
@@ -296,7 +296,7 @@ func fetchManifestSchemaIDsFromAPI(productID, developerName string) (manifestSch
 	baseURL := fmt.Sprintf("https://4c94e3111.%s", developerName)
 	endpoint := fmt.Sprintf("%s/api/grpc/AuthService/GetApplicationSchemaId", baseURL)
 
-	log.Printf("fetchManifestSchemaIDsFromAPI: Requesting manifest/schema ids for productID=%s, developerName=%s, endpoint=%s", productID, developerName, endpoint)
+	glog.Infof("fetchManifestSchemaIDsFromAPI: Requesting manifest/schema ids for productID=%s, developerName=%s, endpoint=%s", productID, developerName, endpoint)
 
 	// Create HTTP client with timeout
 	httpClient := resty.New()
@@ -338,7 +338,7 @@ func fetchManifestSchemaIDsFromAPI(productID, developerName string) (manifestSch
 		return manifestSchemaIDs{}, errors.New("applicationVerifiableCredentialId is empty in API response")
 	}
 
-	log.Printf("fetchManifestSchemaIDsFromAPI: Successfully fetched manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s for productID=%s",
+	glog.Infof("fetchManifestSchemaIDsFromAPI: Successfully fetched manifestId=%s, presentationDefinitionId=%s, applicationVerifiableCredentialId=%s for productID=%s",
 		apiResponse.Data.ManifestId, apiResponse.Data.PresentationDefinitionId, apiResponse.Data.ApplicationVerifiableCredentialId, productID)
 
 	return manifestSchemaIDs{
@@ -370,7 +370,7 @@ func getMerchantProductLicenseCredentialManifestJSON(productID, developerName st
 	if pd, ok := manifestData["presentation_definition"].(map[string]interface{}); ok {
 		pd["id"] = ids.PresentationDefinitionId
 	} else {
-		log.Printf("getMerchantProductLicenseCredentialManifestJSON: presentation_definition missing, cannot set id for productID=%s, developerName=%s", productID, developerName)
+		glog.Infof("getMerchantProductLicenseCredentialManifestJSON: presentation_definition missing, cannot set id for productID=%s, developerName=%s", productID, developerName)
 	}
 
 	// Marshal back to JSON string
@@ -443,7 +443,7 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 		return fmt.Errorf("failed to parse application VC schema JSON: %w", err)
 	}
 	signBody["application_verifiable_credential_schema"] = applicationCredentialSchema
-	log.Printf("Including application_verifiable_credential_schema in sign notification for user %s, app %s, productID: %s",
+	glog.Infof("Including application_verifiable_credential_schema in sign notification for user %s, app %s, productID: %s",
 		userID, appID, productID)
 
 	// Include product_id and application_verifiable_credential if productID is available
@@ -461,18 +461,18 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 		}
 		signBody["application_verifiable_credential"] = appVerifiableCredential
 
-		log.Printf("Including product_id and application_verifiable_credential in sign notification for user %s, app %s, productID: %s, txHash: %s",
+		glog.Infof("Including product_id and application_verifiable_credential in sign notification for user %s, app %s, productID: %s, txHash: %s",
 			userID, appID, productID, txHash)
 	}
 
 	// Build callback URL using X-Forwarded-Host from request
 	if xForwardedHost == "" {
-		log.Printf("ERROR: X-Forwarded-Host is empty for user %s, cannot build callback URL", userID)
+		glog.Errorf("ERROR: X-Forwarded-Host is empty for user %s, cannot build callback URL", userID)
 		return errors.New("X-Forwarded-Host is required but not available")
 	}
 
 	callbackURL := fmt.Sprintf("https://%s/app-store/api/v2/payment/submit-signature", xForwardedHost)
-	log.Printf("Using X-Forwarded-Host based callback URL for user %s: %s", userID, callbackURL)
+	glog.Infof("Using X-Forwarded-Host based callback URL for user %s: %s", userID, callbackURL)
 
 	// Create the sign notification update
 	update := types.SignNotificationUpdate{
@@ -492,23 +492,23 @@ func notifyLarePassToSign(dataSender DataSenderInterface, userID, appID, product
 
 // notifyLarePassToFetchSignature notifies larepass client to fetch signature (same payload as NotifyLarePassToSign, different topic, omits txHash)
 func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appID, appName, sourceID, productID, xForwardedHost string, developerName string) error {
-	log.Printf("notifyLarePassToFetchSignature: Starting notification for user=%s app=%s productID=%s", userID, appID, productID)
+	glog.Infof("notifyLarePassToFetchSignature: Starting notification for user=%s app=%s productID=%s", userID, appID, productID)
 
 	if dataSender == nil {
-		log.Printf("notifyLarePassToFetchSignature: ERROR - data sender is nil")
+		glog.Error("notifyLarePassToFetchSignature: ERROR - data sender is nil")
 		return errors.New("data sender is nil")
 	}
 
 	// Get manifest JSON with manifestId injected
 	manifestJSON, err := getMerchantProductLicenseCredentialManifestJSON(productID, developerName)
 	if err != nil {
-		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to get manifest JSON: %v", err)
+		glog.Errorf("notifyLarePassToFetchSignature: ERROR - failed to get manifest JSON: %v", err)
 		return fmt.Errorf("failed to get manifest JSON: %w", err)
 	}
 
 	var manifestData map[string]interface{}
 	if err := json.Unmarshal([]byte(manifestJSON), &manifestData); err != nil {
-		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to parse manifest JSON: %v", err)
+		glog.Errorf("notifyLarePassToFetchSignature: ERROR - failed to parse manifest JSON: %v", err)
 		return fmt.Errorf("failed to parse manifest JSON: %w", err)
 	}
 
@@ -520,42 +520,42 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 	// Include application_verifiable_credential_schema for fetch-signature flow
 	appSchemaJSON, err := getMerchantProductLicenseApplicationVerifiableCredentialJSON(productID, developerName)
 	if err != nil {
-		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to get application VC schema JSON: %v", err)
+		glog.Errorf("notifyLarePassToFetchSignature: ERROR - failed to get application VC schema JSON: %v", err)
 		return fmt.Errorf("failed to get application VC schema JSON: %w", err)
 	}
 	var applicationCredentialSchema map[string]interface{}
 	if err := json.Unmarshal([]byte(appSchemaJSON), &applicationCredentialSchema); err != nil {
-		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to parse application VC schema JSON: %v", err)
+		glog.Errorf("notifyLarePassToFetchSignature: ERROR - failed to parse application VC schema JSON: %v", err)
 		return fmt.Errorf("failed to parse application VC schema JSON: %w", err)
 	}
 	signBody["application_verifiable_credential_schema"] = applicationCredentialSchema
-	log.Printf("notifyLarePassToFetchSignature: Including application_verifiable_credential_schema for user %s, app %s, productID: %s",
+	glog.Infof("notifyLarePassToFetchSignature: Including application_verifiable_credential_schema for user %s, app %s, productID: %s",
 		userID, appID, productID)
 
 	// productID is required for application_verifiable_credential (omit txHash by design)
 	if productID == "" {
-		log.Printf("notifyLarePassToFetchSignature: ERROR - productID is empty for user %s, app %s, cannot build application_verifiable_credential", userID, appID)
+		glog.Errorf("notifyLarePassToFetchSignature: ERROR - productID is empty for user %s, app %s, cannot build application_verifiable_credential", userID, appID)
 		return errors.New("productID is required but not available")
 	}
 
 	// Always include product_id at top level for consistency and easy identification
 	signBody["product_id"] = productID
-	log.Printf("notifyLarePassToFetchSignature: Including product_id in sign notification for user %s, app %s, productID: %s", userID, appID, productID)
+	glog.Infof("notifyLarePassToFetchSignature: Including product_id in sign notification for user %s, app %s, productID: %s", userID, appID, productID)
 
 	appVerifiableCredential := map[string]interface{}{
 		"productId": productID,
 	}
 	signBody["application_verifiable_credential"] = appVerifiableCredential
-	log.Printf("notifyLarePassToFetchSignature: Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s, productID: %s", userID, appID, productID)
+	glog.Infof("notifyLarePassToFetchSignature: Including application_verifiable_credential (without txHash) for fetch-signature user %s, app %s, productID: %s", userID, appID, productID)
 
 	if xForwardedHost == "" {
-		log.Printf("notifyLarePassToFetchSignature: ERROR - X-Forwarded-Host is empty for user %s, cannot build callback URL (fetch-signature)", userID)
+		glog.Errorf("notifyLarePassToFetchSignature: ERROR - X-Forwarded-Host is empty for user %s, cannot build callback URL (fetch-signature)", userID)
 		return errors.New("X-Forwarded-Host is required but not available")
 	}
 
 	// New callback endpoint for fetch-signature
 	callbackURL := fmt.Sprintf("https://%s/app-store/api/v2/payment/fetch-signature-callback", xForwardedHost)
-	log.Printf("notifyLarePassToFetchSignature: Using X-Forwarded-Host based callback URL (fetch-signature) for user %s: %s", userID, callbackURL)
+	glog.Infof("notifyLarePassToFetchSignature: Using X-Forwarded-Host based callback URL (fetch-signature) for user %s: %s", userID, callbackURL)
 
 	update := types.SignNotificationUpdate{
 		Sign: types.SignNotificationData{
@@ -567,19 +567,19 @@ func notifyLarePassToFetchSignature(dataSender DataSenderInterface, userID, appI
 		Topic: "fetch_payment_signature",
 	}
 
-	log.Printf("notifyLarePassToFetchSignature: Sending notification to LarePass for user=%s app=%s productID=%s topic=fetch_payment_signature", userID, appID, productID)
+	glog.Infof("notifyLarePassToFetchSignature: Sending notification to LarePass for user=%s app=%s productID=%s topic=fetch_payment_signature", userID, appID, productID)
 	err = dataSender.SendSignNotificationUpdate(update)
 	if err != nil {
-		log.Printf("notifyLarePassToFetchSignature: ERROR - failed to send notification: %v", err)
+		glog.Errorf("notifyLarePassToFetchSignature: ERROR - failed to send notification: %v", err)
 		return err
 	}
-	log.Printf("notifyLarePassToFetchSignature: Successfully sent notification to LarePass for user=%s app=%s productID=%s", userID, appID, productID)
+	glog.Infof("notifyLarePassToFetchSignature: Successfully sent notification to LarePass for user=%s app=%s productID=%s", userID, appID, productID)
 
 	// Notify frontend of syncing status after successfully sending LarePass notification
 	if err := notifyFrontendStateUpdate(dataSender, userID, appID, appName, sourceID, "syncing"); err != nil {
-		log.Printf("notifyLarePassToFetchSignature: Failed to notify frontend syncing status for user=%s app=%s product=%s: %v", userID, appID, productID, err)
+		glog.Errorf("notifyLarePassToFetchSignature: Failed to notify frontend syncing status for user=%s app=%s product=%s: %v", userID, appID, productID, err)
 	} else {
-		log.Printf("notifyLarePassToFetchSignature: Successfully notified frontend syncing status for user=%s app=%s product=%s", userID, appID, productID)
+		glog.Infof("notifyLarePassToFetchSignature: Successfully notified frontend syncing status for user=%s app=%s product=%s", userID, appID, productID)
 	}
 
 	return nil
@@ -631,12 +631,12 @@ func notifyLarePassToSaveVC(dataSender DataSenderInterface, state *PaymentState)
 		Topic: "save_payment_vc",
 	}
 
-	log.Printf("notifyLarePassToSaveVC: Sending VC to LarePass for user=%s app=%s product=%s topic=save_payment_vc", state.UserID, state.AppID, state.ProductID)
+	glog.Infof("notifyLarePassToSaveVC: Sending VC to LarePass for user=%s app=%s product=%s topic=save_payment_vc", state.UserID, state.AppID, state.ProductID)
 	if err := dataSender.SendSignNotificationUpdate(update); err != nil {
-		log.Printf("notifyLarePassToSaveVC: ERROR - failed to send VC to LarePass: %v", err)
+		glog.Errorf("notifyLarePassToSaveVC: ERROR - failed to send VC to LarePass: %v", err)
 		return err
 	}
-	log.Printf("notifyLarePassToSaveVC: Successfully sent VC to LarePass for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+	glog.Infof("notifyLarePassToSaveVC: Successfully sent VC to LarePass for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
 	return nil
 }
 
@@ -771,7 +771,7 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 			for _, source := range marketSources.Sources {
 				if source.ID == sourceID || source.Name == sourceID {
 					appstoreBase = source.BaseURL
-					log.Printf("Found market source for sourceID=%s: %s", sourceID, appstoreBase)
+					glog.Infof("Found market source for sourceID=%s: %s", sourceID, appstoreBase)
 					break
 				}
 			}
@@ -781,7 +781,7 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 			activeSources := settingsManager.GetActiveMarketSources()
 			if len(activeSources) > 0 {
 				appstoreBase = activeSources[0].BaseURL
-				log.Printf("Using first active market source: %s", appstoreBase)
+				glog.Infof("Using first active market source: %s", appstoreBase)
 			}
 		}
 	}
@@ -797,7 +797,7 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 		}
 		if appstoreBase == "" {
 			appstoreBase = "https://appstore-server-prod.bttcdn.com"
-			log.Printf("Using default appstore base URL: %s", appstoreBase)
+			glog.Infof("Using default appstore base URL: %s", appstoreBase)
 		}
 	}
 
@@ -812,7 +812,7 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 		endpoint = fmt.Sprintf("%s/appstore-git-bot/v1/developer/%s", appstoreBase, escaped)
 	}
 
-	log.Printf("Fetching developer info from API: %s", endpoint)
+	glog.Infof("Fetching developer info from API: %s", endpoint)
 
 	resp, err := httpClient.R().
 		SetContext(ctx).
@@ -838,113 +838,113 @@ func fetchDeveloperInfoFromAPI(ctx context.Context, httpClient *resty.Client, de
 // extractTokenInfoFromPriceConfig extracts token information from PriceConfig and API response
 func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *DeveloperAPIResponse, productID string) []types.TokenInfo {
 	if priceConfig == nil {
-		log.Printf("extractTokenInfoFromPriceConfig: priceConfig is nil")
+		glog.Error("extractTokenInfoFromPriceConfig: priceConfig is nil")
 		return nil
 	}
 
-	log.Printf("extractTokenInfoFromPriceConfig: Starting extraction for productID=%s", productID)
-	log.Printf("extractTokenInfoFromPriceConfig: apiResp=%v, apiResp.Data.Apps=%v", apiResp != nil, apiResp != nil && apiResp.Data.Apps != nil)
-	log.Printf("extractTokenInfoFromPriceConfig: priceConfig.Paid=%v, priceConfig.Products count=%d", priceConfig.Paid != nil, len(priceConfig.Products))
+	glog.Infof("extractTokenInfoFromPriceConfig: Starting extraction for productID=%s", productID)
+	glog.Infof("extractTokenInfoFromPriceConfig: apiResp=%v, apiResp.Data.Apps=%v", apiResp != nil, apiResp != nil && apiResp.Data.Apps != nil)
+	glog.Infof("extractTokenInfoFromPriceConfig: priceConfig.Paid=%v, priceConfig.Products count=%d", priceConfig.Paid != nil, len(priceConfig.Products))
 
 	var tokenInfos []types.TokenInfo
 
 	// Extract from Paid section
 	if priceConfig.Paid != nil && len(priceConfig.Paid.Price) > 0 {
-		log.Printf("extractTokenInfoFromPriceConfig: Processing Paid section with %d price entries", len(priceConfig.Paid.Price))
+		glog.Infof("extractTokenInfoFromPriceConfig: Processing Paid section with %d price entries", len(priceConfig.Paid.Price))
 		for _, priceEntry := range priceConfig.Paid.Price {
 			tokenInfo := types.TokenInfo{
 				Chain:         priceEntry.Chain,
 				TokenSymbol:   priceEntry.TokenSymbol,
 				ReceiveWallet: priceEntry.ReceiveWallet,
 			}
-			log.Printf("extractTokenInfoFromPriceConfig: Processing price entry: chain=%s, symbol=%s, receiveWallet=%s", priceEntry.Chain, priceEntry.TokenSymbol, priceEntry.ReceiveWallet)
+			glog.Infof("extractTokenInfoFromPriceConfig: Processing price entry: chain=%s, symbol=%s, receiveWallet=%s", priceEntry.Chain, priceEntry.TokenSymbol, priceEntry.ReceiveWallet)
 
 			// Try to get token decimals from API response
 			if apiResp != nil && apiResp.Data.Apps != nil {
-				log.Printf("extractTokenInfoFromPriceConfig: API response has Apps")
+				glog.Infof("extractTokenInfoFromPriceConfig: API response has Apps")
 				// Log the structure of Apps for debugging
 				if appsJSON, err := json.Marshal(apiResp.Data.Apps); err == nil {
-					log.Printf("extractTokenInfoFromPriceConfig: Apps structure: %s", string(appsJSON))
+					glog.Infof("extractTokenInfoFromPriceConfig: Apps structure: %s", string(appsJSON))
 				}
 				// apps is a map[string]interface{} that represents a JSON object
 				// It contains "app_name" and "products" fields directly
 				// So we should access apps["products"] directly, not iterate through it
-				log.Printf("extractTokenInfoFromPriceConfig: Apps is a map, checking for products...")
+				glog.Infof("extractTokenInfoFromPriceConfig: Apps is a map, checking for products...")
 				if products, ok := apiResp.Data.Apps["products"].([]interface{}); ok {
-					log.Printf("extractTokenInfoFromPriceConfig: Found %d products", len(products))
+					glog.Infof("extractTokenInfoFromPriceConfig: Found %d products", len(products))
 					for _, p := range products {
 						if product, ok := p.(map[string]interface{}); ok {
 							pid, _ := product["product_id"].(string)
-							log.Printf("extractTokenInfoFromPriceConfig: Checking product_id=%s (expected=%s)", pid, productID)
+							glog.Infof("extractTokenInfoFromPriceConfig: Checking product_id=%s (expected=%s)", pid, productID)
 							if pid == productID {
-								log.Printf("extractTokenInfoFromPriceConfig: Product ID matched! Checking prices...")
+								glog.Infof("extractTokenInfoFromPriceConfig: Product ID matched! Checking prices...")
 								if prices, ok := product["price"].([]interface{}); ok {
-									log.Printf("extractTokenInfoFromPriceConfig: Found %d price entries", len(prices))
+									glog.Infof("extractTokenInfoFromPriceConfig: Found %d price entries", len(prices))
 									for _, pr := range prices {
 										if price, ok := pr.(map[string]interface{}); ok {
 											priceChain, _ := price["chain"].(string)
-											log.Printf("Checking price entry: chain=%s, expected=%s", priceChain, priceEntry.Chain)
+											glog.Infof("Checking price entry: chain=%s, expected=%s", priceChain, priceEntry.Chain)
 											if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
-												log.Printf("Chain matched! Extracting token info from price entry: %+v", price)
+												glog.Infof("Chain matched! Extracting token info from price entry: %+v", price)
 												// Extract token_decimals (handle multiple number types from JSON)
 												if decimals, ok := price["token_decimals"].(float64); ok {
 													tokenInfo.TokenDecimals = int(decimals)
-													log.Printf("Extracted token_decimals as float64: %f -> %d", decimals, tokenInfo.TokenDecimals)
+													glog.Infof("Extracted token_decimals as float64: %f -> %d", decimals, tokenInfo.TokenDecimals)
 												} else if decimals, ok := price["token_decimals"].(int); ok {
 													tokenInfo.TokenDecimals = decimals
-													log.Printf("Extracted token_decimals as int: %d", tokenInfo.TokenDecimals)
+													glog.Infof("Extracted token_decimals as int: %d", tokenInfo.TokenDecimals)
 												} else if decimals, ok := price["token_decimals"].(int64); ok {
 													tokenInfo.TokenDecimals = int(decimals)
-													log.Printf("Extracted token_decimals as int64: %d -> %d", decimals, tokenInfo.TokenDecimals)
+													glog.Infof("Extracted token_decimals as int64: %d -> %d", decimals, tokenInfo.TokenDecimals)
 												} else {
-													log.Printf("WARNING: token_decimals not found or wrong type in price entry, available keys: %v", getMapKeys(price))
+													glog.Infof("WARNING: token_decimals not found or wrong type in price entry, available keys: %v", getMapKeys(price))
 												}
 												if contract, ok := price["token_contract"].(string); ok {
 													tokenInfo.TokenContract = contract
-													log.Printf("Extracted token_contract: %s", contract)
+													glog.Infof("Extracted token_contract: %s", contract)
 												} else {
-													log.Printf("WARNING: token_contract not found in price entry")
+													glog.Infof("WARNING: token_contract not found in price entry")
 												}
 												if amount, ok := price["token_amount"].(string); ok {
 													tokenInfo.TokenAmount = amount
-													log.Printf("Extracted token_amount: %s", amount)
+													glog.Infof("Extracted token_amount: %s", amount)
 												}
 												if icon, ok := price["token_icon"].(string); ok {
 													tokenInfo.TokenIcon = icon
-													log.Printf("Extracted token_icon: %s", icon)
+													glog.Infof("Extracted token_icon: %s", icon)
 												} else {
-													log.Printf("WARNING: token_icon not found in price entry")
+													glog.Info("WARNING: token_icon not found in price entry")
 												}
-												log.Printf("Final extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
+												glog.Infof("Final extracted token info for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
 													productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount, tokenInfo.TokenIcon)
 												break
 											}
 										}
 									}
 								} else {
-									log.Printf("extractTokenInfoFromPriceConfig: Product price field is not an array")
+									glog.Info("extractTokenInfoFromPriceConfig: Product price field is not an array")
 								}
-								log.Printf("Found product %s", productID)
+								glog.Infof("Found product %s", productID)
 								break
 							}
 						}
 					}
 				} else {
-					log.Printf("extractTokenInfoFromPriceConfig: No products array found in apps")
+					glog.Info("extractTokenInfoFromPriceConfig: No products array found in apps")
 				}
 			}
 
 			tokenInfos = append(tokenInfos, tokenInfo)
-			log.Printf("extractTokenInfoFromPriceConfig: Added token info from Paid section: chain=%s, symbol=%s", tokenInfo.Chain, tokenInfo.TokenSymbol)
+			glog.Infof("extractTokenInfoFromPriceConfig: Added token info from Paid section: chain=%s, symbol=%s", tokenInfo.Chain, tokenInfo.TokenSymbol)
 		}
-		log.Printf("extractTokenInfoFromPriceConfig: After processing Paid section, tokenInfos count=%d", len(tokenInfos))
+		glog.Infof("extractTokenInfoFromPriceConfig: After processing Paid section, tokenInfos count=%d", len(tokenInfos))
 	} else {
-		log.Printf("extractTokenInfoFromPriceConfig: No Paid section or no price entries in Paid section")
+		glog.Info("extractTokenInfoFromPriceConfig: No Paid section or no price entries in Paid section")
 	}
 
 	// Extract from Products section
 	if len(priceConfig.Products) > 0 {
-		log.Printf("extractTokenInfoFromPriceConfig: Processing Products section with %d products", len(priceConfig.Products))
+		glog.Infof("extractTokenInfoFromPriceConfig: Processing Products section with %d products", len(priceConfig.Products))
 		for _, product := range priceConfig.Products {
 			if product.ProductID == productID && len(product.Price) > 0 {
 				for _, priceEntry := range product.Price {
@@ -966,46 +966,46 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 											for _, pr := range prices {
 												if price, ok := pr.(map[string]interface{}); ok {
 													priceChain, _ := price["chain"].(string)
-													log.Printf("Checking price entry (Products): chain=%s, expected=%s", priceChain, priceEntry.Chain)
+													glog.Infof("Checking price entry (Products): chain=%s, expected=%s", priceChain, priceEntry.Chain)
 													if chain, ok := price["chain"].(string); ok && chain == priceEntry.Chain {
-														log.Printf("Chain matched! Extracting token info from price entry (Products): %+v", price)
+														glog.Infof("Chain matched! Extracting token info from price entry (Products): %+v", price)
 														// Extract token_decimals (handle multiple number types from JSON)
 														if decimals, ok := price["token_decimals"].(float64); ok {
 															tokenInfo.TokenDecimals = int(decimals)
-															log.Printf("Extracted token_decimals as float64: %f -> %d", decimals, tokenInfo.TokenDecimals)
+															glog.Infof("Extracted token_decimals as float64: %f -> %d", decimals, tokenInfo.TokenDecimals)
 														} else if decimals, ok := price["token_decimals"].(int); ok {
 															tokenInfo.TokenDecimals = decimals
-															log.Printf("Extracted token_decimals as int: %d", tokenInfo.TokenDecimals)
+															glog.Infof("Extracted token_decimals as int: %d", tokenInfo.TokenDecimals)
 														} else if decimals, ok := price["token_decimals"].(int64); ok {
 															tokenInfo.TokenDecimals = int(decimals)
-															log.Printf("Extracted token_decimals as int64: %d -> %d", decimals, tokenInfo.TokenDecimals)
+															glog.Infof("Extracted token_decimals as int64: %d -> %d", decimals, tokenInfo.TokenDecimals)
 														} else {
-															log.Printf("WARNING: token_decimals not found or wrong type in price entry, available keys: %v", getMapKeys(price))
+															glog.Infof("WARNING: token_decimals not found or wrong type in price entry, available keys: %v", getMapKeys(price))
 														}
 														if contract, ok := price["token_contract"].(string); ok {
 															tokenInfo.TokenContract = contract
-															log.Printf("Extracted token_contract: %s", contract)
+															glog.Infof("Extracted token_contract: %s", contract)
 														} else {
-															log.Printf("WARNING: token_contract not found in price entry")
+															glog.Infof("WARNING: token_contract not found in price entry")
 														}
 														if amount, ok := price["token_amount"].(string); ok {
 															tokenInfo.TokenAmount = amount
-															log.Printf("Extracted token_amount: %s", amount)
+															glog.Infof("Extracted token_amount: %s", amount)
 														}
 														if icon, ok := price["token_icon"].(string); ok {
 															tokenInfo.TokenIcon = icon
-															log.Printf("Extracted token_icon: %s", icon)
+															glog.Infof("Extracted token_icon: %s", icon)
 														} else {
-															log.Printf("WARNING: token_icon not found in price entry")
+															glog.Info("WARNING: token_icon not found in price entry")
 														}
-														log.Printf("Final extracted token info (Products) for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
+														glog.Infof("Final extracted token info (Products) for product %s, chain %s: decimals=%d, contract=%s, amount=%s, icon=%s",
 															productID, chain, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount, tokenInfo.TokenIcon)
 														break
 													}
 												}
 											}
 										}
-										log.Printf("Found product %s", productID)
+										glog.Infof("Found product %s", productID)
 										break
 									}
 								}
@@ -1014,17 +1014,17 @@ func extractTokenInfoFromPriceConfig(priceConfig *types.PriceConfig, apiResp *De
 					}
 
 					tokenInfos = append(tokenInfos, tokenInfo)
-					log.Printf("extractTokenInfoFromPriceConfig: Added token info from Products section: chain=%s, symbol=%s", tokenInfo.Chain, tokenInfo.TokenSymbol)
+					glog.Infof("extractTokenInfoFromPriceConfig: Added token info from Products section: chain=%s, symbol=%s", tokenInfo.Chain, tokenInfo.TokenSymbol)
 				}
 				break
 			}
 		}
-		log.Printf("extractTokenInfoFromPriceConfig: After processing Products section, tokenInfos count=%d", len(tokenInfos))
+		glog.Infof("extractTokenInfoFromPriceConfig: After processing Products section, tokenInfos count=%d", len(tokenInfos))
 	} else {
-		log.Printf("extractTokenInfoFromPriceConfig: No Products section")
+		glog.Info("extractTokenInfoFromPriceConfig: No Products section")
 	}
 
-	log.Printf("extractTokenInfoFromPriceConfig: Final result - returning %d token info entries for productID=%s", len(tokenInfos), productID)
+	glog.Infof("extractTokenInfoFromPriceConfig: Final result - returning %d token info entries for productID=%s", len(tokenInfos), productID)
 	return tokenInfos
 }
 
@@ -1041,25 +1041,25 @@ func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, us
 		PriceConfig: priceConfig,
 	}
 
-	log.Printf("createFrontendPaymentData: developerName=%s, httpClient=%v, priceConfig=%v", developerName, httpClient != nil, priceConfig != nil)
+	glog.Infof("createFrontendPaymentData: developerName=%s, httpClient=%v, priceConfig=%v", developerName, httpClient != nil, priceConfig != nil)
 
 	// Fetch developer info from API to get RSA public key and token info
 	if developerName != "" {
 		if httpClient == nil {
 			httpClient = resty.New()
 			httpClient.SetTimeout(10 * time.Second)
-			log.Printf("createFrontendPaymentData: Created new HTTP client")
+			glog.Info("createFrontendPaymentData: Created new HTTP client")
 		}
 		if ctx == nil {
 			ctx = context.Background()
 		}
 
-		log.Printf("createFrontendPaymentData: Calling fetchDeveloperInfoFromAPI for developer=%s, sourceID=%s", developerName, sourceID)
+		glog.Infof("createFrontendPaymentData: Calling fetchDeveloperInfoFromAPI for developer=%s, sourceID=%s", developerName, sourceID)
 		apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName, settingsManager, sourceID)
 		if err != nil {
-			log.Printf("createFrontendPaymentData: Failed to fetch developer info from API: %v, continuing without RSA key and token info", err)
+			glog.Errorf("createFrontendPaymentData: Failed to fetch developer info from API: %v, continuing without RSA key and token info", err)
 		} else {
-			log.Printf("createFrontendPaymentData: Successfully fetched developer info, RSAPublicKeys count=%d", len(apiResp.Data.RSAPublicKeys))
+			glog.Infof("createFrontendPaymentData: Successfully fetched developer info, RSAPublicKeys count=%d", len(apiResp.Data.RSAPublicKeys))
 			// Extract RSA public key (use current key if available)
 			if len(apiResp.Data.RSAPublicKeys) > 0 {
 				var rawKey string
@@ -1067,30 +1067,30 @@ func createFrontendPaymentData(ctx context.Context, httpClient *resty.Client, us
 					if key.IsCurrent {
 						// Remove quotes if present
 						rawKey = strings.Trim(key.Key, "\"")
-						log.Printf("createFrontendPaymentData: Found current RSA public key, length=%d", len(rawKey))
+						glog.Infof("createFrontendPaymentData: Found current RSA public key, length=%d", len(rawKey))
 						break
 					}
 				}
 				// If no current key found, use the first one
 				if rawKey == "" && len(apiResp.Data.RSAPublicKeys) > 0 {
 					rawKey = strings.Trim(apiResp.Data.RSAPublicKeys[0].Key, "\"")
-					log.Printf("createFrontendPaymentData: Using first RSA public key (no current key), length=%d", len(rawKey))
+					glog.Infof("createFrontendPaymentData: Using first RSA public key (no current key), length=%d", len(rawKey))
 				}
 				// Convert RSA key from hex to PEM format
 				if rawKey != "" {
 					paymentData.RSAPublicKey = convertRSAKeyToPEM(rawKey)
-					log.Printf("createFrontendPaymentData: Converted RSA key to PEM format, length=%d", len(paymentData.RSAPublicKey))
+					glog.Infof("createFrontendPaymentData: Converted RSA key to PEM format, length=%d", len(paymentData.RSAPublicKey))
 				}
 			} else {
-				log.Printf("createFrontendPaymentData: No RSA public keys found in API response")
+				glog.Info("createFrontendPaymentData: No RSA public keys found in API response")
 			}
 
 			// Extract token info from price config and API response
 			paymentData.TokenInfo = extractTokenInfoFromPriceConfig(priceConfig, apiResp, productID)
-			log.Printf("createFrontendPaymentData: Extracted token info count=%d", len(paymentData.TokenInfo))
+			glog.Infof("createFrontendPaymentData: Extracted token info count=%d", len(paymentData.TokenInfo))
 		}
 	} else {
-		log.Printf("createFrontendPaymentData: developerName is empty, skipping API call")
+		glog.Info("createFrontendPaymentData: developerName is empty, skipping API call")
 	}
 
 	return paymentData
@@ -1109,7 +1109,7 @@ func getMapKeys(m map[string]interface{}) []string {
 // This function can be used to add token_info to responses even when payment_data is not present
 func GetTokenInfoForState(ctx context.Context, state *PaymentState, appInfo *types.AppInfo, settingsManager *settings.SettingsManager) []types.TokenInfo {
 	if state == nil {
-		log.Printf("GetTokenInfoForState: state is nil")
+		glog.Errorf("GetTokenInfoForState: state is nil")
 		return nil
 	}
 
@@ -1119,15 +1119,15 @@ func GetTokenInfoForState(ctx context.Context, state *PaymentState, appInfo *typ
 	if appInfo != nil && appInfo.Price != nil {
 		priceConfig = appInfo.Price
 		developerName = getDeveloperNameFromPrice(appInfo)
-		log.Printf("GetTokenInfoForState: Using developerName=%s and priceConfig from appInfo for user=%s app=%s product=%s", developerName, state.UserID, state.AppID, state.ProductID)
+		glog.Infof("GetTokenInfoForState: Using developerName=%s and priceConfig from appInfo for user=%s app=%s product=%s", developerName, state.UserID, state.AppID, state.ProductID)
 	} else {
 		// Fallback to state's developer name
 		developerName = state.DeveloperName
-		log.Printf("GetTokenInfoForState: Using developerName=%s from state (appInfo=%v, priceConfig=%v) for user=%s app=%s product=%s", developerName, appInfo != nil, priceConfig != nil, state.UserID, state.AppID, state.ProductID)
+		glog.Infof("GetTokenInfoForState: Using developerName=%s from state (appInfo=%v, priceConfig=%v) for user=%s app=%s product=%s", developerName, appInfo != nil, priceConfig != nil, state.UserID, state.AppID, state.ProductID)
 	}
 
 	if developerName == "" {
-		log.Printf("GetTokenInfoForState: developerName is empty, cannot extract token info for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+		glog.Infof("GetTokenInfoForState: developerName is empty, cannot extract token info for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
 		return nil
 	}
 
@@ -1141,32 +1141,32 @@ func GetTokenInfoForState(ctx context.Context, state *PaymentState, appInfo *typ
 	// Fetch developer info from API to get token info
 	apiResp, err := fetchDeveloperInfoFromAPI(ctx, httpClient, developerName, settingsManager, state.SourceID)
 	if err != nil {
-		log.Printf("GetTokenInfoForState: Failed to fetch developer info from API: %v for user=%s app=%s product=%s", err, state.UserID, state.AppID, state.ProductID)
+		glog.Errorf("GetTokenInfoForState: Failed to fetch developer info from API: %v for user=%s app=%s product=%s", err, state.UserID, state.AppID, state.ProductID)
 		// If we have priceConfig, return basic token info from price config even if API call fails
 		if priceConfig != nil {
-			log.Printf("GetTokenInfoForState: Returning token info from price config only (API call failed)")
+			glog.Infof("GetTokenInfoForState: Returning token info from price config only (API call failed)")
 			return extractTokenInfoFromPriceConfig(priceConfig, nil, state.ProductID)
 		}
 		// If no priceConfig, try to extract from API response structure if available
-		log.Printf("GetTokenInfoForState: No priceConfig available, cannot extract token info without API response")
+		glog.Info("GetTokenInfoForState: No priceConfig available, cannot extract token info without API response")
 		return nil
 	}
 
 	// If we have priceConfig, use the standard extraction method
 	if priceConfig != nil {
-		log.Printf("GetTokenInfoForState: Extracting token info from priceConfig and API response for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+		glog.Infof("GetTokenInfoForState: Extracting token info from priceConfig and API response for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
 		return extractTokenInfoFromPriceConfig(priceConfig, apiResp, state.ProductID)
 	}
 
 	// If no priceConfig but we have API response, try to extract token info directly from API
-	log.Printf("GetTokenInfoForState: No priceConfig, attempting to extract token info from API response only for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+	glog.Infof("GetTokenInfoForState: No priceConfig, attempting to extract token info from API response only for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
 	return extractTokenInfoFromAPIResponse(apiResp, state.ProductID)
 }
 
 // extractTokenInfoFromAPIResponse extracts token information directly from API response without price config
 func extractTokenInfoFromAPIResponse(apiResp *DeveloperAPIResponse, productID string) []types.TokenInfo {
 	if apiResp == nil || apiResp.Data.Apps == nil {
-		log.Printf("extractTokenInfoFromAPIResponse: API response or Apps is nil")
+		glog.Info("extractTokenInfoFromAPIResponse: API response or Apps is nil")
 		return nil
 	}
 
@@ -1174,15 +1174,15 @@ func extractTokenInfoFromAPIResponse(apiResp *DeveloperAPIResponse, productID st
 
 	// Extract from API response structure
 	if products, ok := apiResp.Data.Apps["products"].([]interface{}); ok {
-		log.Printf("extractTokenInfoFromAPIResponse: Found %d products in API response", len(products))
+		glog.Infof("extractTokenInfoFromAPIResponse: Found %d products in API response", len(products))
 		for _, p := range products {
 			if product, ok := p.(map[string]interface{}); ok {
 				pid, _ := product["product_id"].(string)
-				log.Printf("extractTokenInfoFromAPIResponse: Checking product_id=%s (expected=%s)", pid, productID)
+				glog.Infof("extractTokenInfoFromAPIResponse: Checking product_id=%s (expected=%s)", pid, productID)
 				if pid == productID {
-					log.Printf("extractTokenInfoFromAPIResponse: Product ID matched! Extracting token info from API response")
+					glog.Infof("extractTokenInfoFromAPIResponse: Product ID matched! Extracting token info from API response")
 					if prices, ok := product["price"].([]interface{}); ok {
-						log.Printf("extractTokenInfoFromAPIResponse: Found %d price entries", len(prices))
+						glog.Infof("extractTokenInfoFromAPIResponse: Found %d price entries", len(prices))
 						for _, pr := range prices {
 							if price, ok := pr.(map[string]interface{}); ok {
 								tokenInfo := types.TokenInfo{}
@@ -1217,24 +1217,24 @@ func extractTokenInfoFromAPIResponse(apiResp *DeveloperAPIResponse, productID st
 								// Only add if we have at least chain and token_symbol
 								if tokenInfo.Chain != "" && tokenInfo.TokenSymbol != "" {
 									tokenInfos = append(tokenInfos, tokenInfo)
-									log.Printf("extractTokenInfoFromAPIResponse: Extracted token info: chain=%s, symbol=%s, decimals=%d, contract=%s, amount=%s", tokenInfo.Chain, tokenInfo.TokenSymbol, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount)
+									glog.Infof("extractTokenInfoFromAPIResponse: Extracted token info: chain=%s, symbol=%s, decimals=%d, contract=%s, amount=%s", tokenInfo.Chain, tokenInfo.TokenSymbol, tokenInfo.TokenDecimals, tokenInfo.TokenContract, tokenInfo.TokenAmount)
 								} else {
-									log.Printf("extractTokenInfoFromAPIResponse: Skipping incomplete token info (missing chain or symbol)")
+									glog.Info("extractTokenInfoFromAPIResponse: Skipping incomplete token info (missing chain or symbol)")
 								}
 							}
 						}
 					} else {
-						log.Printf("extractTokenInfoFromAPIResponse: Product price field is not an array")
+						glog.Info("extractTokenInfoFromAPIResponse: Product price field is not an array")
 					}
 					break
 				}
 			}
 		}
 	} else {
-		log.Printf("extractTokenInfoFromAPIResponse: No products array found in API response")
+		glog.Info("extractTokenInfoFromAPIResponse: No products array found in API response")
 	}
 
-	log.Printf("extractTokenInfoFromAPIResponse: Extracted %d token info entries", len(tokenInfos))
+	glog.Infof("extractTokenInfoFromAPIResponse: Extracted %d token info entries", len(tokenInfos))
 	return tokenInfos
 }
 
@@ -1251,7 +1251,7 @@ func convertRSAKeyToPEM(hexKey string) string {
 	// Decode hex string to bytes
 	keyBytes, err := hex.DecodeString(hexKey)
 	if err != nil {
-		log.Printf("convertRSAKeyToPEM: Failed to decode hex key: %v", err)
+		glog.Errorf("convertRSAKeyToPEM: Failed to decode hex key: %v", err)
 		return hexKey // Return original if conversion fails
 	}
 
@@ -1276,10 +1276,10 @@ func convertRSAKeyToPEM(hexKey string) string {
 // checkIfAppIsPaid checks if an app is a paid app by examining its Price configuration
 // This is an internal function, use CheckIfAppIsPaid from api.go instead
 func checkIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
-	log.Printf("CheckIfAppIsPaid: Starting payment check for app")
+	glog.Info("CheckIfAppIsPaid: Starting payment check for app")
 
 	if appInfo == nil {
-		log.Printf("CheckIfAppIsPaid: ERROR - app info is nil")
+		glog.Error("CheckIfAppIsPaid: ERROR - app info is nil")
 		return false, errors.New("app info is nil")
 	}
 
@@ -1291,34 +1291,34 @@ func checkIfAppIsPaid(appInfo *types.AppInfo) (bool, error) {
 		return "unknown"
 	}
 
-	log.Printf("CheckIfAppIsPaid: App info received, checking price configuration")
+	glog.Infof("CheckIfAppIsPaid: App info received, checking price configuration")
 	if appInfo.AppEntry != nil {
-		log.Printf("CheckIfAppIsPaid: App ID: %s, App Name: %s", appInfo.AppEntry.ID, appInfo.AppEntry.Name)
+		glog.Infof("CheckIfAppIsPaid: App ID: %s, App Name: %s", appInfo.AppEntry.ID, appInfo.AppEntry.Name)
 	} else {
-		log.Printf("CheckIfAppIsPaid: App entry is nil")
+		glog.Info("CheckIfAppIsPaid: App entry is nil")
 	}
 
 	if appInfo.Price == nil {
-		log.Printf("CheckIfAppIsPaid: App %s is not a paid app - no price configuration", getAppID())
+		glog.Infof("CheckIfAppIsPaid: App %s is not a paid app - no price configuration", getAppID())
 		return false, nil // Not a paid app
 	}
 
-	log.Printf("CheckIfAppIsPaid: Price configuration found, examining paid section and products")
+	glog.Infof("CheckIfAppIsPaid: Price configuration found, examining paid section and products")
 	// Priority: Paid buyout (main feature). Products are for in-app items (reserved), not a paid app flag.
 	if appInfo.Price.Paid != nil {
 		if len(appInfo.Price.Paid.Price) > 0 {
-			log.Printf("CheckIfAppIsPaid: Paid section with price entries found -> PAID app")
+			glog.Info("CheckIfAppIsPaid: Paid section with price entries found -> PAID app")
 			return true, nil
 		}
-		log.Printf("CheckIfAppIsPaid: Paid section present but no price entries")
+		glog.Info("CheckIfAppIsPaid: Paid section present but no price entries")
 	}
 
 	// Products alone do NOT make the app a paid app in this phase
 	if len(appInfo.Price.Products) > 0 {
-		log.Printf("CheckIfAppIsPaid: Products exist but treated as in-app purchases (reserved); not a paid app in this phase")
+		glog.Info("CheckIfAppIsPaid: Products exist but treated as in-app purchases (reserved); not a paid app in this phase")
 	}
 
-	log.Printf("CheckIfAppIsPaid: App %s is not a paid app - no valid paid section", getAppID())
+	glog.Infof("CheckIfAppIsPaid: App %s is not a paid app - no valid paid section", getAppID())
 	return false, nil // Not a paid app
 }
 
@@ -1393,7 +1393,7 @@ func getSystemRemoteServiceBase() string {
 		return base
 	}
 
-	log.Printf("Warning: SystemRemoteService base URL not available from systemenv watcher")
+	glog.Info("Warning: SystemRemoteService base URL not available from systemenv watcher")
 	return ""
 }
 
@@ -1500,13 +1500,13 @@ func isValidDID(did string) bool {
 // Note: This function does not attempt to refetch DID to avoid state inconsistency
 func getValidDeveloperDID(state *PaymentState) string {
 	if state == nil {
-		log.Printf("getValidDeveloperDID: state is nil")
+		glog.Error("getValidDeveloperDID: state is nil")
 		return ""
 	}
 
 	did := state.Developer.DID
 	if !isValidDID(did) {
-		log.Printf("getValidDeveloperDID: Invalid DID format in state: %s (expected format: did:key:...), DeveloperName=%s", did, state.DeveloperName)
+		glog.Infof("getValidDeveloperDID: Invalid DID format in state: %s (expected format: did:key:...), DeveloperName=%s", did, state.DeveloperName)
 		return ""
 	}
 
@@ -1583,7 +1583,7 @@ func verifyPurchaseInfo(pi *types.PurchaseInfo, productID, developerName string)
 		// Get manifest JSON with manifestId injected
 		manifestJSON, err := getMerchantProductLicenseCredentialManifestJSON(productID, developerName)
 		if err != nil {
-			log.Printf("verifyPurchaseInfo: ERROR - failed to get manifest JSON: %v", err)
+			glog.Errorf("verifyPurchaseInfo: ERROR - failed to get manifest JSON: %v", err)
 			return false
 		}
 		ok, _ := verifyVCAgainstManifest(pi.VC, manifestJSON)
@@ -1596,7 +1596,7 @@ func verifyPurchaseInfo(pi *types.PurchaseInfo, productID, developerName string)
 func getProductIDFromAppInfo(appInfo *types.AppInfo) string {
 	// Check if price info exists
 	if appInfo == nil || appInfo.Price == nil {
-		log.Printf("GetProductIDFromAppInfo: No price info available, returning empty string")
+		glog.Error("GetProductIDFromAppInfo: No price info available, returning empty string")
 		return ""
 	}
 
@@ -1604,13 +1604,13 @@ func getProductIDFromAppInfo(appInfo *types.AppInfo) string {
 	if len(appInfo.Price.Products) > 0 {
 		productID := appInfo.Price.Products[0].ProductID
 		if productID != "" {
-			log.Printf("GetProductIDFromAppInfo: Found product ID: %s", productID)
+			glog.Infof("GetProductIDFromAppInfo: Found product ID: %s", productID)
 			return productID
 		}
-		log.Printf("GetProductIDFromAppInfo: First product has empty product_id")
+		glog.Info("GetProductIDFromAppInfo: First product has empty product_id")
 	}
 
-	log.Printf("GetProductIDFromAppInfo: No products found, returning empty string")
+	glog.Info("GetProductIDFromAppInfo: No products found, returning empty string")
 	return ""
 }
 
@@ -1622,10 +1622,10 @@ func getDeveloperNameFromPrice(appInfo *types.AppInfo) string {
 	}
 	developer := strings.TrimSpace(appInfo.Price.Developer)
 	if developer != "" {
-		log.Printf("GetDeveloperNameFromPrice: Found developer: %s", developer)
+		glog.Infof("GetDeveloperNameFromPrice: Found developer: %s", developer)
 		return developer
 	}
-	log.Printf("GetDeveloperNameFromPrice: Developer not found in price info")
+	glog.Info("GetDeveloperNameFromPrice: Developer not found in price info")
 	return ""
 }
 
