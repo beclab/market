@@ -349,7 +349,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		if len(notFoundApps) > 0 {
 			response["not_found"] = notFoundApps
 		}
-		glog.V(2).Infof("Apps info retrieval completed: %d found, %d not found", len(foundApps), len(notFoundApps))
+		glog.V(3).Infof("Apps info retrieval completed: %d found, %d not found", len(foundApps), len(notFoundApps))
 		resultChan <- result{response: response}
 	}()
 
@@ -1085,7 +1085,7 @@ func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData
 		}
 	}
 
-	glog.V(2).Infof("DEBUG: Completed filterUserDataForStateWithTimeout with %d sources processed", len(filteredUserData.Sources))
+	glog.V(3).Infof("DEBUG: Completed filterUserDataForStateWithTimeout with %d sources processed", len(filteredUserData.Sources))
 	return filteredUserData
 }
 

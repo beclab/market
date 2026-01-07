@@ -274,7 +274,7 @@ func (dwr *DataWatcherRepo) fetchStateChanges(afterID int64) ([]*StateChange, er
 
 // processStateChange processes a single state change based on its type
 func (dwr *DataWatcherRepo) processStateChange(change *StateChange) error {
-	glog.V(2).Infof("Processing state change ID %d, type: %s", change.ID, change.Type)
+	glog.V(3).Infof("Processing state change ID %d, type: %s", change.ID, change.Type)
 
 	switch change.Type {
 	case "app_upload_completed":
@@ -282,7 +282,7 @@ func (dwr *DataWatcherRepo) processStateChange(change *StateChange) error {
 	case "image_info_updated":
 		return dwr.handleImageInfoUpdated(change)
 	default:
-		glog.V(3).Infof("Unknown state change type: %s, skipping", change.Type)
+		glog.Warningf("Unknown state change type: %s, skipping", change.Type)
 		return nil
 	}
 }

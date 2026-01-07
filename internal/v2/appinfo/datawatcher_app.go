@@ -269,7 +269,7 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 				dw.hashMutex.Lock()
 				delete(dw.activeHashCalculations, userID)
 				dw.hashMutex.Unlock()
-				glog.Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
+				glog.V(3).Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
 			}()
 
 			// Wait a short time to ensure all source processing locks are released
@@ -316,7 +316,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 		delete(dw.activeHashCalculations, userID)
 		delete(dw.activeHashCalculations, isCalculatingKey)
 		dw.hashMutex.Unlock()
-		glog.Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
+		glog.V(3).Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
 	}()
 
 	// Call the direct calculation function
@@ -368,7 +368,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		return false
 	}
 
-	glog.Infof("DataWatcher: Calculating hash for user %s", userID)
+	glog.V(4).Infof("DataWatcher: Calculating hash for user %s", userID)
 	// Calculate hash using the snapshot
 	newHash, err := utils.CalculateUserDataHash(snapshot)
 	if err != nil {
@@ -458,14 +458,14 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 		return false
 	}
 
-	glog.Infof("DataWatcher: Hash updated for user %s", userID)
+	glog.V(3).Infof("DataWatcher: Hash updated for user %s", userID)
 
 	// Verification: Check if the hash was actually updated
 	if glog.V(2) {
 		verifyUserData := dw.cacheManager.GetUserData(userID)
 		if verifyUserData != nil {
 			verifyHash := verifyUserData.Hash
-			glog.Infof("DataWatcher: Verification - hash = '%s' for user %s", verifyHash, userID)
+			glog.V(2).Infof("DataWatcher: Verification - hash = '%s' for user %s", verifyHash, userID)
 		} else {
 			glog.Errorf("DataWatcher: Verification failed - CacheManager.GetUserData returned nil for user %s", userID)
 		}
@@ -474,7 +474,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	// Trigger force sync to persist the hash change
 	glog.V(3).Infof("DataWatcher: Starting force sync for user %s", userID)
 	if err := dw.cacheManager.ForceSync(); err != nil {
-		glog.Errorf("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
+		glog.V(4).Infof("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
 		return false
 	} else {
 		glog.V(2).Infof("DataWatcher: Force sync completed after hash update for user %s", userID)

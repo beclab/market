@@ -804,7 +804,7 @@ func (tm *TaskModule) executeTask(task *Task) {
 
 	// Call callback if exists (for synchronous requests)
 	if task.Callback != nil {
-		glog.Warningf("[TASK] Calling callback for successful task: %s", task.ID)
+		glog.V(3).Infof("[TASK] Calling callback for successful task: %s", task.ID)
 		task.Callback(result, nil)
 	}
 
