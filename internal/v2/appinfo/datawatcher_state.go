@@ -573,6 +573,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 				switch {
 				//   NATS State                        APP State
 				case appStateMsg.State == "running" && appState.Status.State == "installing":
+				case appStateMsg.State == "running" && appState.Status.State == "initializing":
 				case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
 				case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
 				case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
