@@ -3,12 +3,13 @@ package task
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"market/internal/v2/settings"
+
+	"github.com/golang/glog"
 )
 
 // AppEntrance represents an entrance configuration for cloned app
@@ -40,7 +41,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	appName := task.AppName
 	user := task.User
 
-	log.Printf("Starting app clone: app=%s, user=%s, task_id=%s", appName, user, task.ID)
+	glog.Infof("Starting app clone: app=%s, user=%s, task_id=%s", appName, user, task.ID)
 
 	// Check if there's already a running or pending clone task for the same app
 	tm.mu.RLock()
@@ -49,7 +50,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	for _, runningTask := range tm.runningTasks {
 		if runningTask.Type == CloneApp && runningTask.AppName == appName && runningTask.ID != task.ID {
 			tm.mu.RUnlock()
-			log.Printf("Clone failed: another clone task is already running for app: %s, existing task ID: %s", appName, runningTask.ID)
+			glog.Infof("Clone failed: another clone task is already running for app: %s, existing task ID: %s", appName, runningTask.ID)
 			errorResult := map[string]interface{}{
 				"operation":        "clone",
 				"app_name":         appName,
@@ -67,34 +68,34 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 
 	token, ok := task.Metadata["token"].(string)
 	if !ok {
-		log.Printf("Missing token in task metadata for task: %s", task.ID)
+		glog.Warningf("Missing token in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
 	// Get app source from metadata
 	appSource, ok := task.Metadata["source"].(string)
 	if !ok {
-		log.Printf("Missing source in task metadata for task: %s", task.ID)
+		glog.Warningf("Missing source in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing source in task metadata")
 	}
 
 	// Get cfgType from metadata
 	cfgType, ok := task.Metadata["cfgType"].(string)
 	if !ok {
-		log.Printf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
+		glog.Warningf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
 		cfgType = "app" // Default to app type
 	}
 
 	// Get rawAppName and requestHash from metadata
 	rawAppName, ok := task.Metadata["rawAppName"].(string)
 	if !ok || rawAppName == "" {
-		log.Printf("Missing rawAppName in task metadata for task: %s", task.ID)
+		glog.Warningf("Missing rawAppName in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing rawAppName in task metadata")
 	}
 
 	requestHash, ok := task.Metadata["requestHash"].(string)
 	if !ok || requestHash == "" {
-		log.Printf("Missing requestHash in task metadata for task: %s", task.ID)
+		glog.Warningf("Missing requestHash in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing requestHash in task metadata")
 	}
 
@@ -103,7 +104,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 
 	// Construct URL app name: rawAppName + requestHash (not rawAppName + Title)
 	urlAppName := rawAppName + requestHash
-	log.Printf("Clone operation: rawAppName=%s, requestHash=%s, title=%s, urlAppName=%s for task: %s", rawAppName, requestHash, title, urlAppName, task.ID)
+	glog.Infof("Clone operation: rawAppName=%s, requestHash=%s, title=%s, urlAppName=%s for task: %s", rawAppName, requestHash, title, urlAppName, task.ID)
 
 	// Convert app source to API source parameter
 	var apiSource string
@@ -113,7 +114,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		apiSource = "market"
 	}
 
-	log.Printf("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
+	glog.Infof("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
 
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
@@ -122,15 +123,15 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	var urlStr string
 	// Use rawAppName+requestHash for URL in clone operations
 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, urlAppName)
-	log.Printf("Using app API for clone installation: %s", urlStr)
+	glog.Infof("Using app API for clone installation: %s", urlStr)
 
-	log.Printf("App service URL: %s for task: %s", urlStr, task.ID)
+	glog.Infof("App service URL: %s for task: %s", urlStr, task.ID)
 
 	// Get envs from metadata
 	var envs []AppEnvVar
 	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
 		envs, _ = envsData.([]AppEnvVar)
-		log.Printf("Retrieved %d environment variables for task: %s", len(envs), task.ID)
+		glog.Infof("Retrieved %d environment variables for task: %s", len(envs), task.ID)
 	}
 
 	// Get entrances from metadata
@@ -139,7 +140,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		if entrancesSlice, ok := entrancesData.([]AppEntrance); ok {
 			entrances = entrancesSlice
 		}
-		log.Printf("Retrieved %d entrances for task: %s", len(entrances), task.ID)
+		glog.Infof("Retrieved %d entrances for task: %s", len(entrances), task.ID)
 	}
 
 	// Get VC from purchase receipt using rawAppName and inject into environment variables
@@ -148,7 +149,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		settingsManager = tm.settingsManager
 		tm.mu.RUnlock()
 	} else {
-		log.Printf("Failed to acquire read lock for settingsManager, skipping VC injection for task: %s", task.ID)
+		glog.Warningf("Failed to acquire read lock for settingsManager, skipping VC injection for task: %s", task.ID)
 	}
 
 	if settingsManager != nil {
@@ -160,7 +161,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 				if envs[i].EnvName == "VERIFIABLE_CREDENTIAL" {
 					envs[i].Value = vc
 					vcExists = true
-					log.Printf("Updated VERIFIABLE_CREDENTIAL in envs for task: %s", task.ID)
+					glog.V(3).Infof("Updated VERIFIABLE_CREDENTIAL in envs for task: %s", task.ID)
 					break
 				}
 			}
@@ -170,13 +171,13 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 					EnvName: "VERIFIABLE_CREDENTIAL",
 					Value:   vc,
 				})
-				log.Printf("Added VERIFIABLE_CREDENTIAL to envs for task: %s", task.ID)
+				glog.Infof("Added VERIFIABLE_CREDENTIAL to envs for task: %s", task.ID)
 			}
 		} else {
-			log.Printf("VC not found for app clone, skipping VERIFIABLE_CREDENTIAL injection for task: %s", task.ID)
+			glog.Infof("VC not found for app clone, skipping VERIFIABLE_CREDENTIAL injection for task: %s", task.ID)
 		}
 	} else {
-		log.Printf("Settings manager not available, skipping VC injection for task: %s", task.ID)
+		glog.Infof("Settings manager not available, skipping VC injection for task: %s", task.ID)
 	}
 
 	// Get images from metadata
@@ -203,10 +204,10 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 
 	ms, err := json.Marshal(cloneInfo)
 	if err != nil {
-		log.Printf("Failed to marshal clone info for task %s: %v", task.ID, err)
+		glog.Errorf("Failed to marshal clone info for task %s: %v", task.ID, err)
 		return "", err
 	}
-	log.Printf("Clone request prepared: url=%s, cloneInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
+	glog.Infof("Clone request prepared: url=%s, cloneInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
 
 	headers := map[string]string{
 		"X-Authorization": token,
@@ -217,10 +218,10 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	log.Printf("Sending HTTP request for app clone: task=%s", task.ID)
+	glog.Infof("Sending HTTP request for app clone: task=%s", task.ID)
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
-		log.Printf("HTTP request failed for app clone: task=%s, error=%v", task.ID, err)
+		glog.Errorf("HTTP request failed for app clone: task=%s, error=%v", task.ID, err)
 		// Create detailed error result
 		errorResult := map[string]interface{}{
 			"operation":   "clone",
@@ -240,12 +241,12 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		return string(errorJSON), err
 	}
 
-	log.Printf("HTTP request completed successfully for app clone: task=%s, response_length=%d", task.ID, len(response))
+	glog.Infof("HTTP request completed successfully for app clone: task=%s, response_length=%d", task.ID, len(response))
 
 	// Parse response to extract opID if clone is successful
 	var responseData map[string]interface{}
 	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
-		log.Printf("Failed to parse response JSON for task %s: %v", task.ID, err)
+		glog.Errorf("Failed to parse response JSON for task %s: %v", task.ID, err)
 		// Create error result for JSON parsing failure
 		errorResult := map[string]interface{}{
 			"operation":    "clone",
@@ -271,9 +272,9 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		if data, ok := responseData["data"].(map[string]interface{}); ok {
 			if opID, ok := data["opID"].(string); ok && opID != "" {
 				task.OpID = opID
-				log.Printf("Successfully extracted opID: %s for task: %s", opID, task.ID)
+				glog.Infof("Successfully extracted opID: %s for task: %s", opID, task.ID)
 			} else {
-				log.Printf("opID not found in response data for task: %s", task.ID)
+				glog.Infof("opID not found in response data for task: %s", task.ID)
 				// Return backend response with additional context
 				errorResult := map[string]interface{}{
 					"operation":        "clone",
@@ -294,7 +295,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 				return string(errorJSON), fmt.Errorf("opID not found in response data")
 			}
 		} else {
-			log.Printf("Data field not found or not a map in response for task: %s", task.ID)
+			glog.Infof("Data field not found or not a map in response for task: %s", task.ID)
 			// Return backend response with additional context
 			errorResult := map[string]interface{}{
 				"operation":        "clone",
@@ -314,7 +315,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 			return string(errorJSON), fmt.Errorf("data field not found or not a map in response")
 		}
 	} else {
-		log.Printf("Clone code is not 200 for task: %s, code: %v", task.ID, code)
+		glog.Infof("Clone code is not 200 for task: %s, code: %v", task.ID, code)
 		// Return backend response with additional context
 		errorResult := map[string]interface{}{
 			"operation":        "clone",
@@ -351,6 +352,6 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		"status":           "success",
 	}
 	successJSON, _ := json.Marshal(successResult)
-	log.Printf("App clone completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
+	glog.Infof("App clone completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
 	return string(successJSON), nil
 }

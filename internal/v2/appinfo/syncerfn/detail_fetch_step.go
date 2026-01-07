@@ -246,14 +246,14 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	}
 
 	// Log response status for debugging
-	glog.V(2).Infof("Batch request completed with status: %d for apps: %v (request took %v)",
+	glog.V(3).Infof("Batch request completed with status: %d for apps: %v (request took %v)",
 		resp.StatusCode(), appIDs, requestDuration)
 
 	// Handle different status codes
 	switch resp.StatusCode() {
 	case 200:
 		// Success - process the apps and replace simplified data with detailed data
-		glog.V(2).Infof("Processing successful response for batch with %d apps", len(appIDs))
+		glog.V(3).Infof("Processing successful response for batch with %d apps", len(appIDs))
 
 		// CRITICAL: Get sourceID BEFORE acquiring mutex lock to avoid deadlock
 		// GetMarketSource() uses RLock() internally, and calling it while holding Lock()
@@ -507,7 +507,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 			glog.V(3).Infof("WARNING: Apps not found in batch: %v", rawResponse["not_found"])
 		}
 
-		glog.V(2).Infof("Successfully fetched and replaced details for %d/%d apps in batch", successCount, len(appIDs))
+		glog.V(3).Infof("Successfully fetched and replaced details for %d/%d apps in batch", successCount, len(appIDs))
 		return successCount, errorCount
 
 	case 202:
@@ -569,7 +569,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		}
 	}()
 
-	glog.V(2).Infof("Starting to remove app %s %s from cache", appID, appName)
+	glog.V(3).Infof("Starting to remove app %s %s from cache", appID, appName)
 
 	// Get app name for matching - when an app is suspended, remove ALL versions of that app
 
@@ -607,7 +607,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 	var removals []RemovalData
 
-	glog.V(2).Infof("Processing %d users for app removal (read phase)", len(data.Cache.Users))
+	glog.V(3).Infof("Processing %d users for app removal (read phase)", len(data.Cache.Users))
 
 	for userID, userData := range data.Cache.Users {
 		sourceData, sourceExists := userData.Sources[sourceID]

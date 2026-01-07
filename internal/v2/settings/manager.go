@@ -3,7 +3,6 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"market/internal/v2/utils"
 	"os"
 	"strings"
@@ -31,7 +30,7 @@ func (sm *SettingsManager) SetCacheManager(cacheManager CacheManager) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.cacheManager = cacheManager
-	log.Println("Cache manager set for settings manager")
+	glog.V(4).Info("Cache manager set for settings manager")
 }
 
 // GetRedisClient returns the Redis client for external modules
@@ -45,16 +44,16 @@ func (sm *SettingsManager) GetRedisClient() RedisClient {
 func (sm *SettingsManager) syncMarketSourcesToCache() {
 	if sm.cacheManager != nil {
 		if err := sm.cacheManager.SyncMarketSourcesToCache(sm.marketSources.Sources); err != nil {
-			log.Printf("Failed to sync market sources to cache: %v", err)
+			glog.Errorf("Failed to sync market sources to cache: %v", err)
 		} else {
-			log.Printf("Successfully synced %d market sources to cache", len(sm.marketSources.Sources))
+			glog.V(4).Infof("Successfully synced %d market sources to cache", len(sm.marketSources.Sources))
 		}
 	}
 }
 
 // Initialize initializes the settings manager
 func (sm *SettingsManager) Initialize() error {
-	log.Println("Initializing settings manager...")
+	glog.Info("Initializing settings manager...")
 
 	// Initialize market sources
 	if err := sm.initializeMarketSources(); err != nil {
@@ -74,19 +73,19 @@ func (sm *SettingsManager) initializeMarketSources() error {
 	// Try to load from Redis first
 	config, err := sm.loadMarketSourcesFromRedis()
 	if err != nil {
-		log.Printf("Failed to load market sources from Redis: %v", err)
+		glog.Errorf("Failed to load market sources from Redis: %v", err)
 
 		// Create default configuration from environment variables
 		config = sm.createDefaultMarketSources()
 
 		// Save default config to Redis
 		if err := sm.saveMarketSourcesToRedis(config); err != nil {
-			log.Printf("Failed to save Official Market Sources to Redis: %v", err)
+			glog.Errorf("Failed to save Official Market Sources to Redis: %v", err)
 		}
 
-		log.Printf("Loaded Official Market Sources from environment")
+		glog.V(4).Info("Loaded Official Market Sources from environment")
 	} else {
-		log.Printf("Loaded market sources from Redis: %d sources", len(config.Sources))
+		glog.V(4).Infof("Loaded market sources from Redis: %d sources", len(config.Sources))
 
 		// Merge default configuration with existing Redis configuration
 		// This ensures new default sources (like "local") are added to existing config
@@ -94,7 +93,7 @@ func (sm *SettingsManager) initializeMarketSources() error {
 
 		// Save merged config back to Redis if there were changes
 		if err := sm.saveMarketSourcesToRedis(config); err != nil {
-			log.Printf("Failed to save merged market sources to Redis: %v", err)
+			glog.Errorf("Failed to save merged market sources to Redis: %v", err)
 		}
 	}
 
@@ -109,10 +108,10 @@ func (sm *SettingsManager) initializeMarketSources() error {
 // ReloadMarketSources reloads market sources from Redis into memory
 // This is useful after syncing sources from chartrepo
 func (sm *SettingsManager) ReloadMarketSources() error {
-	log.Println("Reloading market sources from Redis...")
+	glog.V(4).Info("Reloading market sources from Redis...")
 	config, err := sm.loadMarketSourcesFromRedis()
 	if err != nil {
-		log.Printf("Failed to reload market sources from Redis: %v", err)
+		glog.Errorf("Failed to reload market sources from Redis: %v", err)
 		return err
 	}
 
@@ -124,7 +123,7 @@ func (sm *SettingsManager) ReloadMarketSources() error {
 	sm.marketSources = config
 	sm.mu.Unlock()
 
-	log.Printf("Successfully reloaded %d market sources from Redis", len(config.Sources))
+	glog.V(4).Infof("Successfully reloaded %d market sources from Redis", len(config.Sources))
 	return nil
 }
 
@@ -133,19 +132,19 @@ func (sm *SettingsManager) initializeAPIEndpoints() error {
 	// Try to load from Redis first
 	config, err := sm.loadAPIEndpointsFromRedis()
 	if err != nil {
-		log.Printf("Failed to load API endpoints from Redis: %v", err)
+		glog.Errorf("Failed to load API endpoints from Redis: %v", err)
 
 		// Create default configuration from environment variables
 		config = sm.createDefaultAPIEndpoints()
 
 		// Save default config to Redis
 		if err := sm.saveAPIEndpointsToRedis(config); err != nil {
-			log.Printf("Failed to save default API endpoints to Redis: %v", err)
+			glog.Errorf("Failed to save default API endpoints to Redis: %v", err)
 		}
 
-		log.Printf("Loaded default API endpoints from environment")
+		glog.V(4).Info("Loaded default API endpoints from environment")
 	} else {
-		log.Printf("Loaded API endpoints from Redis")
+		glog.V(4).Info("Loaded API endpoints from Redis")
 	}
 
 	// Set in memory
@@ -163,25 +162,25 @@ func getMarketServiceURL() string {
 	if remote := getCachedSystemRemoteService(); remote != "" {
 		remote = strings.TrimSuffix(remote, "/")
 		baseURL := remote + "/market"
-		log.Printf("Using OLARES_SYSTEM_REMOTE_SERVICE from systemenv watcher: %s -> %s", remote, baseURL)
+		glog.Infof("Using OLARES_SYSTEM_REMOTE_SERVICE from systemenv watcher: %s -> %s", remote, baseURL)
 		return baseURL
 	}
 
 	// Then check MARKET_PROVIDER
 	baseURL := os.Getenv("MARKET_PROVIDER")
 	if baseURL != "" {
-		log.Printf("Using MARKET_PROVIDER from environment: %s", baseURL)
+		glog.Infof("Using MARKET_PROVIDER from environment: %s", baseURL)
 		return baseURL
 	}
 
 	// Finally check SYNCER_REMOTE
 	baseURL = os.Getenv("SYNCER_REMOTE")
 	if baseURL != "" {
-		log.Printf("Using SYNCER_REMOTE from environment: %s", baseURL)
+		glog.Infof("Using SYNCER_REMOTE from environment: %s", baseURL)
 		return baseURL
 	}
 
-	log.Printf("No market service URL found in environment variables")
+	glog.Info("No market service URL found in environment variables")
 	return ""
 }
 
@@ -190,22 +189,22 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 
 	baseURL := getMarketServiceURL()
 
-	log.Printf("Market service base URL: %s", baseURL)
+	glog.Infof("Market service base URL: %s", baseURL)
 
 	// Add https:// prefix if baseURL doesn't start with http:// or https://
 	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		baseURL = "https://" + baseURL
-		log.Printf("Added https:// prefix to baseURL: %s", baseURL)
+		glog.Infof("Added https:// prefix to baseURL: %s", baseURL)
 	}
 
 	if baseURL == "" {
 		baseURL = "https://appstore-server-prod.bttcdn.com"
-		log.Printf("SYNCER_REMOTE not set, using default: %s", baseURL)
+		glog.Infof("SYNCER_REMOTE not set, using default: %s", baseURL)
 	}
 
 	// Remove trailing slash
 	baseURL = strings.TrimSuffix(baseURL, "/")
-	log.Printf("Base URL after trimming: %s", baseURL)
+	glog.Infof("Base URL after trimming: %s", baseURL)
 
 	defaultSource := &MarketSource{
 		ID:          "market.olares",
@@ -218,7 +217,7 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 		Description: "Official Market Sources loaded from environment",
 	}
 
-	log.Printf("Created default market source with BaseURL: %s", defaultSource.BaseURL)
+	glog.Infof("Created default market source with BaseURL: %s", defaultSource.BaseURL)
 
 	localSource := &MarketSource{
 		ID:          "upload",
@@ -389,7 +388,7 @@ func (sm *SettingsManager) GetMarketSource() []*MarketSource {
 	// Get chart repository service host from environment variable
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
 	if chartRepoHost == "" {
-		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, falling back to default market sources")
+		glog.Info("CHART_REPO_SERVICE_HOST environment variable not set, falling back to default market sources")
 		// Return default market sources as fallback
 		defaultSource := sm.GetDefaultMarketSource()
 		if defaultSource != nil {
@@ -401,7 +400,7 @@ func (sm *SettingsManager) GetMarketSource() []*MarketSource {
 	// Get market sources from chart repository service
 	chartRepoConfig, err := getMarketSourceFromChartRepo(chartRepoHost)
 	if err != nil {
-		log.Printf("Failed to get market sources from chart repo: %v, falling back to default market sources", err)
+		glog.Errorf("Failed to get market sources from chart repo: %v, falling back to default market sources", err)
 		// Return default market sources as fallback
 		defaultSource := sm.GetDefaultMarketSource()
 		if defaultSource != nil {
@@ -426,7 +425,7 @@ func (sm *SettingsManager) GetMarketSource() []*MarketSource {
 		marketSources = append(marketSources, marketSource)
 	}
 
-	log.Printf("Retrieved %d market sources from chart repository service", len(marketSources))
+	glog.Infof("Retrieved %d market sources from chart repository service", len(marketSources))
 	return marketSources
 }
 
@@ -441,25 +440,25 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 		if sm.cacheManager.HasUserStateDataForSource(sourceID) {
 			return fmt.Errorf("cannot delete market source '%s': some users have non-empty state data for this source", sourceID)
 		}
-		log.Printf("No user state data found for source: %s, proceeding with deletion", sourceID)
+		glog.Infof("No user state data found for source: %s, proceeding with deletion", sourceID)
 	} else {
-		log.Println("Cache manager not available, skipping user state check")
+		glog.Info("Cache manager not available, skipping user state check")
 	}
 
 	// First, delete from chart repository service
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
 	if chartRepoHost == "" {
-		log.Println("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
+		glog.Info("CHART_REPO_SERVICE_HOST environment variable not set, skipping chart repo sync")
 	} else {
 		if err := deleteMarketSourceFromChartRepo(chartRepoHost, sourceID); err != nil {
 			// Only allow continuation for "source not found" error
 			if strings.Contains(err.Error(), "source with ID") && strings.Contains(err.Error(), "not found") {
-				log.Printf("Warning: market source not found in chart repo: %v, continuing with local deletion", err)
+				glog.Infof("Warning: market source not found in chart repo: %v, continuing with local deletion", err)
 			} else {
 				return fmt.Errorf("failed to delete market source from chart repo: %w", err)
 			}
 		} else {
-			log.Printf("Successfully deleted market source from chart repo: %s", sourceID)
+			glog.Infof("Successfully deleted market source from chart repo: %s", sourceID)
 		}
 	}
 
@@ -504,7 +503,7 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 	// Sync to cache
 	sm.syncMarketSourcesToCache()
 
-	log.Printf("Deleted market source: %s", sourceID)
+	glog.Infof("Deleted market source: %s", sourceID)
 	return nil
 }
 
@@ -533,7 +532,7 @@ func (sm *SettingsManager) BuildAPIURL(baseURL, endpointPath string) string {
 	// Add https:// prefix if baseURL doesn't start with http://, https:// or ftp://
 	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") && !strings.HasPrefix(baseURL, "ftp://") && !strings.HasPrefix(baseURL, "file://") {
 		baseURL = "https://" + baseURL
-		log.Printf("Added https:// prefix to baseURL: %s", baseURL)
+		glog.Infof("Added https:// prefix to baseURL: %s", baseURL)
 	}
 
 	baseURL = strings.TrimSuffix(baseURL, "/")
@@ -710,8 +709,8 @@ func (sm *SettingsManager) saveAPIEndpointsToRedis(config *APIEndpointsConfig) e
 func (sm *SettingsManager) mergeWithDefaultConfig(config *MarketSourcesConfig) *MarketSourcesConfig {
 	defaultConfig := sm.createDefaultMarketSources()
 
-	log.Printf("Merging default configuration with existing Redis configuration")
-	log.Printf("Existing sources: %d, Default sources: %d", len(config.Sources), len(defaultConfig.Sources))
+	glog.Info("Merging default configuration with existing Redis configuration")
+	glog.Infof("Existing sources: %d, Default sources: %d", len(config.Sources), len(defaultConfig.Sources))
 
 	// Create a map of existing source IDs for quick lookup
 	existingSourceIDs := make(map[string]bool)
@@ -720,12 +719,12 @@ func (sm *SettingsManager) mergeWithDefaultConfig(config *MarketSourcesConfig) *
 	// Filter out "Official-Market-Sources" entries and build existing source map
 	for _, existingSource := range config.Sources {
 		if existingSource.ID == "Official-Market-Sources" {
-			log.Printf("Removing deprecated source: %s (%s)", existingSource.Name, existingSource.ID)
+			glog.Infof("Removing deprecated source: %s (%s)", existingSource.Name, existingSource.ID)
 			continue
 		}
 		existingSourceIDs[existingSource.ID] = true
 		filteredSources = append(filteredSources, existingSource)
-		log.Printf("Existing source: %s (%s)", existingSource.Name, existingSource.ID)
+		glog.Infof("Existing source: %s (%s)", existingSource.Name, existingSource.ID)
 	}
 
 	// Update config sources with filtered list
@@ -735,29 +734,29 @@ func (sm *SettingsManager) mergeWithDefaultConfig(config *MarketSourcesConfig) *
 	addedSources := 0
 	for _, defaultSource := range defaultConfig.Sources {
 		if !existingSourceIDs[defaultSource.ID] {
-			log.Printf("Adding new default source: %s (%s)", defaultSource.Name, defaultSource.ID)
+			glog.Infof("Adding new default source: %s (%s)", defaultSource.Name, defaultSource.ID)
 			config.Sources = append(config.Sources, defaultSource)
 			addedSources++
 		} else {
-			log.Printf("Default source already exists: %s (%s)", defaultSource.Name, defaultSource.ID)
+			glog.Infof("Default source already exists: %s (%s)", defaultSource.Name, defaultSource.ID)
 		}
 	}
 
 	if addedSources > 0 {
-		log.Printf("Added %d new sources to existing configuration", addedSources)
+		glog.Infof("Added %d new sources to existing configuration", addedSources)
 		config.UpdatedAt = time.Now()
 	} else {
-		log.Printf("No new sources to add, existing configuration is up to date")
+		glog.Info("No new sources to add, existing configuration is up to date")
 	}
 
 	// Ensure default source is set
 	if config.DefaultSource == "" {
-		log.Printf("Setting default source to: %s", defaultConfig.DefaultSource)
+		glog.Infof("Setting default source to: %s", defaultConfig.DefaultSource)
 		config.DefaultSource = defaultConfig.DefaultSource
 		config.UpdatedAt = time.Now()
 	}
 
-	log.Printf("Final configuration has %d sources", len(config.Sources))
+	glog.Infof("Final configuration has %d sources", len(config.Sources))
 	return config
 }
 
@@ -770,7 +769,7 @@ func ClearSettingsRedis(redisClient RedisClient) error {
 	if err := redisClient.Del(RedisKeyAPIEndpoints); err != nil {
 		return fmt.Errorf("failed to delete API endpoints from Redis: %w", err)
 	}
-	log.Println("Settings Redis keys cleared successfully")
+	glog.Info("Settings Redis keys cleared successfully")
 	return nil
 }
 

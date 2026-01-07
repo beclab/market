@@ -317,7 +317,7 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			/*
 				// Check if task can be retried
 				if task.CanRetry() {
-					log.Printf("Task %s failed, will retry after cooldown period (5 minutes). Next retry available at: %v",
+					glog.Infof("Task %s failed, will retry after cooldown period (5 minutes). Next retry available at: %v",
 						task.ID, task.LastFailureTime.Add(5*time.Minute))
 					task.ResetForRetry()
 
@@ -325,7 +325,7 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 					go func() {
 						time.Sleep(5 * time.Minute) // Wait for cooldown period
 						if err := h.EnqueueTask(task); err != nil {
-							log.Printf("Failed to re-enqueue task for retry: %s, error: %v", task.ID, err)
+							glog.Errorf("Failed to re-enqueue task for retry: %s, error: %v", task.ID, err)
 							h.markTaskFailed(task, time.Now(), 0, "retry", err.Error())
 						}
 					}()
@@ -1377,7 +1377,7 @@ func (h *Hydrator) NotifyPendingDataUpdate(userID, sourceID string, pendingData 
 		return
 	}
 
-	glog.V(2).Infof("Received pending data update notification for user: %s, source: %s", userID, sourceID)
+	glog.V(3).Infof("Received pending data update notification for user: %s, source: %s", userID, sourceID)
 
 	// Create tasks from the pending data immediately
 	h.createTasksFromPendingDataMap(userID, sourceID, pendingData)

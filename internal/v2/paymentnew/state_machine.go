@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/golang/glog"
 
 	"market/internal/v2/types"
 )
@@ -75,7 +75,7 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 		}
 		if loaded, err := psm.LoadState(parts[0], parts[1], parts[2]); err == nil && loaded != nil {
 			state = loaded
-			log.Printf("updateState: Loaded state from Redis for key %s", key)
+			glog.Warningf("updateState: Loaded state from Redis for key %s", key)
 		} else {
 			return fmt.Errorf("state not found for key %s", key)
 		}
@@ -89,7 +89,7 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 					// Only use loaded state if it has FrontendData, otherwise keep memory state
 					if loaded.FrontendData != nil && len(loaded.FrontendData) > 0 {
 						state = loaded
-						log.Printf("updateState: Reloaded state from Redis for key %s (memory state had empty FrontendData)", key)
+						glog.Infof("updateState: Reloaded state from Redis for key %s (memory state had empty FrontendData)", key)
 					}
 				}
 			}
@@ -111,7 +111,7 @@ func (psm *PaymentStateMachine) updateState(key string, updater func(*PaymentSta
 	// Sync to persistent store asynchronously to avoid blocking
 	go func(st *PaymentState) {
 		if err := psm.SaveState(st); err != nil {
-			log.Printf("Failed to save updated state to store for key %s: %v", key, err)
+			glog.Errorf("Failed to save updated state to store for key %s: %v", key, err)
 		}
 	}(&newState)
 
@@ -140,14 +140,14 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 		// Try to load from Redis if not in memory
 		if loaded, err := psm.LoadState(userID, appID, productID); err == nil && loaded != nil {
 			state = loaded
-			log.Printf("processEvent: Loaded state from Redis for key %s", key)
+			glog.Warningf("processEvent: Loaded state from Redis for key %s", key)
 		} else {
 			return fmt.Errorf("state not found for key %s", key)
 		}
 	}
 
-	log.Printf("Processing event %s for state %s", event, key)
-	log.Printf("Current state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s, FrontendData length=%d",
+	glog.Infof("Processing event %s for state %s", event, key)
+	glog.Infof("Current state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s, FrontendData length=%d",
 		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus, len(state.FrontendData))
 
 	// Handle state transition by event type
@@ -172,7 +172,7 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 	}
 
 	if err != nil {
-		log.Printf("Error processing event %s: %v", event, err)
+		glog.Errorf("Error processing event %s: %v", event, err)
 		return err
 	}
 
@@ -183,11 +183,11 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 	psm.mu.Unlock()
 
 	if err := psm.SaveState(nextState); err != nil {
-		log.Printf("Failed to persist state after event %s for %s: %v", event, key, err)
+		glog.Errorf("Failed to persist state after event %s for %s: %v", event, key, err)
 	}
 
-	log.Printf("State updated after event %s", event)
-	log.Printf("New state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
+	glog.Infof("State updated after event %s", event)
+	glog.Infof("New state: PaymentNeed=%v, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
 		nextState.PaymentNeed, nextState.DeveloperSync, nextState.LarePassSync, nextState.SignatureStatus, nextState.PaymentStatus)
 
 	return nil
@@ -195,7 +195,7 @@ func (psm *PaymentStateMachine) processEvent(ctx context.Context, userID, appID,
 
 // handleStartPayment handles start_payment event
 func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
-	log.Printf("Handling start_payment event")
+	glog.Info("Handling start_payment event")
 
 	newState := *state
 	newState.PaymentNeed = PaymentNeedRequired
@@ -220,8 +220,8 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	// Branch by current signature/payment status to advance flow
 	// 0) Error states that should short-circuit (no further processing)
 	if newState.SignatureStatus == SignatureErrorNoRecord {
-		log.Printf("handleStartPayment: signature status is error_no_record, no further processing needed for %s", newState.GetKey())
-		log.Printf("handleStartPayment: FrontendData length=%d before returning", len(newState.FrontendData))
+		glog.Infof("handleStartPayment: signature status is error_no_record, no further processing needed for %s", newState.GetKey())
+		glog.Infof("handleStartPayment: FrontendData length=%d before returning", len(newState.FrontendData))
 		// Ensure FrontendData is preserved (should already be set, but ensure it's not nil)
 		if newState.FrontendData == nil {
 			newState.FrontendData = make(map[string]interface{})
@@ -232,7 +232,7 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	// 0.5) Signature invalid → reset and re-trigger sign flow
 	isReSignFlow := false
 	if newState.SignatureStatus == SignatureErrorNeedReSign {
-		log.Printf("handleStartPayment: signature marked invalid, resetting state for re-sign (%s)", newState.GetKey())
+		glog.Infof("handleStartPayment: signature marked invalid, resetting state for re-sign (%s)", newState.GetKey())
 		resetForResign := func(ps *PaymentState) {
 			ps.SignatureStatus = SignatureRequired
 			ps.JWS = ""
@@ -249,7 +249,7 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 				}
 				return nil
 			}); err != nil {
-				log.Printf("handleStartPayment: failed to persist re-sign reset: %v", err)
+				glog.Errorf("handleStartPayment: failed to persist re-sign reset: %v", err)
 			}
 		}
 	}
@@ -294,9 +294,9 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 
 			// Notify frontend of signature_required status
 			if err := notifyFrontendStateUpdate(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID, "signature_required"); err != nil {
-				log.Printf("Failed to notify frontend signature_required for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+				glog.Errorf("Failed to notify frontend signature_required for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
 			} else {
-				log.Printf("Successfully notified frontend signature_required for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+				glog.Infof("Successfully notified frontend signature_required for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 			}
 		}
 		return &newState, nil
@@ -307,10 +307,10 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 	if newState.SignatureStatus == SignatureRequiredAndSigned &&
 		newState.PaymentStatus == PaymentFrontendCompleted {
 		if newState.DeveloperSync == DeveloperSyncCompleted && newState.VC != "" {
-			log.Printf("handleStartPayment: VC already confirmed, skipping VC polling for %s", newState.GetKey())
+			glog.Infof("handleStartPayment: VC already confirmed, skipping VC polling for %s", newState.GetKey())
 			return &newState, nil
 		}
-		log.Printf("handleStartPayment: signature ready and payment already completed; restarting VC polling for %s", newState.GetKey())
+		glog.Infof("handleStartPayment: signature ready and payment already completed; restarting VC polling for %s", newState.GetKey())
 		if psm != nil {
 			go psm.pollForVCFromDeveloper(&newState)
 		}
@@ -343,7 +343,7 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 						nil, // appInfo not available in state machine context
 					)
 				} else {
-					log.Printf("Cannot notify frontend payment required: invalid developer DID in newState")
+					glog.Info("Cannot notify frontend payment required: invalid developer DID in newState")
 				}
 
 				_ = psm.updateState(newState.GetKey(), func(s *PaymentState) error {
@@ -382,7 +382,7 @@ func (psm *PaymentStateMachine) handleStartPayment(ctx context.Context, state *P
 
 // handleFrontendPaymentStarted handles frontend_payment_started event
 func (psm *PaymentStateMachine) handleFrontendPaymentStarted(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
-	log.Printf("Handling frontend_payment_started event")
+	glog.Info("Handling frontend_payment_started event")
 
 	var data map[string]interface{}
 
@@ -417,7 +417,7 @@ func (psm *PaymentStateMachine) handleFrontendPaymentStarted(ctx context.Context
 
 // handleSignatureSubmitted handles signature_submitted event
 func (psm *PaymentStateMachine) handleSignatureSubmitted(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
-	log.Printf("Handling signature_submitted event")
+	glog.Info("Handling signature_submitted event")
 
 	// Extract JWS and SignBody from payload
 	type SignaturePayload struct {
@@ -444,7 +444,7 @@ func (psm *PaymentStateMachine) handleSignatureSubmitted(ctx context.Context, st
 
 // handlePaymentCompleted handles payment_completed event
 func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
-	log.Printf("Handling payment_completed event")
+	glog.Info("Handling payment_completed event")
 
 	// Extract txHash from payload
 	type PaymentPayload struct {
@@ -465,9 +465,9 @@ func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, stat
 	// Notify frontend of waiting_developer_confirmation status
 	if psm.dataSender != nil {
 		if err := notifyFrontendStateUpdate(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID, "waiting_developer_confirmation"); err != nil {
-			log.Printf("Failed to notify frontend waiting_developer_confirmation for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+			glog.Errorf("Failed to notify frontend waiting_developer_confirmation for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
 		} else {
-			log.Printf("Successfully notified frontend waiting_developer_confirmation for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+			glog.Infof("Successfully notified frontend waiting_developer_confirmation for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 		}
 	}
 
@@ -479,7 +479,7 @@ func (psm *PaymentStateMachine) handlePaymentCompleted(ctx context.Context, stat
 
 // handleVCReceived handles vc_received event
 func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
-	log.Printf("Handling vc_received event")
+	glog.Info("Handling vc_received event")
 
 	// Extract VC from payload
 	payloadData, ok := payload.(string)
@@ -492,33 +492,33 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 	newState.DeveloperSync = DeveloperSyncCompleted
 	newState.PaymentStatus = PaymentDeveloperConfirmed
 	newState.FrontendData = nil
-	log.Printf("vc_received: updated state user=%s app=%s product=%s developerSync=%s paymentStatus=%s", newState.UserID, newState.AppID, newState.ProductID, newState.DeveloperSync, newState.PaymentStatus)
+	glog.Infof("vc_received: updated state user=%s app=%s product=%s developerSync=%s paymentStatus=%s", newState.UserID, newState.AppID, newState.ProductID, newState.DeveloperSync, newState.PaymentStatus)
 
 	// Store purchase info to Redis
 	go func(stateCopy PaymentState) {
 		if err := psm.storePurchaseInfo(&stateCopy); err != nil {
-			log.Printf("storePurchaseInfo failed for user=%s app=%s product=%s: %v", stateCopy.UserID, stateCopy.AppID, stateCopy.ProductID, err)
+			glog.Errorf("storePurchaseInfo failed for user=%s app=%s product=%s: %v", stateCopy.UserID, stateCopy.AppID, stateCopy.ProductID, err)
 		} else {
-			log.Printf("storePurchaseInfo succeeded for user=%s app=%s product=%s", stateCopy.UserID, stateCopy.AppID, stateCopy.ProductID)
+			glog.Infof("storePurchaseInfo succeeded for user=%s app=%s product=%s", stateCopy.UserID, stateCopy.AppID, stateCopy.ProductID)
 		}
 	}(newState)
 
 	// Notify frontend of purchase completion
 	if psm.dataSender != nil {
 		if err := notifyFrontendPurchaseCompleted(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID); err != nil {
-			log.Printf("Failed to notify frontend purchase completed for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+			glog.Errorf("Failed to notify frontend purchase completed for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
 		} else {
-			log.Printf("Successfully notified frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+			glog.Infof("Successfully notified frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 		}
 
 		// Also push VC to LarePass for persistence
 		if err := notifyLarePassToSaveVC(psm.dataSender, &newState); err != nil {
-			log.Printf("Failed to notify LarePass save_payment_vc for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+			glog.Errorf("Failed to notify LarePass save_payment_vc for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
 		} else {
-			log.Printf("Successfully notified LarePass save_payment_vc for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+			glog.Infof("Successfully notified LarePass save_payment_vc for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 		}
 	} else {
-		log.Printf("Warning: dataSender is nil, cannot notify frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+		glog.Infof("Warning: dataSender is nil, cannot notify frontend purchase completed for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 	}
 
 	return &newState, nil
@@ -526,7 +526,7 @@ func (psm *PaymentStateMachine) handleVCReceived(ctx context.Context, state *Pay
 
 // handleRequestSignature handles request_signature event
 func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, state *PaymentState, payload interface{}) (*PaymentState, error) {
-	log.Printf("Handling request_signature event")
+	glog.Info("Handling request_signature event")
 
 	// 更新签名状态
 	newState := *state
@@ -561,9 +561,9 @@ func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, stat
 	// Notify frontend of signature_required status
 	if psm.dataSender != nil {
 		if err := notifyFrontendStateUpdate(psm.dataSender, newState.UserID, newState.AppID, newState.AppName, newState.SourceID, "signature_required"); err != nil {
-			log.Printf("Failed to notify frontend signature_required for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
+			glog.Errorf("Failed to notify frontend signature_required for user=%s app=%s product=%s: %v", newState.UserID, newState.AppID, newState.ProductID, err)
 		} else {
-			log.Printf("Successfully notified frontend signature_required for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
+			glog.Infof("Successfully notified frontend signature_required for user=%s app=%s product=%s", newState.UserID, newState.AppID, newState.ProductID)
 		}
 	}
 
@@ -572,16 +572,16 @@ func (psm *PaymentStateMachine) handleRequestSignature(ctx context.Context, stat
 
 // requestVCFromDeveloper requests VC from developer
 func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
-	log.Printf("Requesting VC from developer for user %s, app %s", state.UserID, state.AppID)
+	glog.Infof("Requesting VC from developer for user %s, app %s", state.UserID, state.AppID)
 
 	if state.JWS == "" {
-		log.Printf("JWS is empty, cannot request VC")
+		glog.Warning("JWS is empty, cannot request VC")
 		return
 	}
 
 	result, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
 	if err != nil {
-		log.Printf("Failed to get VC from developer: %v", err)
+		glog.Errorf("Failed to get VC from developer: %v", err)
 		// If failed to obtain, may need to notify frontend to repay or other handling
 		return
 	}
@@ -589,18 +589,18 @@ func (psm *PaymentStateMachine) requestVCFromDeveloper(state *PaymentState) {
 	// Only when code==0 we trigger vc_received event
 	if result.Code == 0 && result.VC != "" {
 		if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
-			log.Printf("Failed to process vc_received event: %v", err)
+			glog.Errorf("Failed to process vc_received event: %v", err)
 		}
 	}
 }
 
 // pollForVCFromDeveloper polls developer for VC
 func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
-	log.Printf("Starting VC polling for user %s, app %s", state.UserID, state.AppID)
+	glog.Infof("Starting VC polling for user %s, app %s", state.UserID, state.AppID)
 
 	// Refresh state from store to avoid stale in-memory copy (especially after re-sign)
 	if _, err := psm.forceReloadState(state.UserID, state.AppID, state.ProductID); err != nil {
-		log.Printf("VC polling: failed to refresh state from store: %v", err)
+		glog.Errorf("VC polling: failed to refresh state from store: %v", err)
 	}
 
 	key := state.GetKey()
@@ -615,7 +615,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 		}
 		return nil
 	}); err != nil {
-		log.Printf("Skip starting VC polling: %v", err)
+		glog.Errorf("Skip starting VC polling: %v", err)
 		return
 	}
 
@@ -630,7 +630,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		select {
 		case <-ctx.Done():
-			log.Printf("VC polling timed out after %v for user %s, app %s", maxDuration, state.UserID, state.AppID)
+			glog.Infof("VC polling timed out after %v for user %s, app %s", maxDuration, state.UserID, state.AppID)
 			_ = psm.updateState(key, func(s *PaymentState) error {
 				if s.DeveloperSync != DeveloperSyncCompleted {
 					s.DeveloperSync = DeveloperSyncFailed
@@ -645,25 +645,25 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 		latest, err := psm.getState(state.UserID, state.AppID, state.ProductID)
 		if err == nil && latest != nil {
 			if (latest.VC != "" && latest.DeveloperSync == DeveloperSyncCompleted) || (latest.PaymentStatus == PaymentDeveloperConfirmed && latest.VC != "") {
-				log.Printf("VC already confirmed; stop polling for user %s, app %s", state.UserID, state.AppID)
+				glog.Infof("VC already confirmed; stop polling for user %s, app %s", state.UserID, state.AppID)
 				return
 			}
 		}
 
-		log.Printf("VC polling attempt %d/%d for user %s, app %s", attempt, maxAttempts, state.UserID, state.AppID)
+		glog.Infof("VC polling attempt %d/%d for user %s, app %s", attempt, maxAttempts, state.UserID, state.AppID)
 
 		result, qerr := queryVCFromDeveloper(state.JWS, state.DeveloperName)
 		if qerr != nil {
-			log.Printf("VC polling attempt %d failed: %v", attempt, qerr)
+			glog.Errorf("VC polling attempt %d failed: %v", attempt, qerr)
 		} else if result.Code == 0 && result.VC != "" {
-			log.Printf("VC obtained successfully on attempt %d", attempt)
+			glog.Infof("VC obtained successfully on attempt %d", attempt)
 			if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
-				log.Printf("Failed to process vc_received event: %v", err)
+				glog.Errorf("Failed to process vc_received event: %v", err)
 			}
 			return
 		} else {
 			if result.Code == 0 && result.VC == "" {
-				log.Printf("VC polling attempt %d failed: code=0 but VC empty; treating as developer error", attempt)
+				glog.Errorf("VC polling attempt %d failed: code=0 but VC empty; treating as developer error", attempt)
 				if attempt == maxAttempts {
 					_ = psm.updateState(key, func(s *PaymentState) error {
 						if s.DeveloperSync != DeveloperSyncCompleted {
@@ -678,9 +678,9 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 
 			switch result.Code {
 			case 1:
-				log.Printf("VC polling attempt %d received no record; will keep polling until max attempts", attempt)
+				glog.Infof("VC polling attempt %d received no record; will keep polling until max attempts", attempt)
 				if attempt == maxAttempts {
-					log.Printf("VC polling reached max attempts with no record; updating state as no record")
+					glog.Infof("VC polling reached max attempts with no record; updating state as no record")
 					_ = psm.updateState(key, func(s *PaymentState) error {
 						s.DeveloperSync = DeveloperSyncCompleted
 						s.SignatureStatus = SignatureErrorNoRecord
@@ -697,9 +697,9 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 								statusToNotify = "signature_no_record"
 							}
 							if err := notifyFrontendStateUpdate(psm.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, statusToNotify); err != nil {
-								log.Printf("Failed to notify frontend %s for user=%s app=%s product=%s: %v", statusToNotify, latest.UserID, latest.AppID, latest.ProductID, err)
+								glog.Errorf("Failed to notify frontend %s for user=%s app=%s product=%s: %v", statusToNotify, latest.UserID, latest.AppID, latest.ProductID, err)
 							} else {
-								log.Printf("Successfully notified frontend %s for user=%s app=%s product=%s", statusToNotify, latest.UserID, latest.AppID, latest.ProductID)
+								glog.Infof("Successfully notified frontend %s for user=%s app=%s product=%s", statusToNotify, latest.UserID, latest.AppID, latest.ProductID)
 							}
 						}
 					}
@@ -707,7 +707,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 				}
 				// keep polling
 			case 2:
-				log.Printf("VC polling received terminal code=2 (need re-sign), stop polling for user %s, app %s", state.UserID, state.AppID)
+				glog.Infof("VC polling received terminal code=2 (need re-sign), stop polling for user %s, app %s", state.UserID, state.AppID)
 				_ = psm.updateState(key, func(s *PaymentState) error {
 					s.DeveloperSync = DeveloperSyncCompleted
 					s.SignatureStatus = SignatureErrorNeedReSign
@@ -718,15 +718,15 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 					latest, _ := psm.getState(state.UserID, state.AppID, state.ProductID)
 					if latest != nil {
 						if err := notifyFrontendStateUpdate(psm.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, "signature_need_resign"); err != nil {
-							log.Printf("Failed to notify frontend signature_need_resign for user=%s app=%s product=%s: %v", latest.UserID, latest.AppID, latest.ProductID, err)
+							glog.Errorf("Failed to notify frontend signature_need_resign for user=%s app=%s product=%s: %v", latest.UserID, latest.AppID, latest.ProductID, err)
 						} else {
-							log.Printf("Successfully notified frontend signature_need_resign for user=%s app=%s product=%s", latest.UserID, latest.AppID, latest.ProductID)
+							glog.Infof("Successfully notified frontend signature_need_resign for user=%s app=%s product=%s", latest.UserID, latest.AppID, latest.ProductID)
 						}
 					}
 				}
 				return
 			default:
-				log.Printf("VC polling attempt %d received unexpected code=%d; treating as developer error", attempt, result.Code)
+				glog.Infof("VC polling attempt %d received unexpected code=%d; treating as developer error", attempt, result.Code)
 				if attempt == maxAttempts {
 					_ = psm.updateState(key, func(s *PaymentState) error {
 						if s.DeveloperSync != DeveloperSyncCompleted {
@@ -741,7 +741,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 		}
 
 		if attempt == maxAttempts {
-			log.Printf("All VC polling attempts completed without success")
+			glog.Info("All VC polling attempts completed without success")
 			_ = psm.updateState(key, func(s *PaymentState) error {
 				if s.DeveloperSync != DeveloperSyncCompleted {
 					s.DeveloperSync = DeveloperSyncFailed
@@ -759,7 +759,7 @@ func (psm *PaymentStateMachine) pollForVCFromDeveloper(state *PaymentState) {
 // storePurchaseInfo stores purchase info into Redis
 func (psm *PaymentStateMachine) storePurchaseInfo(state *PaymentState) error {
 	if psm.settingsManager == nil {
-		log.Printf("storePurchaseInfo: settings manager is nil for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
+		glog.Infof("storePurchaseInfo: settings manager is nil for user=%s app=%s product=%s", state.UserID, state.AppID, state.ProductID)
 		return errors.New("settings manager is nil")
 	}
 
@@ -785,11 +785,11 @@ func (psm *PaymentStateMachine) storePurchaseInfo(state *PaymentState) error {
 	}
 
 	if err := rc.Set(key, string(data), 0); err != nil {
-		log.Printf("storePurchaseInfo: failed to store purchase info in Redis for key=%s: %v", key, err)
+		glog.Errorf("storePurchaseInfo: failed to store purchase info in Redis for key=%s: %v", key, err)
 		return fmt.Errorf("failed to store purchase info in Redis: %w", err)
 	}
 
-	log.Printf("Purchase info stored in Redis with key: %s", key)
+	glog.Infof("Purchase info stored in Redis with key: %s", key)
 	return nil
 }
 
@@ -808,7 +808,7 @@ func (psm *PaymentStateMachine) cleanupCompletedStates(olderThan time.Duration) 
 	for key, state := range psm.states {
 		if state.IsFinalState() && state.UpdatedAt.Before(cutoff) {
 			delete(psm.states, key)
-			log.Printf("Cleaned up completed state: %s", key)
+			glog.Infof("Cleaned up completed state: %s", key)
 		}
 	}
 }
@@ -937,7 +937,7 @@ func triggerPaymentStateSync(state *PaymentState) error {
 		state.SignatureStatus == SignatureRequiredButPending ||
 		state.SignatureStatus == SignatureErrorNeedReSign ||
 		state.SignatureStatus == SignatureErrorNoRecord {
-		log.Printf("triggerPaymentStateSync: Signature status %s for %s, skip fetch-signature push", state.SignatureStatus, state.GetKey())
+		glog.Infof("triggerPaymentStateSync: Signature status %s for %s, skip fetch-signature push", state.SignatureStatus, state.GetKey())
 		return nil
 	}
 
@@ -1074,10 +1074,10 @@ func (psm *PaymentStateMachine) notifyNotBuyState(userID, appID, productID strin
 	}
 
 	if err := notifyFrontendStateUpdate(psm.dataSender, state.UserID, state.AppID, appName, state.SourceID, "not_buy"); err != nil {
-		log.Printf("notifyNotBuyState: failed to notify frontend not_buy for user=%s app=%s product=%s: %v",
+		glog.Errorf("notifyNotBuyState: failed to notify frontend not_buy for user=%s app=%s product=%s: %v",
 			state.UserID, state.AppID, state.ProductID, err)
 	} else {
-		log.Printf("notifyNotBuyState: notified frontend not_buy for user=%s app=%s product=%s",
+		glog.Infof("notifyNotBuyState: notified frontend not_buy for user=%s app=%s product=%s",
 			state.UserID, state.AppID, state.ProductID)
 	}
 }
@@ -1100,7 +1100,7 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 		return
 	}
 	if state.JWS == "" {
-		log.Printf("triggerVCSync: JWS empty, skip for %s", state.GetKey())
+		glog.Warningf("triggerVCSync: JWS empty, skip for %s", state.GetKey())
 		return
 	}
 
@@ -1109,7 +1109,7 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 		result, err := queryVCFromDeveloper(state.JWS, state.DeveloperName)
 		if err != nil {
 			// On network failure: only set DeveloperSync to failed; do not change Signature status
-			log.Printf("triggerVCSync: failed to query VC from developer (network error): %v", err)
+			glog.Errorf("triggerVCSync: failed to query VC from developer (network error): %v", err)
 			_ = psm.updateState(state.GetKey(), func(s *PaymentState) error {
 				s.DeveloperSync = DeveloperSyncFailed
 				return nil
@@ -1120,7 +1120,7 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 		// For code==0: go unified path → trigger vc_received to finalize state/persistence/notification
 		if result.Code == 0 && result.VC != "" {
 			if err := psm.processEvent(context.Background(), state.UserID, state.AppID, state.ProductID, "vc_received", result.VC); err != nil {
-				log.Printf("triggerVCSync: failed to process vc_received event: %v", err)
+				glog.Errorf("triggerVCSync: failed to process vc_received event: %v", err)
 			}
 			return
 		}
@@ -1155,9 +1155,9 @@ func (psm *PaymentStateMachine) triggerVCSync(state *PaymentState) {
 				}
 				if statusToNotify != "" {
 					if err := notifyFrontendStateUpdate(psm.dataSender, latest.UserID, latest.AppID, latest.AppName, latest.SourceID, statusToNotify); err != nil {
-						log.Printf("Failed to notify frontend %s for user=%s app=%s product=%s: %v", statusToNotify, latest.UserID, latest.AppID, latest.ProductID, err)
+						glog.Errorf("Failed to notify frontend %s for user=%s app=%s product=%s: %v", statusToNotify, latest.UserID, latest.AppID, latest.ProductID, err)
 					} else {
-						log.Printf("Successfully notified frontend %s for user=%s app=%s product=%s", statusToNotify, latest.UserID, latest.AppID, latest.ProductID)
+						glog.Infof("Successfully notified frontend %s for user=%s app=%s product=%s", statusToNotify, latest.UserID, latest.AppID, latest.ProductID)
 					}
 				}
 			}
@@ -1184,12 +1184,12 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}
 		// Add token info if available
 		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		glog.Infof("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
 		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+			glog.Info("buildPurchaseResponse: Added token_info to response for status=signature_required")
 		} else {
-			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
+			glog.Infof("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1203,12 +1203,12 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}
 		// Add token info if available
 		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		glog.Infof("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
 		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+			glog.Info("buildPurchaseResponse: Added token_info to response for status=signature_required")
 		} else {
-			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
+			glog.Infof("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1224,12 +1224,12 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		attachFrontendPayload(response, state.FrontendData)
 		// Add token info if available
 		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		glog.Infof("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
 		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+			glog.Info("buildPurchaseResponse: Added token_info to response for status=signature_required")
 		} else {
-			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
+			glog.Infof("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1240,11 +1240,11 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 	if appInfo != nil {
 		priceConfig = appInfo.Price
 		developerName = getDeveloperNameFromPrice(appInfo)
-		log.Printf("buildPurchaseResponse: Extracted developerName=%s from appInfo", developerName)
+		glog.Infof("buildPurchaseResponse: Extracted developerName=%s from appInfo", developerName)
 	} else {
 		// Fallback to state's developer name
 		developerName = state.DeveloperName
-		log.Printf("buildPurchaseResponse: Using developerName=%s from state (appInfo is nil)", developerName)
+		glog.Infof("buildPurchaseResponse: Using developerName=%s from state (appInfo is nil)", developerName)
 	}
 
 	// 1.5) Error states handling: check if we can still return payment info for retry
@@ -1257,8 +1257,8 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		if state.JWS != "" &&
 			(state.PaymentStatus == PaymentNotificationSent ||
 				state.PaymentStatus == PaymentFrontendStarted) {
-			log.Printf("buildPurchaseResponse: error_no_record but JWS and notification exist, returning payment data for retry")
-			log.Printf("buildPurchaseResponse: FrontendData length=%d for payment_retry_required", len(state.FrontendData))
+			glog.Info("buildPurchaseResponse: error_no_record but JWS and notification exist, returning payment data for retry")
+			glog.Infof("buildPurchaseResponse: FrontendData length=%d for payment_retry_required", len(state.FrontendData))
 			developerDID := getValidDeveloperDID(state)
 			if developerDID == "" {
 				return nil, fmt.Errorf("invalid developer DID in state, cannot create payment data")
@@ -1267,29 +1267,29 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 			if err != nil {
 				return nil, fmt.Errorf("failed to get user DID: %w", err)
 			}
-		paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
-		response := map[string]interface{}{
-			"status":       "payment_retry_required",
-			"payment_data": paymentData,
-			"message":      "developer has no matching payment record, please retry payment",
-		}
-		// Ensure FrontendData is attached - attachFrontendPayload now always sets frontend_data field
-		attachFrontendPayload(response, state.FrontendData)
-		// Token info is already included in payment_data, but also add it at top level for consistency
-		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
-			response["token_info"] = paymentData.TokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
-		} else {
-			// Try to get token info even if payment_data doesn't have it
-			tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-			log.Printf("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
-			if len(tokenInfo) > 0 {
-				response["token_info"] = tokenInfo
-				log.Printf("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
+			paymentData := createFrontendPaymentData(ctx, httpClient, userDID, developerDID, state.ProductID, priceConfig, developerName, psm.settingsManager, state.SourceID)
+			response := map[string]interface{}{
+				"status":       "payment_retry_required",
+				"payment_data": paymentData,
+				"message":      "developer has no matching payment record, please retry payment",
 			}
-		}
-		log.Printf("buildPurchaseResponse: payment_retry_required response includes frontend_data with %d keys", len(response["frontend_data"].(map[string]interface{})))
-		return response, nil
+			// Ensure FrontendData is attached - attachFrontendPayload now always sets frontend_data field
+			attachFrontendPayload(response, state.FrontendData)
+			// Token info is already included in payment_data, but also add it at top level for consistency
+			if paymentData != nil && len(paymentData.TokenInfo) > 0 {
+				response["token_info"] = paymentData.TokenInfo
+				glog.Infof("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
+			} else {
+				// Try to get token info even if payment_data doesn't have it
+				tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
+				glog.Infof("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
+				if len(tokenInfo) > 0 {
+					response["token_info"] = tokenInfo
+					glog.Info("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
+				}
+			}
+			glog.Infof("buildPurchaseResponse: payment_retry_required response includes frontend_data with %d keys", len(response["frontend_data"].(map[string]interface{})))
+			return response, nil
 		}
 		// Otherwise return error message
 		response := map[string]interface{}{
@@ -1298,12 +1298,12 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}
 		// Add token info if available
 		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		glog.Infof("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
 		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+			glog.Info("buildPurchaseResponse: Added token_info to response for status=signature_required")
 		} else {
-			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
+			glog.Infof("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1314,12 +1314,12 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}
 		// Add token info if available
 		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		glog.Infof("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
 		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+			glog.Info("buildPurchaseResponse: Added token_info to response for status=signature_required")
 		} else {
-			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
+			glog.Infof("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1343,14 +1343,14 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		// Token info is already included in payment_data, but also add it at top level for consistency
 		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
 			response["token_info"] = paymentData.TokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
+			glog.Infof("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
 		} else {
 			// Try to get token info even if payment_data doesn't have it
 			tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-			log.Printf("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
+			glog.Infof("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
 			if len(tokenInfo) > 0 {
 				response["token_info"] = tokenInfo
-				log.Printf("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
+				glog.Info("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
 			}
 		}
 		return response, nil
@@ -1378,14 +1378,14 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		// Token info is already included in payment_data, but also add it at top level for consistency
 		if paymentData != nil && len(paymentData.TokenInfo) > 0 {
 			response["token_info"] = paymentData.TokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
+			glog.Infof("buildPurchaseResponse: Added token_info from payment_data to response (count=%d)", len(paymentData.TokenInfo))
 		} else {
 			// Try to get token info even if payment_data doesn't have it
 			tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-			log.Printf("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
+			glog.Infof("buildPurchaseResponse: payment_data has no token_info, GetTokenInfoForState returned %d entries", len(tokenInfo))
 			if len(tokenInfo) > 0 {
 				response["token_info"] = tokenInfo
-				log.Printf("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
+				glog.Info("buildPurchaseResponse: Added token_info from GetTokenInfoForState to response")
 			}
 		}
 		return response, nil
@@ -1399,12 +1399,12 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		attachFrontendPayload(response, state.FrontendData)
 		// Add token info if available
 		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		glog.Infof("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
 		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+			glog.Info("buildPurchaseResponse: Added token_info to response for status=signature_required")
 		} else {
-			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
+			glog.Infof("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
@@ -1419,28 +1419,28 @@ func (psm *PaymentStateMachine) buildPurchaseResponse(userID, xForwardedHost str
 		}
 		// Add token info if available
 		tokenInfo := GetTokenInfoForState(ctx, state, appInfo, psm.settingsManager)
-		log.Printf("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
+		glog.Infof("buildPurchaseResponse: GetTokenInfoForState returned %d token info entries for status=signature_required, user=%s app=%s product=%s", len(tokenInfo), state.UserID, state.AppID, state.ProductID)
 		if len(tokenInfo) > 0 {
 			response["token_info"] = tokenInfo
-			log.Printf("buildPurchaseResponse: Added token_info to response for status=signature_required")
+			glog.Info("buildPurchaseResponse: Added token_info to response for status=signature_required")
 		} else {
-			log.Printf("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
+			glog.Infof("buildPurchaseResponse: No token_info to add for status=signature_required (appInfo=%v, developerName=%s)", appInfo != nil, state.DeveloperName)
 		}
 		return response, nil
 	}
 
 	// Default syncing - log all state information for debugging
-	log.Printf("buildPurchaseResponse: returning syncing status for user=%s, app=%s, product=%s", userID, state.AppID, state.ProductID)
-	log.Printf("buildPurchaseResponse: PaymentNeed=%s, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
+	glog.Infof("buildPurchaseResponse: returning syncing status for user=%s, app=%s, product=%s", userID, state.AppID, state.ProductID)
+	glog.Infof("buildPurchaseResponse: PaymentNeed=%s, DeveloperSync=%s, LarePassSync=%s, SignatureStatus=%s, PaymentStatus=%s",
 		state.PaymentNeed, state.DeveloperSync, state.LarePassSync, state.SignatureStatus, state.PaymentStatus)
-	log.Printf("buildPurchaseResponse: JWS present=%v, VC present=%v, TxHash=%s",
+	glog.Infof("buildPurchaseResponse: JWS present=%v, VC present=%v, TxHash=%s",
 		state.JWS != "", state.VC != "", state.TxHash)
-	log.Printf("buildPurchaseResponse: XForwardedHost=%s, FrontendData length=%d, CreatedAt=%v, UpdatedAt=%v",
+	glog.Infof("buildPurchaseResponse: XForwardedHost=%s, FrontendData length=%d, CreatedAt=%v, UpdatedAt=%v",
 		state.XForwardedHost, len(state.FrontendData), state.CreatedAt, state.UpdatedAt)
-	log.Printf("buildPurchaseResponse: DeveloperName=%s, SourceID=%s, AppName=%s",
+	glog.Infof("buildPurchaseResponse: DeveloperName=%s, SourceID=%s, AppName=%s",
 		state.DeveloperName, state.SourceID, state.AppName)
 	if state.Developer.DID != "" {
-		log.Printf("buildPurchaseResponse: Developer.DID=%s", state.Developer.DID)
+		glog.Infof("buildPurchaseResponse: Developer.DID=%s", state.Developer.DID)
 	}
 
 	response := map[string]interface{}{

@@ -274,7 +274,7 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 
 			// Wait a short time to ensure all source processing locks are released
 			time.Sleep(100 * time.Millisecond)
-			glog.Infof("DataWatcher: Starting hash calculation for user %s", userID)
+			glog.V(3).Infof("DataWatcher: Starting hash calculation for user %s", userID)
 
 			// Call the hash calculation function directly
 			dw.calculateAndSetUserHashDirect(userID, userData)
@@ -295,7 +295,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	dw.hashMutex.Lock()
 	if dw.activeHashCalculations[isCalculatingKey] {
 		dw.hashMutex.Unlock()
-		glog.Infof("DataWatcher: Hash calculation already in progress for user %s (isCalculating), skipping", userID)
+		glog.V(4).Infof("DataWatcher: Hash calculation already in progress for user %s (isCalculating), skipping", userID)
 		return
 	}
 
@@ -304,7 +304,7 @@ func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.Us
 	if dw.activeHashCalculations[userID] {
 		// delete(dw.activeHashCalculations, isCalculatingKey)
 		dw.hashMutex.Unlock()
-		glog.Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
+		glog.V(4).Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
 		return
 	}
 	dw.activeHashCalculations[userID] = true
@@ -351,7 +351,7 @@ func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData 
 
 // calculateAndSetUserHashDirect calculates hash without tracking (used internally by goroutines)
 func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *types.UserData) bool {
-	glog.Infof("DataWatcher: Starting direct hash calculation for user %s", userID)
+	glog.V(3).Infof("DataWatcher: Starting direct hash calculation for user %s", userID)
 
 	// Get the original user data from cache manager to ensure we have the latest reference
 	originalUserData := dw.cacheManager.GetUserData(userID)
@@ -361,7 +361,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	}
 
 	// Create snapshot for hash calculation without holding any locks
-	glog.Infof("DataWatcher: Creating user data snapshot for user %s", userID)
+	glog.V(3).Infof("DataWatcher: Creating user data snapshot for user %s", userID)
 	snapshot, err := utils.CreateUserDataSnapshot(userID, originalUserData)
 	if err != nil {
 		glog.Errorf("DataWatcher: Failed to create user data snapshot for user %s: %v", userID, err)
@@ -378,14 +378,14 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	// Get current hash for comparison
 	currentHash := originalUserData.Hash
-	glog.Infof("DataWatcher: Hash comparison for user %s - current: '%s', new: '%s'", userID, currentHash, newHash)
+	glog.V(3).Infof("DataWatcher: Hash comparison for user %s - current: '%s', new: '%s'", userID, currentHash, newHash)
 
 	if currentHash == newHash {
 		glog.V(2).Infof("DataWatcher: Hash unchanged for user %s: %s", userID, newHash)
 		return true
 	}
 
-	glog.Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
+	glog.V(2).Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
 
 	// Use a single write lock acquisition with timeout to avoid deadlock
 	writeTimeout := 5 * time.Second
@@ -523,7 +523,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	func() {
 		glog.V(3).Info("[LOCK] dw.cacheManager.mutex.TryRLock() @660 Start")
 		if !dw.cacheManager.mutex.TryRLock() {
-			glog.Warningf("[TryRLock] processSourceData: Read lock not available for user: %s, source: %s, skipping", userID, sourceID)
+			glog.V(3).Infof("[TryRLock] processSourceData: Read lock not available for user: %s, source: %s, skipping", userID, sourceID)
 			return
 		}
 		defer func() {
@@ -550,7 +550,7 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		return 0, 0
 	}
 
-	glog.Infof("DataWatcher: Processing %d pending apps for user=%s, source=%s", len(pendingApps), userID, sourceID)
+	glog.V(3).Infof("DataWatcher: Processing %d pending apps for user=%s, source=%s", len(pendingApps), userID, sourceID)
 
 	// Step 2: Lock-free processing - Check hydration completion status
 	var completedApps []*types.AppInfoLatestPendingData
@@ -1241,6 +1241,6 @@ func (dw *DataWatcher) sendNewAppReadyNotification(userID string, completedApp *
 	if err := dw.dataSender.SendMarketSystemUpdate(*update); err != nil {
 		glog.Errorf("DataWatcher: Failed to send new app ready notification for app %s: %v", appName, err)
 	} else {
-		glog.V(2).Info("DataWatcher: Successfully sent new app ready notification for app %s (version: %s, source: %s)", appName, appVersion, sourceID)
+		glog.V(2).Infof("DataWatcher: Successfully sent new app ready notification for app %s (version: %s, source: %s)", appName, appVersion, sourceID)
 	}
 }

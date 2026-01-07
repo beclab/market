@@ -1016,7 +1016,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			glog.V(3).Infof("Added render failed app for user=%s, source=%s, app=%s, reason=%s",
 				userID, sourceID, failedAppData.RawData.AppID, failedAppData.FailureReason)
 		} else {
-			glog.Warningf("Invalid render failed data format for user=%s, source=%s", userID, sourceID)
+			glog.Errorf("Invalid render failed data format for user=%s, source=%s", userID, sourceID)
 			return fmt.Errorf("invalid render failed data: missing failed_app field")
 		}
 	}
@@ -1028,7 +1028,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		Type:     SyncSource,
 	})
 
-	glog.V(2).Infof("Set app data for user=%s, source=%s, type=%s", userID, sourceID, dataType)
+	glog.V(3).Infof("Set app data for user=%s, source=%s, type=%s", userID, sourceID, dataType)
 	return nil
 }
 
@@ -2184,7 +2184,7 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	}
 
 	// Use single write lock to batch process all targets to avoid lock contention
-	glog.V(2).Infof("INFO: [Cleanup] Processing %d targets in batch mode", len(targets))
+	glog.V(3).Infof("INFO: [Cleanup] Processing %d targets in batch mode", len(targets))
 
 	// Use short timeout to quickly acquire write lock to avoid writer starvation
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)

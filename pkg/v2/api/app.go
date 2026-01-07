@@ -1003,7 +1003,7 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 				var safeAppSimpleInfo map[string]interface{}
 				if appInfoData.AppSimpleInfo != nil {
 					// Debug: Log the original AppSimpleInfo data
-					// log.Printf("DEBUG: Original AppSimpleInfo - SupportArch: %+v (length: %d)",
+					// glog.Infof("DEBUG: Original AppSimpleInfo - SupportArch: %+v (length: %d)",
 					// 	appInfoData.AppSimpleInfo.SupportArch, len(appInfoData.AppSimpleInfo.SupportArch))
 
 					// Check if SupportArch is empty, try to get it from RawData or AppInfo
@@ -1029,7 +1029,7 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 					}
 
 					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo, appInfoData.AppInfo.AppEntry)
-					// log.Printf("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
+					// glog.Infof("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
 				}
 
 				filteredAppInfo := &FilteredAppInfoLatestData{

@@ -167,14 +167,14 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 
 	// Step 3: Validate required fields
 	if request.Source == "" || request.AppName == "" || request.Version == "" {
-		glog.V(3).Infof("Missing required fields in request")
+		glog.V(4).Infof("Missing required fields in request")
 		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source, app_name, and version are required", nil)
 		return
 	}
 
 	// Step 4: Check if cache manager is available
 	if s.cacheManager == nil {
-		glog.V(3).Infof("Cache manager is not initialized")
+		glog.V(4).Infof("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -182,7 +182,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	// Step 5: Get user data from cache
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
-		glog.V(3).Infof("User data not found for user: %s", userID)
+		glog.V(4).Infof("User data not found for user: %s", userID)
 		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 		return
 	}
@@ -190,7 +190,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	// Step 6: Get source data
 	sourceData := userData.Sources[request.Source]
 	if sourceData == nil {
-		glog.V(3).Infof("Source data not found: %s for user: %s", request.Source, userID)
+		glog.V(4).Infof("Source data not found: %s for user: %s", request.Source, userID)
 		s.sendResponse(w, http.StatusNotFound, false, "Source data not found", nil)
 		return
 	}
@@ -210,15 +210,15 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if targetApp == nil {
-		glog.V(3).Infof("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
+		glog.V(4).Infof("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
 		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
 		return
 	}
 
 	if targetApp.AppInfo == nil {
-		glog.V(3).Infof("installApp: targetApp.AppInfo is nil for app=%s source=%s", request.AppName, request.Source)
+		glog.V(2).Infof("installApp: targetApp.AppInfo is nil for app=%s source=%s", request.AppName, request.Source)
 	} else if targetApp.AppInfo.Price == nil {
-		glog.V(3).Infof("installApp: targetApp.AppInfo.Price is nil for app=%s source=%s", request.AppName, request.Source)
+		glog.V(2).Infof("installApp: targetApp.AppInfo.Price is nil for app=%s source=%s", request.AppName, request.Source)
 	} else {
 		glog.V(2).Infof("installApp: targetApp.AppInfo.Price detected for app=%s source=%s", request.AppName, request.Source)
 	}
@@ -239,7 +239,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		cfgType = targetApp.RawData.CfgType
 		glog.V(2).Infof("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
 	} else {
-		glog.V(3).Infof("Warning: Could not retrieve cfgType for app: %s, using default", request.AppName)
+		glog.V(2).Infof("Warning: Could not retrieve cfgType for app: %s, using default", request.AppName)
 		cfgType = "app" // Default to app type
 	}
 
@@ -278,15 +278,15 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if productID != "" {
 		taskMetadata["productID"] = productID
-		glog.V(3).Infof("installApp: added productID=%s to metadata for app=%s source=%s", productID, request.AppName, request.Source)
+		glog.V(2).Infof("installApp: added productID=%s to metadata for app=%s source=%s", productID, request.AppName, request.Source)
 	}
 	if developerName != "" {
 		taskMetadata["developerName"] = developerName
-		glog.V(3).Infof("installApp: added developerName=%s to metadata for app=%s source=%s", developerName, request.AppName, request.Source)
+		glog.V(2).Infof("installApp: added developerName=%s to metadata for app=%s source=%s", developerName, request.AppName, request.Source)
 	}
 	if realAppID != "" {
 		taskMetadata["realAppID"] = realAppID
-		glog.V(3).Infof("installApp: added realAppID=%s to metadata for app=%s source=%s", realAppID, request.AppName, request.Source)
+		glog.V(2).Infof("installApp: added realAppID=%s to metadata for app=%s source=%s", realAppID, request.AppName, request.Source)
 	}
 
 	// Handle synchronous requests with proper blocking

@@ -108,10 +108,10 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	// if cfgType == "middleware" {
 	// 	// Use middleware API for middleware type
 	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/install", appServiceHost, appServicePort, appName)
-	// 	log.Printf("Using middleware API for installation: %s", urlStr)
+	// 	glog.Infof("Using middleware API for installation: %s", urlStr)
 	// } else if cfgType == "recommend" {
 	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/install", appServiceHost, appServicePort, appName)
-	// 	log.Printf("Using middleware API for installation: %s", urlStr)
+	// 	glog.Infof("Using middleware API for installation: %s", urlStr)
 	// } else {
 	// 	// Use regular app API for other types
 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)

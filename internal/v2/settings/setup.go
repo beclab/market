@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -71,7 +70,7 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 	glog.V(2).Infof("Chart repository service host: %s", chartRepoHost)
 
 	// 2. Get current market source configuration from chart repository service
-	log.Println("Step 1: Getting market source configuration from chart repository service")
+	glog.Info("Step 1: Getting market source configuration from chart repository service")
 	currentConfig, err := getMarketSourceFromChartRepo(chartRepoHost)
 	if err != nil {
 		glog.Errorf("Failed to get market source configuration: %v", err)
@@ -303,8 +302,7 @@ func getMarketSourceFromChartRepo(host string) (*ChartRepoMarketSourcesConfig, e
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	glog.V(2).Infof("Response status: %d", resp.StatusCode)
-	glog.V(2).Infof("Response body: %s", string(body))
+	glog.V(2).Infof("Response status: %d, body: %s", resp.StatusCode, string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
@@ -337,8 +335,7 @@ func getMarketSourceFromChartRepo(host string) (*ChartRepoMarketSourcesConfig, e
 func addMarketSourceToChartRepo(host string, source *ChartRepoMarketSource) error {
 	url := fmt.Sprintf("http://%s/chart-repo/api/v2/settings/market-source", host)
 
-	glog.V(2).Infof("Making POST request to: %s", url)
-	glog.V(2).Infof("Adding market source: %s (Type: %s, Name: %s)", source.ID, source.Type, source.Name)
+	glog.V(2).Infof("Making POST request to: %s, Adding market source: %s (Type: %s, Name: %s)", url, source.ID, source.Type, source.Name)
 
 	// Marshal the source to JSON
 	jsonData, err := json.Marshal(source)
@@ -369,8 +366,7 @@ func addMarketSourceToChartRepo(host string, source *ChartRepoMarketSource) erro
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	glog.V(3).Infof("Response status: %d", resp.StatusCode)
-	glog.V(3).Infof("Response body: %s", string(body))
+	glog.V(3).Infof("Response status: %d, body: %s", resp.StatusCode, string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
@@ -392,8 +388,7 @@ func addMarketSourceToChartRepo(host string, source *ChartRepoMarketSource) erro
 func deleteMarketSourceFromChartRepo(host string, sourceID string) error {
 	url := fmt.Sprintf("http://%s/chart-repo/api/v2/settings/market-source/%s", host, sourceID)
 
-	glog.V(2).Infof("Making DELETE request to: %s", url)
-	glog.V(2).Infof("Deleting market source with ID: %s", sourceID)
+	glog.V(2).Infof("Making DELETE request to: %s, ID: %s", url, sourceID)
 
 	// Create HTTP request
 	req, err := http.NewRequest("DELETE", url, nil)
@@ -414,8 +409,7 @@ func deleteMarketSourceFromChartRepo(host string, sourceID string) error {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	glog.V(2).Infof("Response status: %d", resp.StatusCode)
-	glog.V(2).Infof("Response body: %s", string(body))
+	glog.V(3).Infof("Response status: %d, body: %s", resp.StatusCode, string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))

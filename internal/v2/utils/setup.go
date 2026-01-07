@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"market/internal/v2/types"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/golang/glog"
 )
 
 // AppServiceResponse represents the response structure from app-service
@@ -110,19 +110,19 @@ func SetupAppServiceData() error {
 		return nil
 	}
 
-	log.Println("Starting app service data setup...")
+	glog.Info("Starting app service data setup...")
 
 	// Initialize user app state data map
 	userAppStateData = make(map[string]map[string][]*types.AppStateLatestData)
 
 	// Check if we're in development environment
 	if isDevelopmentEnvironment() {
-		log.Println("Development environment detected, reading from local app-state.json")
+		glog.Info("Development environment detected, reading from local app-state.json")
 		return readLocalAppState()
 	}
 
 	// Production environment - fetch from app-service
-	log.Println("Production environment detected, fetching from app-service")
+	glog.Info("Production environment detected, fetching from app-service")
 	return fetchFromAppService()
 }
 
@@ -162,7 +162,7 @@ func isDevelopmentEnvironment() bool {
 
 // readLocalAppState reads and processes the local app-state.json file
 func readLocalAppState() error {
-	log.Println("Reading local app-state.json file...")
+	glog.Info("Reading local app-state.json file...")
 
 	file, err := os.Open("app-state.json")
 	if err != nil {
@@ -211,7 +211,7 @@ func fetchAppsFromAppService() error {
 	}
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
-	log.Printf("Fetching app data from: %s", url)
+	glog.Infof("Fetching app data from: %s", url)
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -242,8 +242,7 @@ func fetchAppsFromAppService() error {
 
 // processAppData processes the app data and prints the extracted information
 func processAppData(apps []AppServiceResponse) error {
-	log.Println("Processing app data...")
-	log.Printf("Found %d applications", len(apps))
+	glog.Infof("Processing app data...Found %d applications", len(apps))
 
 	var appInfos []AppInfo
 	userSet := make(map[string]bool) // Use map to avoid duplicates
@@ -265,14 +264,16 @@ func processAppData(apps []AppServiceResponse) error {
 		appInfos = append(appInfos, appInfo)
 
 		// Print individual app info with full status structure
-		log.Printf("App %d: User=%s, App=%s, Status=%+v", i+1, user, appName, app.Status)
+		glog.Infof("App %d: User=%s, App=%s, Status=%+v", i+1, user, appName, app.Status)
 
 		// Also print entrance statuses if available
+		var sbuild = new(strings.Builder)
 		if len(app.Status.EntranceStatuses) > 0 {
 			for j, entrance := range app.Status.EntranceStatuses {
-				log.Printf("  Entrance %d: Name=%s, State=%s", j+1, entrance.Name, entrance.State)
+				sbuild.WriteString(fmt.Sprintf("  Entrance %d: Name=%s, State=%s", j+1, entrance.Name, entrance.State))
 			}
 		}
+		glog.Infof(sbuild.String())
 
 		// Create AppStateLatestData for this app (startup process)
 		appStateData, sourceID := createAppStateLatestData(app, true)
@@ -296,9 +297,8 @@ func processAppData(apps []AppServiceResponse) error {
 	}
 
 	// Print summary
-	log.Println("=== App Service Data Summary ===")
-	log.Printf("Total applications: %d", len(appInfos))
-	log.Printf("Extracted users: %v", extractedUsers)
+	glog.Info("=== App Service Data Summary ===")
+	glog.Infof("Total applications: %d, Extracted users: %v", len(appInfos), extractedUsers)
 
 	// Group by user
 	userStats := make(map[string]int)
@@ -306,10 +306,11 @@ func processAppData(apps []AppServiceResponse) error {
 		userStats[info.User]++
 	}
 
-	log.Println("Applications per user:")
+	sbuild := new(strings.Builder)
 	for user, count := range userStats {
-		log.Printf("  %s: %d apps", user, count)
+		sbuild.WriteString(fmt.Sprintf("  %s: %d apps", user, count))
 	}
+	glog.Infof("Applications per user: %s", sbuild.String())
 
 	// Group by status
 	statusStats := make(map[string]int)
@@ -317,23 +318,24 @@ func processAppData(apps []AppServiceResponse) error {
 		statusStats[info.Status.State]++
 	}
 
-	log.Println("Applications by status:")
+	sbuild = new(strings.Builder)
 	for status, count := range statusStats {
-		log.Printf("  %s: %d apps", status, count)
+		sbuild.WriteString(fmt.Sprintf("  %s: %d apps", status, count))
 	}
+	glog.Infof("Applications by status: %s", sbuild.String())
 
 	// Print app state data summary
-	log.Println("App state data created:")
+	glog.Info("App state data created:")
 	for user, sourceData := range userAppStateData {
 		for sourceID, appStates := range sourceData {
-			log.Printf("  User %s: Source %s: %d app states", user, sourceID, len(appStates))
+			glog.Infof("  User %s: Source %s: %d app states", user, sourceID, len(appStates))
 			for _, appState := range appStates {
-				log.Printf("    - App Status: %s", appState.Status.State)
+				glog.Infof("    - App Status: %s", appState.Status.State)
 			}
 		}
 	}
 
-	log.Println("=== End App Service Data Summary ===")
+	glog.Info("=== End App Service Data Summary ===")
 
 	return nil
 }
@@ -370,7 +372,7 @@ func fetchMiddlewaresFromAppService() error {
 	}
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/status", host, port)
-	log.Printf("Fetching middleware data from: %s", url)
+	glog.Infof("Fetching middleware data from: %s", url)
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -414,8 +416,7 @@ func processMiddlewareData(middlewares []struct {
 	Version string `json:"version"`
 	Title   string `json:"title"`
 }) error {
-	log.Println("Processing middleware data...")
-	log.Printf("Found %d middlewares", len(middlewares))
+	glog.Infof("Processing middleware data...Found %d middlewares", len(middlewares))
 
 	userSet := make(map[string]bool) // Use map to avoid duplicates
 
@@ -428,7 +429,7 @@ func processMiddlewareData(middlewares []struct {
 		userSet[user] = true
 
 		// Print individual middleware info
-		log.Printf("Middleware %d: User=%s, Name=%s, Status=%s, Version=%s",
+		glog.Infof("Middleware %d: User=%s, Name=%s, Status=%s, Version=%s",
 			i+1, user, middlewareName, middleware.ResourceStatus, middleware.Version)
 
 		// Create AppStateLatestData for this middleware (startup process)
@@ -462,8 +463,8 @@ func processMiddlewareData(middlewares []struct {
 	}
 
 	// Print summary
-	log.Println("=== Middleware Data Summary ===")
-	log.Printf("Total middlewares: %d", len(middlewares))
+	glog.Info("=== Middleware Data Summary ===")
+	glog.Infof("Total middlewares: %d", len(middlewares))
 
 	// Group by user
 	userStats := make(map[string]int)
@@ -471,9 +472,9 @@ func processMiddlewareData(middlewares []struct {
 		userStats[middleware.User]++
 	}
 
-	log.Println("Middlewares per user:")
+	glog.Info("Middlewares per user:")
 	for user, count := range userStats {
-		log.Printf("  %s: %d middlewares", user, count)
+		glog.Infof("  %s: %d middlewares", user, count)
 	}
 
 	// Group by status
@@ -482,12 +483,12 @@ func processMiddlewareData(middlewares []struct {
 		statusStats[middleware.ResourceStatus]++
 	}
 
-	log.Println("Middlewares by status:")
+	glog.Info("Middlewares by status:")
 	for status, count := range statusStats {
-		log.Printf("  %s: %d middlewares", status, count)
+		glog.Infof("  %s: %d middlewares", status, count)
 	}
 
-	log.Println("=== End Middleware Data Summary ===")
+	glog.Info("=== End Middleware Data Summary ===")
 
 	return nil
 }
@@ -546,7 +547,7 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 	}
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
-	log.Printf("Fetching app entrance URLs from: %s for app: %s", url, appName)
+	glog.Infof("Fetching app entrance URLs from: %s for app: %s", url, appName)
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -585,7 +586,7 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 		}
 	}
 
-	log.Printf("Found %d entrance URLs for app %s", len(entranceUrls), appName)
+	glog.Infof("Found %d entrance URLs for app %s", len(entranceUrls), appName)
 	return entranceUrls, nil
 }
 
@@ -622,11 +623,11 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 
 		// If any entrance has empty URL, ignore the entire app state data
 		if hasEmptyUrl {
-			log.Printf("Skipping app %s due to empty URL in entrance statuses", app.Spec.Name)
+			glog.Infof("Skipping app %s due to empty URL in entrance statuses", app.Spec.Name)
 			return nil, ""
 		}
 	} else {
-		log.Printf("Startup process detected - skipping URL validation for app %s", app.Spec.Name)
+		glog.Infof("Startup process detected - skipping URL validation for app %s", app.Spec.Name)
 	}
 
 	// Combine entrance statuses with URLs from spec.entrances
@@ -636,7 +637,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 
 		// In startup process, allow empty URLs; otherwise, skip entrances without URLs
 		if !isStartupProcess && (!exists || url == "") {
-			log.Printf("Skipping entrance %s for app %s due to missing URL", entranceStatus.Name, app.Spec.Name)
+			glog.Infof("Skipping entrance %s for app %s due to missing URL", entranceStatus.Name, app.Spec.Name)
 			continue
 		}
 
@@ -709,12 +710,12 @@ func checkDependencyService() error {
 	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
 	if chartRepoHost == "" {
 		chartRepoHost = "http://localhost:8080" // Default fallback
-		log.Printf("CHART_REPO_SERVICE_HOST not set, using default: %s", chartRepoHost)
+		glog.Infof("CHART_REPO_SERVICE_HOST not set, using default: %s", chartRepoHost)
 	}
 
 	// Build the API endpoint URL
 	apiURL := "http://" + chartRepoHost + "/chart-repo/api/v2/version"
-	log.Printf("Checking dependency service at: %s", apiURL)
+	glog.Infof("Checking dependency service at: %s", apiURL)
 
 	// Create HTTP client with timeout
 	client := &http.Client{
@@ -722,47 +723,44 @@ func checkDependencyService() error {
 	}
 
 	// Print request details
-	log.Printf("Making GET request to: %s", apiURL)
-	log.Printf("Request timeout: 10 seconds")
+	glog.Infof("Making GET request to: %s, Request timeout: 10 seconds", apiURL)
 
 	// Make GET request to the dependency service
 	resp, err := client.Get(apiURL)
 	if err != nil {
-		log.Printf("Request failed with error: %v", err)
+		glog.Errorf("Request failed with error: %v", err)
 		return fmt.Errorf("failed to connect to dependency service: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Print response details
-	log.Printf("Response status code: %d", resp.StatusCode)
-	log.Printf("Response headers: %v", resp.Header)
+	glog.Infof("Response status code: %d, headers: %v", resp.StatusCode, resp.Header)
 
 	// Check if response is successful
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Non-OK status code received: %d", resp.StatusCode)
+		glog.Infof("Non-OK status code received: %d", resp.StatusCode)
 		return fmt.Errorf("dependency service returned status %d", resp.StatusCode)
 	}
 
 	// Read response body for debugging
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Failed to read response body: %v", err)
+		glog.Errorf("Failed to read response body: %v", err)
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	log.Printf("Raw response body: %s", string(bodyBytes))
+	glog.Infof("Raw response body: %s", string(bodyBytes))
 
 	// Parse response body
 	var responseData DependencyServiceResponse
 	if err := json.Unmarshal(bodyBytes, &responseData); err != nil {
-		log.Printf("Failed to parse JSON response: %v", err)
-		log.Printf("Response was: %s", string(bodyBytes))
+		glog.Errorf("Failed to parse JSON response: %v, result: %s", err, string(bodyBytes))
 		return fmt.Errorf("failed to parse dependency service response: %w", err)
 	}
 
-	log.Printf("Parsed response data: %+v", responseData)
-	log.Printf("Dependency service response: success=%t, message=%s", responseData.Success, responseData.Message)
-	log.Printf("Version data: version=%s, build_time=%s, git_commit=%s, timestamp=%d",
+	glog.Infof("Parsed response data: %+v", responseData)
+	glog.Infof("Dependency service response: success=%t, message=%s", responseData.Success, responseData.Message)
+	glog.Infof("Version data: version=%s, build_time=%s, git_commit=%s, timestamp=%d",
 		responseData.Data.Version, responseData.Data.BuildTime, responseData.Data.GitCommit, responseData.Data.Timestamp)
 
 	// Check if the response indicates success
@@ -772,11 +770,11 @@ func checkDependencyService() error {
 
 	// Check version constraints: >= 0.2.0 and < 0.3.0
 	if err := validateDependencyVersion(responseData.Data.Version); err != nil {
-		log.Printf("Version validation failed: %v", err)
+		glog.Errorf("Version validation failed: %v", err)
 		return fmt.Errorf("version validation failed: %w", err)
 	}
 
-	log.Printf("Dependency service check passed: version %s is valid", responseData.Data.Version)
+	glog.Infof("Dependency service check passed: version %s is valid", responseData.Data.Version)
 	return nil
 }
 
@@ -818,23 +816,22 @@ func validateDependencyVersion(version string) error {
 
 // WaitForDependencyService waits for dependency service to be available with retry logic
 func WaitForDependencyService() {
-	log.Println("=== Checking dependency service availability ===")
-	log.Println("WaitForDependencyService function called successfully")
+	glog.Info("=== Checking dependency service availability ===")
+	glog.Info("WaitForDependencyService function called successfully")
 
 	retryCount := 0
 	for {
 		retryCount++
-		log.Printf("Starting dependency service check iteration #%d...", retryCount)
+		glog.Infof("Starting dependency service check iteration #%d...", retryCount)
 
 		if err := checkDependencyService(); err != nil {
-			log.Printf("Dependency service check failed (attempt #%d): %v", retryCount, err)
-			log.Println("Retrying in 5 seconds...")
+			glog.Errorf("Dependency service check failed (attempt #%d): %v. Retrying in 5 seconds...", retryCount, err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
-		log.Printf("Dependency service is available and version is valid (succeeded on attempt #%d)", retryCount)
+		glog.Infof("Dependency service is available and version is valid (succeeded on attempt #%d)", retryCount)
 		break
 	}
-	log.Println("=== End dependency service check ===")
+	glog.Info("=== End dependency service check ===")
 }

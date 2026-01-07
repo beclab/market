@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"log"
 	"market/internal/v2/types"
 
 	"sort"
@@ -462,7 +461,7 @@ func convertToStringMapDW(val interface{}) map[string]interface{} {
 			if ks, ok := k.(string); ok {
 				converted[ks] = v2
 			} else {
-				log.Printf("WARNING: SupportClient key is not string: %T", k)
+				glog.Errorf("WARNING: SupportClient key is not string: %T", k)
 			}
 		}
 		return converted
@@ -474,7 +473,7 @@ func convertToStringMapDW(val interface{}) map[string]interface{} {
 		}
 		return converted
 	default:
-		log.Printf("WARNING: SupportClient has unexpected type in datahash: %T", val)
+		glog.Errorf("WARNING: SupportClient has unexpected type in datahash: %T", val)
 		return nil
 	}
 }

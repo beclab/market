@@ -3,7 +3,6 @@ package settings
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -47,13 +46,13 @@ func StartSystemEnvWatcher(ctx context.Context) {
 	// Best-effort: if not running in cluster, just skip
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
-		log.Printf("SystemEnv watcher: not running in cluster, skipping watcher: %v", err)
+		glog.Errorf("SystemEnv watcher: not running in cluster, skipping watcher: %v", err)
 		return
 	}
 
 	dyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
-		log.Printf("SystemEnv watcher: dynamic client create failed: %v", err)
+		glog.Errorf("SystemEnv watcher: dynamic client create failed: %v", err)
 		return
 	}
 

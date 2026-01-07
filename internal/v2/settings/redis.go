@@ -3,10 +3,10 @@ package settings
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/golang/glog"
 )
 
 // RedisClientImpl implements the RedisClient interface using go-redis
@@ -33,7 +33,7 @@ func NewRedisClient(host, port, password string, db int) (*RedisClientImpl, erro
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
-	log.Printf("Connected to Redis at %s", addr)
+	glog.V(4).Infof("Connected to Redis at %s", addr)
 
 	return &RedisClientImpl{
 		client: rdb,

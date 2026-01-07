@@ -2,21 +2,22 @@ package utils
 
 import (
 	"encoding/json"
-	"log"
 	"market/internal/v2/types"
 	"reflect"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 // convertApplicationInfoEntryToMap converts ApplicationInfoEntry to map for task creation
 func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[string]interface{} {
 	if entry == nil {
-		log.Printf("DEBUG: convertApplicationInfoEntryToMap called with nil entry")
+		glog.Errorf("DEBUG: convertApplicationInfoEntryToMap called with nil entry")
 		return make(map[string]interface{})
 	}
 
-	log.Printf("DEBUG: Converting ApplicationInfoEntry to map for app: %s", entry.Name)
-	log.Printf("DEBUG: convertApplicationInfoEntryToMap - entry.SupportArch: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
+	glog.V(4).Infof("DEBUG: Converting ApplicationInfoEntry to map for app: %s", entry.Name)
+	glog.V(4).Infof("DEBUG: convertApplicationInfoEntryToMap - entry.SupportArch: %+v (length: %d)", entry.SupportArch, len(entry.SupportArch))
 
 	result := map[string]interface{}{
 		"id":          entry.ID,
@@ -64,7 +65,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 	}
 	// marshal basic fields
 	if _, err := json.Marshal(result); err != nil {
-		log.Printf("DEBUG: marshal basic fields: %v", err)
+		glog.Errorf("DEBUG: marshal basic fields: %v", err)
 	}
 
 	if entry.Description != nil {
@@ -74,7 +75,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		}
 		result["description"] = descCopy
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal description: %v", err)
+			glog.Errorf("DEBUG: marshal description: %v", err)
 		}
 	}
 
@@ -85,7 +86,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		}
 		result["title"] = titleCopy
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal title: %v", err)
+			glog.Errorf("DEBUG: marshal title: %v", err)
 		}
 	}
 
@@ -96,7 +97,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		}
 		result["fullDescription"] = fullDescCopy
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal fullDescription: %v", err)
+			glog.Errorf("DEBUG: marshal fullDescription: %v", err)
 		}
 	}
 
@@ -107,14 +108,14 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		}
 		result["upgradeDescription"] = upgradeDescCopy
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal upgradeDescription: %v", err)
+			glog.Errorf("DEBUG: marshal upgradeDescription: %v", err)
 		}
 	}
 
 	if entry.SupportClient != nil {
 		copied := deepSafeCopy(entry.SupportClient)
 		if copied == nil {
-			log.Printf("WARNING: supportClient deep copy failed, using shallow copy")
+			glog.Errorf("WARNING: supportClient deep copy failed, using shallow copy")
 			// Use shallow copy as fallback
 			copied = make(map[string]interface{})
 			for k, v := range entry.SupportClient {
@@ -123,28 +124,28 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		}
 		result["supportClient"] = copied
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal supportClient: %v", err)
+			glog.Errorf("DEBUG: marshal supportClient: %v", err)
 		}
 	}
 
 	if entry.Permission != nil {
 		result["permission"] = deepSafeCopy(entry.Permission)
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal permission: %v", err)
+			glog.Errorf("DEBUG: marshal permission: %v", err)
 		}
 	}
 
 	if entry.Middleware != nil {
 		result["middleware"] = deepSafeCopy(entry.Middleware)
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal middleware: %v", err)
+			glog.Errorf("DEBUG: marshal middleware: %v", err)
 		}
 	}
 
 	if entry.Options != nil {
 		result["options"] = deepSafeCopy(entry.Options)
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal options: %v", err)
+			glog.Errorf("DEBUG: marshal options: %v", err)
 		}
 	}
 
@@ -158,7 +159,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		if len(safeEntrances) > 0 {
 			result["entrances"] = safeEntrances
 			if _, err := json.Marshal(result); err != nil {
-				log.Printf("DEBUG: marshal entrances: %v", err)
+				glog.Errorf("DEBUG: marshal entrances: %v", err)
 			}
 		}
 	}
@@ -173,7 +174,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		if len(safeEnvs) > 0 {
 			result["envs"] = safeEnvs
 			if _, err := json.Marshal(result); err != nil {
-				log.Printf("DEBUG: marshal envs: %v", err)
+				glog.Errorf("DEBUG: marshal envs: %v", err)
 			}
 		}
 	}
@@ -188,7 +189,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		if len(safeLicenses) > 0 {
 			result["license"] = safeLicenses
 			if _, err := json.Marshal(result); err != nil {
-				log.Printf("DEBUG: marshal license: %v", err)
+				glog.Errorf("DEBUG: marshal license: %v", err)
 			}
 		}
 	}
@@ -203,7 +204,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		if len(safeLegals) > 0 {
 			result["legal"] = safeLegals
 			if _, err := json.Marshal(result); err != nil {
-				log.Printf("DEBUG: marshal legal: %v", err)
+				glog.Errorf("DEBUG: marshal legal: %v", err)
 			}
 		}
 	}
@@ -211,14 +212,14 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 	if entry.I18n != nil {
 		result["i18n"] = deepSafeCopy(entry.I18n)
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal i18n: %v", err)
+			glog.Errorf("DEBUG: marshal i18n: %v", err)
 		}
 	}
 
 	if entry.Count != nil {
 		result["count"] = safeCopyCount(entry.Count)
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal count: %v", err)
+			glog.Errorf("DEBUG: marshal count: %v", err)
 		}
 	}
 
@@ -241,7 +242,7 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		if len(safeVersionHistory) > 0 {
 			result["versionHistory"] = safeVersionHistory
 			if _, err := json.Marshal(result); err != nil {
-				log.Printf("DEBUG: marshal versionHistory: %v", err)
+				glog.Errorf("DEBUG: marshal versionHistory: %v", err)
 			}
 		}
 	}
@@ -260,18 +261,18 @@ func ConvertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[str
 		if len(safeSubCharts) > 0 {
 			result["subCharts"] = safeSubCharts
 			if _, err := json.Marshal(result); err != nil {
-				log.Printf("DEBUG: marshal subCharts: %v", err)
+				glog.Errorf("DEBUG: marshal subCharts: %v", err)
 			}
 		}
 	}
 
 	if entry.Metadata != nil {
-		log.Printf("DEBUG: Processing Metadata field, length: %d", len(entry.Metadata))
+		glog.V(4).Infof("DEBUG: Processing Metadata field, length: %d", len(entry.Metadata))
 		metadataCopy := convertMetadataToMap(entry.Metadata)
 		result["metadata"] = metadataCopy
-		log.Printf("DEBUG: Metadata copy completed, length: %d", len(metadataCopy))
+		glog.V(4).Infof("DEBUG: Metadata copy completed, length: %d", len(metadataCopy))
 		if _, err := json.Marshal(result); err != nil {
-			log.Printf("DEBUG: marshal metadata: %v", err)
+			glog.Errorf("DEBUG: marshal metadata: %v", err)
 		}
 	}
 
@@ -296,7 +297,7 @@ func deepSafeCopyWithVisited(src map[string]interface{}, visited map[uintptr]boo
 	// Use reflect to get the unique pointer of the map
 	ptr := reflect.ValueOf(src).Pointer()
 	if visited[ptr] {
-		log.Printf("DEBUG: Detected circular reference in deepSafeCopy, skipping")
+		glog.V(4).Info("DEBUG: Detected circular reference in deepSafeCopy, skipping")
 		return nil
 	}
 	visited[ptr] = true
@@ -307,7 +308,7 @@ func deepSafeCopyWithVisited(src map[string]interface{}, visited map[uintptr]boo
 		// Skip potential circular reference keys
 		if k == "source_data" || k == "raw_data" || k == "app_info" || k == "parent" || k == "self" ||
 			k == "circular_ref" || k == "back_ref" || k == "loop" {
-			log.Printf("DEBUG: Skipping potential circular reference key: %s", k)
+			glog.V(4).Infof("DEBUG: Skipping potential circular reference key: %s", k)
 			continue
 		}
 
@@ -325,7 +326,7 @@ func deepSafeCopyWithVisited(src map[string]interface{}, visited map[uintptr]boo
 				case string, int, int64, float64, bool:
 					safeSlice = append(safeSlice, item)
 				default:
-					log.Printf("DEBUG: Skipping complex slice item in deepSafeCopy for key %s", k)
+					glog.V(4).Infof("DEBUG: Skipping complex slice item in deepSafeCopy for key %s", k)
 				}
 			}
 			if len(safeSlice) > 0 {
@@ -349,7 +350,7 @@ func deepSafeCopyWithVisited(src map[string]interface{}, visited map[uintptr]boo
 			}
 		default:
 			// Skip complex types and log for debugging
-			log.Printf("DEBUG: Skipping complex type in deepSafeCopy for key %s: %T", k, v)
+			glog.V(4).Infof("DEBUG: Skipping complex type in deepSafeCopy for key %s: %T", k, v)
 		}
 	}
 	return dst
@@ -391,7 +392,7 @@ func safeCopyCount(count interface{}) interface{} {
 			case string, int, int64, float64, bool:
 				safeSlice = append(safeSlice, item)
 			default:
-				log.Printf("DEBUG: Skipping complex Count slice item: %T", item)
+				glog.V(4).Infof("DEBUG: Skipping complex Count slice item: %T", item)
 			}
 		}
 		if len(safeSlice) > 0 {
@@ -400,7 +401,7 @@ func safeCopyCount(count interface{}) interface{} {
 		return nil
 	default:
 		// For any other type, log and return nil to be safe
-		log.Printf("DEBUG: Skipping complex Count type: %T", val)
+		glog.V(4).Infof("DEBUG: Skipping complex Count type: %T", val)
 		return nil
 	}
 }
@@ -414,7 +415,7 @@ func convertMetadataToMap(metadata map[string]interface{}) map[string]interface{
 			// Only copy simple types to avoid circular references
 			switch val := v.(type) {
 			case string, int, int64, float64, bool, []string:
-				log.Printf("DEBUG: Metadata[%s] = %v (type: %T)", k, v, v)
+				glog.V(4).Infof("DEBUG: Metadata[%s] = %v (type: %T)", k, v, v)
 				safeMetadata[k] = v
 			case []interface{}:
 				// Only allow simple types in slices
@@ -424,7 +425,7 @@ func convertMetadataToMap(metadata map[string]interface{}) map[string]interface{
 					case string, int, int64, float64, bool:
 						safeSlice = append(safeSlice, item)
 					default:
-						log.Printf("DEBUG: Skipping complex slice item in Metadata[%s]", k)
+						glog.V(4).Infof("DEBUG: Skipping complex slice item in Metadata[%s]", k)
 					}
 				}
 				if len(safeSlice) > 0 {
@@ -440,7 +441,7 @@ func convertMetadataToMap(metadata map[string]interface{}) map[string]interface{
 						case string, int, int64, float64, bool, []string:
 							nestedCopy[nk] = nv
 						default:
-							log.Printf("DEBUG: Skipping complex nested value in Metadata[%s][%s]", k, nk)
+							glog.V(4).Infof("DEBUG: Skipping complex nested value in Metadata[%s][%s]", k, nk)
 						}
 					}
 				}
@@ -448,11 +449,16 @@ func convertMetadataToMap(metadata map[string]interface{}) map[string]interface{
 					safeMetadata[k] = nestedCopy
 				}
 			default:
-				log.Printf("DEBUG: Skipping Metadata[%s] with complex type %T", k, v)
+				glog.V(4).Infof("DEBUG: Skipping Metadata[%s] with complex type %T", k, v)
 			}
 		} else {
-			log.Printf("DEBUG: Skipping Metadata[%s] to avoid circular reference", k)
+			glog.V(4).Infof("DEBUG: Skipping Metadata[%s] to avoid circular reference", k)
 		}
 	}
 	return safeMetadata
+}
+
+func ParseJson(v interface{}) string {
+	r, _ := json.Marshal(v)
+	return string(r)
 }

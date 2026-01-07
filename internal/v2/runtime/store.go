@@ -2,9 +2,10 @@ package runtime
 
 import (
 	"fmt"
-	"log"
 	"sync"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 // StateStore manages the current runtime state in memory
@@ -30,7 +31,7 @@ func NewStateStore() *StateStore {
 // UpdateAppState updates or creates an app flow state
 func (s *StateStore) UpdateAppState(state *AppFlowState) {
 	if !s.mu.TryLock() {
-		log.Printf("Failed to acquire lock for UpdateAppState, skipping update for app: %s", state.AppName)
+		glog.Warning("[TryLock] Failed to acquire lock for UpdateAppState, skipping update for app: %s", state.AppName)
 		return
 	}
 	defer s.mu.Unlock()
@@ -44,7 +45,7 @@ func (s *StateStore) UpdateAppState(state *AppFlowState) {
 // GetAppState retrieves an app flow state
 func (s *StateStore) GetAppState(userID, sourceID, appName string) (*AppFlowState, bool) {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetAppState, returning empty for app: %s", appName)
+		glog.Warningf("[TryRLock] Failed to acquire read lock for GetAppState, returning empty for app: %s", appName)
 		return nil, false
 	}
 	defer s.mu.RUnlock()
@@ -57,7 +58,7 @@ func (s *StateStore) GetAppState(userID, sourceID, appName string) (*AppFlowStat
 // GetAllAppStates returns all app states
 func (s *StateStore) GetAllAppStates() map[string]*AppFlowState {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetAllAppStates, returning empty map")
+		glog.Warning("[TryRLock] Failed to acquire read lock for GetAllAppStates, returning empty map")
 		return make(map[string]*AppFlowState)
 	}
 	defer s.mu.RUnlock()
@@ -72,7 +73,7 @@ func (s *StateStore) GetAllAppStates() map[string]*AppFlowState {
 // UpdateTask updates or creates a task state
 func (s *StateStore) UpdateTask(task *TaskState) {
 	if !s.mu.TryLock() {
-		log.Printf("Failed to acquire lock for UpdateTask, skipping update for task: %s", task.TaskID)
+		glog.Warningf("[TryLock] Failed to acquire lock for UpdateTask, skipping update for task: %s, opId: %s, app: %s", task.TaskID, task.OpID, task.AppName)
 		return
 	}
 	defer s.mu.Unlock()
@@ -84,7 +85,7 @@ func (s *StateStore) UpdateTask(task *TaskState) {
 // GetTask retrieves a task state
 func (s *StateStore) GetTask(taskID string) (*TaskState, bool) {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetTask, returning empty for task: %s", taskID)
+		glog.Warningf("[TryRLock] Failed to acquire read lock for GetTask, returning empty for task: %s", taskID)
 		return nil, false
 	}
 	defer s.mu.RUnlock()
@@ -96,7 +97,7 @@ func (s *StateStore) GetTask(taskID string) (*TaskState, bool) {
 // GetAllTasks returns all tasks
 func (s *StateStore) GetAllTasks() map[string]*TaskState {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetAllTasks, returning empty map")
+		glog.Warning("[TryRLock] Failed to acquire read lock for GetAllTasks, returning empty map")
 		return make(map[string]*TaskState)
 	}
 	defer s.mu.RUnlock()
@@ -111,7 +112,7 @@ func (s *StateStore) GetAllTasks() map[string]*TaskState {
 // RemoveTask removes a completed/failed/canceled task after some time
 func (s *StateStore) RemoveTask(taskID string) {
 	if !s.mu.TryLock() {
-		log.Printf("Failed to acquire lock for RemoveTask, skipping removal for task: %s", taskID)
+		glog.Warningf("[TryLock] Failed to acquire lock for RemoveTask, skipping removal for task: %s", taskID)
 		return
 	}
 	defer s.mu.Unlock()
@@ -123,7 +124,7 @@ func (s *StateStore) RemoveTask(taskID string) {
 // UpdateComponent updates or creates a component status
 func (s *StateStore) UpdateComponent(component *ComponentStatus) {
 	if !s.mu.TryLock() {
-		log.Printf("Failed to acquire lock for UpdateComponent, skipping update for component: %s", component.Name)
+		glog.Warningf("[TryLock] Failed to acquire lock for UpdateComponent, skipping update for component: %s", component.Name)
 		return
 	}
 	defer s.mu.Unlock()
@@ -136,7 +137,7 @@ func (s *StateStore) UpdateComponent(component *ComponentStatus) {
 // GetComponent retrieves a component status
 func (s *StateStore) GetComponent(name string) (*ComponentStatus, bool) {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetComponent, returning empty for component: %s", name)
+		glog.Warningf("[TryRLock] Failed to acquire read lock for GetComponent, returning empty for component: %s", name)
 		return nil, false
 	}
 	defer s.mu.RUnlock()
@@ -148,7 +149,7 @@ func (s *StateStore) GetComponent(name string) (*ComponentStatus, bool) {
 // GetAllComponents returns all component statuses
 func (s *StateStore) GetAllComponents() map[string]*ComponentStatus {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetAllComponents, returning empty map")
+		glog.Warning("[TryRLock] Failed to acquire read lock for GetAllComponents, returning empty map")
 		return make(map[string]*ComponentStatus)
 	}
 	defer s.mu.RUnlock()
@@ -163,7 +164,7 @@ func (s *StateStore) GetAllComponents() map[string]*ComponentStatus {
 // GetSnapshot creates a complete snapshot of current state
 func (s *StateStore) GetSnapshot() *RuntimeSnapshot {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetSnapshot, returning empty snapshot")
+		glog.Warning("[TryRLock] Failed to acquire read lock for GetSnapshot, returning empty snapshot")
 		return &RuntimeSnapshot{
 			Timestamp:  time.Now(),
 			AppStates:  make(map[string]*AppFlowState),
@@ -254,7 +255,7 @@ func (s *StateStore) getAppStateKey(userID, sourceID, appName string) string {
 // UpdateChartRepoStatus updates chart repo status
 func (s *StateStore) UpdateChartRepoStatus(status *ChartRepoStatus) {
 	if !s.mu.TryLock() {
-		log.Printf("Failed to acquire lock for UpdateChartRepoStatus, skipping update")
+		glog.Warning("[TryLock] Failed to acquire lock for UpdateChartRepoStatus, skipping update")
 		return
 	}
 	defer s.mu.Unlock()
@@ -269,7 +270,7 @@ func (s *StateStore) UpdateChartRepoStatus(status *ChartRepoStatus) {
 // GetChartRepoStatus retrieves chart repo status
 func (s *StateStore) GetChartRepoStatus() *ChartRepoStatus {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetChartRepoStatus, returning nil")
+		glog.Warning("[TryRLock] Failed to acquire read lock for GetChartRepoStatus, returning nil")
 		return nil
 	}
 	defer s.mu.RUnlock()
@@ -279,7 +280,7 @@ func (s *StateStore) GetChartRepoStatus() *ChartRepoStatus {
 // GetLastUpdate returns the last update time
 func (s *StateStore) GetLastUpdate() time.Time {
 	if !s.mu.TryRLock() {
-		log.Printf("Failed to acquire read lock for GetLastUpdate, returning zero time")
+		glog.Warning("[TryRLock] Failed to acquire read lock for GetLastUpdate, returning zero time")
 		return time.Time{}
 	}
 	defer s.mu.RUnlock()

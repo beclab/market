@@ -28,10 +28,10 @@ COPY internal/ bytetrade.io/web3os/market/internal/
 
 # Build
 RUN cd bytetrade.io/web3os/market && \
-        go mod tidy 
+  go mod tidy 
 
 RUN cd bytetrade.io/web3os/market && \
-    CGO_ENABLED=0 go build -ldflags="-s -w" -a -o market cmd/market/v2/main.go
+  CGO_ENABLED=0 go build -ldflags="-s -w" -a -o market cmd/market/v2/main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
@@ -39,4 +39,4 @@ FROM golang:1.23.11-alpine
 WORKDIR /opt/app
 COPY --from=builder /workspace/bytetrade.io/web3os/market/market .
 
-CMD ["/opt/app/market", "-v", "4", "--logtostderr"]
+CMD ["/opt/app/market", "-v", "2", "--logtostderr"]
