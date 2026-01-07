@@ -1288,7 +1288,7 @@ func (cm *CacheManager) ForceSync() error {
 	now := time.Now()
 	if !cm.lastForceSync.IsZero() && now.Sub(cm.lastForceSync) < time.Minute {
 		cm.forceSyncMutex.Unlock()
-		glog.Warningf("ForceSync: Rate limited, last sync was %v ago", now.Sub(cm.lastForceSync))
+		glog.V(4).Infof("ForceSync: Rate limited, last sync was %v ago", now.Sub(cm.lastForceSync))
 		return fmt.Errorf("force sync rate limited, please wait %v", time.Minute-now.Sub(cm.lastForceSync))
 	}
 	cm.lastForceSync = now

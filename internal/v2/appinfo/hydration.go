@@ -1410,13 +1410,13 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 			if apps, hasApps := dataMap["apps"]; hasApps {
 				if appsMapValue, ok := apps.(map[string]interface{}); ok {
 					appsMap = appsMapValue
-					glog.V(2).Infof("Found apps data in standard map format for user: %s, source: %s", userID, sourceID)
+					glog.V(3).Infof("Found apps data in standard map format for user: %s, source: %s", userID, sourceID)
 				}
 			} else {
 				// Check if the dataMap itself contains app entries
 				if h.looksLikeAppsMap(dataMap) {
 					appsMap = dataMap
-					glog.V(2).Infof("Data section appears to contain apps directly for user: %s, source: %s", userID, sourceID)
+					glog.V(3).Infof("Data section appears to contain apps directly for user: %s, source: %s", userID, sourceID)
 				}
 			}
 		} else {

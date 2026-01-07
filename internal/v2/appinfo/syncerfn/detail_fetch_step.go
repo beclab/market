@@ -86,7 +86,7 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	errorCount := 0
 	overallStartTime := time.Now()
 
-	glog.V(2).Infof("Starting detail fetch with %d total batches", totalBatches)
+	glog.V(3).Infof("Starting detail fetch with %d total batches", totalBatches)
 
 	for i := 0; i < len(data.AppIDs); i += d.BatchSize {
 		batchNumber := (i / d.BatchSize) + 1

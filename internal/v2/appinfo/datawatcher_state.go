@@ -458,12 +458,12 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 
 	// Check if this is an uninstall operation with uninstalled state
 	if appStateMsg.OpType == "uninstall" && appStateMsg.State == "uninstalled" {
-		glog.V(3).Infof("Detected uninstall operation with uninstalled state for opID: %s, app: %s, user: %s",
+		glog.V(2).Infof("Detected uninstall operation with uninstalled state for opID: %s, app: %s, user: %s",
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		if dw.taskModule != nil {
 			if err := dw.taskModule.UninstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
-				glog.Errorf("Failed to mark uninstall task as succeeded for opID %s: %v", appStateMsg.OpID, err)
+				glog.Warningf("Failed to mark uninstall task as succeeded for opID %s: %v", appStateMsg.OpID, err)
 			} else {
 				glog.V(2).Infof("Successfully marked uninstall task as succeeded for opID: %s, app: %s, user: %s",
 					appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
@@ -495,13 +495,13 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 	// Or if task is not found in memory and we need to wait for database persistence
 	if appStateMsg.OpType == "install" && appStateMsg.State == "pending" {
 		if dw.taskModule != nil {
-			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(appStateMsg.Name, appStateMsg.User) // + install & pending
+			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(appStateMsg.Name, appStateMsg.User)
 			if !lockAcquired {
 				// If we can't acquire the lock, delay processing to be safe
 				// This avoids blocking NATS message processing
 				glog.V(2).Infof("Delaying pending state message for app=%s, user=%s, opID=%s - failed to acquire lock",
 					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
-				dw.addDelayedMessage(msg, appStateMsg) // + install & pending
+				dw.addDelayedMessage(msg, appStateMsg)
 				return
 			}
 			if hasPendingTask {
@@ -549,7 +549,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 
 	userData := dw.cacheManager.getUserData(appStateMsg.User)
 	if userData == nil {
-		glog.V(3).Infof("User data not found for user %s", appStateMsg.User)
+		glog.V(2).Infof("User data not found for user %s", appStateMsg.User)
 		return
 	}
 
@@ -557,10 +557,35 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		for _, appState := range sourceData.AppStateLatest {
 			if appState.Status.Name == appStateMsg.Name { // && appState.Status.State == appStateMsg.State
 
-				if (appStateMsg.EntranceStatuses == nil || len(appStateMsg.EntranceStatuses) == 0) && appState.Status.Progress == appStateMsg.Progress {
-					glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s",
-						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
-					return
+				/**
+				 * [Mandatory Sync Whitelist]
+				 * The cases below define critical state transition scenarios that must be processed.
+				 *
+				 * Background:
+				 * When a user performs an action in the UI (e.g., canceling installation/download) or when an app lifecycle event completes (e.g., installation finished, uninstallation finished),
+				 * the final state pushed by NATS (appStateMsg.State) may differ from the cached state in memory (appState.Status.State).
+				 *
+				 * Purpose:
+				 * Even if the progress (Progress) has not changed and there is no entrance information (EntranceStatuses),
+				 * as long as the following conditions are met, we must bypass the "deduplication check" in the default branch.
+				 * This forces the local state to update and pushes the change to the frontend, ensuring the UI promptly reflects the final result.
+				 */
+				switch {
+				//   NATS State                        APP State
+				case appStateMsg.State == "running" && appState.Status.State == "installing":
+				case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
+				case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
+				case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
+				case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "downloadingCanceling":
+				case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
+				case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
+				case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
+				default:
+					if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
+						glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
+							appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, appState.Status.State, appStateMsg.State)
+						return
+					}
 				}
 
 				// Compare timestamps properly by parsing them
@@ -570,8 +595,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 
 					if err1 == nil && err2 == nil {
 						if statusTime.After(createTime) {
-							glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s. Skipping update.",
-								appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
+							glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s, appTime: %s, msgTime: %s. Skipping update.",
+								appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, statusTime.String(), createTime.String())
 							return
 						}
 					} else {
@@ -584,7 +609,9 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 	}
 
 	// Process the message
-	dw.processMessageInternal(msg, appStateMsg) // + handler message
+	glog.V(2).Infof("State - Processs message from NATS subject %s, for internal for opID: %s, app: %s, user: %s, msgState: %s",
+		msg.Subject, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, appStateMsg.State)
+	dw.processMessageInternal(msg, appStateMsg)
 }
 
 // storeHistoryRecord stores the app state message as a history record
@@ -961,7 +988,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		return
 	}
 
-	if err := dw.cacheManager.SetAppData(userID, sourceID, AppStateLatest, stateData); err != nil {
+	if err := dw.cacheManager.SetAppData(userID, sourceID, AppStateLatest, stateData); err != nil { // + App - Sending
 		glog.Errorf("Failed to store app state to cache: %v", err)
 	} else {
 		glog.V(2).Infof("Successfully stored app state to cache for user=%s, source=%s, app=%s, state=%s",
@@ -1199,7 +1226,7 @@ func (dw *DataWatcherState) processMessageInternal(msg *nats.Msg, appStateMsg Ap
 	dw.storeHistoryRecord(appStateMsg, string(msg.Data))
 
 	// Store state data to cache
-	dw.storeStateToCache(appStateMsg)
+	dw.storeStateToCache(appStateMsg) // + App - Sending
 
 	// Print the parsed message
 	dw.printAppStateMessage(appStateMsg)

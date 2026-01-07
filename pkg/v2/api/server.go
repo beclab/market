@@ -263,7 +263,7 @@ func (s *Server) Start() error {
 	s.router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			glog.V(2).Infof("Request started: %s %s", r.Method, r.URL.Path)
+			glog.V(3).Infof("Request started: %s %s", r.Method, r.URL.Path)
 
 			next.ServeHTTP(w, r)
 

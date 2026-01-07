@@ -303,7 +303,7 @@ func (hm *HistoryModule) QueryRecords(condition *QueryCondition) ([]*HistoryReco
 		argIndex++
 	}
 
-	glog.Infof("Executing query: %s with args: %v", query, args)
+	glog.V(3).Infof("Executing query: %s with args: %v", query, args)
 
 	rows, err := hm.db.Query(query, args...)
 	if err != nil {
@@ -328,7 +328,7 @@ func (hm *HistoryModule) QueryRecords(condition *QueryCondition) ([]*HistoryReco
 		return nil, err
 	}
 
-	glog.Infof("Retrieved %d history records", len(records))
+	glog.V(2).Infof("Retrieved %d history records, args: %v", len(records), args)
 	return records, nil
 }
 
