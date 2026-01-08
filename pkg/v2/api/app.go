@@ -2105,7 +2105,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
-		glog.V(3).Infof("Cache manager is not initialized")
+		glog.Error("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -2113,7 +2113,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	// Step 3: Get user data from cache
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
-		glog.V(3).Infof("User data not found for user: %s", userID)
+		glog.Errorf("User data not found for user: %s", userID)
 		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 		return
 	}
@@ -2121,7 +2121,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	// Step 4: Find app in specified source
 	foundApp, sourceID := s.findAppInUserDataWithSource(userData, appID, source)
 	if foundApp == nil {
-		glog.V(3).Infof("App not found: %s in source: %s for user: %s", appID, source, userID)
+		glog.Errorf("App not found: %s in source: %s for user: %s", appID, source, userID)
 		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("App not found in source '%s'", source), nil)
 		return
 	}
@@ -2152,7 +2152,7 @@ func (s *Server) getAppPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	// Add token_info if available
 	if len(result.TokenInfo) > 0 {
 		responseData["token_info"] = result.TokenInfo
-		glog.V(3).Infof("getAppPaymentStatus: Added token_info to response (count=%d)", len(result.TokenInfo))
+		glog.V(2).Infof("getAppPaymentStatus: Added token_info to response (count=%d)", len(result.TokenInfo))
 	}
 
 	glog.V(2).Infof("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s", appID, sourceID, userID, result.Status)
@@ -2294,7 +2294,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 
 	// Step 2: Check if cache manager is available
 	if s.cacheManager == nil {
-		glog.V(3).Infof("Cache manager is not initialized")
+		glog.Error("Cache manager is not initialized")
 		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
 		return
 	}
@@ -2302,7 +2302,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	// Step 3: Get user data from cache
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
-		glog.V(3).Infof("User data not found for user: %s", userID)
+		glog.Errorf("User data not found for user: %s", userID)
 		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
 		return
 	}
@@ -2310,7 +2310,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	// Step 4: Find app in all sources (legacy behavior)
 	foundApp, sourceID := s.findAppInUserData(userData, appID)
 	if foundApp == nil {
-		glog.V(3).Infof("App not found: %s for user: %s", appID, userID)
+		glog.Errorf("App not found: %s for user: %s", appID, userID)
 		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
 		return
 	}
@@ -2341,7 +2341,7 @@ func (s *Server) getAppPaymentStatusLegacy(w http.ResponseWriter, r *http.Reques
 	// Add token_info if available
 	if len(result.TokenInfo) > 0 {
 		responseData["token_info"] = result.TokenInfo
-		glog.V(3).Infof("getAppPaymentStatusLegacy: Added token_info to response (count=%d)", len(result.TokenInfo))
+		glog.V(2).Infof("getAppPaymentStatusLegacy: Added token_info to response (count=%d)", len(result.TokenInfo))
 	}
 
 	glog.V(2).Infof("App payment status retrieved successfully for app: %s, source: %s, user: %s, status: %s (legacy)", appID, sourceID, userID, result.Status)
@@ -2454,7 +2454,7 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 	glog.V(3).Infof("X-Forwarded-Host header value: %s", xForwardedHost)
 
 	if xForwardedHost == "" {
-		glog.V(3).Infof("ERROR: X-Forwarded-Host header is missing in request")
+		glog.Error("ERROR: X-Forwarded-Host header is missing in request")
 		s.sendResponse(w, http.StatusBadRequest, false, "X-Forwarded-Host header is required", nil)
 		return
 	}
@@ -2487,7 +2487,7 @@ func (s *Server) startPaymentPolling(w http.ResponseWriter, r *http.Request) {
 
 	// Step 3: Validate required fields (source_id, app_id, tx_hash, product_id)
 	if strings.TrimSpace(request.SourceID) == "" || strings.TrimSpace(request.AppID) == "" || strings.TrimSpace(request.TxHash) == "" || strings.TrimSpace(request.ProductID) == "" {
-		glog.V(3).Infof("Missing required fields in payment polling request")
+		glog.Error("Missing required fields in payment polling request")
 		s.sendResponse(w, http.StatusBadRequest, false, "Missing required fields: source_id, app_id, tx_hash, product_id", nil)
 		return
 	}

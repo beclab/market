@@ -11,6 +11,7 @@ import (
 
 type MarketSettings struct {
 	SelectedSource string `json:"selected_source"`
+	Nsfw           bool   `json:"nsfw"`
 }
 
 // ModifyType represents different types of value modifications

@@ -227,7 +227,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	// Parse response to extract opID if installation is successful
 	var responseData map[string]interface{}
 	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
-		glog.Errorf("Failed to parse response JSON for task %s: %v", task.ID, err)
+		glog.Errorf("Failed to parse response JSON for task %s: %v, resp: %s", task.ID, err, string([]byte(response)))
 		// Create error result for JSON parsing failure
 		errorResult := map[string]interface{}{
 			"operation":    "install",
