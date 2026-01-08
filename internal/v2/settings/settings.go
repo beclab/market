@@ -31,6 +31,7 @@ func getMarketSettings(redisClient RedisClient, userID string) (*MarketSettings,
 		if err.Error() == "key not found" {
 			return &MarketSettings{
 				SelectedSource: "market.olares", // Default selected source
+				Nsfw:           true,            // Default nsfw settings
 			}, nil
 		}
 		return nil, err

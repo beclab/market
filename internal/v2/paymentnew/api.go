@@ -239,7 +239,7 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 	realAppID := appID
 	if appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
 		realAppID = appInfo.AppEntry.ID
-		glog.V(3).Infof("GetPaymentStatus: Using real app ID from AppEntry: %s (URL param was: %s)", realAppID, appID)
+		glog.V(2).Infof("GetPaymentStatus: Using real app ID from AppEntry: %s (URL param was: %s)", realAppID, appID)
 	}
 
 	// Step 2: Determine productID for state machine lookup
@@ -252,11 +252,11 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 		if appInfo.Price.Paid.ProductID != "" {
 			// Paid buyout app with product_id - use it
 			productID = appInfo.Price.Paid.ProductID
-			glog.V(3).Infof("GetPaymentStatus: Paid buyout app, using productID from Price.Paid: %s", productID)
+			glog.V(2).Infof("GetPaymentStatus: Paid buyout app, using productID from Price.Paid: %s", productID)
 		} else if len(appInfo.Price.Paid.Price) > 0 {
 			// Paid buyout app without product_id - use realAppID as fallback
 			productID = realAppID
-			glog.V(3).Infof("GetPaymentStatus: Paid buyout app without product_id, using realAppID as fallback: %s", productID)
+			glog.V(2).Infof("GetPaymentStatus: Paid buyout app without product_id, using realAppID as fallback: %s", productID)
 		}
 	}
 
@@ -264,14 +264,14 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 	if productID == "" {
 		productID = getProductIDFromAppInfo(appInfo)
 		if productID != "" {
-			glog.V(3).Infof("GetPaymentStatus: Using productID from Products: %s", productID)
+			glog.V(2).Infof("GetPaymentStatus: Using productID from Products: %s", productID)
 		}
 	}
 
 	// Final fallback: use realAppID
 	if productID == "" {
 		productID = realAppID
-		glog.V(3).Infof("GetPaymentStatus: No productID found, using realAppID as final fallback: %s", productID)
+		glog.V(2).Infof("GetPaymentStatus: No productID found, using realAppID as final fallback: %s", productID)
 	}
 
 	// Step 3: Find state (try memory first, then fallback to Redis)
@@ -281,13 +281,13 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 		// Try getState first (memory only)
 		if s, err := globalStateMachine.getState(userID, realAppID, productID); err == nil {
 			state = s
-			glog.V(3).Infof("GetPaymentStatus: Found state in memory for user=%s app=%s productID=%s", userID, realAppID, productID)
+			glog.V(2).Infof("GetPaymentStatus: Found state in memory for user=%s app=%s productID=%s", userID, realAppID, productID)
 		} else {
 			// Try LoadState (will check Redis and load to memory)
 			glog.Errorf("GetPaymentStatus: State not in memory, trying LoadState from Redis. Error: %v", err)
 			if s, err := globalStateMachine.LoadState(userID, realAppID, productID); err == nil {
 				state = s
-				glog.V(3).Infof("GetPaymentStatus: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, realAppID, productID)
+				glog.V(2).Infof("GetPaymentStatus: Found state in Redis and loaded to memory for user=%s app=%s productID=%s", userID, realAppID, productID)
 			} else {
 				glog.Errorf("GetPaymentStatus: State not found in Redis either. Error: %v", err)
 			}
@@ -295,8 +295,8 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 	}
 
 	if state == nil {
-		glog.V(3).Infof("GetPaymentStatus: state not found for user=%s app=%s product=%s -> not_buy", userID, realAppID, productID)
-		// 需要购买但尚未开始任何流程，标记为 not_buy
+		glog.V(2).Infof("GetPaymentStatus: state not found for user=%s app=%s product=%s -> not_buy", userID, realAppID, productID)
+		// Needs to be purchased but no process has started; mark as 'not_buy'.
 		return &PaymentStatusResult{RequiresPurchase: true, Status: "not_buy", Message: "Payment not started"}, nil
 	}
 
@@ -314,7 +314,7 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 		}
 	}
 
-	glog.V(3).Infof("GetPaymentStatus: state snapshot user=%s app=%s product=%s developerSync=%s signatureStatus=%s paymentStatus=%s VC_present=%t",
+	glog.V(2).Infof("GetPaymentStatus: state snapshot user=%s app=%s product=%s developerSync=%s signatureStatus=%s paymentStatus=%s VC_present=%t",
 		userID, realAppID, productID, state.DeveloperSync, state.SignatureStatus, state.PaymentStatus, state.VC != "")
 
 	// If DeveloperSync or LarePassSync not completed, trigger a sync once (reentrant)
@@ -370,16 +370,16 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 			settingsManager = globalStateMachine.settingsManager
 		}
 		tokenInfo := GetTokenInfoForState(context.Background(), state, appInfo, settingsManager)
-		glog.V(3).Infof("GetPaymentStatus: GetTokenInfoForState returned %d token info entries for user=%s app=%s product=%s", len(tokenInfo), userID, realAppID, productID)
+		glog.V(2).Infof("GetPaymentStatus: GetTokenInfoForState returned %d token info entries for user=%s app=%s product=%s", len(tokenInfo), userID, realAppID, productID)
 		if len(tokenInfo) > 0 {
 			result.TokenInfo = tokenInfo
-			glog.V(3).Infof("GetPaymentStatus: Added token_info to response (count=%d)", len(tokenInfo))
+			glog.V(2).Infof("GetPaymentStatus: Added token_info to response (count=%d)", len(tokenInfo))
 		} else {
-			glog.V(3).Infof("GetPaymentStatus: No token_info extracted (appInfo=%v, developerName=%s, settingsManager=%v)", appInfo != nil, state.DeveloperName, settingsManager != nil)
+			glog.V(2).Infof("GetPaymentStatus: No token_info extracted (appInfo=%v, developerName=%s, settingsManager=%v)", appInfo != nil, state.DeveloperName, settingsManager != nil)
 		}
 	}
 
-	glog.V(3).Infof("GetPaymentStatus: responding with status=%s message=%s for user=%s app=%s product=%s", result.Status, result.Message, userID, realAppID, productID)
+	glog.V(2).Infof("GetPaymentStatus: responding with status=%s message=%s for user=%s app=%s product=%s", result.Status, result.Message, userID, realAppID, productID)
 
 	return result, nil
 }
@@ -393,8 +393,8 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 	glog.V(2).Infof("X-Forwarded-Host: %s", xForwardedHost)
 
 	if globalStateMachine == nil {
-		glog.V(3).Infof("State machine not initialized, falling back to basic processing")
-		glog.V(3).Infof("=== End of Payment State Machine Processing ===")
+		glog.V(2).Infof("State machine not initialized, falling back to basic processing")
+		glog.V(2).Infof("=== End of Payment State Machine Processing ===")
 		return nil
 	}
 
@@ -475,7 +475,7 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 			return nil
 		})
 	} else if !shouldNotifyFrontend {
-		glog.V(3).Infof("Skip notifying payment_required: current status=%s", latest.PaymentStatus)
+		glog.V(2).Infof("Skip notifying payment_required: current status=%s", latest.PaymentStatus)
 	}
 
 	// Step 5: Start VC polling if:
@@ -484,17 +484,17 @@ func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 	// - Early stage but signature exists (restore purchase scenario)
 	if shouldPollDeveloper {
 		if isPaymentCompleted {
-			glog.V(3).Info("Payment already completed; restarting VC polling with refreshed signature")
+			glog.V(2).Info("Payment already completed; restarting VC polling with refreshed signature")
 		} else if isNotificationSent {
-			glog.V(3).Info("Restore purchase/retry scenario detected (notification sent with signature); starting VC polling directly")
+			glog.V(2).Info("Restore purchase/retry scenario detected (notification sent with signature); starting VC polling directly")
 		} else {
-			glog.V(3).Info("Early stage with signature detected; starting VC polling (restore purchase scenario)")
+			glog.V(2).Info("Early stage with signature detected; starting VC polling (restore purchase scenario)")
 		}
 		latestCopy := *latest
 		go globalStateMachine.pollForVCFromDeveloper(&latestCopy)
 	}
 
-	glog.V(3).Info("=== End of Payment State Machine Processing ===")
+	glog.V(2).Info("=== End of Payment State Machine Processing ===")
 	return nil
 }
 
@@ -1051,7 +1051,7 @@ func ListPaymentStates() map[string]*PaymentState {
 func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userID, sourceID string, settingsManager *settings.SettingsManager, client *resty.Client) (*types.PurchaseInfo, error) {
 	// Step 0: Basic validation and quick exit
 	if appInfo == nil || appInfo.Price == nil {
-		glog.V(3).Infof("INFO: no payment section, skip")
+		glog.V(2).Infof("INFO: no payment section, skip")
 		return nil, nil
 	}
 
@@ -1060,23 +1060,23 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 	if appInfo.Price != nil && appInfo.Price.Paid != nil {
 		if appInfo.Price.Paid.ProductID != "" {
 			productID = appInfo.Price.Paid.ProductID
-			glog.V(3).Infof("PreprocessAppPaymentData: Using productID from Price.Paid: %s", productID)
+			glog.V(2).Infof("PreprocessAppPaymentData: Using productID from Price.Paid: %s", productID)
 		}
 	}
 	if productID == "" {
 		productID = getProductIDFromAppInfo(appInfo)
 		if productID != "" {
-			glog.V(3).Infof("PreprocessAppPaymentData: Using productID from Products: %s", productID)
+			glog.V(2).Infof("PreprocessAppPaymentData: Using productID from Products: %s", productID)
 		}
 	}
 	if productID == "" {
 		// For paid apps, we can use appID as productID if no explicit product_id
 		if appInfo.AppEntry != nil {
 			productID = appInfo.AppEntry.ID
-			glog.V(3).Infof("PreprocessAppPaymentData: Using appID as productID fallback: %s", productID)
+			glog.V(2).Infof("PreprocessAppPaymentData: Using appID as productID fallback: %s", productID)
 		} else {
 			// No valid productID -> return directly, no further processing
-			glog.V(3).Infof("INFO: productID not found and no appID available, skip state init")
+			glog.V(2).Infof("INFO: productID not found and no appID available, skip state init")
 			return nil, nil
 		}
 	}
