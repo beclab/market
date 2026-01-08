@@ -3,6 +3,7 @@ package settings
 import (
 	"context"
 	"fmt"
+	"market/internal/v2/utils"
 	"strings"
 	"time"
 
@@ -43,6 +44,12 @@ func setCachedSystemRemoteService(v string) {
 
 // StartSystemEnvWatcher starts a background informer to watch systemenvs and update cached OlaresRemoteService
 func StartSystemEnvWatcher(ctx context.Context) {
+	// Skip in public environment (no systemenvs CRD available)
+	if utils.IsPublicEnvironment() {
+		glog.Info("SystemEnv watcher: public environment detected, skipping watcher")
+		return
+	}
+
 	// Best-effort: if not running in cluster, just skip
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
