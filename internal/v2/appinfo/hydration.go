@@ -302,8 +302,8 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 
 		// Execute step
 		if err := step.Execute(ctx, task); err != nil {
-			glog.V(3).Infof("Step %d (%s) failed for task: %s, error: %v", i+1, step.GetStepName(), task.ID, err)
-			glog.V(3).Infof("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
+			glog.Errorf("Step %d (%s) failed for task: %s, app: %s %s %s, error: %v", i+1, step.GetStepName(), task.ID, task.AppID, task.AppName, task.AppVersion, err)
+			glog.Errorf("-------- HYDRATION STEP %d/%d FAILED: %s --------", i+1, len(h.steps), step.GetStepName())
 			task.SetError(err)
 
 			// Clean up resources before failure
@@ -344,14 +344,14 @@ func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationT
 			failureReason := err.Error()
 			failureStep := step.GetStepName()
 
-			glog.V(3).Infof("Task %s failed at step %s, moving to render failed list with reason: %s",
+			glog.Errorf("Task %s failed at step %s, moving to render failed list with reason: %s",
 				task.ID, failureStep, failureReason)
 
 			duration := time.Since(taskStartTime)
 			h.moveTaskToRenderFailed(task, failureReason, failureStep)
 			h.markTaskFailed(task, taskStartTime, duration, failureStep, failureReason)
 
-			glog.V(4).Info("==================== HYDRATION TASK MOVED TO RENDER FAILED LIST ====================")
+			glog.Errorf("==================== HYDRATION TASK MOVED TO RENDER FAILED LIST ====================")
 			return
 		}
 
@@ -660,33 +660,33 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 		appID, appName, pendingData.RawPackage, pendingData.RenderedPackage)
 
 	if pendingData.RawPackage == "" {
-		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - RawPackage is empty for appID=%s, name=%s", appID, appName)
+		glog.Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - RawPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.RenderedPackage == "" {
-		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - RenderedPackage is empty for appID=%s, name=%s", appID, appName)
+		glog.Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - RenderedPackage is empty for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if pendingData.AppInfo == nil {
-		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - AppInfo is nil for appID=%s, name=%s", appID, appName)
+		glog.Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - AppInfo is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	imageAnalysis := pendingData.AppInfo.ImageAnalysis
 	if imageAnalysis == nil {
-		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
+		glog.Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis is nil for appID=%s, name=%s", appID, appName)
 		return false
 	}
 
 	if imageAnalysis.TotalImages > 0 {
-		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages > 0 for appID=%s, name=%s, TotalImages: %d", appID, appName, imageAnalysis.TotalImages)
+		glog.Infof("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages > 0 for appID=%s, name=%s, TotalImages: %d", appID, appName, imageAnalysis.TotalImages)
 		return true
 	}
 
 	if imageAnalysis.TotalImages == 0 && imageAnalysis.Images != nil {
-		glog.V(3).Infof("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages=0 but Images not nil for appID=%s, name=%s, Images: %v", appID, appName, imageAnalysis.Images)
+		glog.Infof("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages=0 but Images not nil for appID=%s, name=%s, Images: %v", appID, appName, imageAnalysis.Images)
 		return true
 	}
 
@@ -977,7 +977,7 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask, startedAt tim
 	}
 
 	if !h.taskMutex.TryLock() {
-		glog.Warningf("[TryLock] Failed to acquire lock for markTaskFailed, skipping status update, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
+		glog.Warningf("[TryLock] Failed to acquire lock for markTaskFailed, skipping status update, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s, error: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion, errorMsg)
 		return
 	}
 

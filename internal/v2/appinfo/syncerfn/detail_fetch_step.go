@@ -213,7 +213,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 	// Build complete URL from market source base URL and endpoint path
 	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
-	glog.V(3).Infof("Fetching details for batch from: %s", detailURL)
+	glog.V(2).Infof("Fetching details for batch from: %s, Source: %s", detailURL, marketSource.ID)
 
 	request := types.AppsInfoRequest{
 		AppIds:  appIDs,

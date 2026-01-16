@@ -40,7 +40,7 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 	version := data.GetVersion()
 	if version == "" {
 		version = "1.12.3" // fallback version
-		glog.V(3).Infof("No version provided in context, using default: %s", version)
+		glog.V(2).Infof("No version provided in context, using default: %s", version)
 	}
 
 	// Get current market source from context
@@ -51,7 +51,7 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 
 	// Build complete URL from market source base URL and endpoint path
 	dataURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DataEndpointPath)
-	glog.V(2).Infof("Using data URL: %s", dataURL)
+	glog.V(2).Infof("Using data, Source: %s, Version: %s, URL: %s", marketSource.ID, version, dataURL)
 
 	if strings.HasPrefix(dataURL, "file://") {
 		return nil

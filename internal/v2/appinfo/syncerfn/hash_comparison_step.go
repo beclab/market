@@ -46,7 +46,7 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	version := data.GetVersion()
 	if version == "" {
 		version = "1.12.3" // fallback version
-		glog.V(3).Infof("No version provided in context, using default: %s", version)
+		glog.V(2).Infof("No version provided in context, using default: %s", version)
 	}
 
 	glog.V(2).Infof("Using version: %s", version)
@@ -59,7 +59,7 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 
 	// Build complete URL from market source base URL and endpoint path
 	hashURL := h.SettingsManager.BuildAPIURL(marketSource.BaseURL, h.HashEndpointPath)
-	glog.V(2).Infof("Using hash URL: %s", hashURL)
+	glog.V(2).Infof("Using hash, Source: %s, Version: %s, URL: %s", marketSource.ID, version, hashURL)
 
 	if strings.HasPrefix(hashURL, "file://") {
 		return nil
