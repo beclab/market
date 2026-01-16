@@ -516,7 +516,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			glog.V(3).Info("Using CacheManager for data storage with hydration notifications")
 			s.storeDataViaCacheManager(userIDs, sourceID, completeData)
 		} else {
-			glog.V(3).Info("CacheManager not available, using direct cache storage")
+			glog.Warning("CacheManager not available, using direct cache storage")
 			s.storeDataDirectlyBatch(userIDs, sourceID, completeData)
 		}
 	} else {

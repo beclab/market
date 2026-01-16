@@ -40,7 +40,7 @@ type PaymentStatusResult struct {
 // PurchaseApp starts a purchase flow for a given user/app/source (placeholder)
 // NOTE: Implementation to be added. For now, only logs and returns nil.
 func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.AppInfo) (map[string]interface{}, error) {
-	glog.V(2).Info("[PurchaseApp] user=%s app=%s source=%s", userID, appID, sourceID)
+	glog.V(2).Infof("[PurchaseApp] user=%s app=%s source=%s", userID, appID, sourceID)
 
 	// Extract productID from app info with correct priority
 	if appInfo == nil {
@@ -195,7 +195,7 @@ func PurchaseApp(userID, appID, sourceID, xForwardedHost string, appInfo *types.
 		_ = triggerPaymentStateSync(latest)
 	} else if latest != nil {
 		if latest.DeveloperSync == DeveloperSyncCompleted && latest.VC != "" {
-			glog.V(3).Infof("PurchaseApp: Skip triggerPaymentStateSync because VC already confirmed (purchase completed)")
+			glog.V(3).Info("PurchaseApp: Skip triggerPaymentStateSync because VC already confirmed (purchase completed)")
 		} else if latest.SignatureStatus == SignatureErrorNoRecord || latest.SignatureStatus == SignatureErrorNeedReSign {
 			glog.V(3).Infof("PurchaseApp: Skip triggerPaymentStateSync because signature is in error state (status=%s)", latest.SignatureStatus)
 		} else {
@@ -386,15 +386,15 @@ func GetPaymentStatus(userID, appID, sourceID, xForwardedHost string, appInfo *t
 
 // ProcessSignatureSubmission handles the business logic for signature submission
 func ProcessSignatureSubmission(jws, signBody, user, xForwardedHost string) error {
-	glog.V(2).Infof("=== Payment State Machine Processing Signature Submission ===")
+	glog.V(2).Info("=== Payment State Machine Processing Signature Submission ===")
 	glog.V(2).Infof("JWS: %s", jws)
 	glog.V(2).Infof("SignBody: %s", signBody)
 	glog.V(2).Infof("User: %s", user)
 	glog.V(2).Infof("X-Forwarded-Host: %s", xForwardedHost)
 
 	if globalStateMachine == nil {
-		glog.V(2).Infof("State machine not initialized, falling back to basic processing")
-		glog.V(2).Infof("=== End of Payment State Machine Processing ===")
+		glog.V(2).Info("State machine not initialized, falling back to basic processing")
+		glog.V(2).Info("=== End of Payment State Machine Processing ===")
 		return nil
 	}
 
