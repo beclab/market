@@ -37,6 +37,7 @@ const (
 var (
 	NewCacheData                                      = types.NewCacheData
 	NewUserData                                       = types.NewUserData
+	NewUserDataEx                                     = types.NewUserDataExt
 	NewSourceData                                     = types.NewSourceData
 	NewAppData                                        = types.NewAppData
 	NewAppInfoHistoryData                             = types.NewAppInfoHistoryData

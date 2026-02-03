@@ -101,9 +101,9 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 		data.RemoteHash, data.LocalHash, data.HashMatches)
 
 	if data.HashMatches {
-		glog.V(3).Infof("Hashes match - subsequent steps may be skipped")
+		glog.Infof("Hashes match - subsequent steps may be skipped")
 	} else {
-		glog.V(3).Info("Hashes differ - sync is required")
+		glog.Info("Hashes differ - sync is required")
 	}
 
 	return nil

@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/appinfo"
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
@@ -25,6 +26,13 @@ var settingsManager *settings.SettingsManager
 // SetSettingsManager sets the global settings manager
 func SetSettingsManager(sm *settings.SettingsManager) {
 	settingsManager = sm
+}
+
+type AppControllerFailedResp struct {
+	Code     int    `json:"code"`
+	Resource string `json:"resource"`
+	Message  string `json:"message"`
+	Reason   string `json:"reason"`
 }
 
 // MarketSourceRequest represents the request body for adding market source
@@ -51,6 +59,7 @@ type StopAppRequest struct {
 // Aggregated system status response
 type SystemStatusResponse struct {
 	UserInfo        interface{} `json:"user_info"`
+	AllUsers        interface{} `json:"users"`
 	CurUserResource interface{} `json:"cur_user_resource"`
 	ClusterResource interface{} `json:"cluster_resource"`
 	TerminusVersion interface{} `json:"terminus_version"`
@@ -236,11 +245,18 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Declare variables for storing responses
 	var userInfo, curUserResource, clusterResource, terminusVersion interface{}
+	var allUsers []map[string]string
 	var err1, err2, err3, err4 error
 
 	// Check if account is from header
 	if utils.IsAccountFromHeader() {
 		glog.V(2).Infof("Account from header detected, using bflUser: %s", bflUser)
+
+		allUsers, err1 = doGetUsers(s.cacheManager)
+		if err1 != nil {
+			glog.Errorf("Failed to get users: %v", err1)
+		}
+		glog.V(2).Infof("users: %v", allUsers)
 
 		glog.V(3).Infof("Requesting userInfo from %s", userInfoURL)
 		userInfo, err1 = doGetWithBflUser(userInfoURL, bflUser)
@@ -317,6 +333,7 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 
 	resp := SystemStatusResponse{
 		UserInfo:        userInfo,
+		AllUsers:        allUsers,
 		CurUserResource: curUserResource,
 		ClusterResource: clusterResource,
 		TerminusVersion: terminusVersion,
@@ -384,6 +401,25 @@ func doGetWithBflUser(url, bflUser string) (interface{}, error) {
 		return map[string]interface{}{}, nil
 	}
 	return result, nil
+}
+
+func doGetUsers(cm *appinfo.CacheManager) ([]map[string]string, error) {
+	if ok := cm.TryRLock(); !ok {
+		glog.Warning("[TryRLock] doGetUsers: CacheManager read lock not available")
+		return nil, nil
+	}
+	defer cm.RUnlock()
+
+	var usersInfo []map[string]string
+
+	getUsers := cm.GetCache().Users
+	for _, v := range getUsers {
+		if v.UserInfo != nil {
+			usersInfo = append(usersInfo, v.UserInfo)
+		}
+	}
+
+	return usersInfo, nil
 }
 
 func getenv(key string) string {
@@ -593,7 +629,13 @@ func (s *Server) resumeApp(w http.ResponseWriter, r *http.Request) {
 	resBody, err := resumeByType(req.AppName, token, bflUser)
 	if err != nil {
 		glog.Errorf("Failed to resume %s resp:%s, err:%s", req.AppName, resBody, err.Error())
-		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to resume application", nil)
+		var reason *AppControllerFailedResp
+		if e := json.Unmarshal([]byte(resBody), &reason); e != nil {
+			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to resume application", nil)
+		} else {
+			s.sendResponse(w, http.StatusInternalServerError, false, reason.Message, nil)
+		}
+
 		return
 	}
 

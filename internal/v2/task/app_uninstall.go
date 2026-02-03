@@ -36,6 +36,12 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		all = false // Default to false
 	}
 
+	deleteData, ok := task.Metadata["deleteData"].(bool)
+	if !ok {
+		glog.Warningf("Missing deleteData parameter in task metadata for task: %s, using default false", task.ID)
+		deleteData = false
+	}
+
 	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
 	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
 
@@ -69,7 +75,8 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 
 	// Create request body with all parameter
 	requestBody := map[string]interface{}{
-		"all": all,
+		"all":        all,
+		"deleteData": deleteData,
 	}
 	requestBodyBytes, _ := json.Marshal(requestBody)
 
@@ -78,14 +85,15 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		glog.Errorf("HTTP request failed for app uninstallation: task=%s, error=%v", task.ID, err)
 		// Create detailed error result
 		errorResult := map[string]interface{}{
-			"operation": "uninstall",
-			"app_name":  appName,
-			"user":      task.User,
-			"cfgType":   cfgType,
-			"all":       all,
-			"url":       urlStr,
-			"error":     err.Error(),
-			"status":    "failed",
+			"operation":  "uninstall",
+			"app_name":   appName,
+			"user":       task.User,
+			"cfgType":    cfgType,
+			"all":        all,
+			"deleteData": deleteData,
+			"url":        urlStr,
+			"error":      err.Error(),
+			"status":     "failed",
 		}
 		errorJSON, _ := json.Marshal(errorResult)
 		return string(errorJSON), err

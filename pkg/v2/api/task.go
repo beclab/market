@@ -753,6 +753,7 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	var requestBody map[string]interface{}
 	var sync bool
 	var all bool
+	var deleteData bool
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err == nil {
 			if syncVal, ok := requestBody["sync"].(bool); ok {
@@ -760,6 +761,9 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 			}
 			if allVal, ok := requestBody["all"].(bool); ok {
 				all = allVal
+			}
+			if deleteDataVal, ok := requestBody["deleteData"].(bool); ok {
+				deleteData = deleteDataVal
 			}
 		}
 	}
@@ -807,11 +811,12 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 
 	// Step 6: Create uninstallation task
 	taskMetadata := map[string]interface{}{
-		"user_id":  userID,
-		"app_name": appName,
-		"token":    utils.GetTokenFromRequest(restfulReq),
-		"cfgType":  cfgType, // Use retrieved cfgType
-		"all":      all,     // Add all parameter to metadata
+		"user_id":    userID,
+		"app_name":   appName,
+		"token":      utils.GetTokenFromRequest(restfulReq),
+		"cfgType":    cfgType,    // Use retrieved cfgType
+		"all":        all,        // Add all parameter to metadata
+		"deleteData": deleteData, // Add delete userData
 	}
 
 	// Handle synchronous requests with proper blocking

@@ -202,7 +202,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	glog.V(2).Infof("Sending HTTP request for app installation: task=%s", task.ID)
+	glog.V(2).Infof("Sending HTTP request for app installation: task=%s, data: %s", task.ID, string(ms))
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
 		glog.Errorf("HTTP request failed for app installation: task=%s, error=%v", task.ID, err)
