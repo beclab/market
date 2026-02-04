@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"market/internal/v2/appinfo"
+	"market/internal/v2/client"
 	"market/internal/v2/history"
 	"market/internal/v2/paymentnew"
 	runtimestate "market/internal/v2/runtime"
@@ -128,6 +129,11 @@ func main() {
 		if err != nil {
 			glog.Exitf("Failed to create Redis client: %v", err)
 		}
+	}
+
+	// Pre-startup step: Init K8s Factory
+	if err := client.NewFactory(); err != nil {
+		glog.Exitf("Failed to init k8s factory error: %v", err)
 	}
 
 	// utils.SetRedisClient(redisClient.GetRawClient())

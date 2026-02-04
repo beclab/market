@@ -577,6 +577,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 				case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
 				case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
 				case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
+				case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCanceling":
+				case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCancelFailed":
 				case appStateMsg.State == "pendingCanceled" && appState.Status.State == "pending":
 				case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "downloadingCanceling":
 				case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":

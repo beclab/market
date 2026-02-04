@@ -157,7 +157,7 @@ func (r *RedisClient) LoadCacheFromRedis() (*CacheData, error) {
 
 // loadUserData loads all sources for a specific user
 func (r *RedisClient) loadUserData(userID string) (*UserData, error) {
-	userData := NewUserData()
+	userData := NewUserDataEx(userID) // NewUserData()
 
 	// Load user hash from Redis
 	userHashKey := fmt.Sprintf("appinfo:user:%s:hash", userID)

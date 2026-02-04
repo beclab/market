@@ -490,7 +490,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 				// Double-check after acquiring write lock
 				if len(s.cache.Users) == 0 {
 					systemUserID := "system"
-					s.cache.Users[systemUserID] = NewUserData()
+					s.cache.Users[systemUserID] = NewUserDataEx(systemUserID) // NewUserData()
 					userIDs = append(userIDs, systemUserID)
 					glog.V(3).Infof("No existing users found, created system user as fallback")
 				} else {

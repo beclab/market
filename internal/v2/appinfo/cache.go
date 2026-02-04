@@ -3,6 +3,7 @@ package appinfo
 import (
 	"context"
 	"fmt"
+	"market/internal/v2/client"
 	"market/internal/v2/types"
 	"sync"
 	"time"
@@ -253,7 +254,7 @@ func (cm *CacheManager) Start() error {
 		for _, userID := range cm.userConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.V(3).Infof("Creating data structure for new user: %s", userID)
-				cm.cache.Users[userID] = NewUserData()
+				cm.cache.Users[userID] = NewUserDataEx(userID) // NewUserData()
 				newUsers = append(newUsers, userID)
 			}
 		}
@@ -631,7 +632,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 	// Ensure user exists
 	if _, exists := cm.cache.Users[userID]; !exists {
-		cm.cache.Users[userID] = NewUserData()
+		cm.cache.Users[userID] = NewUserDataEx(userID) // NewUserData()
 	}
 
 	// Check source limit for user
@@ -1068,7 +1069,7 @@ func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataTyp
 	}
 
 	if _, exists := cm.cache.Users[userID]; !exists {
-		cm.cache.Users[userID] = NewUserData()
+		cm.cache.Users[userID] = NewUserDataEx(userID) // NewUserData()
 	}
 	userData := cm.cache.Users[userID]
 	if _, exists := userData.Sources[sourceID]; !exists {
@@ -1205,7 +1206,7 @@ func (cm *CacheManager) addUserInternal(userID string) error {
 		return nil
 	}
 
-	userData := NewUserData()
+	userData := NewUserDataEx(userID) // NewUserData()
 
 	// Initialize sources from settingsManager
 	if cm.settingsManager != nil {
@@ -1459,7 +1460,7 @@ func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) erro
 		for _, userID := range newUserConfig.UserList {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				glog.V(3).Infof("Creating data structure for newly configured user: %s", userID)
-				userData := NewUserData()
+				userData := NewUserDataEx(userID) // NewUserData()
 				cm.cache.Users[userID] = userData
 
 				// Trigger sync to Redis for the new user
@@ -1532,7 +1533,7 @@ func (cm *CacheManager) syncUserListToCacheInternal() error {
 	for _, userID := range cm.userConfig.UserList {
 		if _, exists := cm.cache.Users[userID]; !exists {
 			glog.V(4).Infof("Adding missing user to cache: %s", userID)
-			userData := NewUserData()
+			userData := NewUserDataEx(userID) // NewUserData()
 			cm.cache.Users[userID] = userData
 			newUsersCount++
 			newUsersList = append(newUsersList, userID)
@@ -2093,13 +2094,17 @@ func (cm *CacheManager) resynceUserInternal() error {
 		return fmt.Errorf("cache is not initialized")
 	}
 
+	if err := client.NewFactory(); err != nil {
+		return fmt.Errorf("k8s factory init error: %v", err)
+	}
+
 	err := utils.SetupAppServiceData()
 	if err == nil {
 		extractedUsers := utils.GetExtractedUsers()
 		for _, userID := range extractedUsers {
 			if _, exists := cm.cache.Users[userID]; !exists {
 				// Add user directly without calling AddUserToCache to avoid deadlock
-				userData := types.NewUserData()
+				userData := types.NewUserDataExt(userID) //types.NewUserData()
 				activeSources := cm.settingsManager.GetActiveMarketSources()
 				for _, source := range activeSources {
 					userData.Sources[source.ID] = types.NewSourceDataWithType(types.SourceDataType(source.Type))

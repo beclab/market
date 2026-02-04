@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"market/internal/v2/client"
 	"reflect"
 	"strings"
 	"time"
@@ -475,8 +476,9 @@ type SourceData struct {
 
 // UserData represents data for a specific user
 type UserData struct {
-	Sources map[string]*SourceData `json:"sources"`
-	Hash    string                 `json:"hash"`
+	Sources  map[string]*SourceData `json:"sources"`
+	UserInfo map[string]string      `json:"userInfo"`
+	Hash     string                 `json:"hash"`
 	// Remove Mutex, all lock operations will be managed by CacheData
 }
 
@@ -616,6 +618,25 @@ func NewUserData() *UserData {
 	userData.Sources["upload"] = NewSourceDataWithType(SourceDataTypeLocal)
 	userData.Sources["cli"] = NewSourceDataWithType(SourceDataTypeLocal)
 	userData.Sources["studio"] = NewSourceDataWithType(SourceDataTypeLocal)
+
+	return userData
+}
+
+func NewUserDataExt(userID string) *UserData {
+	userData := &UserData{
+		Sources:  make(map[string]*SourceData),
+		UserInfo: make(map[string]string),
+	}
+
+	// Create a default local source for the user
+	userData.Sources["upload"] = NewSourceDataWithType(SourceDataTypeLocal)
+	userData.Sources["cli"] = NewSourceDataWithType(SourceDataTypeLocal)
+	userData.Sources["studio"] = NewSourceDataWithType(SourceDataTypeLocal)
+
+	if userID != "system" {
+		userInfo, _ := client.Factory.GetUserInfo(userID)
+		userData.UserInfo = userInfo
+	}
 
 	return userData
 }
