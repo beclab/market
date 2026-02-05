@@ -2,6 +2,7 @@ package appinfo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"market/internal/v2/client"
 	"market/internal/v2/types"
@@ -15,6 +16,8 @@ import (
 	"runtime/debug"
 
 	"github.com/golang/glog"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
 )
 
 // HydrationNotifier interface for notifying hydrator about pending data updates
@@ -2245,5 +2248,76 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 		glog.V(2).Infof("INFO: Periodic cleanup completed, cleared %d total AppRenderFailed entries in %v", totalCleared, time.Since(start))
 	} else {
 		glog.V(3).Infof("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
+	}
+}
+
+func (cm *CacheManager) HandlerEvent() cache.ResourceEventHandler {
+	return cache.FilteringResourceEventHandler{
+		FilterFunc: func(obj interface{}) bool {
+			return true
+		},
+		Handler: cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				cm.ListUsers()
+			},
+			DeleteFunc: func(obj interface{}) {
+				cm.ListUsers()
+			},
+		},
+	}
+}
+
+func (cm *CacheManager) ListUsers() {
+	dynamicClient := client.Factory.Client()
+	unstructuredUsers, err := dynamicClient.Resource(client.UserGVR).List(context.Background(), v1.ListOptions{})
+	if err != nil {
+		glog.Errorf("Watchers, get user list error: %v", err)
+		return
+	}
+
+	var userList = make([]*client.User, 0)
+
+	for _, unstructuredUser := range unstructuredUsers.Items {
+		b, err := unstructuredUser.MarshalJSON()
+		if err != nil {
+			glog.Errorf("Watchers, marshal list error: %v", err)
+			continue
+		}
+		var user *client.User
+		if err := json.Unmarshal(b, &user); err != nil {
+			glog.Errorf("unmarshal user error: %v", err)
+			continue
+		}
+
+		userList = append(userList, user)
+	}
+
+	if flag := cm.TryLock(); !flag {
+		glog.Warning("[TryLock] watch user list lock failed")
+		return
+	}
+	defer cm.Unlock()
+
+	if len(cm.cache.Users) == 0 {
+		glog.V(2).Info("watch user list, cache user not exists")
+		return
+	}
+
+	for userId, u := range cm.cache.Users {
+		if u.UserInfo == nil {
+			continue
+		}
+		var find bool
+		for _, ul := range userList {
+			if ul.Name == userId {
+				find = true
+				break
+			}
+		}
+		if find {
+			u.UserInfo.Exists = true
+		} else {
+			u.UserInfo.Exists = false
+		}
 	}
 }

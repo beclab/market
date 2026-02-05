@@ -474,10 +474,18 @@ type SourceData struct {
 	// Remove Mutex, all lock operations will be managed by CacheData
 }
 
+type UserDataInfo struct {
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Id     string `json:"id"`
+	Status string `json:"status"`
+	Exists bool   `json:"exists"`
+}
+
 // UserData represents data for a specific user
 type UserData struct {
 	Sources  map[string]*SourceData `json:"sources"`
-	UserInfo map[string]string      `json:"userInfo"`
+	UserInfo *UserDataInfo          `json:"userInfo"`
 	Hash     string                 `json:"hash"`
 	// Remove Mutex, all lock operations will be managed by CacheData
 }
@@ -624,8 +632,7 @@ func NewUserData() *UserData {
 
 func NewUserDataExt(userID string) *UserData {
 	userData := &UserData{
-		Sources:  make(map[string]*SourceData),
-		UserInfo: make(map[string]string),
+		Sources: make(map[string]*SourceData),
 	}
 
 	// Create a default local source for the user
@@ -635,7 +642,16 @@ func NewUserDataExt(userID string) *UserData {
 
 	if userID != "system" {
 		userInfo, _ := client.Factory.GetUserInfo(userID)
-		userData.UserInfo = userInfo
+		if userInfo != nil {
+			udi := &UserDataInfo{
+				Id:     userInfo["id"],
+				Name:   userInfo["name"],
+				Role:   userInfo["role"],
+				Status: userInfo["status"],
+				Exists: true,
+			}
+			userData.UserInfo = udi
+		}
 	}
 
 	return userData

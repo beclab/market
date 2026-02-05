@@ -202,6 +202,8 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 	// Compare and detect changes
 	changes := scc.compareStatus(latestStatus, cachedStatus)
 
+	glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v", changes)
+
 	if len(changes) > 0 {
 		glog.V(2).Infof("Detected %d status changes, applying corrections", len(changes))
 		scc.applyCorrections(changes, latestStatus)
@@ -209,16 +211,29 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		// After applying corrections, recalculate and update user data hash for all affected users.
 		// This ensures the hash stays consistent with the latest user data state.
 		// The hash calculation logic is consistent with DataWatcher (see datawatcher_app.go).
-		affectedUsers := make(map[string]struct{})
+		// affectedUsers := make(map[string]struct{})
+		affectedUsers := make(map[string]*StatusChange)
 		for _, change := range changes {
-			affectedUsers[change.UserID] = struct{}{}
+			affectedUsers[change.UserID] = &change //change.ChangeType
 		}
-		for userID := range affectedUsers {
+		for userID, cs := range affectedUsers {
 			userData := scc.cacheManager.GetUserData(userID)
 			if userData == nil {
 				glog.V(3).Infof("StatusCorrectionChecker: userData not found for user %s, skip hash calculation", userID)
 				continue
 			}
+
+			if userData.UserInfo != nil {
+				glog.V(2).Infof("[UserChanged] userId: %s, appName: %s, changeType: %s, newState: %s", cs.UserID, cs.AppName, cs.ChangeType, cs.NewState)
+				if cs.AppName == "olares-app" && cs.ChangeType == "app_disappeared" && cs.NewState == "unknown" {
+					userData.UserInfo.Exists = false
+				} else if cs.AppName == "olares-app" && cs.ChangeType == "app_appeared" && cs.NewState == "running" {
+					userData.UserInfo.Exists = true
+				}
+			} else {
+				glog.V(2).Infof("[UserChanged] userId: %s, userInfo is null", cs.UserID)
+			}
+
 			// Generate snapshot for hash calculation (reuse logic from DataWatcher)
 			snapshot, err := utils.CreateUserDataSnapshot(userID, userData)
 			if err != nil {
