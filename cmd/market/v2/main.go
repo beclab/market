@@ -20,6 +20,7 @@ import (
 	"market/internal/v2/task"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
+	"market/internal/v2/watchers"
 	"market/pkg/v2/api"
 
 	"github.com/golang/glog"
@@ -95,6 +96,10 @@ func main() {
 	utils.WaitForDependencyService()
 	glog.V(2).Info("WaitForDependencyService completed")
 
+	if err := client.NewFactory(); err != nil {
+		glog.Exitf("Failed to init k8s factory error: %v", err)
+	}
+
 	// Start systemenv watcher early and wait for remote service if available
 	{
 		ctx := context.Background()
@@ -129,11 +134,6 @@ func main() {
 		if err != nil {
 			glog.Exitf("Failed to create Redis client: %v", err)
 		}
-	}
-
-	// Pre-startup step: Init K8s Factory
-	if err := client.NewFactory(); err != nil {
-		glog.Exitf("Failed to init k8s factory error: %v", err)
 	}
 
 	// utils.SetRedisClient(redisClient.GetRawClient())
@@ -245,6 +245,11 @@ func main() {
 	var taskModule *task.TaskModule
 	var historyModule *history.HistoryModule
 	if !utils.IsPublicEnvironment() {
+		// 1. Init user watch
+		var w = watchers.NewWatchers(context.Background(), client.Factory.Config())
+		watchers.AddToWatchers[client.User](w, client.UserGVR, cacheManager.HandlerEvent())
+		go w.Run(1)
+
 		// 2. Initialize History Module
 		historyModule, err = history.NewHistoryModule()
 		if err != nil {

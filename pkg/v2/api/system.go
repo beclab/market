@@ -414,8 +414,13 @@ func doGetUsers(cm *appinfo.CacheManager) ([]map[string]string, error) {
 
 	getUsers := cm.GetCache().Users
 	for _, v := range getUsers {
-		if v.UserInfo != nil {
-			usersInfo = append(usersInfo, v.UserInfo)
+		if v.UserInfo != nil && v.UserInfo.Exists {
+			var ui = make(map[string]string)
+			ui["id"] = v.UserInfo.Id
+			ui["name"] = v.UserInfo.Name
+			ui["role"] = v.UserInfo.Role
+			ui["status"] = v.UserInfo.Status
+			usersInfo = append(usersInfo, ui)
 		}
 	}
 

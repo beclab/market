@@ -209,16 +209,26 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		// After applying corrections, recalculate and update user data hash for all affected users.
 		// This ensures the hash stays consistent with the latest user data state.
 		// The hash calculation logic is consistent with DataWatcher (see datawatcher_app.go).
-		affectedUsers := make(map[string]struct{})
+		// affectedUsers := make(map[string]struct{})
+		affectedUsers := make(map[string]string)
 		for _, change := range changes {
-			affectedUsers[change.UserID] = struct{}{}
+			affectedUsers[change.UserID] = change.ChangeType
 		}
-		for userID := range affectedUsers {
+		for userID, changeType := range affectedUsers {
 			userData := scc.cacheManager.GetUserData(userID)
 			if userData == nil {
 				glog.V(3).Infof("StatusCorrectionChecker: userData not found for user %s, skip hash calculation", userID)
 				continue
 			}
+
+			if userData.UserInfo != nil {
+				if changeType == "app_disappeared" {
+					userData.UserInfo.Exists = false
+				} else if changeType == "app_appeared" {
+					userData.UserInfo.Exists = true
+				}
+			}
+
 			// Generate snapshot for hash calculation (reuse logic from DataWatcher)
 			snapshot, err := utils.CreateUserDataSnapshot(userID, userData)
 			if err != nil {
