@@ -16,8 +16,7 @@ var Factory *factory
 
 type factory struct {
 	config *rest.Config
-
-	client *dynamic.DynamicClient //dynamic.Interface
+	client *dynamic.DynamicClient
 }
 
 func NewFactory() error {
@@ -42,6 +41,14 @@ func NewFactory() error {
 	}
 
 	return nil
+}
+
+func (f *factory) Config() *rest.Config {
+	return f.config
+}
+
+func (f *factory) Client() *dynamic.DynamicClient {
+	return f.client
 }
 
 func (f *factory) GetUserInfo(userId string) (map[string]string, error) {
@@ -72,5 +79,4 @@ func (f *factory) GetUserInfo(userId string) (map[string]string, error) {
 	userInfo["status"] = status
 
 	return userInfo, nil
-
 }
