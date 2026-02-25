@@ -2308,12 +2308,18 @@ func (cm *CacheManager) ListUsers() {
 			continue
 		}
 		var find bool
+		var role, id string
 		for _, ul := range userList {
 			if ul.Name == userId {
+				var anno = ul.ObjectMeta.Annotations
+				role = anno["bytetrade.io/owner-role"]
+				id = anno["bytetrade.io/terminus-name"]
 				find = true
 				break
 			}
 		}
+		u.UserInfo.Id = id
+		u.UserInfo.Role = role
 		if find {
 			u.UserInfo.Exists = true
 		} else {
