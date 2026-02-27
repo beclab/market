@@ -10,16 +10,25 @@ import (
 	"github.com/golang/glog"
 )
 
-// SyncPipeline orchestrates Syncer, Hydrator, and DataWatcher in serial mode.
+// SyncPipeline orchestrates Syncer, Hydrator, and DataWatcher in strict serial
+// order within a single goroutine loop:
 //
-// In pipeline mode the three stages execute sequentially in a single loop:
+//	Stage 1 — Syncer.executeSyncCycle()              (fetch remote -> AppInfoLatestPending)
+//	          ↓  blocks until complete
+//	Stage 2 — Hydrator.ProcessAllPendingSync()       (hydrate all pending items, wait for every task)
+//	          ↓  blocks until complete
+//	Stage 3 — DataWatcher.ProcessCompletedAppsSync() (move completed items -> AppInfoLatest)
+//	          ↓  blocks until complete
+//	          sleep(interval) → next cycle
 //
-//	Syncer.executeSyncCycle()       – fetch remote data into AppInfoLatestPending
-//	Hydrator.ProcessAllPendingSync() – hydrate all pending items and wait for completion
-//	DataWatcher.processCompletedApps() – move completed items to AppInfoLatest
-//
-// This eliminates lock contention between the three components and guarantees
-// that each stage sees a consistent snapshot produced by the previous stage.
+// Key guarantees compared to the concurrent mode:
+//   - No async hydrationNotifier: CacheManager does NOT call
+//     hydrationNotifier.NotifyPendingDataUpdate() in pipeline mode, so the
+//     Syncer will never cause the Hydrator to run concurrently.
+//   - Hydrator's pendingDataMonitor goroutine is NOT started; the pipeline
+//     explicitly calls ProcessAllPendingSync().
+//   - DataWatcher's 30-second watchLoop goroutine is NOT started; the pipeline
+//     explicitly calls ProcessCompletedAppsSync().
 type SyncPipeline struct {
 	syncer      *Syncer
 	hydrator    *Hydrator
@@ -30,16 +39,15 @@ type SyncPipeline struct {
 	isRunning atomic.Bool
 	mutex     sync.Mutex
 
-	// Per-cycle timeout; protects against a single stage hanging forever.
 	cycleTimeout time.Duration
 
 	// Metrics
-	totalCycles     atomic.Int64
-	successCycles   atomic.Int64
-	failureCycles   atomic.Int64
-	lastCycleTime   atomic.Value // time.Time
-	lastCycleDur    atomic.Value // time.Duration
-	lastCycleErr    atomic.Value // string
+	totalCycles   atomic.Int64
+	successCycles atomic.Int64
+	failureCycles atomic.Int64
+	lastCycleTime atomic.Value // time.Time
+	lastCycleDur  atomic.Value // time.Duration
+	lastCycleErr  atomic.Value // string
 }
 
 // PipelineConfig holds configuration for the SyncPipeline.
@@ -133,6 +141,9 @@ func (p *SyncPipeline) loop(ctx context.Context) {
 }
 
 // runCycle executes one complete Syncer -> Hydrator -> DataWatcher cycle.
+//
+// The three stages are strictly sequential: each stage blocks until it finishes
+// before the next one starts. This is the core serial guarantee.
 func (p *SyncPipeline) runCycle(parentCtx context.Context) {
 	cycleStart := time.Now()
 	p.totalCycles.Add(1)
@@ -141,30 +152,53 @@ func (p *SyncPipeline) runCycle(parentCtx context.Context) {
 	ctx, cancel := context.WithTimeout(parentCtx, p.cycleTimeout)
 	defer cancel()
 
-	glog.V(2).Info("========== PIPELINE CYCLE START ==========")
+	glog.Infof("========== PIPELINE CYCLE START ==========")
 
-	// Stage 1: Syncer
-	glog.V(2).Info("Pipeline Stage 1/3: Syncer")
+	// ── Stage 1: Syncer ─────────────────────────────────────────────────
+	// Fetches remote data and writes to AppInfoLatestPending.
+	// Blocks until the full sync cycle completes (or fails).
+	glog.Infof("Pipeline Stage 1/3: Syncer — fetching remote data")
+	stage1Start := time.Now()
+
 	syncErr := p.syncer.executeSyncCycle(ctx)
 	if syncErr != nil {
-		glog.Errorf("Pipeline Stage 1 (Syncer) failed: %v", syncErr)
+		glog.Errorf("Pipeline Stage 1 (Syncer) failed after %v: %v", time.Since(stage1Start), syncErr)
+		// Even if sync fails, there may be previously pending data that still
+		// needs hydration, so we continue to Stage 2.
+	} else {
+		glog.Infof("Pipeline Stage 1 (Syncer) completed in %v", time.Since(stage1Start))
 	}
 
-	// Stage 2: Hydrator – process all newly pending items synchronously
-	glog.V(2).Info("Pipeline Stage 2/3: Hydrator")
+	// ── Stage 2: Hydrator ───────────────────────────────────────────────
+	// Scans AppInfoLatestPending, creates hydration tasks, and blocks until
+	// every single task has completed (success or failure).
+	glog.Infof("Pipeline Stage 2/3: Hydrator — processing all pending items")
+	stage2Start := time.Now()
+
 	if err := p.hydrator.ProcessAllPendingSync(ctx); err != nil {
-		glog.Errorf("Pipeline Stage 2 (Hydrator) failed: %v", err)
+		glog.Errorf("Pipeline Stage 2 (Hydrator) failed after %v: %v", time.Since(stage2Start), err)
 		p.recordCycleResult(cycleStart, fmt.Errorf("hydrator: %w", err))
+		glog.Errorf("========== PIPELINE CYCLE ABORTED ==========")
 		return
 	}
+	glog.Infof("Pipeline Stage 2 (Hydrator) completed in %v", time.Since(stage2Start))
 
-	// Stage 3: DataWatcher
-	glog.V(2).Info("Pipeline Stage 3/3: DataWatcher")
-	p.dataWatcher.processCompletedApps()
+	// ── Stage 3: DataWatcher ────────────────────────────────────────────
+	// Checks all pending items for completed hydration status, moves them
+	// from AppInfoLatestPending to AppInfoLatest, and recalculates user hashes.
+	glog.Infof("Pipeline Stage 3/3: DataWatcher — moving completed apps to latest")
+	stage3Start := time.Now()
 
+	p.dataWatcher.ProcessCompletedAppsSync()
+
+	glog.Infof("Pipeline Stage 3 (DataWatcher) completed in %v", time.Since(stage3Start))
+
+	// ── Cycle done ──────────────────────────────────────────────────────
 	dur := time.Since(cycleStart)
 	p.recordCycleResult(cycleStart, nil)
-	glog.V(2).Infof("========== PIPELINE CYCLE END (duration=%v) ==========", dur)
+	glog.Infof("========== PIPELINE CYCLE END (total=%v, sync=%v, hydrate=%v, watch=%v) ==========",
+		dur, stage1Start.Sub(cycleStart)+time.Since(stage1Start),
+		time.Since(stage2Start), time.Since(stage3Start))
 }
 
 func (p *SyncPipeline) recordCycleResult(start time.Time, err error) {

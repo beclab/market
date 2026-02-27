@@ -242,10 +242,17 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
-	// Set up hydration notifier connection if both cache and hydrator are enabled
-	if m.config.EnableCache && m.config.EnableHydrator && m.cacheManager != nil && m.hydrator != nil {
-		m.cacheManager.SetHydrationNotifier(m.hydrator)
-		glog.Infof("Hydration notifier connection established between cache manager and hydrator")
+	// Set up hydration notifier connection — only in concurrent mode.
+	// In pipeline mode the SyncPipeline drives Hydrator explicitly after Syncer
+	// completes, so the async notification must be disabled to guarantee strict
+	// serial ordering: Syncer -> Hydrator -> DataWatcher.
+	if !m.config.EnablePipeline {
+		if m.config.EnableCache && m.config.EnableHydrator && m.cacheManager != nil && m.hydrator != nil {
+			m.cacheManager.SetHydrationNotifier(m.hydrator)
+			glog.Infof("Hydration notifier connection established between cache manager and hydrator")
+		}
+	} else {
+		glog.Infof("Pipeline mode: hydration notifier NOT set (pipeline drives hydrator explicitly)")
 	}
 
 	m.isStarted = true

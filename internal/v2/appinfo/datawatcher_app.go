@@ -1244,3 +1244,20 @@ func (dw *DataWatcher) sendNewAppReadyNotification(userID string, completedApp *
 		glog.V(2).Infof("DataWatcher: Successfully sent new app ready notification for app %s (version: %s, source: %s)", appName, appVersion, sourceID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Pipeline mode support
+// ---------------------------------------------------------------------------
+
+// ProcessCompletedAppsSync runs one full processing cycle synchronously.
+// It is called by SyncPipeline after Hydrator has finished, ensuring strict
+// serial ordering: Syncer -> Hydrator -> DataWatcher.
+//
+// Unlike Start()/watchLoop() which spin up an independent 30-second ticker
+// goroutine, this method executes exactly once and returns, giving the
+// pipeline full control over scheduling.
+func (dw *DataWatcher) ProcessCompletedAppsSync() {
+	glog.V(2).Info("DataWatcher: Pipeline-driven processing cycle started")
+	dw.processCompletedApps()
+	glog.V(2).Info("DataWatcher: Pipeline-driven processing cycle finished")
+}
