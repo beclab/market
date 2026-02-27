@@ -170,12 +170,14 @@ func (p *SyncPipeline) runCycle(parentCtx context.Context) {
 	}
 
 	// ── Stage 2: Hydrator ───────────────────────────────────────────────
-	// Scans AppInfoLatestPending, creates hydration tasks, and blocks until
-	// every single task has completed (success or failure).
-	glog.Infof("Pipeline Stage 2/3: Hydrator — processing all pending items")
+	// Collects all pending items under a short RLock, then processes each
+	// one serially in THIS goroutine (no queue, no workers). Each hydration
+	// step can freely acquire/release cacheManager locks without competing
+	// with any other goroutine.
+	glog.Infof("Pipeline Stage 2/3: Hydrator — processing all pending items serially")
 	stage2Start := time.Now()
 
-	if err := p.hydrator.ProcessAllPendingSync(ctx); err != nil {
+	if err := p.hydrator.ProcessAllPendingSerial(ctx); err != nil {
 		glog.Errorf("Pipeline Stage 2 (Hydrator) failed after %v: %v", time.Since(stage2Start), err)
 		p.recordCycleResult(cycleStart, fmt.Errorf("hydrator: %w", err))
 		glog.Errorf("========== PIPELINE CYCLE ABORTED ==========")

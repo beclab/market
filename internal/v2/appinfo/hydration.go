@@ -2146,7 +2146,7 @@ func (h *Hydrator) ForceCheckPendingData() {
 }
 
 // WaitForAllTasks blocks until all currently enqueued/active hydration tasks have completed.
-// Used by SyncPipeline to wait for hydration to finish before proceeding to DataWatcher.
+// Used in concurrent mode by SyncPipeline to wait for hydration to finish.
 func (h *Hydrator) WaitForAllTasks(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
@@ -2162,22 +2162,241 @@ func (h *Hydrator) WaitForAllTasks(ctx context.Context) error {
 	}
 }
 
-// ProcessAllPendingSync scans cache for pending data, creates hydration tasks, and waits
-// for all tasks to complete. This provides synchronous hydration processing for pipeline mode.
-func (h *Hydrator) ProcessAllPendingSync(ctx context.Context) error {
-	if !h.IsRunning() {
-		return fmt.Errorf("hydrator is not running")
-	}
+// ---------------------------------------------------------------------------
+// Pipeline serial mode: no queue, no workers, process one app at a time
+// in the calling goroutine so there is zero concurrent cacheManager access.
+// ---------------------------------------------------------------------------
 
-	glog.V(2).Info("Pipeline: Starting synchronous hydration processing")
+// pendingItem holds the minimum info needed to create and execute a hydration
+// task outside any cache lock.
+type pendingItem struct {
+	userID   string
+	sourceID string
+	appID    string
+	appName  string
+	version  string
+	appData  map[string]interface{}
+}
+
+// ProcessAllPendingSerial collects all pending items under a short RLock,
+// releases the lock, then processes each item one by one in the calling
+// goroutine. No task queue and no worker goroutines are involved, so there
+// is no concurrent access to cacheManager at all.
+func (h *Hydrator) ProcessAllPendingSerial(ctx context.Context) error {
+	glog.V(2).Info("Pipeline: Starting serial hydration processing")
 	startTime := time.Now()
 
-	h.checkForPendingData()
+	// ── Step 1: snapshot pending items under a short RLock ───────────────
+	items := h.collectPendingItems()
+	if len(items) == 0 {
+		glog.V(2).Info("Pipeline: No pending items to hydrate")
+		return nil
+	}
+	glog.V(2).Infof("Pipeline: Collected %d pending items for serial hydration", len(items))
 
-	if err := h.WaitForAllTasks(ctx); err != nil {
-		return fmt.Errorf("pipeline: hydration wait interrupted: %w", err)
+	// ── Step 2: process each item serially ───────────────────────────────
+	processed := 0
+	succeeded := 0
+	failed := 0
+
+	for i, item := range items {
+		select {
+		case <-ctx.Done():
+			glog.Errorf("Pipeline: Context cancelled after processing %d/%d items", i, len(items))
+			return ctx.Err()
+		default:
+		}
+
+		glog.V(3).Infof("Pipeline: Processing item %d/%d: app=%s (user=%s, source=%s)",
+			i+1, len(items), item.appID, item.userID, item.sourceID)
+
+		if err := h.processOneItemSerial(ctx, item); err != nil {
+			glog.Errorf("Pipeline: Item %d/%d failed: app=%s, error=%v",
+				i+1, len(items), item.appID, err)
+			failed++
+		} else {
+			succeeded++
+		}
+		processed++
 	}
 
-	glog.V(2).Infof("Pipeline: Synchronous hydration processing completed in %v", time.Since(startTime))
+	glog.V(2).Infof("Pipeline: Serial hydration completed in %v — %d processed, %d succeeded, %d failed",
+		time.Since(startTime), processed, succeeded, failed)
 	return nil
+}
+
+// collectPendingItems snapshots all pending items under a short RLock and
+// returns them with all data needed to process independently of the lock.
+func (h *Hydrator) collectPendingItems() []pendingItem {
+	if h.cacheManager == nil {
+		return nil
+	}
+	if !h.cacheManager.mutex.TryRLock() {
+		glog.Warning("[TryRLock] Hydrator.collectPendingItems: lock not available, skipping")
+		return nil
+	}
+	defer h.cacheManager.mutex.RUnlock()
+
+	var items []pendingItem
+
+	for userID, userData := range h.cache.Users {
+		for sourceID, sourceData := range userData.Sources {
+			for _, pendingData := range sourceData.AppInfoLatestPending {
+				if pendingData == nil || pendingData.RawData == nil {
+					continue
+				}
+
+				appID := pendingData.RawData.AppID
+				if appID == "" {
+					appID = pendingData.RawData.ID
+				}
+				appName := pendingData.RawData.Name
+				version := pendingData.RawData.Version
+
+				if appID == "" {
+					continue
+				}
+
+				// Skip already-completed apps
+				if h.isAppHydrationComplete(pendingData) {
+					continue
+				}
+
+				// Skip apps in render-failed list (check is under the same RLock)
+				if h.isAppInRenderFailedListLocked(userID, sourceID, appID, appName) {
+					continue
+				}
+
+				// Skip apps already in latest queue with same version
+				if h.isAppInLatestQueueLocked(userID, sourceID, appID, appName, version) {
+					continue
+				}
+
+				appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
+				if len(appDataMap) == 0 {
+					continue
+				}
+
+				items = append(items, pendingItem{
+					userID:   userID,
+					sourceID: sourceID,
+					appID:    appID,
+					appName:  appName,
+					version:  version,
+					appData:  appDataMap,
+				})
+			}
+		}
+	}
+
+	return items
+}
+
+// processOneItemSerial creates a HydrationTask and runs all hydration steps
+// directly in the calling goroutine. No lock is held during step execution.
+func (h *Hydrator) processOneItemSerial(ctx context.Context, item pendingItem) error {
+	var cacheManagerIface types.CacheManagerInterface
+	if h.cacheManager != nil {
+		cacheManagerIface = h.cacheManager
+	}
+
+	task := hydrationfn.NewHydrationTaskWithManager(
+		item.userID, item.sourceID, item.appID,
+		item.appData, h.cache, cacheManagerIface, h.settingsManager,
+	)
+
+	task.SetStatus(hydrationfn.TaskStatusRunning)
+	taskStart := time.Now()
+
+	for i, step := range h.steps {
+		if task.CurrentStep > i {
+			continue
+		}
+
+		if step.CanSkip(ctx, task) {
+			glog.V(3).Infof("Pipeline serial: Skipping step %d (%s) for app=%s",
+				i+1, step.GetStepName(), item.appID)
+			task.IncrementStep()
+			continue
+		}
+
+		glog.V(3).Infof("Pipeline serial: Executing step %d/%d (%s) for app=%s",
+			i+1, len(h.steps), step.GetStepName(), item.appID)
+
+		if err := step.Execute(ctx, task); err != nil {
+			glog.Errorf("Pipeline serial: Step %d (%s) failed for app=%s: %v",
+				i+1, step.GetStepName(), item.appID, err)
+			task.SetError(err)
+
+			h.moveTaskToRenderFailed(task, err.Error(), step.GetStepName())
+
+			duration := time.Since(taskStart)
+			h.markTaskFailed(task, taskStart, duration, step.GetStepName(), err.Error())
+			return err
+		}
+
+		task.IncrementStep()
+		glog.V(3).Infof("Pipeline serial: Step %d (%s) completed for app=%s",
+			i+1, step.GetStepName(), item.appID)
+	}
+
+	task.SetStatus(hydrationfn.TaskStatusCompleted)
+	duration := time.Since(taskStart)
+	h.markTaskCompleted(task, taskStart, duration)
+
+	glog.V(3).Infof("Pipeline serial: All steps completed for app=%s in %v", item.appID, duration)
+	return nil
+}
+
+// isAppInRenderFailedListLocked checks render-failed list; caller must hold cacheManager.mutex RLock.
+func (h *Hydrator) isAppInRenderFailedListLocked(userID, sourceID, appID, appName string) bool {
+	userData, ok := h.cache.Users[userID]
+	if !ok {
+		return false
+	}
+	sourceData, ok := userData.Sources[sourceID]
+	if !ok {
+		return false
+	}
+	for _, failedData := range sourceData.AppRenderFailed {
+		if failedData.RawData != nil &&
+			(failedData.RawData.ID == appID || failedData.RawData.AppID == appID || failedData.RawData.Name == appID) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAppInLatestQueueLocked checks latest queue; caller must hold cacheManager.mutex RLock.
+func (h *Hydrator) isAppInLatestQueueLocked(userID, sourceID, appID, appName, version string) bool {
+	userData, ok := h.cache.Users[userID]
+	if !ok {
+		return false
+	}
+	sourceData, ok := userData.Sources[sourceID]
+	if !ok {
+		return false
+	}
+	for _, latestData := range sourceData.AppInfoLatest {
+		if latestData == nil {
+			continue
+		}
+		if latestData.RawData != nil {
+			if latestData.RawData.ID == appID || latestData.RawData.AppID == appID || latestData.RawData.Name == appID {
+				if version != "" && latestData.RawData.Version != version {
+					continue
+				}
+				return true
+			}
+		}
+		if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+			if latestData.AppInfo.AppEntry.ID == appID || latestData.AppInfo.AppEntry.AppID == appID || latestData.AppInfo.AppEntry.Name == appID {
+				if version != "" && latestData.AppInfo.AppEntry.Version != version {
+					continue
+				}
+				return true
+			}
+		}
+	}
+	return false
 }

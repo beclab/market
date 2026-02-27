@@ -744,11 +744,12 @@ func (m *AppInfoModule) initHydratorForPipeline() error {
 
 	m.hydrator = NewHydrator(cacheData, m.settingsManager, m.cacheManager, hydratorConfig)
 
-	if err := m.hydrator.StartWorkersOnly(m.ctx); err != nil {
-		return fmt.Errorf("failed to start hydrator workers: %w", err)
-	}
+	// In pipeline serial mode we do NOT start any goroutines (no workers, no
+	// monitors). The pipeline calls ProcessAllPendingSerial() which runs all
+	// hydration steps directly in the pipeline goroutine.
+	m.hydrator.isRunning.Store(true)
 
-	glog.V(2).Info("Hydrator initialized for pipeline mode (workers only, no pendingDataMonitor)")
+	glog.V(2).Info("Hydrator initialized for pipeline mode (no goroutines, serial processing)")
 	return nil
 }
 
