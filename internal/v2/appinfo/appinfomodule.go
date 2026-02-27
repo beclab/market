@@ -32,6 +32,7 @@ type AppInfoModule struct {
 	dataWatcherRepo         *DataWatcherRepo // Add DataWatcherRepo for image info updates
 	dataSender              *DataSender
 	statusCorrectionChecker *StatusCorrectionChecker
+	pipeline                *SyncPipeline // Serial pipeline orchestrator (optional)
 	settingsManager         *settings.SettingsManager
 	ctx                     context.Context
 	cancel                  context.CancelFunc
@@ -43,20 +44,26 @@ type AppInfoModule struct {
 
 // ModuleConfig holds configuration for the AppInfo module
 type ModuleConfig struct {
-	Redis                         *RedisConfig    `json:"redis"`
-	Syncer                        *SyncerConfig   `json:"syncer"`
-	Cache                         *CacheConfig    `json:"cache"`
-	User                          *UserConfig     `json:"user"`
-	Hydrator                      *HydratorConfig `json:"hydrator"`
-	EnableSync                    bool            `json:"enable_sync"`
-	EnableCache                   bool            `json:"enable_cache"`
-	EnableHydrator                bool            `json:"enable_hydrator"`
-	EnableDataWatcher             bool            `json:"enable_data_watcher"`
-	EnableDataWatcherState        bool            `json:"enable_data_watcher_state"`
-	EnableDataWatcherUser         bool            `json:"enable_data_watcher_user"`
-	EnableDataWatcherRepo         bool            `json:"enable_data_watcher_repo"` // Add DataWatcherRepo enable flag
-	EnableStatusCorrectionChecker bool            `json:"enable_status_correction_checker"`
-	StartTimeout                  time.Duration   `json:"start_timeout"`
+	Redis                         *RedisConfig     `json:"redis"`
+	Syncer                        *SyncerConfig    `json:"syncer"`
+	Cache                         *CacheConfig     `json:"cache"`
+	User                          *UserConfig      `json:"user"`
+	Hydrator                      *HydratorConfig  `json:"hydrator"`
+	Pipeline                      *PipelineConfig  `json:"pipeline"`
+	EnableSync                    bool             `json:"enable_sync"`
+	EnableCache                   bool             `json:"enable_cache"`
+	EnableHydrator                bool             `json:"enable_hydrator"`
+	EnableDataWatcher             bool             `json:"enable_data_watcher"`
+	EnableDataWatcherState        bool             `json:"enable_data_watcher_state"`
+	EnableDataWatcherUser         bool             `json:"enable_data_watcher_user"`
+	EnableDataWatcherRepo         bool             `json:"enable_data_watcher_repo"`
+	EnableStatusCorrectionChecker bool             `json:"enable_status_correction_checker"`
+	// EnablePipeline activates serial pipeline mode: Syncer -> Hydrator -> DataWatcher
+	// run sequentially in a single loop instead of concurrently.  When enabled, the
+	// independent goroutine loops of Syncer, Hydrator's PendingDataMonitor, and
+	// DataWatcher are NOT started; the SyncPipeline drives them instead.
+	EnablePipeline bool          `json:"enable_pipeline"`
+	StartTimeout   time.Duration `json:"start_timeout"`
 }
 
 // CacheConfig holds cache-specific configuration
@@ -172,24 +179,36 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
-	// Initialize syncer if enabled
-	if m.config.EnableSync {
-		if err := m.initSyncer(); err != nil {
-			return fmt.Errorf("failed to initialize syncer: %w", err)
+	if m.config.EnablePipeline {
+		// Pipeline mode: Syncer, Hydrator, DataWatcher are driven serially by SyncPipeline.
+		if err := m.initSyncerForPipeline(); err != nil {
+			return fmt.Errorf("failed to initialize syncer (pipeline): %w", err)
 		}
-	}
-
-	// Initialize hydrator if enabled
-	if m.config.EnableHydrator {
-		if err := m.initHydrator(); err != nil {
-			return fmt.Errorf("failed to initialize hydrator: %w", err)
+		if err := m.initHydratorForPipeline(); err != nil {
+			return fmt.Errorf("failed to initialize hydrator (pipeline): %w", err)
 		}
-	}
-
-	// Initialize DataWatcher if enabled
-	if m.config.EnableDataWatcher {
-		if err := m.initDataWatcher(); err != nil {
-			return fmt.Errorf("failed to initialize DataWatcher: %w", err)
+		if err := m.initDataWatcherForPipeline(); err != nil {
+			return fmt.Errorf("failed to initialize DataWatcher (pipeline): %w", err)
+		}
+		if err := m.initPipeline(); err != nil {
+			return fmt.Errorf("failed to initialize pipeline: %w", err)
+		}
+	} else {
+		// Legacy concurrent mode
+		if m.config.EnableSync {
+			if err := m.initSyncer(); err != nil {
+				return fmt.Errorf("failed to initialize syncer: %w", err)
+			}
+		}
+		if m.config.EnableHydrator {
+			if err := m.initHydrator(); err != nil {
+				return fmt.Errorf("failed to initialize hydrator: %w", err)
+			}
+		}
+		if m.config.EnableDataWatcher {
+			if err := m.initDataWatcher(); err != nil {
+				return fmt.Errorf("failed to initialize DataWatcher: %w", err)
+			}
 		}
 	}
 
@@ -244,6 +263,11 @@ func (m *AppInfoModule) Stop() error {
 	}
 
 	glog.V(3).Info("Stopping AppInfo module...")
+
+	// Stop pipeline first if running
+	if m.pipeline != nil {
+		m.pipeline.Stop()
+	}
 
 	// Stop components in reverse order
 	if m.hydrator != nil {
@@ -408,6 +432,7 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 		"enable_data_watcher_state":        m.config.EnableDataWatcherState,
 		"enable_data_watcher_user":         m.config.EnableDataWatcherUser,
 		"enable_status_correction_checker": m.config.EnableStatusCorrectionChecker,
+		"enable_pipeline":                  m.config.EnablePipeline,
 		"components": map[string]interface{}{
 			"redis_client":              m.redisClient != nil,
 			"cache_manager":             m.cacheManager != nil,
@@ -418,6 +443,7 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 			"data_watcher_user":         m.dataWatcherUser != nil,
 			"data_sender":               m.dataSender != nil,
 			"status_correction_checker": m.statusCorrectionChecker != nil,
+			"pipeline":                  m.pipeline != nil,
 		},
 	}
 
@@ -454,6 +480,12 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	// Add StatusCorrectionChecker status
 	if m.statusCorrectionChecker != nil {
 		status["status_correction_checker_stats"] = m.statusCorrectionChecker.GetStats()
+	}
+
+	// Add Pipeline status
+	if m.pipeline != nil {
+		status["pipeline_running"] = m.pipeline.IsRunning()
+		status["pipeline_metrics"] = m.pipeline.GetMetrics()
 	}
 
 	return status
@@ -654,6 +686,120 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 
 	glog.V(2).Info("DataWatcherRepo initialized successfully")
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline-mode initializers: set up the components without starting their
+// independent goroutine loops. The SyncPipeline drives them instead.
+// ---------------------------------------------------------------------------
+
+// initSyncerForPipeline creates the Syncer but does NOT start its syncLoop.
+func (m *AppInfoModule) initSyncerForPipeline() error {
+	glog.V(3).Info("Initializing syncer for pipeline mode...")
+
+	if m.cacheManager == nil {
+		return fmt.Errorf("cache manager is required for syncer")
+	}
+	if m.settingsManager == nil {
+		return fmt.Errorf("settings manager is required for syncer")
+	}
+
+	cacheData := m.cacheManager.cache
+	m.syncer = CreateDefaultSyncer(cacheData, *m.config.Syncer, m.settingsManager)
+
+	if m.cacheManager != nil {
+		m.syncer.SetCacheManager(m.cacheManager)
+	}
+
+	// Mark as running so executeSyncCycle can proceed, but don't start syncLoop.
+	m.syncer.isRunning.Store(true)
+
+	glog.V(2).Info("Syncer initialized for pipeline mode (no independent loop)")
+	return nil
+}
+
+// initHydratorForPipeline creates the Hydrator and starts workers only (no pendingDataMonitor).
+func (m *AppInfoModule) initHydratorForPipeline() error {
+	glog.V(3).Info("Initializing hydrator for pipeline mode...")
+
+	if m.cacheManager == nil {
+		return fmt.Errorf("cache manager is required for hydrator")
+	}
+	if m.settingsManager == nil {
+		return fmt.Errorf("settings manager is required for hydrator")
+	}
+
+	cacheData := m.cacheManager.cache
+	hydratorConfig := DefaultHydratorConfig()
+	if m.config.Hydrator != nil {
+		hydratorConfig = *m.config.Hydrator
+	}
+
+	m.hydrator = NewHydrator(cacheData, m.settingsManager, m.cacheManager, hydratorConfig)
+
+	if err := m.hydrator.StartWorkersOnly(m.ctx); err != nil {
+		return fmt.Errorf("failed to start hydrator workers: %w", err)
+	}
+
+	glog.V(2).Info("Hydrator initialized for pipeline mode (workers only, no pendingDataMonitor)")
+	return nil
+}
+
+// initDataWatcherForPipeline creates the DataWatcher but does NOT start its watchLoop.
+func (m *AppInfoModule) initDataWatcherForPipeline() error {
+	glog.V(3).Info("Initializing DataWatcher for pipeline mode...")
+
+	if m.cacheManager == nil {
+		return fmt.Errorf("cache manager is required for DataWatcher")
+	}
+	if m.hydrator == nil {
+		return fmt.Errorf("hydrator is required for DataWatcher")
+	}
+
+	dataSender, err := NewDataSender()
+	if err != nil {
+		glog.Errorf("Failed to initialize DataSender: %v, DataWatcher will run without system notifications", err)
+		dataSender = nil
+	} else {
+		m.dataSender = dataSender
+	}
+
+	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator, m.dataSender)
+	// Don't call m.dataWatcher.Start() — the pipeline calls processCompletedApps() directly.
+
+	glog.V(2).Info("DataWatcher initialized for pipeline mode (no independent loop)")
+	return nil
+}
+
+// initPipeline creates and starts the SyncPipeline.
+func (m *AppInfoModule) initPipeline() error {
+	glog.V(3).Info("Initializing SyncPipeline...")
+
+	if m.syncer == nil || m.hydrator == nil || m.dataWatcher == nil {
+		return fmt.Errorf("syncer, hydrator, and dataWatcher are all required for pipeline")
+	}
+
+	cfg := DefaultPipelineConfig()
+	if m.config.Pipeline != nil {
+		cfg = *m.config.Pipeline
+	}
+	if m.config.Syncer != nil && m.config.Syncer.SyncInterval > 0 {
+		cfg.Interval = m.config.Syncer.SyncInterval
+	}
+
+	m.pipeline = NewSyncPipeline(m.syncer, m.hydrator, m.dataWatcher, cfg)
+
+	if err := m.pipeline.Start(m.ctx); err != nil {
+		return fmt.Errorf("failed to start pipeline: %w", err)
+	}
+
+	glog.V(2).Info("SyncPipeline initialized and started")
+	return nil
+}
+
+// GetPipeline returns the SyncPipeline instance (nil when not in pipeline mode).
+func (m *AppInfoModule) GetPipeline() *SyncPipeline {
+	return m.pipeline
 }
 
 // initStatusCorrectionChecker initializes the StatusCorrectionChecker
@@ -948,6 +1094,11 @@ func DefaultModuleConfig() *ModuleConfig {
 		enableStatusCorrectionChecker = true
 	}
 
+	enablePipeline, err := strconv.ParseBool(os.Getenv("MODULE_ENABLE_PIPELINE"))
+	if err != nil {
+		enablePipeline = false
+	}
+
 	startTimeout, err := time.ParseDuration(os.Getenv("MODULE_START_TIMEOUT"))
 	if err != nil || startTimeout <= 0 {
 		startTimeout = 30 * time.Second
@@ -1090,6 +1241,7 @@ func DefaultModuleConfig() *ModuleConfig {
 		EnableDataWatcherUser:         enableDataWatcherUser,
 		EnableDataWatcherRepo:         enableDataWatcherRepo,
 		EnableStatusCorrectionChecker: enableStatusCorrectionChecker,
+		EnablePipeline:                enablePipeline,
 		StartTimeout:                  startTimeout,
 	}
 }

@@ -60,6 +60,9 @@ type Hydrator struct {
 	recentCompletedTasks []*TaskHistoryEntry // Most recent completed tasks
 	recentFailedTasks    []*TaskHistoryEntry // Most recent failed tasks
 	maxHistorySize       int                 // Maximum number of tasks to keep in history
+
+	// Pipeline mode support: track in-flight tasks for synchronous waiting
+	pipelineWg sync.WaitGroup
 }
 
 // WorkerStatus represents the status of a worker
@@ -162,7 +165,7 @@ func (h *Hydrator) AddStep(step hydrationfn.HydrationStep) {
 	h.steps = append(h.steps, step)
 }
 
-// Start begins the hydration process with workers
+// Start begins the hydration process with workers and all background monitors.
 func (h *Hydrator) Start(ctx context.Context) error {
 	if h.isRunning.Load() {
 		return fmt.Errorf("hydrator is already running")
@@ -183,6 +186,30 @@ func (h *Hydrator) Start(ctx context.Context) error {
 	go h.batchCompletionProcessor(ctx)
 
 	// Start database sync monitor if cache manager is available
+	if h.cacheManager != nil {
+		go h.databaseSyncMonitor(ctx)
+	}
+
+	return nil
+}
+
+// StartWorkersOnly starts only the worker goroutines and batch processor, without
+// the pendingDataMonitor. Used in pipeline mode where the pipeline orchestrator
+// drives task creation via ProcessAllPendingSync() instead.
+func (h *Hydrator) StartWorkersOnly(ctx context.Context) error {
+	if h.isRunning.Load() {
+		return fmt.Errorf("hydrator is already running")
+	}
+	h.isRunning.Store(true)
+
+	glog.V(3).Infof("Starting hydrator in worker-only mode with %d workers and %d steps", h.workerCount, len(h.steps))
+
+	for i := 0; i < h.workerCount; i++ {
+		go h.worker(ctx, i)
+	}
+
+	go h.batchCompletionProcessor(ctx)
+
 	if h.cacheManager != nil {
 		go h.databaseSyncMonitor(ctx)
 	}
@@ -212,6 +239,7 @@ func (h *Hydrator) EnqueueTask(task *hydrationfn.HydrationTask) error {
 		return fmt.Errorf("hydrator is not running")
 	}
 
+	h.pipelineWg.Add(1)
 	select {
 	case h.taskQueue <- task:
 		h.trackTask(task)
@@ -219,6 +247,7 @@ func (h *Hydrator) EnqueueTask(task *hydrationfn.HydrationTask) error {
 			task.ID, task.AppID, task.UserID, task.SourceID, len(h.taskQueue))
 		return nil
 	default:
+		h.pipelineWg.Done()
 		glog.Errorf("ERROR: Task queue is full! Cannot enqueue task: %s for app: %s (user: %s, source: %s) - Queue length: %d",
 			task.ID, task.AppID, task.UserID, task.SourceID, len(h.taskQueue))
 		return fmt.Errorf("task queue is full")
@@ -255,6 +284,8 @@ func (h *Hydrator) worker(ctx context.Context, workerID int) {
 
 // processTask processes a single hydration task
 func (h *Hydrator) processTask(ctx context.Context, task *hydrationfn.HydrationTask, workerID int) {
+	defer h.pipelineWg.Done()
+
 	// Add memory monitoring at the start of task processing
 	h.monitorMemoryUsage()
 
@@ -2112,4 +2143,41 @@ func (h *Hydrator) ForceCheckPendingData() {
 
 	glog.V(3).Infof("Force checking pending data triggered externally")
 	h.checkForPendingData()
+}
+
+// WaitForAllTasks blocks until all currently enqueued/active hydration tasks have completed.
+// Used by SyncPipeline to wait for hydration to finish before proceeding to DataWatcher.
+func (h *Hydrator) WaitForAllTasks(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		h.pipelineWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ProcessAllPendingSync scans cache for pending data, creates hydration tasks, and waits
+// for all tasks to complete. This provides synchronous hydration processing for pipeline mode.
+func (h *Hydrator) ProcessAllPendingSync(ctx context.Context) error {
+	if !h.IsRunning() {
+		return fmt.Errorf("hydrator is not running")
+	}
+
+	glog.V(2).Info("Pipeline: Starting synchronous hydration processing")
+	startTime := time.Now()
+
+	h.checkForPendingData()
+
+	if err := h.WaitForAllTasks(ctx); err != nil {
+		return fmt.Errorf("pipeline: hydration wait interrupted: %w", err)
+	}
+
+	glog.V(2).Infof("Pipeline: Synchronous hydration processing completed in %v", time.Since(startTime))
+	return nil
 }
