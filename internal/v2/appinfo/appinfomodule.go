@@ -772,12 +772,7 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 		return fmt.Errorf("cache manager not available")
 	}
 
-	// Add detailed lock logs for diagnosis
-	glog.V(3).Infof("[LOCK] m.cacheManager.mutex.TryLock() @appinfomodule:cleanup Start")
-	if !m.cacheManager.mutex.TryLock() {
-		glog.Warning("[TryLock] AppInfoModule cleanup: CacheManager write lock not available, skipping cleanup")
-		return nil
-	}
+	m.cacheManager.mutex.Lock()
 	defer m.cacheManager.mutex.Unlock()
 	removedCount := 0
 	for userID, userData := range m.cacheManager.cache.Users {
@@ -1377,13 +1372,7 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 		},
 	}
 
-	if !m.cacheManager.mutex.TryRLock() {
-		glog.Warning("[TryRLock] AppInfoModule: CacheManager read lock not available, skipping operation")
-		return map[string]interface{}{
-			"error":  "lock not available",
-			"status": "unknown",
-		}
-	}
+	m.cacheManager.mutex.RLock()
 	defer m.cacheManager.mutex.RUnlock()
 
 	totalUsers := 0
