@@ -158,20 +158,32 @@ func (dw *DataWatcherState) resolveInvisibleFlag(raw *bool, entranceName, appNam
 func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entranceName string) (bool, error) {
 	// Check cache first (using TryRLock to avoid blocking)
 	cacheKey := fmt.Sprintf("%s:%s", userID, appName)
-	if dw.appServiceCacheMutex.TryRLock() {
-		if appCache, exists := dw.appServiceCache[cacheKey]; exists {
-			if invisible, found := appCache[entranceName]; found {
-				dw.appServiceCacheMutex.RUnlock()
-				glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - using cached invisible=%t for entrance %s (app=%s, user=%s)",
-					invisible, entranceName, appName, userID)
-				return invisible, nil
-			}
+	dw.appServiceCacheMutex.RLock()
+	defer dw.appServiceCacheMutex.RUnlock()
+
+	if appCache, exists := dw.appServiceCache[cacheKey]; exists {
+		if invisible, found := appCache[entranceName]; found {
+			// dw.appServiceCacheMutex.RUnlock()
+			glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - using cached invisible=%t for entrance %s (app=%s, user=%s)",
+				invisible, entranceName, appName, userID)
+			return invisible, nil
 		}
-		dw.appServiceCacheMutex.RUnlock()
-	} else {
-		glog.Warningf("[TryRLock] DEBUG: fetchInvisibleFromAppService - read lock not available, skipping cache check for entrance %s (app=%s, user=%s)",
-			entranceName, appName, userID)
 	}
+
+	// if dw.appServiceCacheMutex.TryRLock() {
+	// 	if appCache, exists := dw.appServiceCache[cacheKey]; exists {
+	// 		if invisible, found := appCache[entranceName]; found {
+	// 			dw.appServiceCacheMutex.RUnlock()
+	// 			glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - using cached invisible=%t for entrance %s (app=%s, user=%s)",
+	// 				invisible, entranceName, appName, userID)
+	// 			return invisible, nil
+	// 		}
+	// 	}
+	// 	dw.appServiceCacheMutex.RUnlock()
+	// } else {
+	// 	glog.Warningf("[TryRLock] DEBUG: fetchInvisibleFromAppService - read lock not available, skipping cache check for entrance %s (app=%s, user=%s)",
+	// 		entranceName, appName, userID)
+	// }
 
 	// Fetch from API
 	host := getEnvOrDefault("APP_SERVICE_SERVICE_HOST", "localhost")
@@ -221,20 +233,33 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 			}
 
 			// Cache all entrances for this app to avoid future API calls (using TryLock to avoid blocking)
-			if dw.appServiceCacheMutex.TryLock() {
-				if dw.appServiceCache[cacheKey] == nil {
-					dw.appServiceCache[cacheKey] = make(map[string]bool)
-				}
-				for _, specEntrance := range app.Spec.Entrances {
-					dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
-				}
-				dw.appServiceCacheMutex.Unlock()
-				glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - fetched and cached invisible=%t for entrance %s (app=%s, user=%s)",
-					invisibleValue, entranceName, appName, userID)
-			} else {
-				glog.Warningf("[TryLock] DEBUG: fetchInvisibleFromAppService - write lock not available, skipping cache update for entrance %s (app=%s, user=%s)",
-					entranceName, appName, userID)
+			dw.appServiceCacheMutex.Lock()
+			defer dw.appServiceCacheMutex.Unlock()
+
+			if dw.appServiceCache[cacheKey] == nil {
+				dw.appServiceCache[cacheKey] = make(map[string]bool)
 			}
+			for _, specEntrance := range app.Spec.Entrances {
+				dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
+			}
+			// dw.appServiceCacheMutex.Unlock()
+			glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - fetched and cached invisible=%t for entrance %s (app=%s, user=%s)",
+				invisibleValue, entranceName, appName, userID)
+
+			// if dw.appServiceCacheMutex.TryLock() {
+			// 	if dw.appServiceCache[cacheKey] == nil {
+			// 		dw.appServiceCache[cacheKey] = make(map[string]bool)
+			// 	}
+			// 	for _, specEntrance := range app.Spec.Entrances {
+			// 		dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
+			// 	}
+			// 	dw.appServiceCacheMutex.Unlock()
+			// 	glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - fetched and cached invisible=%t for entrance %s (app=%s, user=%s)",
+			// 		invisibleValue, entranceName, appName, userID)
+			// } else {
+			// 	glog.Warningf("[TryLock] DEBUG: fetchInvisibleFromAppService - write lock not available, skipping cache update for entrance %s (app=%s, user=%s)",
+			// 		entranceName, appName, userID)
+			// }
 
 			return invisibleValue, nil
 		}

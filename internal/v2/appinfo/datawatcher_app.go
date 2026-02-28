@@ -51,6 +51,32 @@ func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator, dataSender *
 
 // Start begins the data watching process
 func (dw *DataWatcher) Start(ctx context.Context) error {
+	// if atomic.LoadInt32(&dw.isRunning) == 1 {
+	// 	return fmt.Errorf("DataWatcher is already running")
+	// }
+
+	// if dw.cacheManager == nil {
+	// 	return fmt.Errorf("CacheManager is required for DataWatcher")
+	// }
+
+	// if dw.hydrator == nil {
+	// 	return fmt.Errorf("Hydrator is required for DataWatcher")
+	// }
+
+	// atomic.StoreInt32(&dw.isRunning, 1)
+	// glog.Infof("Starting DataWatcher with interval: %v", time.Duration(atomic.LoadInt64((*int64)(&dw.interval))))
+
+	// // Start the monitoring goroutine
+	// go dw.watchLoop(ctx)
+
+	// return nil
+
+	return dw.StartWithOptions(ctx, true)
+}
+
+// StartWithOptions begins the data watching process with options
+// If enableWatchLoop is false, the periodic watchLoop is not started (used when serial pipeline handles processing)
+func (dw *DataWatcher) StartWithOptions(ctx context.Context, enableWatchLoop bool) error {
 	if atomic.LoadInt32(&dw.isRunning) == 1 {
 		return fmt.Errorf("DataWatcher is already running")
 	}
@@ -64,10 +90,13 @@ func (dw *DataWatcher) Start(ctx context.Context) error {
 	}
 
 	atomic.StoreInt32(&dw.isRunning, 1)
-	glog.Infof("Starting DataWatcher with interval: %v", time.Duration(atomic.LoadInt64((*int64)(&dw.interval))))
 
-	// Start the monitoring goroutine
-	go dw.watchLoop(ctx)
+	if enableWatchLoop {
+		glog.Infof("Starting DataWatcher with interval: %v", time.Duration(atomic.LoadInt64((*int64)(&dw.interval))))
+		go dw.watchLoop(ctx)
+	} else {
+		glog.Infof("Starting DataWatcher in passive mode (serial pipeline handles processing)")
+	}
 
 	return nil
 }
@@ -351,6 +380,7 @@ func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData 
 
 // calculateAndSetUserHashDirect calculates hash without tracking (used internally by goroutines)
 func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *types.UserData) bool {
+	glog.V(2).Infof("Serial pipeline: DataWatcherApp, user: %s", userID)
 	glog.V(3).Infof("DataWatcher: Starting direct hash calculation for user %s", userID)
 
 	// Get the original user data from cache manager to ensure we have the latest reference
@@ -1243,4 +1273,90 @@ func (dw *DataWatcher) sendNewAppReadyNotification(userID string, completedApp *
 	} else {
 		glog.V(2).Infof("DataWatcher: Successfully sent new app ready notification for app %s (version: %s, source: %s)", appName, appVersion, sourceID)
 	}
+}
+
+// ProcessSingleAppToLatest moves a single completed pending app to AppInfoLatest
+// Returns true if the app was successfully moved
+func (dw *DataWatcher) ProcessSingleAppToLatest(userID, sourceID string, pendingApp *types.AppInfoLatestPendingData) bool {
+	if pendingApp == nil {
+		return false
+	}
+
+	// Check hydration completion
+	if dw.hydrator != nil && !dw.hydrator.isAppHydrationComplete(pendingApp) {
+		return false
+	}
+
+	// Convert to latest data
+	latestData := dw.convertPendingToLatest(pendingApp)
+	if latestData == nil {
+		return false
+	}
+
+	glog.V(2).Infof("Serial pipeline, datawatcher_app user: %s, source: %s, id: %s, name: %s", userID, sourceID, pendingApp.AppInfo.AppEntry.ID, pendingApp.AppInfo.AppEntry.Name)
+
+	// Acquire write lock to move data
+	if !dw.cacheManager.mutex.TryLock() {
+		glog.Warningf("[TryLock] ProcessSingleAppToLatest: Write lock not available for user=%s, source=%s, skipping", userID, sourceID)
+		return false
+	}
+	defer dw.cacheManager.mutex.Unlock()
+
+	userData, userExists := dw.cacheManager.cache.Users[userID]
+	if !userExists {
+		return false
+	}
+	sourceData, sourceExists := userData.Sources[sourceID]
+	if !sourceExists {
+		return false
+	}
+
+	appName := dw.getAppName(pendingApp)
+	appID := dw.getAppID(pendingApp)
+
+	// Check if app with same name already exists in AppInfoLatest
+	existingIndex := -1
+	for i, existingApp := range sourceData.AppInfoLatest {
+		if existingApp != nil {
+			existingAppName := dw.getAppNameFromLatest(existingApp)
+			if existingAppName == appName {
+				existingIndex = i
+				break
+			}
+		}
+	}
+
+	if existingIndex >= 0 {
+		if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil &&
+			sourceData.AppInfoLatest[existingIndex].AppInfo != nil &&
+			sourceData.AppInfoLatest[existingIndex].AppInfo.AppEntry != nil &&
+			latestData.AppInfo.AppEntry.Version != sourceData.AppInfoLatest[existingIndex].AppInfo.AppEntry.Version {
+			dw.sendNewAppReadyNotification(userID, pendingApp, sourceID)
+		}
+		sourceData.AppInfoLatest[existingIndex] = latestData
+		glog.V(2).Infof("ProcessSingleAppToLatest: replaced existing app %s (user=%s, source=%s)", appName, userID, sourceID)
+	} else {
+		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
+		glog.V(2).Infof("ProcessSingleAppToLatest: added new app %s (user=%s, source=%s)", appName, userID, sourceID)
+		dw.sendNewAppReadyNotification(userID, pendingApp, sourceID)
+	}
+
+	// Remove from pending list
+	newPendingList := make([]*types.AppInfoLatestPendingData, 0, len(sourceData.AppInfoLatestPending))
+	for _, p := range sourceData.AppInfoLatestPending {
+		pID := dw.getAppID(p)
+		if pID != appID {
+			newPendingList = append(newPendingList, p)
+		}
+	}
+	sourceData.AppInfoLatestPending = newPendingList
+
+	atomic.AddInt64(&dw.totalAppsMoved, 1)
+	glog.Infof("ProcessSingleAppToLatest: successfully moved app %s to Latest (user=%s, source=%s)", appName, userID, sourceID)
+	return true
+}
+
+// CalculateAndSetUserHashDirect is a public wrapper for calculateAndSetUserHashDirect
+func (dw *DataWatcher) CalculateAndSetUserHashDirect(userID string, userData *types.UserData) bool {
+	return dw.calculateAndSetUserHashDirect(userID, userData)
 }

@@ -143,6 +143,30 @@ func (dwr *DataWatcherRepo) Start() error {
 	return nil
 }
 
+// StartWithOptions starts with options, if enablePolling is false, the periodic polling is not started
+func (dwr *DataWatcherRepo) StartWithOptions(enablePolling bool) error {
+	dwr.mu.Lock()
+	defer dwr.mu.Unlock()
+
+	if dwr.isRunning {
+		return fmt.Errorf("DataWatcherRepo is already running")
+	}
+
+	dwr.isRunning = true
+	glog.V(3).Info("Starting DataWatcherRepo in passive mode (serial pipeline handles processing)")
+
+	return nil
+}
+
+// ProcessOnce executes one round of state change processing, called by serial pipeline
+func (dwr *DataWatcherRepo) ProcessOnce() {
+	if !dwr.isRunning {
+		return
+	}
+
+	dwr.processStateChanges()
+}
+
 // Stop stops the periodic state checking process
 func (dwr *DataWatcherRepo) Stop() error {
 	dwr.mu.Lock()

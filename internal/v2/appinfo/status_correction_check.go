@@ -107,6 +107,35 @@ func (scc *StatusCorrectionChecker) Start() error {
 	return nil
 }
 
+// StartWithOptions starts with options
+func (scc *StatusCorrectionChecker) StartWithOptions(enablePeriodicCheck bool) error {
+	scc.mutex.Lock()
+	defer scc.mutex.Unlock()
+
+	if scc.isRunning {
+		return fmt.Errorf("status correction checker is already running")
+	}
+
+	scc.isRunning = true
+
+	if enablePeriodicCheck {
+		glog.Infof("Starting status correction checker with interval: %v", scc.checkInterval)
+		go scc.runPeriodicCheck()
+	} else {
+		glog.Infof("Starting status correction checker in passive mode (serial pipeline handles processing)")
+	}
+
+	return nil
+}
+
+// PerformStatusCheckOnce executes one status check cycle, called by serial pipeline
+func (scc *StatusCorrectionChecker) PerformStatusCheckOnce() {
+	if !scc.isRunning {
+		return
+	}
+	scc.performStatusCheck()
+}
+
 // Stop stops the periodic status checking
 func (scc *StatusCorrectionChecker) Stop() {
 	scc.mutex.Lock()

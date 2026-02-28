@@ -120,7 +120,7 @@ func (cm *CacheManager) GetUserDataNoLock(userID string) *UserData {
 func (cm *CacheManager) GetUserDataWithFallback(userID string) *UserData {
 	if !cm.mutex.TryRLock() {
 		// Lock not available immediately, return nil to avoid blocking
-		glog.Warningf("[TryRLock] GetUserData: Read lock not available for user %s, returning nil", userID)
+		glog.Warningf("[TryRLock] GetUserDataWithFallback: Read lock not available for user %s, returning nil", userID)
 		return nil
 	}
 	defer cm.mutex.RUnlock()
@@ -203,7 +203,7 @@ func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheMan
 
 // Start initializes the cache by loading data from Redis and starts the sync worker
 func (cm *CacheManager) Start() error {
-	glog.V(3).Infof("Starting cache manager")
+	glog.V(2).Infof("Starting cache manager")
 
 	// Load cache data from Redis if ClearCache is false
 	if !cm.userConfig.ClearCache {
@@ -278,11 +278,11 @@ func (cm *CacheManager) Start() error {
 	_wd()
 
 	// Start sync worker goroutine
-	go cm.syncWorker()
+	go cm.syncWorker() // + 临时注释
 
 	// Start periodic cleanup of AppRenderFailed data (every 5 minutes)
 	cm.cleanupTicker = time.NewTicker(5 * time.Minute)
-	go cm.cleanupWorker()
+	go cm.cleanupWorker() // +
 
 	glog.V(3).Infof("Cache manager started successfully")
 	return nil
@@ -963,7 +963,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			}
 
 			glog.V(3).Infof("Successfully processed %d apps from market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
-		} else {
+		} else { // + 走这里
 			// This might be market data with nested apps structure, try to extract apps
 			glog.V(3).Infof("DEBUG: CALL POINT 2 - Processing potential market data for user=%s, source=%s", userID, sourceID)
 			glog.V(3).Infof("DEBUG: CALL POINT 2 - Data before processing: %+v", data)
@@ -1011,7 +1011,8 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		// Notify hydrator about pending data update for immediate task creation
 		if cm.hydrationNotifier != nil && len(sourceData.AppInfoLatestPending) > 0 {
 			glog.V(3).Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
-			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
+			glog.V(2).Info("Serial pipeline, syncer done, continue...")
+			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data) // +++++
 		}
 	case types.AppRenderFailed:
 		// Handle render failed data - this is typically set by the hydrator when tasks fail

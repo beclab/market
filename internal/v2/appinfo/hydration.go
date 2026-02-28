@@ -35,6 +35,13 @@ type Hydrator struct {
 	failedTasks    map[string]*hydrationfn.HydrationTask
 	taskMutex      sync.RWMutex
 
+	// Serial pipeline (replaces parallel workers + pendingDataMonitor + DataWatcher.watchLoop)
+	dataWatcher             *DataWatcher
+	dataWatcherRepo         *DataWatcherRepo
+	statusCorrectionChecker *StatusCorrectionChecker
+	pipelineTrigger         chan struct{}
+	pipelineMutex           sync.Mutex
+
 	// Cache access mutex for unified lock strategy - removed, use CacheManager.mutex instead
 
 	// Batch completion tracking
@@ -112,6 +119,7 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 		settingsManager:      settingsManager,
 		cacheManager:         cacheManager,
 		taskQueue:            make(chan *hydrationfn.HydrationTask, config.QueueSize),
+		pipelineTrigger:      make(chan struct{}, 1),
 		workerCount:          config.WorkerCount,
 		stopChan:             make(chan struct{}),
 		isRunning:            atomic.Bool{}, // Initialize atomic.Bool
@@ -172,12 +180,15 @@ func (h *Hydrator) Start(ctx context.Context) error {
 	glog.V(3).Infof("Starting hydrator with %d workers and %d steps", h.workerCount, len(h.steps))
 
 	// Start worker goroutines
-	for i := 0; i < h.workerCount; i++ {
-		go h.worker(ctx, i)
-	}
+	// for i := 0; i < h.workerCount; i++ {
+	// 	go h.worker(ctx, i)
+	// }
 
-	// Start pending data monitor
-	go h.pendingDataMonitor(ctx)
+	// // Start pending data monitor
+	// go h.pendingDataMonitor(ctx)
+
+	// Start serial pipeline loop (replaces worker pool + pendingDataMonitor + DataWatcher watchLoop)
+	go h.serialPipelineLoop(ctx)
 
 	// Start batch completion processor
 	go h.batchCompletionProcessor(ctx)
@@ -1373,11 +1384,11 @@ func CreateDefaultHydrator(cache *types.CacheData, settingsManager *settings.Set
 // Processes pending data update notification and creates hydration tasks immediately
 func (h *Hydrator) NotifyPendingDataUpdate(userID, sourceID string, pendingData map[string]interface{}) {
 	if !h.IsRunning() {
-		glog.V(3).Infof("Hydrator is not running, ignoring pending data notification for user: %s, source: %s", userID, sourceID)
+		glog.V(2).Infof("Hydrator is not running, ignoring pending data notification for user: %s, source: %s", userID, sourceID)
 		return
 	}
 
-	glog.V(3).Infof("Received pending data update notification for user: %s, source: %s", userID, sourceID)
+	glog.V(2).Infof("Received pending data update notification for user: %s, source: %s", userID, sourceID)
 
 	// Create tasks from the pending data immediately
 	h.createTasksFromPendingDataMap(userID, sourceID, pendingData)
@@ -1440,7 +1451,7 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 		if appMap, ok := appData.(map[string]interface{}); ok {
 			// Check if app data contains necessary raw data fields before creating task
 			if !h.hasRequiredRawDataFields(appMap) {
-				glog.V(3).Infof("App %s (user: %s, source: %s) missing required raw data fields, skipping task creation",
+				glog.Warningf("Serial pipeline, App %s (user: %s, source: %s) missing required raw data fields, skipping task creation",
 					appID, userID, sourceID)
 				continue
 			}
@@ -1449,7 +1460,7 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 			if !h.hasActiveTaskForApp(userID, sourceID, appID, appName) {
 				// Check if app is already in render failed list
 				if h.isAppInRenderFailedList(userID, sourceID, appID, appName) {
-					glog.V(3).Infof("App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
+					glog.Warningf("Serial pipeline, App %s (user: %s, source: %s) is already in render failed list, skipping task creation",
 						appID, userID, sourceID)
 					continue
 				}
@@ -1463,13 +1474,13 @@ func (h *Hydrator) createTasksFromPendingDataMap(userID, sourceID string, pendin
 					}
 				}
 				if h.isAppInLatestQueue(userID, sourceID, appID, appName, version) {
-					// glog.Infof("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
-					// 	appID, userID, sourceID)
+					glog.Infof("App hydration already complete for app: %s (user: %s, source: %s), skipping task creation",
+						appID, userID, sourceID)
 					continue
 				}
 
 				if len(appMap) == 0 {
-					glog.V(3).Infof("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
+					glog.Warningf("Warning: Empty app data for app: %s (user: %s, source: %s), skipping task creation",
 						appID, userID, sourceID)
 					continue
 				}
@@ -2112,4 +2123,250 @@ func (h *Hydrator) ForceCheckPendingData() {
 
 	glog.V(3).Infof("Force checking pending data triggered externally")
 	h.checkForPendingData()
+}
+
+// SetDataWatcher sets the DataWatcher reference for the serial pipeline
+func (h *Hydrator) SetDataWatcher(dw *DataWatcher) {
+	h.dataWatcher = dw
+}
+
+func (h *Hydrator) SetDataWatcherRepo(dwr *DataWatcherRepo) {
+	h.dataWatcherRepo = dwr
+}
+
+func (h *Hydrator) SetStatusCorrectionChecker(scc *StatusCorrectionChecker) {
+	h.statusCorrectionChecker = scc
+}
+
+// serialPipelineLoop runs the serial pipeline, triggered by notifications or periodic timer
+func (h *Hydrator) serialPipelineLoop(ctx context.Context) {
+	glog.V(3).Info("Serial pipeline loop started")
+	defer glog.V(3).Info("Serial pipeline loop stopped")
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.stopChan:
+			return
+		case <-h.pipelineTrigger:
+			h.runSerialPipeline(ctx)
+		case <-ticker.C:
+			h.runSerialPipeline(ctx)
+		}
+	}
+}
+
+// runSerialPipeline collects all pending apps and processes them one by one
+func (h *Hydrator) runSerialPipeline(ctx context.Context) {
+	if !h.pipelineMutex.TryLock() {
+		glog.V(3).Info("Serial pipeline: another run in progress, skipping")
+		return
+	}
+	defer h.pipelineMutex.Unlock()
+
+	if h.cacheManager == nil {
+		return
+	}
+
+	type pendingItem struct {
+		userID   string
+		sourceID string
+		pending  *types.AppInfoLatestPendingData
+	}
+
+	// Step 1: Read-lock to snapshot all pending data
+	if !h.cacheManager.mutex.TryRLock() {
+		glog.Warning("[TryRLock] serialPipeline: CacheManager read lock not available, skipping")
+		return
+	}
+	var items []pendingItem
+	for userID, userData := range h.cache.Users {
+		for sourceID, sourceData := range userData.Sources {
+			for _, pd := range sourceData.AppInfoLatestPending {
+				if pd != nil {
+					items = append(items, pendingItem{userID, sourceID, pd})
+				}
+			}
+		}
+	}
+	h.cacheManager.mutex.RUnlock()
+
+	if len(items) == 0 {
+		return
+	}
+
+	// glog.V(2).Infof("Serial pipeline: hydrator, found %d pending apps to process", len(items))
+	if len(items) > 0 {
+		glog.V(2).Infof("Serial pipeline Phase 1: processing %d pending apps", len(items))
+	}
+
+	// Step 2: Process each app serially through the full pipeline
+	affectedUsers := make(map[string]bool)
+	var total = len(items)
+	for idx, item := range items {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.stopChan:
+			return
+		default:
+		}
+
+		glog.V(2).Infof("Serial pipeline: user: %s, source: %s, id: %s, name: %s, %d/%d", item.userID, item.sourceID, item.pending.AppInfo.AppEntry.ID, item.pending.AppInfo.AppEntry.Name, idx+1, total)
+		h.processSingleAppFullPipeline(ctx, item.userID, item.sourceID, item.pending) // +
+		affectedUsers[item.userID] = true
+	}
+
+	glog.V(2).Info("Serial pipeline done, continue...")
+
+	// Step 3: Calculate hash and sync for affected users
+	if h.dataWatcher != nil {
+		for userID := range affectedUsers {
+			userData := h.cacheManager.GetUserData(userID)
+			if userData != nil {
+				h.dataWatcher.CalculateAndSetUserHashDirect(userID, userData)
+			}
+		}
+	}
+
+	// ========== Phase 2: DataWatcherRepo ==========
+	if h.dataWatcherRepo != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.stopChan:
+			return
+		default:
+		}
+		glog.V(3).Info("Serial pipeline Phase 2: processing DataWatcherRepo")
+		h.dataWatcherRepo.ProcessOnce()
+	}
+
+	// ========== Phase 3: StatusCorrectionChecker ==========
+	if h.statusCorrectionChecker != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.stopChan:
+			return
+		default:
+		}
+		glog.V(3).Info("Serial pipeline Phase 3: processing StatusCorrectionChecker")
+		h.statusCorrectionChecker.PerformStatusCheckOnce()
+	}
+
+	// ========== Phase 4: Hash + Sync ==========
+	if h.dataWatcher != nil {
+		for userID := range affectedUsers {
+			userData := h.cacheManager.GetUserData(userID)
+			if userData != nil {
+				h.dataWatcher.CalculateAndSetUserHashDirect(userID, userData)
+			}
+		}
+	}
+
+	// Step 4: Force sync
+	if err := h.cacheManager.ForceSync(); err != nil {
+		glog.Errorf("Serial pipeline: ForceSync failed: %v", err)
+	}
+}
+
+// processSingleAppFullPipeline processes a single app through hydration + move to latest
+func (h *Hydrator) processSingleAppFullPipeline(ctx context.Context, userID, sourceID string, pendingData *types.AppInfoLatestPendingData) {
+	if pendingData == nil || pendingData.RawData == nil {
+		return
+	}
+
+	appID := pendingData.RawData.AppID
+	if appID == "" {
+		appID = pendingData.RawData.ID
+	}
+	appName := pendingData.RawData.Name
+	if appID == "" {
+		return
+	}
+
+	// Skip if in render failed list
+	if h.isAppInRenderFailedList(userID, sourceID, appID, appName) {
+		return
+	}
+
+	// Check if already hydrated → move to latest directly
+	if h.isAppHydrationComplete(pendingData) { // +
+		if h.dataWatcher != nil {
+			h.dataWatcher.ProcessSingleAppToLatest(userID, sourceID, pendingData) // + processSingleAppFullPipeline
+		}
+		return
+	}
+
+	// Skip if already in latest queue with matching version
+	version := ""
+	if pendingData.RawData != nil {
+		version = pendingData.RawData.Version
+	}
+	if h.isAppInLatestQueue(userID, sourceID, appID, appName, version) {
+		return
+	}
+
+	// Create a task for hydration step execution
+	appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
+	if len(appDataMap) == 0 {
+		return
+	}
+
+	var cacheManagerIface types.CacheManagerInterface
+	if h.cacheManager != nil {
+		cacheManagerIface = h.cacheManager
+	}
+	task := hydrationfn.NewHydrationTaskWithManager(
+		userID, sourceID, appID,
+		appDataMap, h.cache, cacheManagerIface, h.settingsManager,
+	)
+
+	glog.V(2).Infof("Serial pipeline: processing app %s %s (user=%s, source=%s)", appID, appName, userID, sourceID)
+	taskStartTime := time.Now()
+
+	// Execute hydration steps synchronously
+	for i, step := range h.steps {
+		_ = i
+		if step.CanSkip(ctx, task) {
+			task.IncrementStep()
+			continue
+		}
+
+		if err := step.Execute(ctx, task); err != nil {
+			failureReason := err.Error()
+			failureStep := step.GetStepName()
+			glog.Errorf("Serial pipeline: step %s failed for app %s %s: %v", failureStep, appID, appName, err)
+
+			h.moveTaskToRenderFailed(task, failureReason, failureStep)
+			duration := time.Since(taskStartTime)
+			h.markTaskFailed(task, taskStartTime, duration, failureStep, failureReason)
+			return
+		}
+
+		task.IncrementStep()
+	}
+
+	if !h.isAppHydrationComplete(pendingData) {
+		glog.Warningf("Serial pipeline: hydration steps completed but data incomplete for app %s %s (user=%s, source=%s), will retry next cycle",
+			appID, appName, userID, sourceID)
+		return
+	}
+
+	// All steps completed
+	task.SetStatus(hydrationfn.TaskStatusCompleted)
+	duration := time.Since(taskStartTime)
+	h.markTaskCompleted(task, taskStartTime, duration)
+
+	glog.V(2).Infof("Serial pipeline: hydration completed for app %s %s, moving to latest", appID, appName)
+
+	// Move to Latest
+	if h.dataWatcher != nil {
+		h.dataWatcher.ProcessSingleAppToLatest(userID, sourceID, pendingData) // + processSingleAppFullPipeline
+	}
 }

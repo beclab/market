@@ -584,9 +584,15 @@ func (m *AppInfoModule) initDataWatcher() error {
 	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator, m.dataSender)
 
 	// Start DataWatcher
-	if err := m.dataWatcher.Start(m.ctx); err != nil {
+	// if err := m.dataWatcher.Start(m.ctx); err != nil {
+	// 	return fmt.Errorf("failed to start DataWatcher: %w", err)
+	// }
+	if err := m.dataWatcher.StartWithOptions(m.ctx, false); err != nil {
 		return fmt.Errorf("failed to start DataWatcher: %w", err)
 	}
+
+	// Wire DataWatcher into Hydrator's serial pipeline
+	m.hydrator.SetDataWatcher(m.dataWatcher)
 
 	glog.V(2).Info("DataWatcher initialized successfully")
 	return nil
@@ -648,8 +654,16 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.cacheManager, m.dataWatcher, m.dataSender)
 
 	// Start DataWatcherRepo
-	if err := m.dataWatcherRepo.Start(); err != nil {
+	// if err := m.dataWatcherRepo.Start(); err != nil {
+	// 	return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
+	// }
+
+	if err := m.dataWatcherRepo.StartWithOptions(false); err != nil {
 		return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
+	}
+
+	if m.hydrator != nil {
+		m.hydrator.SetDataWatcherRepo(m.dataWatcherRepo)
 	}
 
 	glog.V(2).Info("DataWatcherRepo initialized successfully")
@@ -667,8 +681,16 @@ func (m *AppInfoModule) initStatusCorrectionChecker() error {
 	m.statusCorrectionChecker = NewStatusCorrectionChecker(m.cacheManager)
 
 	// Start StatusCorrectionChecker
-	if err := m.statusCorrectionChecker.Start(); err != nil {
+	// if err := m.statusCorrectionChecker.Start(); err != nil {
+	// 	return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
+	// }
+
+	if err := m.statusCorrectionChecker.StartWithOptions(false); err != nil {
 		return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
+	}
+
+	if m.hydrator != nil {
+		m.hydrator.SetStatusCorrectionChecker(m.statusCorrectionChecker)
 	}
 
 	glog.V(2).Info("StatusCorrectionChecker initialized successfully")
