@@ -51,26 +51,6 @@ func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator, dataSender *
 
 // Start begins the data watching process
 func (dw *DataWatcher) Start(ctx context.Context) error {
-	// if atomic.LoadInt32(&dw.isRunning) == 1 {
-	// 	return fmt.Errorf("DataWatcher is already running")
-	// }
-
-	// if dw.cacheManager == nil {
-	// 	return fmt.Errorf("CacheManager is required for DataWatcher")
-	// }
-
-	// if dw.hydrator == nil {
-	// 	return fmt.Errorf("Hydrator is required for DataWatcher")
-	// }
-
-	// atomic.StoreInt32(&dw.isRunning, 1)
-	// glog.Infof("Starting DataWatcher with interval: %v", time.Duration(atomic.LoadInt64((*int64)(&dw.interval))))
-
-	// // Start the monitoring goroutine
-	// go dw.watchLoop(ctx)
-
-	// return nil
-
 	return dw.StartWithOptions(ctx, true)
 }
 
@@ -1293,7 +1273,9 @@ func (dw *DataWatcher) ProcessSingleAppToLatest(userID, sourceID string, pending
 		return false
 	}
 
-	glog.V(2).Infof("Serial pipeline, datawatcher_app user: %s, source: %s, id: %s, name: %s", userID, sourceID, pendingApp.AppInfo.AppEntry.ID, pendingApp.AppInfo.AppEntry.Name)
+	appID := dw.getAppID(pendingApp)
+	appName := dw.getAppName(pendingApp)
+	glog.V(2).Infof("Pipeline: ProcessSingleAppToLatest user=%s, source=%s, id=%s, name=%s", userID, sourceID, appID, appName)
 
 	// Acquire write lock to move data
 	if !dw.cacheManager.mutex.TryLock() {
@@ -1310,9 +1292,6 @@ func (dw *DataWatcher) ProcessSingleAppToLatest(userID, sourceID string, pending
 	if !sourceExists {
 		return false
 	}
-
-	appName := dw.getAppName(pendingApp)
-	appID := dw.getAppID(pendingApp)
 
 	// Check if app with same name already exists in AppInfoLatest
 	existingIndex := -1

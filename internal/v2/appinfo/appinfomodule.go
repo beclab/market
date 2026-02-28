@@ -26,10 +26,11 @@ type AppInfoModule struct {
 	redisClient             *RedisClient
 	syncer                  *Syncer
 	hydrator                *Hydrator
+	pipeline                *Pipeline
 	dataWatcher             *DataWatcher
 	dataWatcherState        *DataWatcherState
 	dataWatcherUser         *DataWatcherUser
-	dataWatcherRepo         *DataWatcherRepo // Add DataWatcherRepo for image info updates
+	dataWatcherRepo         *DataWatcherRepo
 	dataSender              *DataSender
 	statusCorrectionChecker *StatusCorrectionChecker
 	settingsManager         *settings.SettingsManager
@@ -223,10 +224,30 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
-	// Set up hydration notifier connection if both cache and hydrator are enabled
-	if m.config.EnableCache && m.config.EnableHydrator && m.cacheManager != nil && m.hydrator != nil {
-		m.cacheManager.SetHydrationNotifier(m.hydrator)
-		glog.Infof("Hydration notifier connection established between cache manager and hydrator")
+	// Create and start Pipeline to orchestrate all components serially
+	if m.config.EnableHydrator && m.cacheManager != nil {
+		p := NewPipeline(m.cacheManager, m.cacheManager.cache, 30*time.Second)
+		if m.syncer != nil {
+			p.SetSyncer(m.syncer)
+		}
+		if m.hydrator != nil {
+			p.SetHydrator(m.hydrator)
+		}
+		if m.dataWatcher != nil {
+			p.SetDataWatcher(m.dataWatcher)
+		}
+		if m.dataWatcherRepo != nil {
+			p.SetDataWatcherRepo(m.dataWatcherRepo)
+		}
+		if m.statusCorrectionChecker != nil {
+			p.SetStatusCorrectionChecker(m.statusCorrectionChecker)
+		}
+		m.cacheManager.SetHydrationNotifier(p)
+		if err := p.Start(m.ctx); err != nil {
+			return fmt.Errorf("failed to start Pipeline: %w", err)
+		}
+		m.pipeline = p
+		glog.Infof("Pipeline started, all components orchestrated serially")
 	}
 
 	m.isStarted = true
@@ -245,7 +266,11 @@ func (m *AppInfoModule) Stop() error {
 
 	glog.V(3).Info("Stopping AppInfo module...")
 
-	// Stop components in reverse order
+	// Stop Pipeline first (it orchestrates other components)
+	if m.pipeline != nil {
+		m.pipeline.Stop()
+	}
+
 	if m.hydrator != nil {
 		m.hydrator.Stop()
 	}
@@ -517,12 +542,12 @@ func (m *AppInfoModule) initSyncer() error {
 		glog.V(3).Info("Cache manager reference set in syncer for hydration notifications")
 	}
 
-	// Start syncer
-	if err := m.syncer.Start(m.ctx); err != nil {
+	// Start syncer in passive mode (Pipeline handles scheduling)
+	if err := m.syncer.StartWithOptions(m.ctx, false); err != nil {
 		return fmt.Errorf("failed to start syncer: %w", err)
 	}
 
-	glog.V(2).Info("Syncer initialized successfully")
+	glog.V(2).Info("Syncer initialized (passive mode, Pipeline handles scheduling)")
 	return nil
 }
 
@@ -583,18 +608,11 @@ func (m *AppInfoModule) initDataWatcher() error {
 	// Create DataWatcher instance
 	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator, m.dataSender)
 
-	// Start DataWatcher
-	// if err := m.dataWatcher.Start(m.ctx); err != nil {
-	// 	return fmt.Errorf("failed to start DataWatcher: %w", err)
-	// }
 	if err := m.dataWatcher.StartWithOptions(m.ctx, false); err != nil {
 		return fmt.Errorf("failed to start DataWatcher: %w", err)
 	}
 
-	// Wire DataWatcher into Hydrator's serial pipeline
-	m.hydrator.SetDataWatcher(m.dataWatcher)
-
-	glog.V(2).Info("DataWatcher initialized successfully")
+	glog.V(2).Info("DataWatcher initialized (passive mode)")
 	return nil
 }
 
@@ -653,20 +671,11 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 	// Create DataWatcherRepo instance
 	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.cacheManager, m.dataWatcher, m.dataSender)
 
-	// Start DataWatcherRepo
-	// if err := m.dataWatcherRepo.Start(); err != nil {
-	// 	return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
-	// }
-
 	if err := m.dataWatcherRepo.StartWithOptions(false); err != nil {
 		return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
 	}
 
-	if m.hydrator != nil {
-		m.hydrator.SetDataWatcherRepo(m.dataWatcherRepo)
-	}
-
-	glog.V(2).Info("DataWatcherRepo initialized successfully")
+	glog.V(2).Info("DataWatcherRepo initialized (passive mode)")
 	return nil
 }
 
@@ -680,20 +689,11 @@ func (m *AppInfoModule) initStatusCorrectionChecker() error {
 
 	m.statusCorrectionChecker = NewStatusCorrectionChecker(m.cacheManager)
 
-	// Start StatusCorrectionChecker
-	// if err := m.statusCorrectionChecker.Start(); err != nil {
-	// 	return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
-	// }
-
 	if err := m.statusCorrectionChecker.StartWithOptions(false); err != nil {
 		return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
 	}
 
-	if m.hydrator != nil {
-		m.hydrator.SetStatusCorrectionChecker(m.statusCorrectionChecker)
-	}
-
-	glog.V(2).Info("StatusCorrectionChecker initialized successfully")
+	glog.V(2).Info("StatusCorrectionChecker initialized (passive mode)")
 	return nil
 }
 

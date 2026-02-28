@@ -103,8 +103,14 @@ func (s *Syncer) GetSteps() []syncerfn.SyncStep {
 	return steps
 }
 
-// Start begins the synchronization process
+// Start begins the synchronization process with its own sync loop
 func (s *Syncer) Start(ctx context.Context) error {
+	return s.StartWithOptions(ctx, true)
+}
+
+// StartWithOptions starts the syncer with options.
+// If enableSyncLoop is false, the periodic sync loop is not started (Pipeline handles scheduling).
+func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) error {
 	if !s.mutex.TryLock() {
 		return fmt.Errorf("failed to acquire lock for Start")
 	}
@@ -115,10 +121,23 @@ func (s *Syncer) Start(ctx context.Context) error {
 	s.isRunning.Store(true)
 	s.mutex.Unlock()
 
-	glog.V(2).Infof("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
-
-	go s.syncLoop(ctx)
+	if enableSyncLoop {
+		glog.V(2).Infof("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
+		go s.syncLoop(ctx)
+	} else {
+		glog.V(2).Infof("Starting syncer with %d steps (passive mode, Pipeline handles scheduling)", len(s.steps))
+	}
 	return nil
+}
+
+// SyncOnce executes one sync cycle, called by Pipeline
+func (s *Syncer) SyncOnce(ctx context.Context) {
+	if !s.isRunning.Load() {
+		return
+	}
+	if err := s.executeSyncCycle(ctx); err != nil {
+		glog.Errorf("SyncOnce: sync cycle failed: %v", err)
+	}
 }
 
 // Stop stops the synchronization process

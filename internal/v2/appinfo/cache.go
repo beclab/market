@@ -897,18 +897,57 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		appData.Timestamp = time.Now().Unix()
 		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, appData)
 	case AppInfoLatestPending:
-		// Clear existing AppInfoLatestPending list before adding new data
-		// This ensures we don't accumulate old data when hash doesn't match
+		// Build version map from AppInfoLatest to skip apps with unchanged versions
+		latestVersionMap := make(map[string]string)
+		for _, latestApp := range sourceData.AppInfoLatest {
+			if latestApp == nil || latestApp.RawData == nil {
+				continue
+			}
+			v := latestApp.RawData.Version
+			if v == "" {
+				continue
+			}
+			if latestApp.RawData.Name != "" {
+				latestVersionMap[latestApp.RawData.Name] = v
+			}
+			if latestApp.RawData.AppID != "" {
+				latestVersionMap[latestApp.RawData.AppID] = v
+			}
+			if latestApp.RawData.ID != "" {
+				latestVersionMap[latestApp.RawData.ID] = v
+			}
+		}
+
 		originalCount := len(sourceData.AppInfoLatestPending)
-		sourceData.AppInfoLatestPending = sourceData.AppInfoLatestPending[:0] // Clear the slice
+		sourceData.AppInfoLatestPending = sourceData.AppInfoLatestPending[:0]
 		glog.V(3).Infof("Cleared %d existing AppInfoLatestPending entries for user=%s, source=%s", originalCount, userID, sourceID)
 
-		// Check if this is a complete market data structure
+		shouldSkipApp := func(appData *AppInfoLatestPendingData) bool {
+			if appData == nil || appData.RawData == nil {
+				return false
+			}
+			incomingVersion := appData.RawData.Version
+			if incomingVersion == "" {
+				return false
+			}
+			if name := appData.RawData.Name; name != "" {
+				if existing, ok := latestVersionMap[name]; ok && existing == incomingVersion {
+					return true
+				}
+			}
+			if id := appData.RawData.AppID; id != "" {
+				if existing, ok := latestVersionMap[id]; ok && existing == incomingVersion {
+					return true
+				}
+			}
+			return false
+		}
+
+		skippedCount := 0
+
 		if appsData, hasApps := data["apps"].(map[string]interface{}); hasApps {
-			// This is complete market data, extract individual apps
 			glog.V(3).Infof("Processing complete market data with %d apps for user=%s, source=%s", len(appsData), userID, sourceID)
 
-			// Also store the "others" data (hash, version, topics, etc.)
 			others := &types.Others{}
 			if version, ok := data["version"].(string); ok {
 				others.Version = version
@@ -916,8 +955,6 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			if hash, ok := data["hash"].(string); ok {
 				others.Hash = hash
 			}
-
-			// Extract topics, recommends, pages if present
 			if topics, ok := data["topics"].(map[string]interface{}); ok {
 				for _, topicData := range topics {
 					if topicMap, ok := topicData.(map[string]interface{}); ok {
@@ -925,7 +962,6 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						if name, ok := topicMap["name"].(string); ok {
 							topic.Name = name
 						}
-						// Extract topic data if present
 						if data, ok := topicMap["data"].(map[string]interface{}); ok {
 							topic.Data = make(map[string]*types.TopicData)
 							for lang, topicDataInterface := range data {
@@ -942,77 +978,66 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 					}
 				}
 			}
-
-			// Store others data in source
 			sourceData.Others = others
 
-			// Process each individual app
 			for appID, appDataInterface := range appsData {
 				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
-					glog.V(3).Infof("DEBUG: CALL POINT 1 - Processing app %s for user=%s, source=%s", appID, userID, sourceID)
-					glog.V(3).Infof("DEBUG: CALL POINT 1 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
 					appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
-					if appData != nil {
-						appData.Timestamp = time.Now().Unix()
-						sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
-						glog.V(2).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
-					} else {
-						glog.Warningf("Failed to create app data for app %s (user=%s, source=%s)", appID, userID, sourceID)
+					if appData == nil {
+						continue
 					}
+					if shouldSkipApp(appData) {
+						skippedCount++
+						continue
+					}
+					appData.Timestamp = time.Now().Unix()
+					sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+					glog.V(3).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
 				}
 			}
-
-			glog.V(3).Infof("Successfully processed %d apps from market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
-		} else { // + 走这里
-			// This might be market data with nested apps structure, try to extract apps
-			glog.V(3).Infof("DEBUG: CALL POINT 2 - Processing potential market data for user=%s, source=%s", userID, sourceID)
-			glog.V(3).Infof("DEBUG: CALL POINT 2 - Data before processing: %+v", data)
-
-			// Check if this is market data with nested structure
+		} else {
 			if dataSection, hasData := data["data"].(map[string]interface{}); hasData {
 				if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
-					// This is market data with apps - process each app individually
-					glog.V(3).Infof("DEBUG: CALL POINT 2 - Found nested apps structure with %d apps", len(appsData))
 					for appID, appDataInterface := range appsData {
 						if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
-							glog.V(3).Infof("DEBUG: CALL POINT 2 - Processing app %s", appID)
 							appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
-							if appData != nil {
-								appData.Timestamp = time.Now().Unix()
-								sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
-								glog.V(3).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
-							} else {
-								glog.Warningf("Failed to create app data for app %s (user=%s, source=%s)", appID, userID, sourceID)
+							if appData == nil {
+								continue
 							}
+							if shouldSkipApp(appData) {
+								skippedCount++
+								continue
+							}
+							appData.Timestamp = time.Now().Unix()
+							sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+							glog.V(3).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
 						}
 					}
-					glog.V(2).Infof("Successfully processed %d apps from nested market data for user=%s, source=%s", len(sourceData.AppInfoLatestPending), userID, sourceID)
 				} else {
 					glog.Warningf("Market data found but no apps section for user=%s, source=%s", userID, sourceID)
 				}
 			} else {
-				// This might be actual single app data, try to process directly
-				glog.V(3).Infof("DEBUG: CALL POINT 2 - Trying as single app data for user=%s, source=%s", userID, sourceID)
 				appData := NewAppInfoLatestPendingDataFromLegacyData(data)
 				if appData == nil {
-					glog.Warningf("Failed to create AppInfoLatestPendingData from data for user=%s, source=%s - not recognized as app data or market data", userID, sourceID)
+					glog.Warningf("Failed to create AppInfoLatestPendingData for user=%s, source=%s", userID, sourceID)
 					return fmt.Errorf("invalid app data: missing required identifiers (id, name, or appID)")
 				}
-
-				appData.Timestamp = time.Now().Unix()
-				sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
-				glog.V(2).Infof("Successfully processed single app data for user=%s, source=%s", userID, sourceID)
+				if !shouldSkipApp(appData) {
+					appData.Timestamp = time.Now().Unix()
+					sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, appData)
+				} else {
+					skippedCount++
+				}
 			}
 		}
 
-		glog.V(2).Infof("Updated AppInfoLatestPending list with %d new entries for user=%s, source=%s",
-			len(sourceData.AppInfoLatestPending), userID, sourceID)
+		glog.V(2).Infof("Updated AppInfoLatestPending: %d new, %d skipped (unchanged version) for user=%s, source=%s",
+			len(sourceData.AppInfoLatestPending), skippedCount, userID, sourceID)
 
-		// Notify hydrator about pending data update for immediate task creation
 		if cm.hydrationNotifier != nil && len(sourceData.AppInfoLatestPending) > 0 {
-			glog.V(3).Infof("Notifying hydrator about pending data update for user=%s, source=%s", userID, sourceID)
-			glog.V(2).Info("Serial pipeline, syncer done, continue...")
-			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data) // +++++
+			glog.V(2).Infof("Notifying pipeline about %d pending apps for user=%s, source=%s",
+				len(sourceData.AppInfoLatestPending), userID, sourceID)
+			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
 		}
 	case types.AppRenderFailed:
 		// Handle render failed data - this is typically set by the hydrator when tasks fail
