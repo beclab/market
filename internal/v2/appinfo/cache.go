@@ -118,11 +118,7 @@ func (cm *CacheManager) GetUserDataNoLock(userID string) *UserData {
 // GetUserDataWithFallback retrieves user data with fallback mechanism
 // Uses TryRLock to avoid blocking - returns nil if lock is not available immediately
 func (cm *CacheManager) GetUserDataWithFallback(userID string) *UserData {
-	if !cm.mutex.TryRLock() {
-		// Lock not available immediately, return nil to avoid blocking
-		glog.Warningf("[TryRLock] GetUserDataWithFallback: Read lock not available for user %s, returning nil", userID)
-		return nil
-	}
+	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	if cm.cache == nil {
@@ -135,11 +131,7 @@ func (cm *CacheManager) GetUserDataWithFallback(userID string) *UserData {
 // GetAllUsersDataWithFallback returns all users data with fallback mechanism
 // Uses TryRLock to avoid blocking - returns empty map if lock is not available immediately
 func (cm *CacheManager) GetAllUsersDataWithFallback() map[string]*UserData {
-	if !cm.mutex.TryRLock() {
-		// Lock not available immediately, return empty map to avoid blocking
-		glog.Warning("[TryRLock] GetAllUsersData: Read lock not available, returning empty map")
-		return make(map[string]*UserData)
-	}
+	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	if cm.cache == nil {
@@ -355,11 +347,7 @@ func (cm *CacheManager) processSyncRequest(req SyncRequest) {
 
 // GetUserData retrieves user data from cache
 func (cm *CacheManager) GetUserData(userID string) *UserData {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @184 Start")
-	if !cm.mutex.TryRLock() {
-		glog.Warningf("[TryRLock] GetUserData: Read lock not available for user %s, returning nil", userID)
-		return nil
-	}
+	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	return cm.cache.Users[userID]
@@ -372,11 +360,7 @@ func (cm *CacheManager) getUserData(userID string) *UserData {
 
 // GetSourceData retrieves source data from cache
 func (cm *CacheManager) GetSourceData(userID, sourceID string) *SourceData {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @197 Start")
-	if !cm.mutex.TryRLock() {
-		glog.Warningf("[TryRLock] GetSourceData: Read lock not available for user %s, source %s, returning nil", userID, sourceID)
-		return nil
-	}
+	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	if userData, exists := cm.cache.Users[userID]; exists {
@@ -388,9 +372,7 @@ func (cm *CacheManager) GetSourceData(userID, sourceID string) *SourceData {
 // GetAppVersionFromState retrieves app version from AppStateLatest in the specified source
 // Returns version and found flag
 func (cm *CacheManager) GetAppVersionFromState(userID, sourceID, appName string) (version string, found bool) {
-	if !cm.mutex.TryRLock() {
-		return "", false
-	}
+	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	userData := cm.cache.Users[userID]
@@ -554,13 +536,8 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 }
 
 func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @269 Start")
-	if !cm.mutex.TryLock() {
-		glog.Warningf("[TryLock] setAppDataInternal: Write lock not available for user %s, source %s, type %v, skipping", userID, sourceID, dataType)
-		return fmt.Errorf("write lock not available")
-	}
+	cm.mutex.Lock()
 	cm.updateLockStats("lock")
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @269 Success")
 	// Watchdog: warn if write lock is held >1s
 	watchdogFired := make(chan struct{}, 1)
 	timer := time.AfterFunc(1*time.Second, func() {
@@ -1074,13 +1051,8 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 }
 
 func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @SetLocalAppData Start")
-	if !cm.mutex.TryLock() {
-		glog.Warningf("[TryLock] setLocalAppDataInternal: Write lock not available for user %s, source %s, type %v, skipping", userID, sourceID, dataType)
-		return fmt.Errorf("write lock not available")
-	}
+	cm.mutex.Lock()
 	cm.updateLockStats("lock")
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @SetLocalAppData Success")
 	_wd := cm.startLockWatchdog("@SetLocalAppData")
 
 	defer func() {
@@ -1158,11 +1130,7 @@ func (cm *CacheManager) SetLocalAppData(userID, sourceID string, dataType AppDat
 
 // GetAppData retrieves app data from cache using single global lock
 func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @543 Start")
-	if !cm.mutex.TryRLock() {
-		glog.Warningf("[TryRLock] GetAppData: Read lock not available for user %s, source %s, type %v, returning nil", userID, sourceID, dataType)
-		return nil
-	}
+	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	if userData, exists := cm.cache.Users[userID]; exists {
@@ -1187,12 +1155,7 @@ func (cm *CacheManager) GetAppData(userID, sourceID string, dataType AppDataType
 
 // RemoveUserData removes user data from cache and Redis
 func (cm *CacheManager) removeUserDataInternal(userID string) error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @568 Start")
-	if !cm.mutex.TryLock() {
-		glog.Warningf("[TryLock] removeUserDataInternal: Write lock not available for user %s, skipping", userID)
-		return fmt.Errorf("write lock not available")
-	}
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @568 Success")
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@568:removeUser")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1221,12 +1184,7 @@ func (cm *CacheManager) RemoveUserData(userID string) error {
 
 // AddUser adds a new user to the cache
 func (cm *CacheManager) addUserInternal(userID string) error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @AddUser Start")
-	if !cm.mutex.TryLock() {
-		glog.Warningf("[TryLock] addUserInternal: Write lock not available for user %s, skipping", userID)
-		return fmt.Errorf("write lock not available")
-	}
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @AddUser Success")
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@AddUser")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1277,11 +1235,7 @@ func (cm *CacheManager) AddUser(userID string) error {
 
 // GetCacheStats returns cache statistics using single global lock
 func (cm *CacheManager) GetCacheStats() map[string]interface{} {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @586 Start")
-	if !cm.mutex.TryRLock() {
-		glog.Warning("[TryRLock] GetCacheStats: Read lock not available, returning empty stats")
-		return map[string]interface{}{"error": "lock not available"}
-	}
+	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	stats := make(map[string]interface{})
@@ -1329,11 +1283,7 @@ func (cm *CacheManager) ForceSync() error {
 	// 1. Quickly obtain a data snapshot to minimize lock holding time
 	var userDataSnapshot map[string]*UserData
 	func() {
-		glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @617 Start")
-		if !cm.mutex.TryRLock() {
-			glog.Warning("[TryRLock] ForceSync: Read lock not available, returning error")
-			return
-		}
+		cm.mutex.RLock()
 		defer func() {
 			cm.mutex.RUnlock()
 			glog.V(4).Infof("[LOCK] cm.mutex.RUnlock() @617 End")
@@ -1409,10 +1359,7 @@ func (cm *CacheManager) GetForceSyncCooldown() time.Duration {
 
 // GetAllUsersData returns all users data from cache using single global lock
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
-	if !cm.mutex.TryRLock() {
-		glog.Warning("[TryRLock] GetAllUsersData: Read lock not available, returning empty map")
-		return make(map[string]*UserData)
-	}
+	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
 	if cm.cache == nil {
@@ -1435,11 +1382,7 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 
 // HasUserStateDataForSource checks if any user has non-empty state data for a specific source
 func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryRLock() @HasUserStateDataForSource Start")
-	if !cm.mutex.TryRLock() {
-		glog.Warningf("[TryRLock] HasUserStateDataForSource: Read lock not available for source %s, returning false", sourceID)
-		return false
-	}
+	cm.mutex.RLock()
 	defer func() {
 		cm.mutex.RUnlock()
 		glog.V(4).Infof("[LOCK] cm.mutex.RUnlock() @HasUserStateDataForSource End")
@@ -1466,12 +1409,7 @@ func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
 
 // UpdateUserConfig updates the user configuration and ensures all users have data structures
 func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @660 Start")
-	if !cm.mutex.TryLock() {
-		glog.Warning("[TryLock] updateUserConfigInternal: Write lock not available, skipping")
-		return fmt.Errorf("write lock not available")
-	}
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @660 Success")
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@660:updateUserConfig")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1541,12 +1479,7 @@ func (cm *CacheManager) UpdateUserConfig(newUserConfig *UserConfig) error {
 
 // SyncUserListToCache ensures all users from current userConfig have initialized data structures
 func (cm *CacheManager) syncUserListToCacheInternal() error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @718 Start")
-	if !cm.mutex.TryLock() {
-		glog.Warning("[TryLock] syncUserListToCacheInternal: Write lock not available, skipping")
-		return fmt.Errorf("write lock not available")
-	}
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @718 Success")
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@718:syncUserList")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1594,11 +1527,7 @@ func (cm *CacheManager) SyncUserListToCache() error {
 
 // CleanupInvalidPendingData removes invalid pending data entries that lack required identifiers
 func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @751 Start")
-	if !cm.mutex.TryLock() {
-		glog.Warning("[TryLock] CleanupInvalidPendingData: Write lock not available, skipping cleanup")
-		return 0
-	}
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@751:cleanupInvalidPending")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1884,11 +1813,7 @@ func (cm *CacheManager) updateLockStats(lockType string) {
 
 // RemoveAppStateData removes a specific app from AppStateLatest for a user and source
 func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName string) error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @RemoveAppStateData Start")
-	if !cm.mutex.TryLock() {
-		glog.Warningf("[TryLock] RemoveAppStateData: Write lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appName)
-		return fmt.Errorf("write lock not available")
-	}
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@RemoveAppStateData")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -1941,12 +1866,7 @@ func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) err
 
 // RemoveAppInfoLatestData removes a specific app from AppInfoLatest for a user and source
 func (cm *CacheManager) removeAppInfoLatestDataInternal(userID, sourceID, appName string) error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @RemoveAppInfoLatestData Start")
-	if !cm.mutex.TryLock() {
-		glog.Warningf("[TryLock] removeAppInfoLatestDataInternal: Write lock not available for user %s, source %s, app %s, skipping", userID, sourceID, appName)
-		return fmt.Errorf("write lock not available")
-	}
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @RemoveAppInfoLatestData Success")
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@RemoveAppInfoLatestData")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -2032,12 +1952,7 @@ func (cm *CacheManager) GetSettingsManager() *settings.SettingsManager {
 
 // SyncMarketSourcesToCache synchronizes market sources to all users in cache
 func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.MarketSource) error {
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @SyncMarketSourcesToCache Start")
-	if !cm.mutex.TryLock() {
-		glog.Warningf("[TryLock] syncMarketSourcesToCacheInternal: Write lock not available, skipping")
-		return fmt.Errorf("write lock not available")
-	}
-	glog.V(4).Infof("[LOCK] cm.mutex.TryLock() @SyncMarketSourcesToCache Success")
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@SyncMarketSourcesToCache")
 	defer func() {
 		cm.mutex.Unlock()
@@ -2110,12 +2025,7 @@ func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSourc
 }
 
 func (cm *CacheManager) resynceUserInternal() error {
-	glog.V(4).Info("[LOCK] cm.mutex.TryLock() @resynceUserInternal Start")
-	if !cm.mutex.TryLock() {
-		glog.Warning("[TryLock] resynceUserInternal: Write lock not available, skipping")
-		return fmt.Errorf("write lock not available")
-	}
-	glog.V(4).Info("[LOCK] cm.mutex.TryLock() @resynceUserInternal Success")
+	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@resynceUserInternal")
 	defer func() { cm.mutex.Unlock(); _wd() }()
 
@@ -2182,10 +2092,7 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	counts := make(map[target]int)
 
 	glog.V(3).Info("INFO: [Cleanup] Attempting to acquire read lock for scan phase")
-	if !cm.mutex.TryRLock() {
-		glog.Warning("[TryRLock] INFO: [Cleanup] Read lock not available for scan phase, skipping cleanup")
-		return
-	}
+	cm.mutex.RLock()
 	scanLockAcquiredAt := time.Now()
 	glog.V(3).Info("INFO: [Cleanup] Read lock acquired (scan). Hold minimal time")
 
@@ -2232,9 +2139,8 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	go func() {
 		done := make(chan struct{}, 1)
 		go func() {
-			if cm.mutex.TryLock() {
+			cm.mutex.Lock()
 				done <- struct{}{}
-			}
 		}()
 		select {
 		case <-done:
@@ -2318,10 +2224,7 @@ func (cm *CacheManager) ListUsers() {
 		userList = append(userList, user)
 	}
 
-	if flag := cm.TryLock(); !flag {
-		glog.Warning("[TryLock] watch user list lock failed")
-		return
-	}
+	cm.Lock()
 	defer cm.Unlock()
 
 	if len(cm.cache.Users) == 0 {
