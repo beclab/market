@@ -397,94 +397,14 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	glog.V(2).Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
 
-	// Use a single write lock acquisition with timeout to avoid deadlock
-	writeTimeout := 5 * time.Second
-	writeLockAcquired := make(chan bool, 1)
-	writeLockError := make(chan error, 1)
-	cancel := make(chan bool, 1)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("DataWatcher: Panic during write lock acquisition for user %s: %v", userID, r)
-				writeLockError <- fmt.Errorf("panic during write lock acquisition: %v", r)
-			}
-		}()
-
-		glog.V(3).Infof("DataWatcher: Attempting to acquire write lock for user %s", userID)
-		glog.V(3).Infof("[LOCK] dw.cacheManager.mutex.TryLock() @439 Start")
-		if !dw.cacheManager.mutex.TryLock() {
-			glog.Warningf("DataWatcher: Write lock not available for user %s, skipping hash update", userID)
-			writeLockError <- fmt.Errorf("write lock not available")
-			return
-		}
-		defer func() {
-			dw.cacheManager.mutex.Unlock()
-			glog.V(3).Infof("[LOCK] dw.cacheManager.mutex.Unlock() @453 Start")
-			glog.V(3).Infof("DataWatcher: Write lock released for user %s", userID)
-		}()
-
-		// Check if cancelled before sending signal
-		select {
-		case <-cancel:
-			glog.V(3).Infof("DataWatcher: Write lock acquisition cancelled for user %s", userID)
-			return
-		default:
-		}
-
-		glog.V(3).Infof("DataWatcher: Write lock acquired for user %s", userID)
-		glog.V(3).Infof("[LOCK] dw.cacheManager.mutex.Lock() @439 Success")
-
-		// Send signal and wait for processing
-		select {
-		case writeLockAcquired <- true:
-			// Successfully sent signal, wait for cancellation or completion
-			<-cancel
-		case <-cancel:
-			glog.V(3).Infof("DataWatcher: Write lock acquisition cancelled before signal for user %s", userID)
-		}
-	}()
-
-	select {
-	case <-writeLockAcquired:
-		// Write lock acquired successfully
-		glog.V(3).Infof("DataWatcher: Write lock acquired for hash update, user %s", userID)
-
-		// Update hash and release lock immediately
-		originalUserData.Hash = newHash
-		glog.V(3).Infof("DataWatcher: Hash updated in memory for user %s", userID)
-
-		// Cancel the goroutine to release the lock
-		close(cancel)
-
-	case err := <-writeLockError:
-		glog.Errorf("DataWatcher: Error acquiring write lock for user %s: %v", userID, err)
-		close(cancel)
-		return false
-
-	case <-time.After(writeTimeout):
-		glog.Errorf("DataWatcher: Timeout acquiring write lock for hash update, user %s", userID)
-		close(cancel)
-		return false
-	}
+	dw.cacheManager.mutex.Lock()
+	originalUserData.Hash = newHash
+	dw.cacheManager.mutex.Unlock()
 
 	glog.V(3).Infof("DataWatcher: Hash updated for user %s", userID)
 
-	// Verification: Check if the hash was actually updated
-	if glog.V(2) {
-		verifyUserData := dw.cacheManager.GetUserData(userID)
-		if verifyUserData != nil {
-			verifyHash := verifyUserData.Hash
-			glog.V(2).Infof("DataWatcher: Verification - hash = '%s' for user %s", verifyHash, userID)
-		} else {
-			glog.Errorf("DataWatcher: Verification failed - CacheManager.GetUserData returned nil for user %s", userID)
-		}
-	}
-
-	// Trigger force sync to persist the hash change
-	glog.V(3).Infof("DataWatcher: Starting force sync for user %s", userID)
 	if err := dw.cacheManager.ForceSync(); err != nil {
-		glog.V(4).Infof("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
+		glog.Errorf("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
 		return false
 	} else {
 		glog.V(2).Infof("DataWatcher: Force sync completed after hash update for user %s", userID)
@@ -1277,11 +1197,7 @@ func (dw *DataWatcher) ProcessSingleAppToLatest(userID, sourceID string, pending
 	appName := dw.getAppName(pendingApp)
 	glog.V(2).Infof("Pipeline: ProcessSingleAppToLatest user=%s, source=%s, id=%s, name=%s", userID, sourceID, appID, appName)
 
-	// Acquire write lock to move data
-	if !dw.cacheManager.mutex.TryLock() {
-		glog.Warningf("[TryLock] ProcessSingleAppToLatest: Write lock not available for user=%s, source=%s, skipping", userID, sourceID)
-		return false
-	}
+	dw.cacheManager.mutex.Lock()
 	defer dw.cacheManager.mutex.Unlock()
 
 	userData, userExists := dw.cacheManager.cache.Users[userID]

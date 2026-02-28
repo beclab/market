@@ -274,12 +274,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 				glog.Errorf("StatusCorrectionChecker: failed to calculate hash for user %s: %v", userID, err)
 				continue
 			}
-			// Write back hash with lock
-			glog.V(3).Infof("[LOCK] scc.cacheManager.mutex.TryLock() @status_correction:updateHash Start")
-			if !scc.cacheManager.mutex.TryLock() {
-				glog.Warning("[TryLock] StatusCorrectionChecker: CacheManager write lock not available for hash update, skipping")
-				continue
-			}
+			scc.cacheManager.mutex.Lock()
 			userData.Hash = newHash
 			scc.cacheManager.mutex.Unlock()
 			glog.V(2).Infof("StatusCorrectionChecker: user %s hash updated to %s", userID, newHash)

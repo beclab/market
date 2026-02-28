@@ -164,11 +164,8 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		return fmt.Errorf("app_data is not in expected format, app=%s, appName=%s", task.AppID, task.AppName)
 	}
 
-	// Now acquire the lock for cache operations
 	if task.CacheManager != nil {
-		if !task.CacheManager.TryLock() {
-			return fmt.Errorf("write lock not available for cache update, user=%s, source=%s, app=%s, appName=%s", task.UserID, task.SourceID, task.AppID, task.AppName)
-		}
+		task.CacheManager.Lock()
 		defer task.CacheManager.Unlock()
 	}
 

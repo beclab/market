@@ -487,25 +487,15 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 		// Get all existing user IDs with minimal locking
 		var userIDs []string
-		// Use CacheManager if available, otherwise use direct cache access
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-			// Use CacheManager's lock
-			if !cacheManager.mutex.TryRLock() {
-				glog.Warning("[TryRLock] Syncer: CacheManager read lock not available, skipping user ID collection")
-				return fmt.Errorf("read lock not available")
-			}
+			cacheManager.mutex.RLock()
 			for userID := range s.cache.Users {
 				userIDs = append(userIDs, userID)
 			}
 			cacheManager.mutex.RUnlock()
 
-			// If no users exist, create a system user as fallback
 			if len(userIDs) == 0 {
-				glog.V(3).Infof("[LOCK] cacheManager.mutex.TryLock() @syncer:createSystemUser Start")
-				if !cacheManager.mutex.TryLock() {
-					glog.Warning("[TryLock] Syncer: CacheManager write lock not available for system user creation, skipping")
-					return fmt.Errorf("write lock not available")
-				}
+				cacheManager.mutex.Lock()
 				// Double-check after acquiring write lock
 				if len(s.cache.Users) == 0 {
 					systemUserID := "system"
@@ -550,13 +540,8 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 // storeDataDirectly stores data directly to cache without going through CacheManager
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
-	// Use CacheManager's lock if available
 	if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-		glog.V(3).Infof("[LOCK] cacheManager.mutex.TryLock() @syncer:storeDataDirectly Start")
-		if !cacheManager.mutex.TryLock() {
-			glog.Warning("[TryLock] Syncer: CacheManager write lock not available for data storage, skipping")
-			return
-		}
+		cacheManager.mutex.Lock()
 		defer cacheManager.mutex.Unlock()
 	} else {
 		// Fallback: no lock protection (not recommended)
@@ -829,10 +814,7 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 	for _, userID := range userIDs {
 		// Check if the source is local type - skip syncer operations for local sources
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-			if !cacheManager.mutex.TryRLock() {
-				glog.Warningf("[TryRLock] Syncer.storeDataViaCacheManager: CacheManager read lock not available for user %s, source %s, skipping", userID, sourceID)
-				continue
-			}
+			cacheManager.mutex.RLock()
 			userData, userExists := s.cache.Users[userID]
 			if userExists {
 				sourceData, sourceExists := userData.Sources[sourceID]

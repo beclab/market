@@ -1076,13 +1076,9 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 		return
 	}
 
-	// Find the pending data for this task
 	var pendingData *types.AppInfoLatestPendingData
 	if h.cacheManager != nil {
-		if !h.cacheManager.mutex.TryRLock() {
-			glog.Warningf("[TryRLock] Hydrator.moveTaskToRenderFailed: CacheManager read lock not available for user %s, skipping, source: %s, id: %s, name: %s, version: %s", task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
-			return
-		}
+		h.cacheManager.mutex.RLock()
 		userData, userExists := h.cache.Users[task.UserID]
 		if !userExists {
 			h.cacheManager.mutex.RUnlock()
@@ -1141,19 +1137,15 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID, appName, appVe
 		return
 	}
 
-	// 1) Read-lock phase: locate index to remove (no writes under RLock)
-	if !h.cacheManager.mutex.TryRLock() {
-		glog.Warningf("[TryRLock] Hydrator.removeFromPendingList: CacheManager read lock not available for user %s, source %s, app %s %s %s, skipping", userID, sourceID, appID, appName, appVersion)
-		return
-	}
+	h.cacheManager.mutex.Lock()
+	defer h.cacheManager.mutex.Unlock()
+
 	userData, userExists := h.cache.Users[userID]
 	if !userExists {
-		h.cacheManager.mutex.RUnlock()
 		return
 	}
 	sourceData, sourceExists := userData.Sources[sourceID]
 	if !sourceExists {
-		h.cacheManager.mutex.RUnlock()
 		return
 	}
 	removeIdx := -1
@@ -1164,19 +1156,9 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID, appName, appVe
 			break
 		}
 	}
-	h.cacheManager.mutex.RUnlock()
-
 	if removeIdx == -1 {
 		return
 	}
-
-	// 2) Try to acquire short write-lock and apply removal with new slice; skip if contended
-	// Use TryLock to avoid blocking
-	if !h.cacheManager.mutex.TryLock() {
-		glog.Warningf("[TryLock] DEBUG: removeFromPendingList skipped (lock not available) for user=%s source=%s app=%s %s %s", userID, sourceID, appID, appName, appVersion)
-		return
-	}
-	defer h.cacheManager.mutex.Unlock()
 
 	// Re-validate pointers under write-lock
 	if userData2, ok := h.cache.Users[userID]; ok {
@@ -1825,12 +1807,8 @@ func (h *Hydrator) cleanupOldTasks() {
 func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, appName, version string) bool {
 	glog.V(3).Infof("DEBUG: isAppInLatestQueue checking appID=%s %s, version=%s for user=%s, source=%s", appID, appName, version, userID, sourceID)
 
-	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
-		if !h.cacheManager.mutex.TryRLock() {
-			glog.Warningf("[TryRLock] Hydrator.isAppInLatestQueue: CacheManager read lock not available for user: %s, source: %s, app: %s %s %s, returning false", userID, sourceID, appID, appName, version)
-			return false
-		}
+		h.cacheManager.mutex.RLock()
 		defer h.cacheManager.mutex.RUnlock()
 
 		userData, userExists := h.cache.Users[userID]
@@ -2053,12 +2031,8 @@ func (h *Hydrator) convertLatestDataToMap(latestData *types.AppInfoLatestData) m
 
 // isAppInRenderFailedList checks if an app already exists in the render failed list
 func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID, appName string) bool {
-	// Use CacheManager's lock if available
 	if h.cacheManager != nil {
-		if !h.cacheManager.mutex.TryRLock() {
-			glog.Warningf("[TryRLock] Hydrator.isAppInRenderFailedList: CacheManager read lock not available for user %s, source %s, app %s %s, returning false", userID, sourceID, appID, appName)
-			return false
-		}
+		h.cacheManager.mutex.RLock()
 		defer h.cacheManager.mutex.RUnlock()
 
 		userData, userExists := h.cache.Users[userID]
