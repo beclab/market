@@ -588,12 +588,8 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		return
 	}
 
-	// Step 1: Use try read lock to find all data that needs to be removed
-	glog.V(2).Infof("Step 1: Attempting to acquire read lock to find data for removal")
-	if !data.CacheManager.TryRLock() {
-		glog.Warningf("[TryRLock] Warning: Read lock not available for app removal, skipping: %s %s", appID, appName)
-		return
-	}
+	glog.V(2).Infof("Step 1: Acquiring read lock to find data for removal")
+	data.CacheManager.RLock()
 
 	// Collect all data that needs to be removed
 	type RemovalData struct {
@@ -673,11 +669,8 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		return
 	}
 
-	glog.V(2).Info("Step 2: Attempting to acquire write lock to update data")
-	if !data.CacheManager.TryLock() {
-		glog.Warningf("[TryLock] Warning: Write lock not available for app removal, skipping: %s %s", appID, appName)
-		return
-	}
+	glog.V(2).Info("Step 2: Acquiring write lock to update data")
+	data.CacheManager.Lock()
 	defer data.CacheManager.Unlock()
 
 	// Collect sync requests to trigger after releasing the lock
@@ -1006,11 +999,7 @@ func (d *DetailFetchStep) isAppInstalled(appName, sourceID string, data *SyncCon
 		return false
 	}
 
-	// English comment: use try read lock to safely inspect installation states
-	if !data.CacheManager.TryRLock() {
-		glog.Warningf("[TryRLock] Warning: Read lock not available for isAppInstalled check, returning false, source: %s, name: %s", sourceID, appName)
-		return false
-	}
+	data.CacheManager.RLock()
 	defer data.CacheManager.RUnlock()
 
 	for _, userData := range data.Cache.Users {

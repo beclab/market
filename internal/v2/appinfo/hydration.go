@@ -921,10 +921,7 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask, startedAt 
 		sourceChartPath = path
 	}
 
-	if !h.taskMutex.TryLock() {
-		glog.Warningf("[TryLock] Failed to acquire lock for markTaskCompleted, skipping status update, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
-		return
-	}
+	h.taskMutex.Lock()
 	delete(h.activeTasks, task.ID)
 
 	// Clean up in-memory data under lock
@@ -966,11 +963,7 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask, startedAt tim
 		sourceChartPath = path
 	}
 
-	if !h.taskMutex.TryLock() {
-		glog.Warningf("[TryLock] Failed to acquire lock for markTaskFailed, skipping status update, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s, error: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion, errorMsg)
-		return
-	}
-
+	h.taskMutex.Lock()
 	task.SetStatus(hydrationfn.TaskStatusFailed)
 	delete(h.activeTasks, task.ID)
 
@@ -1015,10 +1008,7 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask, startedAt tim
 
 // addToCompletedHistory adds a task to the completed tasks history
 func (h *Hydrator) addToCompletedHistory(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration) {
-	if !h.workerStatusMutex.TryLock() {
-		glog.Warningf("[TryLock] Failed to acquire lock for addToCompletedHistory, skipping, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
-		return
-	}
+	h.workerStatusMutex.Lock()
 	defer h.workerStatusMutex.Unlock()
 
 	entry := &TaskHistoryEntry{
@@ -1042,10 +1032,7 @@ func (h *Hydrator) addToCompletedHistory(task *hydrationfn.HydrationTask, starte
 
 // addToFailedHistory adds a task to the failed tasks history
 func (h *Hydrator) addToFailedHistory(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration, failedStep string, errorMsg string) {
-	if !h.workerStatusMutex.TryLock() {
-		glog.Warningf("[TryLock] Failed to acquire lock for addToFailedHistory, skipping, task: %s, user: %s, source: %s, id: %s, name: %s, version: %s", task.ID, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
-		return
-	}
+	h.workerStatusMutex.Lock()
 	defer h.workerStatusMutex.Unlock()
 
 	entry := &TaskHistoryEntry{
