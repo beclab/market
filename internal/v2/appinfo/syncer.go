@@ -26,6 +26,8 @@ type Syncer struct {
 	mutex           sync.RWMutex              // Keep mutex for steps slice operations
 	settingsManager *settings.SettingsManager // Settings manager for data source information
 
+	lastSyncExecuted time.Time // Last time a full sync cycle was actually executed
+
 	// Status tracking fields
 	lastSyncTime        atomic.Value // time.Time
 	lastSyncSuccess     atomic.Value // time.Time
@@ -130,11 +132,17 @@ func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) erro
 	return nil
 }
 
-// SyncOnce executes one sync cycle, called by Pipeline
+// SyncOnce executes one sync cycle if at least syncInterval has elapsed
+// since the last execution. Called by Pipeline on every tick.
 func (s *Syncer) SyncOnce(ctx context.Context) {
 	if !s.isRunning.Load() {
 		return
 	}
+	if !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval {
+		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)", time.Since(s.lastSyncExecuted), s.syncInterval)
+		return
+	}
+	s.lastSyncExecuted = time.Now()
 	if err := s.executeSyncCycle(ctx); err != nil {
 		glog.Errorf("SyncOnce: sync cycle failed: %v", err)
 	}

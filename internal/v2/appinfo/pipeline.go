@@ -36,7 +36,7 @@ type Pipeline struct {
 
 func NewPipeline(cacheManager *CacheManager, cache *types.CacheData, interval time.Duration) *Pipeline {
 	if interval <= 0 {
-		interval = 5 * time.Minute
+		interval = 30 * time.Second
 	}
 	return &Pipeline{
 		cacheManager: cacheManager,
