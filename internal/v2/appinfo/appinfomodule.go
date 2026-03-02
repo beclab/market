@@ -242,7 +242,6 @@ func (m *AppInfoModule) Start() error {
 		if m.statusCorrectionChecker != nil {
 			p.SetStatusCorrectionChecker(m.statusCorrectionChecker)
 		}
-		m.cacheManager.SetHydrationNotifier(p)
 		if err := p.Start(m.ctx); err != nil {
 			return fmt.Errorf("failed to start Pipeline: %w", err)
 		}

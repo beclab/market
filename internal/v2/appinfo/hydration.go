@@ -769,12 +769,6 @@ func CreateDefaultHydrator(cache *types.CacheData, settingsManager *settings.Set
 	return NewHydrator(cache, settingsManager, cacheManager, config)
 }
 
-// NotifyPendingDataUpdate implements HydrationNotifier interface.
-// In the new architecture, Pipeline handles notifications directly.
-// This method is kept for backward compatibility but does nothing.
-func (h *Hydrator) NotifyPendingDataUpdate(userID, sourceID string, pendingData map[string]interface{}) {
-	glog.V(3).Infof("Hydrator.NotifyPendingDataUpdate: Pipeline handles notifications, user=%s, source=%s", userID, sourceID)
-}
 // SetCacheManager removed: cacheManager must be provided at NewHydrator
 
 // batchCompletionProcessor processes completed tasks in batches

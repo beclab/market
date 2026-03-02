@@ -20,18 +20,12 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// HydrationNotifier interface for notifying hydrator about pending data updates
-type HydrationNotifier interface {
-	NotifyPendingDataUpdate(userID, sourceID string, pendingData map[string]interface{})
-}
-
 // CacheManager manages the in-memory cache and Redis synchronization
 type CacheManager struct {
-	cache             *CacheData
-	redisClient       *RedisClient
-	userConfig        *UserConfig
-	hydrationNotifier HydrationNotifier   // Notifier for hydration updates
-	stateMonitor      *utils.StateMonitor // State monitor for change detection
+	cache        *CacheData
+	redisClient  *RedisClient
+	userConfig   *UserConfig
+	stateMonitor *utils.StateMonitor // State monitor for change detection
 	dataSender        *DataSender         // Direct data sender for bypassing state monitor
 	mutex             sync.RWMutex
 	syncChannel       chan SyncRequest
@@ -860,23 +854,6 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 	return nil
 }
 
-// SetHydrationNotifier sets the hydration notifier for real-time updates
-func (cm *CacheManager) setHydrationNotifierInternal(notifier HydrationNotifier) {
-	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @216 Start")
-	lockStart := time.Now()
-	cm.mutex.Lock()
-	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @216 Success (wait=%v)", time.Since(lockStart))
-	defer cm.mutex.Unlock()
-	cm.hydrationNotifier = notifier
-	glog.V(4).Infof("Hydration notifier set successfully")
-}
-
-// SetHydrationNotifier sets the hydration notifier for real-time updates
-func (cm *CacheManager) SetHydrationNotifier(notifier HydrationNotifier) {
-	go func() {
-		cm.setHydrationNotifierInternal(notifier)
-	}()
-}
 
 // updateAppStateLatest updates or adds a single app state based on name matching
 func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData *SourceData, newAppState *types.AppStateLatestData) {
@@ -1467,11 +1444,6 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		glog.V(2).Infof("Updated AppInfoLatestPending: %d new, %d skipped (unchanged version) for user=%s, source=%s",
 			len(sourceData.AppInfoLatestPending), skippedCount, userID, sourceID)
 
-		if cm.hydrationNotifier != nil && len(sourceData.AppInfoLatestPending) > 0 {
-			glog.V(2).Infof("Notifying pipeline about %d pending apps for user=%s, source=%s",
-				len(sourceData.AppInfoLatestPending), userID, sourceID)
-			go cm.hydrationNotifier.NotifyPendingDataUpdate(userID, sourceID, data)
-		}
 	case types.AppRenderFailed:
 		// Handle render failed data - this is typically set by the hydrator when tasks fail
 		if failedAppData, hasFailedApp := data["failed_app"].(*types.AppRenderFailedData); hasFailedApp {

@@ -28,7 +28,6 @@ type Pipeline struct {
 	dataWatcherRepo         *DataWatcherRepo
 	statusCorrectionChecker *StatusCorrectionChecker
 
-	trigger   chan struct{}
 	mutex     sync.Mutex
 	stopChan  chan struct{}
 	isRunning atomic.Bool
@@ -42,7 +41,6 @@ func NewPipeline(cacheManager *CacheManager, cache *types.CacheData, interval ti
 	return &Pipeline{
 		cacheManager: cacheManager,
 		cache:        cache,
-		trigger:      make(chan struct{}, 1),
 		stopChan:     make(chan struct{}),
 		interval:     interval,
 	}
@@ -53,19 +51,6 @@ func (p *Pipeline) SetHydrator(h *Hydrator)                                { p.h
 func (p *Pipeline) SetDataWatcher(dw *DataWatcher)                         { p.dataWatcher = dw }
 func (p *Pipeline) SetDataWatcherRepo(dwr *DataWatcherRepo)                { p.dataWatcherRepo = dwr }
 func (p *Pipeline) SetStatusCorrectionChecker(scc *StatusCorrectionChecker) { p.statusCorrectionChecker = scc }
-
-// NotifyPendingDataUpdate implements HydrationNotifier interface.
-// Called by CacheManager after new pending data is written.
-func (p *Pipeline) NotifyPendingDataUpdate(userID, sourceID string, pendingData map[string]interface{}) {
-	if !p.isRunning.Load() {
-		return
-	}
-	glog.V(2).Infof("Pipeline: pending data notification received for user=%s, source=%s", userID, sourceID)
-	select {
-	case p.trigger <- struct{}{}:
-	default:
-	}
-}
 
 func (p *Pipeline) Start(ctx context.Context) error {
 	if p.isRunning.Load() {
@@ -86,13 +71,6 @@ func (p *Pipeline) Stop() {
 	glog.Info("Pipeline stopped")
 }
 
-func (p *Pipeline) Trigger() {
-	select {
-	case p.trigger <- struct{}{}:
-	default:
-	}
-}
-
 func (p *Pipeline) loop(ctx context.Context) {
 	glog.Info("Pipeline loop started")
 	defer glog.Info("Pipeline loop stopped")
@@ -106,8 +84,6 @@ func (p *Pipeline) loop(ctx context.Context) {
 			return
 		case <-p.stopChan:
 			return
-		case <-p.trigger:
-			p.run(ctx)
 		case <-ticker.C:
 			p.run(ctx)
 		}
