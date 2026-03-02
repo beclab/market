@@ -226,7 +226,7 @@ func (m *AppInfoModule) Start() error {
 
 	// Create and start Pipeline to orchestrate all components serially
 	if m.config.EnableHydrator && m.cacheManager != nil {
-		p := NewPipeline(m.cacheManager, m.cacheManager.cache, 30*time.Second)
+		p := NewPipeline(m.cacheManager, m.cacheManager.cache, 5*time.Minute)
 		if m.syncer != nil {
 			p.SetSyncer(m.syncer)
 		}

@@ -36,7 +36,7 @@ type Pipeline struct {
 
 func NewPipeline(cacheManager *CacheManager, cache *types.CacheData, interval time.Duration) *Pipeline {
 	if interval <= 0 {
-		interval = 30 * time.Second
+		interval = 5 * time.Minute
 	}
 	return &Pipeline{
 		cacheManager: cacheManager,
@@ -74,6 +74,8 @@ func (p *Pipeline) Stop() {
 func (p *Pipeline) loop(ctx context.Context) {
 	glog.Info("Pipeline loop started")
 	defer glog.Info("Pipeline loop stopped")
+
+	p.run(ctx)
 
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
