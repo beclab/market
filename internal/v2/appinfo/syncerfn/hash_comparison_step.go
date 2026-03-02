@@ -87,11 +87,16 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 
 	data.RemoteHash = hashResponse.Hash
 
-	// Calculate local hash with proper locking
+	// Calculate local hash
 	if data.CacheManager != nil {
-		data.CacheManager.RLock()
-		data.LocalHash = h.calculateLocalHash(data.Cache, data.GetMarketSource())
-		data.CacheManager.RUnlock()
+		data.LocalHash = data.CacheManager.GetSourceOthersHash(marketSource.ID)
+		if data.LocalHash == "" {
+			if data.Cache == nil || len(data.Cache.Users) == 0 {
+				data.LocalHash = "empty_cache_no_users"
+			} else {
+				data.LocalHash = "no_source_hash"
+			}
+		}
 	}
 
 	// Compare hashes and set result

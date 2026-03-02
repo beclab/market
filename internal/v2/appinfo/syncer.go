@@ -485,33 +485,11 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		sourceID := source.ID // Use market source name as source ID
 		glog.V(3).Infof("Using source ID: %s for data storage", sourceID)
 
-		// Get all existing user IDs with minimal locking
+		// Get all existing user IDs, creating a system user if none exist
 		var userIDs []string
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-			cacheManager.mutex.RLock()
-			for userID := range s.cache.Users {
-				userIDs = append(userIDs, userID)
-			}
-			cacheManager.mutex.RUnlock()
-
-			if len(userIDs) == 0 {
-				cacheManager.mutex.Lock()
-				// Double-check after acquiring write lock
-				if len(s.cache.Users) == 0 {
-					systemUserID := "system"
-					s.cache.Users[systemUserID] = NewUserDataEx(systemUserID) // NewUserData()
-					userIDs = append(userIDs, systemUserID)
-					glog.V(3).Infof("No existing users found, created system user as fallback")
-				} else {
-					// Users were added by another goroutine
-					for userID := range s.cache.Users {
-						userIDs = append(userIDs, userID)
-					}
-				}
-				cacheManager.mutex.Unlock()
-			}
+			userIDs = cacheManager.GetOrCreateUserIDs("system")
 		} else {
-			// Fallback to direct cache access without lock (not recommended)
 			glog.V(3).Info("Warning: CacheManager not available, using direct cache access")
 			for userID := range s.cache.Users {
 				userIDs = append(userIDs, userID)
@@ -540,13 +518,16 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 // storeDataDirectly stores data directly to cache without going through CacheManager
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
-	if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-		cacheManager.mutex.Lock()
-		defer cacheManager.mutex.Unlock()
-	} else {
-		// Fallback: no lock protection (not recommended)
+	cacheManager := s.cacheManager.Load()
+	if cacheManager == nil {
 		glog.V(3).Infof("Warning: CacheManager not available for storeDataDirectly")
+		return
 	}
+	// TODO: refactor storeDataDirectly to use CacheManager write methods
+	// For now, use the internal mutex directly as this function contains
+	// complex parsing logic (~250 lines) that runs under the lock.
+	cacheManager.mutex.Lock()
+	defer cacheManager.mutex.Unlock()
 
 	userData := s.cache.Users[userID]
 
@@ -814,20 +795,10 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 	for _, userID := range userIDs {
 		// Check if the source is local type - skip syncer operations for local sources
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-			cacheManager.mutex.RLock()
-			userData, userExists := s.cache.Users[userID]
-			if userExists {
-				sourceData, sourceExists := userData.Sources[sourceID]
-				if sourceExists {
-					sourceType := sourceData.Type
-					if sourceType == types.SourceDataTypeLocal {
-						glog.V(3).Infof("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
-						cacheManager.mutex.RUnlock()
-						continue
-					}
-				}
+			if cacheManager.IsLocalSource(userID, sourceID) {
+				glog.V(3).Infof("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
+				continue
 			}
-			cacheManager.mutex.RUnlock()
 		}
 
 		// Use CacheManager.SetAppData to trigger hydration notifications if available

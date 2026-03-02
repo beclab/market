@@ -3,7 +3,6 @@ package syncerfn
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -588,159 +587,8 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 		return
 	}
 
-	glog.V(2).Infof("Step 1: Acquiring read lock to find data for removal")
-	data.CacheManager.RLock()
-
-	// Collect all data that needs to be removed
-	type RemovalData struct {
-		userID               string
-		sourceID             string
-		newLatestList        []*types.AppInfoLatestData
-		newPendingList       []*types.AppInfoLatestPendingData
-		originalLatestCount  int
-		originalPendingCount int
-	}
-
-	var removals []RemovalData
-
-	glog.V(3).Infof("Processing %d users for app removal (read phase)", len(data.Cache.Users))
-
-	for userID, userData := range data.Cache.Users {
-		sourceData, sourceExists := userData.Sources[sourceID]
-		if !sourceExists {
-			continue
-		}
-
-		// Create new lists without the target app (all versions)
-		var newLatestList []*types.AppInfoLatestData
-		var newPendingList []*types.AppInfoLatestPendingData
-
-		// Filter latest list - remove ALL versions of the app by name
-		for _, latestApp := range sourceData.AppInfoLatest {
-			if latestApp == nil || latestApp.RawData == nil {
-				newLatestList = append(newLatestList, latestApp)
-				continue
-			}
-			// Remove all versions of the app with matching name
-			if latestApp.RawData.Name != appName {
-				newLatestList = append(newLatestList, latestApp)
-			} else {
-				glog.V(3).Infof("Removing app version %s (name: %s) from AppInfoLatest", latestApp.RawData.Version, appName)
-			}
-		}
-
-		// Filter pending list - remove ALL versions of the app by name
-		for _, pendingApp := range sourceData.AppInfoLatestPending {
-			if pendingApp == nil || pendingApp.RawData == nil {
-				newPendingList = append(newPendingList, pendingApp)
-				continue
-			}
-			// Remove all versions of the app with matching name
-			if pendingApp.RawData.Name != appName {
-				newPendingList = append(newPendingList, pendingApp)
-			} else {
-				glog.V(3).Infof("Removing pending app version %s (name: %s) from AppInfoLatestPending", pendingApp.RawData.Version, appName)
-			}
-		}
-
-		// Only add to removals if there were actually items to remove
-		if len(newLatestList) != len(sourceData.AppInfoLatest) || len(newPendingList) != len(sourceData.AppInfoLatestPending) {
-			removals = append(removals, RemovalData{
-				userID:               userID,
-				sourceID:             sourceID,
-				newLatestList:        newLatestList,
-				newPendingList:       newPendingList,
-				originalLatestCount:  len(sourceData.AppInfoLatest),
-				originalPendingCount: len(sourceData.AppInfoLatestPending),
-			})
-		}
-	}
-
-	if len(removals) > 0 {
-		glog.V(2).Infof("Step 1 completed: Found %d users with data to remove", len(removals))
-	}
-
-	// Release read lock before acquiring write lock (must release manually since we need to acquire write lock)
-	data.CacheManager.RUnlock()
-
-	// Step 2: Use try write lock to quickly update the data
-	if len(removals) == 0 {
-		glog.V(3).Infof("No data found to remove for app: %s", appID)
-		return
-	}
-
-	glog.V(2).Info("Step 2: Acquiring write lock to update data")
-	data.CacheManager.Lock()
-	defer data.CacheManager.Unlock()
-
-	// Collect sync requests to trigger after releasing the lock
-	type SyncReq struct {
-		userID   string
-		sourceID string
-	}
-	var syncReqs []SyncReq
-
-	// Quickly update all the data by replacing array pointers
-	for _, removal := range removals {
-		userData := data.Cache.Users[removal.userID]
-		sourceData := userData.Sources[removal.sourceID]
-
-		// Replace array pointers (atomic operation)
-		sourceData.AppInfoLatest = removal.newLatestList
-		sourceData.AppInfoLatestPending = removal.newPendingList
-
-		glog.V(3).Infof("Updated user: %s, source: %s, app: %s (latest: %d->%d, pending: %d->%d)",
-			removal.userID, removal.sourceID, appName,
-			removal.originalLatestCount, len(removal.newLatestList),
-			removal.originalPendingCount, len(removal.newPendingList))
-
-		// Collect sync request
-		syncReqs = append(syncReqs, SyncReq{
-			userID:   removal.userID,
-			sourceID: removal.sourceID,
-		})
-	}
-
-	glog.V(3).Infof("App removal from cache completed for app: %s %s", appID, appName)
-
-	// Trigger sync to Redis for all affected users and sources after releasing the lock
-	// Use reflection to access the private requestSync method
-	// We do this in a goroutine to avoid blocking and to ensure the lock is released first
-	go func() {
-		// Wait a bit to ensure the lock is released
-		time.Sleep(10 * time.Millisecond)
-
-		cmValue := reflect.ValueOf(data.CacheManager)
-		if cmValue.Kind() == reflect.Ptr {
-			cmValue = cmValue.Elem()
-		}
-
-		requestSyncMethod := cmValue.MethodByName("requestSync")
-		if !requestSyncMethod.IsValid() {
-			glog.V(3).Infof("Warning: Cannot find requestSync method in CacheManager, sync to Redis will be handled by StoreCompleteDataToPending")
-			return
-		}
-
-		// SyncSource = 1 (based on iota: SyncUser=0, SyncSource=1)
-		const SyncSource = 1
-
-		for _, syncReq := range syncReqs {
-			// Create SyncRequest struct value
-			// SyncRequest has: UserID string, SourceID string, Type SyncType (int)
-			syncRequestValue := reflect.New(reflect.TypeOf(struct {
-				UserID   string
-				SourceID string
-				Type     int
-			}{})).Elem()
-			syncRequestValue.Field(0).SetString(syncReq.userID)
-			syncRequestValue.Field(1).SetString(syncReq.sourceID)
-			syncRequestValue.Field(2).SetInt(SyncSource)
-
-			// Call requestSync method
-			requestSyncMethod.Call([]reflect.Value{syncRequestValue})
-			glog.V(3).Infof("Triggered sync to Redis for user: %s, source: %s, app: %s", syncReq.userID, syncReq.sourceID, appName)
-		}
-	}()
+	affected := data.CacheManager.RemoveAppFromAllSources(appName, sourceID)
+	glog.V(3).Infof("App removal from cache completed for app: %s %s, affected %d users", appID, appName, affected)
 }
 
 // cleanupSuspendedAppsFromLatestData checks all apps in LatestData.Data.Apps for suspend/remove labels
@@ -995,30 +843,8 @@ func (d *DetailFetchStep) preserveFieldsForDelistedApp(originalMap, detailMap ma
 
 // isAppInstalled determines whether the given app is currently installed for the active source.
 func (d *DetailFetchStep) isAppInstalled(appName, sourceID string, data *SyncContext) bool {
-	if appName == "" || sourceID == "" || data == nil || data.Cache == nil || data.CacheManager == nil {
+	if appName == "" || sourceID == "" || data == nil || data.CacheManager == nil {
 		return false
 	}
-
-	data.CacheManager.RLock()
-	defer data.CacheManager.RUnlock()
-
-	for _, userData := range data.Cache.Users {
-		if userData == nil {
-			continue
-		}
-		sourceData, ok := userData.Sources[sourceID]
-		if !ok || sourceData == nil {
-			continue
-		}
-		for _, appState := range sourceData.AppStateLatest {
-			if appState == nil {
-				continue
-			}
-			if appState.Status.Name == appName && appState.Status.State != "uninstalled" {
-				return true
-			}
-		}
-	}
-
-	return false
+	return data.CacheManager.IsAppInstalled(sourceID, appName)
 }

@@ -143,8 +143,7 @@ func (dw *DataWatcher) processCompletedApps() {
 	// Get all users data from cache manager with timeout
 	var allUsersData map[string]*types.UserData
 
-	// Use fallback method with TryRLock to avoid blocking
-	allUsersData = dw.cacheManager.GetAllUsersDataWithFallback()
+	allUsersData = dw.cacheManager.GetAllUsersData()
 
 	if len(allUsersData) == 0 {
 		glog.Infof("DataWatcher: No users data found, processing cycle completed")
@@ -397,9 +396,7 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 
 	glog.V(2).Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
 
-	dw.cacheManager.mutex.Lock()
-	originalUserData.Hash = newHash
-	dw.cacheManager.mutex.Unlock()
+	dw.cacheManager.SetUserHash(userID, newHash)
 
 	glog.V(3).Infof("DataWatcher: Hash updated for user %s", userID)
 
@@ -446,34 +443,8 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 		return 0, 0
 	}
 
-	var pendingApps []*types.AppInfoLatestPendingData
-	var appInfoLatest []*types.AppInfoLatestData
-
 	// Step 1: Quick check and data copy with minimal lock time
-	func() {
-		glog.V(3).Info("[LOCK] dw.cacheManager.mutex.TryRLock() @660 Start")
-		if !dw.cacheManager.mutex.TryRLock() {
-			glog.V(3).Infof("[TryRLock] processSourceData: Read lock not available for user: %s, source: %s, skipping", userID, sourceID)
-			return
-		}
-		defer func() {
-			dw.cacheManager.mutex.RUnlock()
-			glog.V(3).Infof("[LOCK] dw.cacheManager.mutex.RUnlock() @660 End")
-		}()
-
-		// Quick check - if no pending apps, exit early
-		if len(sourceData.AppInfoLatestPending) == 0 {
-			return
-		}
-
-		// Copy references to pending apps for processing
-		pendingApps = make([]*types.AppInfoLatestPendingData, len(sourceData.AppInfoLatestPending))
-		copy(pendingApps, sourceData.AppInfoLatestPending)
-
-		// Copy references to existing AppInfoLatest
-		appInfoLatest = make([]*types.AppInfoLatestData, len(sourceData.AppInfoLatest))
-		copy(appInfoLatest, sourceData.AppInfoLatest)
-	}()
+	pendingApps, _ := dw.cacheManager.SnapshotSourcePending(userID, sourceID)
 
 	// Early exit if no pending apps
 	if len(pendingApps) == 0 {
@@ -513,135 +484,38 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 	}
 	glog.Infof("DataWatcher: user=%s source=%s completed=%d/%d apps=[%s]", userID, sourceID, len(completedApps), len(pendingApps), strings.Join(completedIDs, ","))
 
-	// Step 3: Try to acquire write lock non-blocking and move completed apps
-	lockStartTime := time.Now()
-
-	// Try to acquire write lock non-blocking with cancellation support
-	lockAcquired := make(chan bool, 1)
-	lockCancel := make(chan bool, 1)
-
-	go func() {
-		glog.V(3).Info("[LOCK] dw.cacheManager.mutex.TryLock() @716 Start")
-		if !dw.cacheManager.mutex.TryLock() {
-			glog.Warningf("DataWatcher: Write lock not available for user %s, source %s, skipping app move", userID, sourceID)
-			return
+	// Step 3: Move completed apps from pending to latest via CacheManager
+	movedCount := int64(0)
+	for _, completedApp := range completedApps {
+		latestData := dw.convertPendingToLatest(completedApp)
+		if latestData == nil {
+			continue
 		}
-		defer func() {
-			dw.cacheManager.mutex.Unlock()
-			glog.V(3).Info("[LOCK] dw.cacheManager.mutex.Unlock() @725 Start")
-		}()
+		appID := dw.getAppID(completedApp)
+		appName := dw.getAppName(completedApp)
 
-		// Check if cancelled before sending signal
-		select {
-		case <-lockCancel:
-			glog.V(3).Infof("DataWatcher: Write lock acquisition cancelled for user=%s, source=%s", userID, sourceID)
-			return
-		default:
+		oldVersion, replaced, ok := dw.cacheManager.UpsertLatestAndRemovePending(userID, sourceID, latestData, appID, appName)
+		if !ok {
+			continue
 		}
 
-		glog.V(3).Info("[LOCK] dw.cacheManager.mutex.Lock() @716 Success")
-
-		// Send signal and wait for processing
-		select {
-		case lockAcquired <- true:
-			// Successfully sent signal, wait for cancellation
-			<-lockCancel
-		case <-lockCancel:
-			glog.V(3).Infof("DataWatcher: Write lock acquisition cancelled before signal for user=%s, source=%s", userID, sourceID)
-		}
-	}()
-
-	// Use a short timeout to avoid blocking too long
-	select {
-	case <-lockAcquired:
-		glog.V(3).Infof("DataWatcher: Write lock acquired for user=%s, source=%s", userID, sourceID)
-
-		defer func() {
-			totalLockTime := time.Since(lockStartTime)
-			glog.V(3).Infof("DataWatcher: Write lock released after %v for user=%s, source=%s", totalLockTime, userID, sourceID)
-			// Cancel the goroutine to release the lock
-			close(lockCancel)
-		}()
-
-		// Move completed apps from pending to latest
-		movedCount := int64(0)
-		for _, completedApp := range completedApps {
-			// Convert to AppInfoLatestData
-			latestData := dw.convertPendingToLatest(completedApp)
-			if latestData != nil {
-				// Check if app with same name already exists in AppInfoLatest
-				appName := dw.getAppName(completedApp)
-				existingIndex := -1
-
-				// Find existing app with same name
-				for i, existingApp := range sourceData.AppInfoLatest {
-					if existingApp != nil {
-						existingAppName := dw.getAppNameFromLatest(existingApp)
-						if existingAppName == appName {
-							existingIndex = i
-							break
-						}
-					}
-				}
-
-				if existingIndex >= 0 {
-
-					if latestData.AppInfo.AppEntry.Version != sourceData.AppInfoLatest[existingIndex].AppInfo.AppEntry.Version {
-						// Send system notification for new app ready
-						dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
-						glog.V(3).Infof("DataWatcher: Sent system notification for new app ready: %s", appName)
-					}
-
-					// Replace existing app with same name
-					sourceData.AppInfoLatest[existingIndex] = latestData
-					glog.V(3).Infof("DataWatcher: Replaced existing app with same name: %s (index: %d)", appName, existingIndex)
-
-				} else {
-					// Add new app if no existing app with same name
-					sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
-					glog.V(2).Infof("DataWatcher: Added new app to latest: %s", appName)
-					// Send system notification for new app ready
-					dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
-				}
-
-				movedCount++
-
+		if replaced {
+			newVersion := ""
+			if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+				newVersion = latestData.AppInfo.AppEntry.Version
 			}
-		}
-
-		// Remove completed apps from pending list
-		if movedCount > 0 {
-			newPendingList := make([]*types.AppInfoLatestPendingData, 0, len(sourceData.AppInfoLatestPending)-int(movedCount))
-			completedAppIDs := make(map[string]bool)
-
-			// Create a map of completed app IDs for efficient lookup
-			for _, completedApp := range completedApps {
-				appID := dw.getAppID(completedApp)
-				if appID != "" {
-					completedAppIDs[appID] = true
-				}
+			if oldVersion != newVersion {
+				dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
 			}
-
-			// Filter out completed apps from pending list
-			for _, pendingApp := range sourceData.AppInfoLatestPending {
-				appID := dw.getAppID(pendingApp)
-				if !completedAppIDs[appID] {
-					newPendingList = append(newPendingList, pendingApp)
-				}
-			}
-
-			sourceData.AppInfoLatestPending = newPendingList
-			glog.Infof("DataWatcher: Updated pending list: %d -> %d apps for user=%s, source=%s",
-				len(sourceData.AppInfoLatestPending)+int(movedCount), len(sourceData.AppInfoLatestPending), userID, sourceID)
+			glog.V(3).Infof("DataWatcher: Replaced existing app: %s", appName)
+		} else {
+			glog.V(2).Infof("DataWatcher: Added new app to latest: %s", appName)
+			dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
 		}
-
-		return int64(len(pendingApps)), movedCount
-
-	case <-time.After(2 * time.Second):
-		close(lockCancel) // Cancel the goroutine to release the lock
-		glog.V(3).Infof("DataWatcher: Skipping write lock acquisition for user=%s, source=%s (timeout after 2s) - will retry in next cycle", userID, sourceID)
-		return int64(len(pendingApps)), 0
+		movedCount++
 	}
+
+	return int64(len(pendingApps)), movedCount
 }
 
 // isAppHydrationCompletedWithTimeout checks if app hydration is completed with timeout protection
@@ -1197,54 +1071,24 @@ func (dw *DataWatcher) ProcessSingleAppToLatest(userID, sourceID string, pending
 	appName := dw.getAppName(pendingApp)
 	glog.V(2).Infof("Pipeline: ProcessSingleAppToLatest user=%s, source=%s, id=%s, name=%s", userID, sourceID, appID, appName)
 
-	dw.cacheManager.mutex.Lock()
-	defer dw.cacheManager.mutex.Unlock()
-
-	userData, userExists := dw.cacheManager.cache.Users[userID]
-	if !userExists {
-		return false
-	}
-	sourceData, sourceExists := userData.Sources[sourceID]
-	if !sourceExists {
+	oldVersion, replaced, ok := dw.cacheManager.UpsertLatestAndRemovePending(userID, sourceID, latestData, appID, appName)
+	if !ok {
 		return false
 	}
 
-	// Check if app with same name already exists in AppInfoLatest
-	existingIndex := -1
-	for i, existingApp := range sourceData.AppInfoLatest {
-		if existingApp != nil {
-			existingAppName := dw.getAppNameFromLatest(existingApp)
-			if existingAppName == appName {
-				existingIndex = i
-				break
-			}
+	if replaced {
+		newVersion := ""
+		if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+			newVersion = latestData.AppInfo.AppEntry.Version
 		}
-	}
-
-	if existingIndex >= 0 {
-		if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil &&
-			sourceData.AppInfoLatest[existingIndex].AppInfo != nil &&
-			sourceData.AppInfoLatest[existingIndex].AppInfo.AppEntry != nil &&
-			latestData.AppInfo.AppEntry.Version != sourceData.AppInfoLatest[existingIndex].AppInfo.AppEntry.Version {
+		if oldVersion != newVersion {
 			dw.sendNewAppReadyNotification(userID, pendingApp, sourceID)
 		}
-		sourceData.AppInfoLatest[existingIndex] = latestData
 		glog.V(2).Infof("ProcessSingleAppToLatest: replaced existing app %s (user=%s, source=%s)", appName, userID, sourceID)
 	} else {
-		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
 		glog.V(2).Infof("ProcessSingleAppToLatest: added new app %s (user=%s, source=%s)", appName, userID, sourceID)
 		dw.sendNewAppReadyNotification(userID, pendingApp, sourceID)
 	}
-
-	// Remove from pending list
-	newPendingList := make([]*types.AppInfoLatestPendingData, 0, len(sourceData.AppInfoLatestPending))
-	for _, p := range sourceData.AppInfoLatestPending {
-		pID := dw.getAppID(p)
-		if pID != appID {
-			newPendingList = append(newPendingList, p)
-		}
-	}
-	sourceData.AppInfoLatestPending = newPendingList
 
 	atomic.AddInt64(&dw.totalAppsMoved, 1)
 	glog.Infof("ProcessSingleAppToLatest: successfully moved app %s to Latest (user=%s, source=%s)", appName, userID, sourceID)

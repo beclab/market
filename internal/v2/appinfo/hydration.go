@@ -575,36 +575,7 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 		return
 	}
 
-	var pendingData *types.AppInfoLatestPendingData
-	if h.cacheManager != nil {
-		h.cacheManager.mutex.RLock()
-		userData, userExists := h.cache.Users[task.UserID]
-		if !userExists {
-			h.cacheManager.mutex.RUnlock()
-			glog.Warningf("Warning: User data not found for task: %s, user: %s", task.ID, task.UserID)
-			return
-		}
-
-		sourceData, sourceExists := userData.Sources[task.SourceID]
-		if !sourceExists {
-			h.cacheManager.mutex.RUnlock()
-			glog.V(3).Infof("Warning: Source data not found for task: %s, user: %s, source: %s", task.ID, task.UserID, task.SourceID)
-			return
-		}
-
-		// Find the pending data for this app
-		for _, pending := range sourceData.AppInfoLatestPending {
-			if pending.RawData != nil &&
-				(pending.RawData.ID == task.AppID || pending.RawData.AppID == task.AppID || pending.RawData.Name == task.AppID) {
-				pendingData = pending
-				break
-			}
-		}
-		h.cacheManager.mutex.RUnlock()
-	} else {
-		glog.V(3).Infof("Warning: CacheManager not available for moveTaskToRenderFailed")
-		return
-	}
+	pendingData := h.cacheManager.FindPendingDataForApp(task.UserID, task.SourceID, task.AppID)
 
 	if pendingData == nil {
 		glog.V(3).Infof("Warning: Pending data not found for task: %s, app: %s", task.ID, task.AppID)
@@ -635,50 +606,8 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID, appName, appVe
 		glog.V(3).Infof("Warning: CacheManager not available for removeFromPendingList")
 		return
 	}
-
-	h.cacheManager.mutex.Lock()
-	defer h.cacheManager.mutex.Unlock()
-
-	userData, userExists := h.cache.Users[userID]
-	if !userExists {
-		return
-	}
-	sourceData, sourceExists := userData.Sources[sourceID]
-	if !sourceExists {
-		return
-	}
-	removeIdx := -1
-	for i, pending := range sourceData.AppInfoLatestPending {
-		if pending != nil && pending.RawData != nil &&
-			(pending.RawData.ID == appID || pending.RawData.AppID == appID || pending.RawData.Name == appID) {
-			removeIdx = i
-			break
-		}
-	}
-	if removeIdx == -1 {
-		return
-	}
-
-	// Re-validate pointers under write-lock
-	if userData2, ok := h.cache.Users[userID]; ok {
-		if sourceData2, ok2 := userData2.Sources[sourceID]; ok2 {
-			if removeIdx >= 0 && removeIdx < len(sourceData2.AppInfoLatestPending) {
-				// Re-check match to be safe
-				p := sourceData2.AppInfoLatestPending[removeIdx]
-				if p != nil && p.RawData != nil && (p.RawData.ID == appID || p.RawData.AppID == appID || p.RawData.Name == appID) {
-					// Create new slice dropping index removeIdx
-					old := sourceData2.AppInfoLatestPending
-					newSlice := make([]*types.AppInfoLatestPendingData, 0, len(old)-1)
-					newSlice = append(newSlice, old[:removeIdx]...)
-					if removeIdx+1 <= len(old)-1 {
-						newSlice = append(newSlice, old[removeIdx+1:]...)
-					}
-					sourceData2.AppInfoLatestPending = newSlice
-					glog.V(2).Infof("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
-				}
-			}
-		}
-	}
+	h.cacheManager.RemoveFromPendingList(userID, sourceID, appID)
+	glog.V(2).Infof("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
 }
 
 // GetMetrics returns hydrator metrics
@@ -1119,106 +1048,20 @@ func (h *Hydrator) cleanupOldTasks() {
 func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, appName, version string) bool {
 	glog.V(3).Infof("DEBUG: isAppInLatestQueue checking appID=%s %s, version=%s for user=%s, source=%s", appID, appName, version, userID, sourceID)
 
-	if h.cacheManager != nil {
-		h.cacheManager.mutex.RLock()
-		defer h.cacheManager.mutex.RUnlock()
-
-		userData, userExists := h.cache.Users[userID]
-		if !userExists {
-			return false
-		}
-
-		sourceData, sourceExists := userData.Sources[sourceID]
-		if !sourceExists {
-			return false
-		}
-
-		// Check if app exists in AppInfoLatest queue
-		for _, latestData := range sourceData.AppInfoLatest {
-			if latestData == nil {
-				continue
-			}
-
-			// Check RawData first
-			if latestData.RawData != nil {
-				if latestData.RawData.ID == appID ||
-					latestData.RawData.AppID == appID ||
-					latestData.RawData.Name == appID {
-					// Add version comparison - only return true if versions match
-					if version != "" && latestData.RawData.Version != version {
-						glog.V(3).Infof("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
-							appID, version, latestData.RawData.Version)
-						continue
-					}
-					glog.V(3).Infof("App %s found in latest queue with matching version: %s", appID, version)
-					return true
-				}
-			}
-
-			// Check AppInfo.AppEntry
-			if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
-				if latestData.AppInfo.AppEntry.ID == appID ||
-					latestData.AppInfo.AppEntry.AppID == appID ||
-					latestData.AppInfo.AppEntry.Name == appID {
-					// Add version comparison - only return true if versions match
-					if version != "" && latestData.AppInfo.AppEntry.Version != version {
-						glog.V(3).Infof("App %s found in latest queue but version mismatch: current=%s, latest=%s, skipping",
-							appID, version, latestData.AppInfo.AppEntry.Version)
-						continue
-					}
-					glog.V(3).Infof("App %s found in latest queue with matching version: %s", appID, version)
-					return true
-				}
-			}
-
-			// Check AppSimpleInfo
-			if latestData.AppSimpleInfo != nil {
-				if latestData.AppSimpleInfo.AppID == appID ||
-					latestData.AppSimpleInfo.AppName == appID {
-					// For AppSimpleInfo, we may not have version info, so only check if version is empty
-					if version == "" {
-						glog.V(3).Infof("App %s found in latest queue (AppSimpleInfo)", appID)
-						return true
-					}
-					// If version is provided but AppSimpleInfo doesn't have version, skip
-					glog.V(3).Infof("App %s found in latest queue but AppSimpleInfo has no version info, skipping", appID)
-					continue
-				}
-			}
-		}
-	} else {
+	if h.cacheManager == nil {
 		glog.V(3).Infof("Warning: CacheManager not available for isAppInLatestQueue")
+		return false
 	}
 
-	glog.V(3).Infof("DEBUG: isAppInLatestQueue returning false for appID=%s, version=%s, user=%s, source=%s", appID, version, userID, sourceID)
-	return false
+	result := h.cacheManager.IsAppInLatestQueue(userID, sourceID, appID, version)
+	glog.V(3).Infof("DEBUG: isAppInLatestQueue returning %v for appID=%s, version=%s, user=%s, source=%s", result, appID, version, userID, sourceID)
+	return result
 }
 // isAppInRenderFailedList checks if an app already exists in the render failed list
 func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID, appName string) bool {
-	if h.cacheManager != nil {
-		h.cacheManager.mutex.RLock()
-		defer h.cacheManager.mutex.RUnlock()
-
-		userData, userExists := h.cache.Users[userID]
-		if !userExists {
-			return false
-		}
-
-		sourceData, sourceExists := userData.Sources[sourceID]
-		if !sourceExists {
-			return false
-		}
-
-		// Check if app exists in render failed list
-		for _, failedData := range sourceData.AppRenderFailed {
-			if failedData.RawData != nil &&
-				(failedData.RawData.ID == appID || failedData.RawData.AppID == appID || failedData.RawData.Name == appID) {
-				return true
-			}
-		}
-	} else {
+	if h.cacheManager == nil {
 		glog.V(2).Infof("Warning: CacheManager not available for isAppInRenderFailedList")
+		return false
 	}
-
-	return false
+	return h.cacheManager.IsAppInRenderFailedList(userID, sourceID, appID)
 }

@@ -274,9 +274,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 				glog.Errorf("StatusCorrectionChecker: failed to calculate hash for user %s: %v", userID, err)
 				continue
 			}
-			scc.cacheManager.mutex.Lock()
-			userData.Hash = newHash
-			scc.cacheManager.mutex.Unlock()
+			scc.cacheManager.SetUserHash(userID, newHash)
 			glog.V(2).Infof("StatusCorrectionChecker: user %s hash updated to %s", userID, newHash)
 		}
 		// Force sync after hash update

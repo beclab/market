@@ -3,26 +3,20 @@ package types
 // CacheManagerInterface defines the interface for cache management operations
 // This interface is used to avoid circular imports between packages
 type CacheManagerInterface interface {
-	// Lock acquires the cache manager's write lock
-	Lock()
+	// Hierarchical read accessors
+	GetAllUsersData() map[string]*UserData
+	GetUserData(userID string) *UserData
+	GetSourceData(userID, sourceID string) *SourceData
+	GetUserIDs() []string
 
-	// Unlock releases the cache manager's write lock
-	Unlock()
+	// Specific read queries
+	HasSourceData(sourceID string) bool
+	IsAppInstalled(sourceID, appName string) bool
+	GetSourceOthersHash(sourceID string) string
+	FindPendingDataForApp(userID, sourceID, appID string) *AppInfoLatestPendingData
 
-	// TryLock attempts to acquire the cache manager's write lock without blocking
-	// Returns true if lock acquired, false if would block
-	TryLock() bool
-
-	// RLock acquires the cache manager's read lock
-	RLock()
-
-	// RUnlock releases the cache manager's read lock
-	RUnlock()
-
-	// TryRLock attempts to acquire the cache manager's read lock without blocking
-	// Returns true if lock acquired, false if would block
-	TryRLock() bool
-
-	// GetCache returns the underlying cache data
-	GetCache() *CacheData
+	// Write operations
+	UpdateSourceOthers(sourceID string, others *Others)
+	RemoveAppFromAllSources(appName, sourceID string) int
+	CopyPendingVersionHistory(userID, sourceID, appID, appName string, latestData *AppInfoLatestData) error
 }

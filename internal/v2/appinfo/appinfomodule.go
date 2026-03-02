@@ -772,12 +772,11 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 		return fmt.Errorf("cache manager not available")
 	}
 
-	m.cacheManager.mutex.Lock()
-	defer m.cacheManager.mutex.Unlock()
-	removedCount := 0
-	for userID, userData := range m.cacheManager.cache.Users {
+	// Build the set of delisted app IDs (apps NOT in validApps)
+	delistedAppIDs := make(map[string]bool)
+	allUsersData := m.cacheManager.GetAllUsersData()
+	for _, userData := range allUsersData {
 		for sourceID, sourceData := range userData.Sources {
-			newLatest := sourceData.AppInfoLatest[:0]
 			for _, app := range sourceData.AppInfoLatest {
 				var appID string
 				if app != nil && app.RawData != nil {
@@ -789,22 +788,19 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 						appID = app.RawData.Name
 					}
 				}
-				if appID != "" && validApps[sourceID] != nil {
-					if _, ok := validApps[sourceID][appID]; ok {
-						newLatest = append(newLatest, app)
-					} else {
-						removedCount++
-						glog.V(3).Infof("Removed app from cache: user=%s source=%s appID=%s", userID, sourceID, appID)
-					}
-				} else {
-					// If appID is empty, treat as invalid and remove
-					removedCount++
-					glog.V(3).Infof("Removed app from cache (empty appID): user=%s source=%s", userID, sourceID)
+				if appID == "" {
+					continue
+				}
+				if validApps[sourceID] == nil {
+					delistedAppIDs[appID] = true
+				} else if _, ok := validApps[sourceID][appID]; !ok {
+					delistedAppIDs[appID] = true
 				}
 			}
-			sourceData.AppInfoLatest = newLatest
 		}
 	}
+
+	removedCount := m.cacheManager.RemoveDelistedApps(delistedAppIDs)
 	glog.V(2).Infof("Cache correction finished, removed %d apps not in chart repo", removedCount)
 	return nil
 }
@@ -1372,15 +1368,14 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 		},
 	}
 
-	m.cacheManager.mutex.RLock()
-	defer m.cacheManager.mutex.RUnlock()
+	allUsersForReport := m.cacheManager.GetAllUsersData()
 
 	totalUsers := 0
 	totalSources := 0
 	totalPendingData := 0
 	totalInvalidData := 0
 
-	for userID, userData := range m.cacheManager.cache.Users {
+	for userID, userData := range allUsersForReport {
 		totalUsers++
 		userReport := map[string]interface{}{
 			"sources": make(map[string]interface{}),
