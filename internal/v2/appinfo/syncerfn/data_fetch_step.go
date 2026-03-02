@@ -106,38 +106,19 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 
 	// Check if we have existing data in cache for THIS specific source only
 	hasExistingData := false
-	if data.Cache != nil {
-		// Use CacheManager's lock for unified lock strategy
-		if data.CacheManager != nil {
-			data.CacheManager.RLock()
-			for userID, userData := range data.Cache.Users {
-				// Only check data for the current market source
-				if sourceData, exists := userData.Sources[sourceID]; exists {
-					if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
-						hasExistingData = true
-						glog.V(2).Infof("Found existing data for source:%s user:%s (pending:%d latest:%d)",
-							sourceID, userID, len(sourceData.AppInfoLatestPending), len(sourceData.AppInfoLatest))
-						break
-					}
+	if data.CacheManager != nil {
+		hasExistingData = data.CacheManager.HasSourceData(sourceID)
+	} else if data.Cache != nil {
+		data.mutex.RLock()
+		for _, userData := range data.Cache.Users {
+			if sourceData, exists := userData.Sources[sourceID]; exists {
+				if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
+					hasExistingData = true
+					break
 				}
 			}
-			data.CacheManager.RUnlock()
-		} else {
-			// Fallback to SyncContext's mutex if CacheManager is not available
-			data.mutex.RLock()
-			for userID, userData := range data.Cache.Users {
-				// Only check data for the current market source
-				if sourceData, exists := userData.Sources[sourceID]; exists {
-					if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
-						hasExistingData = true
-						glog.V(2).Infof("Found existing data for source:%s user:%s (pending:%d latest:%d)",
-							sourceID, userID, len(sourceData.AppInfoLatestPending), len(sourceData.AppInfoLatest))
-						break
-					}
-				}
-			}
-			data.mutex.RUnlock()
 		}
+		data.mutex.RUnlock()
 	}
 
 	// Skip only if hashes match AND we have existing data for THIS specific source
@@ -657,64 +638,11 @@ func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Oth
 	// Get source ID from market source - use Name to match syncer.go behavior
 	sourceID := data.MarketSource.ID
 
-	// Use CacheManager's lock for unified lock strategy
 	if data.CacheManager != nil {
-		data.CacheManager.Lock()
-		defer data.CacheManager.Unlock()
+		data.CacheManager.UpdateSourceOthers(sourceID, others)
+	} else {
+		glog.Warning("CacheManager not available, cannot update Others in cache")
 	}
 
-	// Get all existing user IDs
-	var userIDs []string
-	for userID := range data.Cache.Users {
-		userIDs = append(userIDs, userID)
-	}
-
-	// If no users exist, create a system user as fallback
-	if len(userIDs) == 0 {
-		systemUserID := "system"
-		data.Cache.Users[systemUserID] = types.NewUserData()
-		userIDs = append(userIDs, systemUserID)
-		glog.V(3).Infof("No existing users found, created system user as fallback")
-	}
-
-	glog.V(3).Infof("Updating Others data for %d users: %v, sourceID: %s", len(userIDs), userIDs, sourceID)
-
-	// Update Others for each user
-	for _, userID := range userIDs {
-		userData := data.Cache.Users[userID]
-
-		// Ensure source data exists for this user
-		if userData.Sources == nil {
-			userData.Sources = make(map[string]*types.SourceData)
-		}
-
-		if userData.Sources[sourceID] == nil {
-			userData.Sources[sourceID] = types.NewSourceData()
-		}
-
-		sourceData := userData.Sources[sourceID]
-
-		// Update Others in SourceData
-		sourceData.Others = others
-
-		// Log details about the saved recommends data
-		if sourceData.Others != nil && len(sourceData.Others.Recommends) > 0 {
-			glog.V(3).Infof("DEBUG: Saved %d recommends to cache for user %s, source %s",
-				len(sourceData.Others.Recommends), userID, sourceID)
-			for i, rec := range sourceData.Others.Recommends {
-				glog.V(3).Infof("DEBUG: Saved recommend[%d] '%s', has Data: %v",
-					i, rec.Name, rec.Data != nil)
-				if rec.Data != nil {
-					glog.V(3).Infof("DEBUG: Saved recommend[%d] Data.Title count: %d, Data.Description count: %d",
-						i, len(rec.Data.Title), len(rec.Data.Description))
-				}
-			}
-		} else {
-			glog.V(3).Infof("DEBUG: No recommends data saved to cache for user %s, source %s", userID, sourceID)
-		}
-
-		glog.V(3).Infof("Updated Others data in cache for user %s, source %s", userID, sourceID)
-	}
-
-	glog.V(2).Infof("Successfully updated Others data for all %d users, source %s", len(userIDs), sourceID)
+	glog.V(2).Infof("Successfully updated Others data for source %s", sourceID)
 }

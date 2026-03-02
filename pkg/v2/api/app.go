@@ -277,7 +277,7 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		// Get user data from cache
-		userData := s.cacheManager.GetUserDataNoLock(userID)
+		userData := s.cacheManager.GetUserData(userID)
 		if userData == nil {
 			glog.V(3).Infof("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}
@@ -629,20 +629,17 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 
-		// Get user data from cache with fallback (non-blocking)
-		userData := s.cacheManager.GetUserDataNoLock(userID)
+		userData := s.cacheManager.GetUserData(userID)
 		if userData == nil {
 			glog.Warningf("User data not found for user: %s, attempting to resync user data", userID)
 
-			// Try to resync user data to fix missing user information
 			if err := s.cacheManager.ResynceUser(); err != nil {
 				glog.Errorf("Failed to resync user data for user %s: %v", userID, err)
 				resultChan <- result{err: fmt.Errorf("failed to resync user data: %v", err)}
 				return
 			}
 
-			// Try to get user data again after resync
-			userData = s.cacheManager.GetUserDataNoLock(userID)
+			userData = s.cacheManager.GetUserData(userID)
 			if userData == nil {
 				glog.Warningf("User data still not found for user: %s after resync", userID)
 				resultChan <- result{err: fmt.Errorf("user data not found even after resync")}
@@ -664,9 +661,6 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	case <-ctx.Done():
 		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/hash")
 		// On timeout, dump lock info to find who holds the lock
-		if s.cacheManager != nil {
-			s.cacheManager.DumpLockInfo("getMarketHash timeout")
-		}
 		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - hash retrieval took too long", nil)
 		return
 	case res := <-resultChan:
@@ -847,7 +841,7 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 
 		// Get user data from cache with timeout check
 		start := time.Now()
-		userData := s.cacheManager.GetUserDataNoLock(userID)
+		userData := s.cacheManager.GetUserData(userID)
 		if userData == nil {
 			glog.V(3).Infof("User data not found for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("user data not found")}

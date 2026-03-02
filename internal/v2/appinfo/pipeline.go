@@ -157,24 +157,7 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		return affectedUsers
 	}
 
-	type pendingItem struct {
-		userID   string
-		sourceID string
-		pending  *types.AppInfoLatestPendingData
-	}
-
-	p.cacheManager.mutex.RLock()
-	var items []pendingItem
-	for userID, userData := range p.cache.Users {
-		for sourceID, sourceData := range userData.Sources {
-			for _, pd := range sourceData.AppInfoLatestPending {
-				if pd != nil {
-					items = append(items, pendingItem{userID, sourceID, pd})
-				}
-			}
-		}
-	}
-	p.cacheManager.mutex.RUnlock()
+	items := p.cacheManager.CollectAllPendingItems()
 
 	if len(items) == 0 {
 		return affectedUsers
@@ -192,15 +175,15 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		default:
 		}
 
-		appID, appName := getAppIdentifiers(item.pending)
+		appID, appName := getAppIdentifiers(item.Pending)
 		glog.V(2).Infof("Pipeline Phase 2: [%d/%d] %s %s (user=%s, source=%s)",
-			idx+1, total, appID, appName, item.userID, item.sourceID)
+			idx+1, total, appID, appName, item.UserID, item.SourceID)
 
-		hydrated := p.hydrator.HydrateSingleApp(ctx, item.userID, item.sourceID, item.pending)
+		hydrated := p.hydrator.HydrateSingleApp(ctx, item.UserID, item.SourceID, item.Pending)
 		if hydrated && p.dataWatcher != nil {
-			p.dataWatcher.ProcessSingleAppToLatest(item.userID, item.sourceID, item.pending)
+			p.dataWatcher.ProcessSingleAppToLatest(item.UserID, item.SourceID, item.Pending)
 		}
-		affectedUsers[item.userID] = true
+		affectedUsers[item.UserID] = true
 	}
 
 	return affectedUsers

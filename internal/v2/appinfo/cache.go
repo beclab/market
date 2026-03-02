@@ -75,79 +75,535 @@ func (cm *CacheManager) startLockWatchdog(tag string) func() {
 	}
 }
 
-// Lock acquires the cache manager's write lock
-func (cm *CacheManager) Lock() {
-	cm.mutex.Lock()
-}
-
-// Unlock releases the cache manager's write lock
-func (cm *CacheManager) Unlock() {
-	cm.mutex.Unlock()
-}
-
-// TryLock attempts to acquire the cache manager's write lock without blocking
-// Returns true if lock acquired, false if would block
-func (cm *CacheManager) TryLock() bool {
-	return cm.mutex.TryLock()
-}
-
-// RLock acquires the cache manager's read lock
-func (cm *CacheManager) RLock() {
+// GetUserIDs returns a list of all user IDs in the cache
+func (cm *CacheManager) GetUserIDs() []string {
 	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	if cm.cache == nil {
+		return nil
+	}
+
+	ids := make([]string, 0, len(cm.cache.Users))
+	for id := range cm.cache.Users {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
-// RUnlock releases the cache manager's read lock
-func (cm *CacheManager) RUnlock() {
+// GetOrCreateUserIDs returns all user IDs; if none exist, creates a default user first.
+func (cm *CacheManager) GetOrCreateUserIDs(defaultUserID string) []string {
+	cm.mutex.RLock()
+	ids := make([]string, 0, len(cm.cache.Users))
+	for id := range cm.cache.Users {
+		ids = append(ids, id)
+	}
 	cm.mutex.RUnlock()
-}
 
-// TryRLock attempts to acquire the cache manager's read lock without blocking
-// Returns true if lock acquired, false if would block
-func (cm *CacheManager) TryRLock() bool {
-	return cm.mutex.TryRLock()
-}
-
-func (cm *CacheManager) GetUserDataNoLock(userID string) *UserData {
-	if cm.cache == nil {
-		return nil
+	if len(ids) > 0 {
+		return ids
 	}
 
-	return cm.cache.Users[userID]
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if len(cm.cache.Users) > 0 {
+		for id := range cm.cache.Users {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+
+	cm.cache.Users[defaultUserID] = NewUserDataEx(defaultUserID)
+	glog.V(3).Infof("No existing users found, created user %s as fallback", defaultUserID)
+	return []string{defaultUserID}
 }
 
-// GetUserDataWithFallback retrieves user data with fallback mechanism
-// Uses TryRLock to avoid blocking - returns nil if lock is not available immediately
-func (cm *CacheManager) GetUserDataWithFallback(userID string) *UserData {
+// IsLocalSource returns true if the given source is of local type.
+func (cm *CacheManager) IsLocalSource(userID, sourceID string) bool {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
-	if cm.cache == nil {
-		return nil
+	userData, exists := cm.cache.Users[userID]
+	if !exists {
+		return false
 	}
-
-	return cm.cache.Users[userID]
+	sourceData, exists := userData.Sources[sourceID]
+	if !exists {
+		return false
+	}
+	return sourceData.Type == types.SourceDataTypeLocal
 }
 
-// GetAllUsersDataWithFallback returns all users data with fallback mechanism
-// Uses TryRLock to avoid blocking - returns empty map if lock is not available immediately
-func (cm *CacheManager) GetAllUsersDataWithFallback() map[string]*UserData {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
+// SetUserHash atomically sets the hash for a user.
+func (cm *CacheManager) SetUserHash(userID, hash string) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
 
-	if cm.cache == nil {
-		return make(map[string]*UserData)
+	if userData, exists := cm.cache.Users[userID]; exists {
+		userData.Hash = hash
+	}
+}
+
+// RemoveFromPendingList removes an app from the pending list for the given user/source.
+func (cm *CacheManager) RemoveFromPendingList(userID, sourceID, appID string) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	userData, ok := cm.cache.Users[userID]
+	if !ok {
+		return
+	}
+	sourceData, ok := userData.Sources[sourceID]
+	if !ok {
+		return
 	}
 
-	result := make(map[string]*UserData)
+	newSlice := make([]*types.AppInfoLatestPendingData, 0, len(sourceData.AppInfoLatestPending))
+	for _, p := range sourceData.AppInfoLatestPending {
+		if p != nil && p.RawData != nil &&
+			(p.RawData.ID == appID || p.RawData.AppID == appID || p.RawData.Name == appID) {
+			continue
+		}
+		newSlice = append(newSlice, p)
+	}
+	sourceData.AppInfoLatestPending = newSlice
+}
+
+// UpsertLatestAndRemovePending inserts or replaces an app in AppInfoLatest and removes
+// it from AppInfoLatestPending. Returns the old version (if replaced), whether it was
+// a replacement, and whether the user/source existed.
+func (cm *CacheManager) UpsertLatestAndRemovePending(
+	userID, sourceID string,
+	latestData *types.AppInfoLatestData,
+	appID, appName string,
+) (oldVersion string, replaced bool, ok bool) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	userData, exists := cm.cache.Users[userID]
+	if !exists {
+		return "", false, false
+	}
+	sourceData, exists := userData.Sources[sourceID]
+	if !exists {
+		return "", false, false
+	}
+
+	// Find existing app by name
+	existingIndex := -1
+	for i, app := range sourceData.AppInfoLatest {
+		if app == nil {
+			continue
+		}
+		name := ""
+		if app.RawData != nil {
+			name = app.RawData.Name
+		} else if app.AppInfo != nil && app.AppInfo.AppEntry != nil {
+			name = app.AppInfo.AppEntry.Name
+		} else if app.AppSimpleInfo != nil {
+			name = app.AppSimpleInfo.AppName
+		}
+		if name == appName {
+			existingIndex = i
+			break
+		}
+	}
+
+	if existingIndex >= 0 {
+		old := sourceData.AppInfoLatest[existingIndex]
+		if old.AppInfo != nil && old.AppInfo.AppEntry != nil {
+			oldVersion = old.AppInfo.AppEntry.Version
+		}
+		sourceData.AppInfoLatest[existingIndex] = latestData
+		replaced = true
+	} else {
+		sourceData.AppInfoLatest = append(sourceData.AppInfoLatest, latestData)
+	}
+
+	// Remove from pending
+	newPending := make([]*types.AppInfoLatestPendingData, 0, len(sourceData.AppInfoLatestPending))
+	for _, p := range sourceData.AppInfoLatestPending {
+		pID := ""
+		if p != nil && p.RawData != nil {
+			pID = p.RawData.AppID
+			if pID == "" {
+				pID = p.RawData.ID
+			}
+			if pID == "" {
+				pID = p.RawData.Name
+			}
+		}
+		if pID != appID {
+			newPending = append(newPending, p)
+		}
+	}
+	sourceData.AppInfoLatestPending = newPending
+
+	return oldVersion, replaced, true
+}
+
+// UpdateSourceOthers updates the Others data for a given sourceID across all users.
+// If a user or source doesn't exist, it is created.
+func (cm *CacheManager) UpdateSourceOthers(sourceID string, others *types.Others) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if len(cm.cache.Users) == 0 {
+		systemUserID := "system"
+		cm.cache.Users[systemUserID] = NewUserDataEx(systemUserID)
+		glog.V(3).Infof("No existing users found, created system user as fallback")
+	}
+
 	for userID, userData := range cm.cache.Users {
-		result[userID] = userData
+		if userData.Sources == nil {
+			userData.Sources = make(map[string]*SourceData)
+		}
+		if userData.Sources[sourceID] == nil {
+			userData.Sources[sourceID] = NewSourceData()
+		}
+		userData.Sources[sourceID].Others = others
+		glog.V(3).Infof("Updated Others data in cache for user %s, source %s", userID, sourceID)
 	}
-	return result
 }
 
-// GetCache returns the underlying cache data
-func (cm *CacheManager) GetCache() *CacheData {
-	return cm.cache
+// RemoveAppFromAllSources removes an app (by name) from AppInfoLatest and
+// AppInfoLatestPending across all users for the given sourceID. Returns the
+// total number of users affected.
+func (cm *CacheManager) RemoveAppFromAllSources(appName, sourceID string) int {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	affected := 0
+	for _, userData := range cm.cache.Users {
+		sourceData, exists := userData.Sources[sourceID]
+		if !exists {
+			continue
+		}
+
+		origLatest := len(sourceData.AppInfoLatest)
+		origPending := len(sourceData.AppInfoLatestPending)
+
+		newLatest := make([]*types.AppInfoLatestData, 0, origLatest)
+		for _, app := range sourceData.AppInfoLatest {
+			if app == nil || app.RawData == nil || app.RawData.Name != appName {
+				newLatest = append(newLatest, app)
+			}
+		}
+
+		newPending := make([]*types.AppInfoLatestPendingData, 0, origPending)
+		for _, app := range sourceData.AppInfoLatestPending {
+			if app == nil || app.RawData == nil || app.RawData.Name != appName {
+				newPending = append(newPending, app)
+			}
+		}
+
+		if len(newLatest) != origLatest || len(newPending) != origPending {
+			sourceData.AppInfoLatest = newLatest
+			sourceData.AppInfoLatestPending = newPending
+			affected++
+		}
+	}
+	return affected
+}
+
+// RemoveDelistedApps removes apps whose ID is in the provided set from
+// AppInfoLatest across all users and sources. Returns the total removal count.
+func (cm *CacheManager) RemoveDelistedApps(delistedAppIDs map[string]bool) int {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	removedCount := 0
+	for userID, userData := range cm.cache.Users {
+		for sourceID, sourceData := range userData.Sources {
+			newLatest := sourceData.AppInfoLatest[:0]
+			for _, app := range sourceData.AppInfoLatest {
+				var appID string
+				if app != nil && app.RawData != nil {
+					if app.RawData.ID != "" {
+						appID = app.RawData.ID
+					} else if app.RawData.AppID != "" {
+						appID = app.RawData.AppID
+					} else if app.RawData.Name != "" {
+						appID = app.RawData.Name
+					}
+				}
+				if delistedAppIDs[appID] {
+					removedCount++
+					glog.V(3).Infof("Removing delisted app %s from user %s source %s", appID, userID, sourceID)
+				} else {
+					newLatest = append(newLatest, app)
+				}
+			}
+			sourceData.AppInfoLatest = newLatest
+		}
+	}
+	return removedCount
+}
+
+// CopyPendingVersionHistory finds the pending data for the given app and copies
+// its VersionHistory and AppLabels into the target ApplicationInfoEntry under write lock.
+// It also overwrites the pending entry with the supplied latestData fields.
+func (cm *CacheManager) CopyPendingVersionHistory(
+	userID, sourceID, appID, appName string,
+	latestData *types.AppInfoLatestData,
+) error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	userData, ok := cm.cache.Users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	sourceData, ok := userData.Sources[sourceID]
+	if !ok {
+		return fmt.Errorf("source %s not found for user %s", sourceID, userID)
+	}
+
+	// Find the pending data
+	var pendingData *types.AppInfoLatestPendingData
+	for _, p := range sourceData.AppInfoLatestPending {
+		if p == nil || p.RawData == nil {
+			continue
+		}
+		if p.RawData.Name == appName || p.RawData.AppID == appID || p.RawData.ID == appID {
+			pendingData = p
+			break
+		}
+	}
+	if pendingData == nil {
+		return fmt.Errorf("pendingData not found for user=%s, source=%s, app=%s, appName=%s", userID, sourceID, appID, appName)
+	}
+
+	// Copy version history from pending to latest
+	if latestData.RawData != nil && pendingData.RawData != nil {
+		latestData.RawData.VersionHistory = pendingData.RawData.VersionHistory
+		if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+			latestData.AppInfo.AppEntry.VersionHistory = pendingData.RawData.VersionHistory
+		}
+		// Preserve appLabels from pendingData if latest doesn't have them
+		if len(pendingData.RawData.AppLabels) > 0 && len(latestData.RawData.AppLabels) == 0 {
+			latestData.RawData.AppLabels = pendingData.RawData.AppLabels
+			if latestData.AppInfo != nil && latestData.AppInfo.AppEntry != nil {
+				latestData.AppInfo.AppEntry.AppLabels = pendingData.RawData.AppLabels
+			}
+		}
+	}
+
+	// Overwrite pending entry with latest data fields
+	pendingData.Type = latestData.Type
+	pendingData.Timestamp = latestData.Timestamp
+	pendingData.Version = latestData.Version
+	pendingData.RawData = latestData.RawData
+	pendingData.RawPackage = latestData.RawPackage
+	pendingData.Values = latestData.Values
+	pendingData.AppInfo = latestData.AppInfo
+	pendingData.RenderedPackage = latestData.RenderedPackage
+	pendingData.AppSimpleInfo = latestData.AppSimpleInfo
+
+	return nil
+}
+
+// FindPendingDataForApp finds a pending data entry by appID in the given user/source.
+func (cm *CacheManager) FindPendingDataForApp(userID, sourceID, appID string) *types.AppInfoLatestPendingData {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	userData, ok := cm.cache.Users[userID]
+	if !ok {
+		return nil
+	}
+	sourceData, ok := userData.Sources[sourceID]
+	if !ok {
+		return nil
+	}
+	for _, p := range sourceData.AppInfoLatestPending {
+		if p != nil && p.RawData != nil &&
+			(p.RawData.ID == appID || p.RawData.AppID == appID || p.RawData.Name == appID) {
+			return p
+		}
+	}
+	return nil
+}
+
+// IsAppInLatestQueue checks if an app (by ID) with a matching version exists in AppInfoLatest.
+func (cm *CacheManager) IsAppInLatestQueue(userID, sourceID, appID, version string) bool {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	userData, ok := cm.cache.Users[userID]
+	if !ok {
+		return false
+	}
+	sourceData, ok := userData.Sources[sourceID]
+	if !ok {
+		return false
+	}
+
+	for _, ld := range sourceData.AppInfoLatest {
+		if ld == nil {
+			continue
+		}
+		if ld.RawData != nil {
+			if ld.RawData.ID == appID || ld.RawData.AppID == appID || ld.RawData.Name == appID {
+				if version != "" && ld.RawData.Version != version {
+					continue
+				}
+				return true
+			}
+		}
+		if ld.AppInfo != nil && ld.AppInfo.AppEntry != nil {
+			if ld.AppInfo.AppEntry.ID == appID || ld.AppInfo.AppEntry.AppID == appID || ld.AppInfo.AppEntry.Name == appID {
+				if version != "" && ld.AppInfo.AppEntry.Version != version {
+					continue
+				}
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsAppInRenderFailedList checks if an app exists in the render failed list.
+func (cm *CacheManager) IsAppInRenderFailedList(userID, sourceID, appID string) bool {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	userData, ok := cm.cache.Users[userID]
+	if !ok {
+		return false
+	}
+	sourceData, ok := userData.Sources[sourceID]
+	if !ok {
+		return false
+	}
+	for _, fd := range sourceData.AppRenderFailed {
+		if fd.RawData != nil &&
+			(fd.RawData.ID == appID || fd.RawData.AppID == appID || fd.RawData.Name == appID) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSourceData returns true if any user has non-empty AppInfoLatest or
+// AppInfoLatestPending data for the given sourceID.
+func (cm *CacheManager) HasSourceData(sourceID string) bool {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	for _, userData := range cm.cache.Users {
+		if sourceData, exists := userData.Sources[sourceID]; exists {
+			if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsAppInstalled returns true if any user has the named app in a non-uninstalled
+// state in AppStateLatest for the given sourceID.
+func (cm *CacheManager) IsAppInstalled(sourceID, appName string) bool {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	for _, userData := range cm.cache.Users {
+		if sourceData, ok := userData.Sources[sourceID]; ok {
+			for _, appState := range sourceData.AppStateLatest {
+				if appState != nil && appState.Status.Name == appName && appState.Status.State != "uninstalled" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// GetSourceOthersHash returns the Others.Hash stored for the given sourceID
+// in the first user that has a valid hash.
+func (cm *CacheManager) GetSourceOthersHash(sourceID string) string {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	for _, userData := range cm.cache.Users {
+		if sourceData, exists := userData.Sources[sourceID]; exists {
+			if sourceData.Others != nil && sourceData.Others.Hash != "" {
+				return sourceData.Others.Hash
+			}
+		}
+	}
+	return ""
+}
+
+// ListActiveUsers returns information about all active (existing) users.
+func (cm *CacheManager) ListActiveUsers() []map[string]string {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	var usersInfo []map[string]string
+	for _, v := range cm.cache.Users {
+		if v.UserInfo != nil && v.UserInfo.Exists {
+			ui := map[string]string{
+				"id":     v.UserInfo.Id,
+				"name":   v.UserInfo.Name,
+				"role":   v.UserInfo.Role,
+				"status": v.UserInfo.Status,
+			}
+			usersInfo = append(usersInfo, ui)
+		}
+	}
+	return usersInfo
+}
+
+// CollectAllPendingItems returns all non-nil pending items across all users and sources.
+type PendingItem struct {
+	UserID   string
+	SourceID string
+	Pending  *types.AppInfoLatestPendingData
+}
+
+func (cm *CacheManager) CollectAllPendingItems() []PendingItem {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	var items []PendingItem
+	for userID, userData := range cm.cache.Users {
+		for sourceID, sourceData := range userData.Sources {
+			for _, pd := range sourceData.AppInfoLatestPending {
+				if pd != nil {
+					items = append(items, PendingItem{userID, sourceID, pd})
+				}
+			}
+		}
+	}
+	return items
+}
+
+// SnapshotSourcePending returns shallow copies of the pending and latest slices
+// for the given user/source, safe for iteration outside the lock.
+func (cm *CacheManager) SnapshotSourcePending(userID, sourceID string) (
+	pending []*types.AppInfoLatestPendingData,
+	latest []*types.AppInfoLatestData,
+) {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	userData, exists := cm.cache.Users[userID]
+	if !exists {
+		return nil, nil
+	}
+	sourceData, exists := userData.Sources[sourceID]
+	if !exists {
+		return nil, nil
+	}
+
+	pending = make([]*types.AppInfoLatestPendingData, len(sourceData.AppInfoLatestPending))
+	copy(pending, sourceData.AppInfoLatestPending)
+	latest = make([]*types.AppInfoLatestData, len(sourceData.AppInfoLatest))
+	copy(latest, sourceData.AppInfoLatest)
+	return pending, latest
 }
 
 // SyncRequest represents a request to sync data to Redis
@@ -1737,14 +2193,10 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 	return enhancedData
 }
 
-// GetLockStats returns current lock statistics for monitoring
-func (cm *CacheManager) GetLockStats() map[string]interface{} {
-	glog.V(4).Infof("[LOCK] cm.lockStats.Lock() GetLockStats Start")
+// getLockStats returns current lock statistics for internal monitoring
+func (cm *CacheManager) getLockStats() map[string]interface{} {
 	cm.lockStats.Lock()
-	defer func() {
-		cm.lockStats.Unlock()
-		glog.V(4).Infof("[LOCK] cm.lockStats.Unlock() GetLockStats End")
-	}()
+	defer cm.lockStats.Unlock()
 
 	stats := make(map[string]interface{})
 	stats["last_lock_time"] = cm.lockStats.lastLockTime
@@ -1753,7 +2205,6 @@ func (cm *CacheManager) GetLockStats() map[string]interface{} {
 	stats["lock_count"] = cm.lockStats.lockCount
 	stats["unlock_count"] = cm.lockStats.unlockCount
 
-	// Check for potential lock issues
 	if cm.lockStats.lockCount > cm.lockStats.unlockCount {
 		stats["lock_imbalance"] = cm.lockStats.lockCount - cm.lockStats.unlockCount
 		stats["potential_deadlock"] = true
@@ -1762,7 +2213,6 @@ func (cm *CacheManager) GetLockStats() map[string]interface{} {
 		stats["potential_deadlock"] = false
 	}
 
-	// Check if lock has been held for too long
 	if !cm.lockStats.lastLockTime.IsZero() && cm.lockStats.lockDuration > 30*time.Second {
 		stats["long_lock_duration"] = true
 		stats["current_lock_duration"] = time.Since(cm.lockStats.lastLockTime)
@@ -1773,15 +2223,12 @@ func (cm *CacheManager) GetLockStats() map[string]interface{} {
 	return stats
 }
 
-// DumpLockInfo prints lock stats and all goroutine stacks for diagnosing lock holders
-func (cm *CacheManager) DumpLockInfo(reason string) {
+// dumpLockInfo prints lock stats and all goroutine stacks for diagnosing lock holders
+func (cm *CacheManager) dumpLockInfo(reason string) {
 	glog.V(4).Infof("LOCK DIAG: reason=%s", reason)
-	// Print current lock stats snapshot
-	stats := cm.GetLockStats()
+	stats := cm.getLockStats()
 	glog.V(4).Infof("LOCK DIAG: stats=%v", stats)
 
-	// Dump all goroutine stacks to identify who might be holding the lock
-	// Note: This is safe but can be large; only used on timeouts.
 	buf := make([]byte, 1<<20)
 	n := runtime.Stack(buf, true)
 	glog.V(4).Infof("LOCK DIAG: goroutine dump (%d bytes)\n%s", n, string(buf[:n]))
@@ -2224,8 +2671,8 @@ func (cm *CacheManager) ListUsers() {
 		userList = append(userList, user)
 	}
 
-	cm.Lock()
-	defer cm.Unlock()
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
 
 	if len(cm.cache.Users) == 0 {
 		glog.V(2).Info("watch user list, cache user not exists")
