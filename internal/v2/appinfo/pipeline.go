@@ -101,11 +101,31 @@ func (p *Pipeline) run(ctx context.Context) {
 
 	startTime := time.Now()
 
+	// Phase 1-4: only modify data, no hash calculation or ForceSync
 	p.phaseSyncer(ctx)
-	affectedUsers := p.phaseHydrateApps(ctx)
-	p.phaseDataWatcherRepo(ctx)
-	p.phaseStatusCorrection(ctx)
-	p.phaseHashAndSync(affectedUsers)
+	hydrateUsers := p.phaseHydrateApps(ctx)
+	repoUsers := p.phaseDataWatcherRepo(ctx)
+	statusUsers := p.phaseStatusCorrection(ctx)
+
+	// Phase 5: merge all affected users + dirty users, calculate hash once, sync once
+	allAffected := make(map[string]bool)
+	for u := range hydrateUsers {
+		allAffected[u] = true
+	}
+	for u := range repoUsers {
+		allAffected[u] = true
+	}
+	for u := range statusUsers {
+		allAffected[u] = true
+	}
+	// Collect dirty users from event-driven paths (DataWatcherState)
+	if p.dataWatcher != nil {
+		for u := range p.dataWatcher.CollectAndClearDirtyUsers() {
+			allAffected[u] = true
+		}
+	}
+
+	p.phaseHashAndSync(allAffected)
 
 	if elapsed := time.Since(startTime); elapsed > 5*time.Second {
 		glog.V(2).Infof("Pipeline: cycle completed in %v", elapsed)
@@ -168,40 +188,42 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 }
 
 // phaseDataWatcherRepo processes chart-repo state changes
-func (p *Pipeline) phaseDataWatcherRepo(ctx context.Context) {
+func (p *Pipeline) phaseDataWatcherRepo(ctx context.Context) map[string]bool {
 	if p.dataWatcherRepo == nil {
-		return
+		return nil
 	}
 	select {
 	case <-ctx.Done():
-		return
+		return nil
 	case <-p.stopChan:
-		return
+		return nil
 	default:
 	}
 	glog.V(3).Info("Pipeline Phase 3: DataWatcherRepo")
-	p.dataWatcherRepo.ProcessOnce()
+	return p.dataWatcherRepo.ProcessOnce()
 }
 
 // phaseStatusCorrection corrects app running statuses
-func (p *Pipeline) phaseStatusCorrection(ctx context.Context) {
+func (p *Pipeline) phaseStatusCorrection(ctx context.Context) map[string]bool {
 	if p.statusCorrectionChecker == nil {
-		return
+		return nil
 	}
 	select {
 	case <-ctx.Done():
-		return
+		return nil
 	case <-p.stopChan:
-		return
+		return nil
 	default:
 	}
 	glog.V(3).Info("Pipeline Phase 4: StatusCorrectionChecker")
-	p.statusCorrectionChecker.PerformStatusCheckOnce()
+	return p.statusCorrectionChecker.PerformStatusCheckOnce()
 }
 
-// phaseHashAndSync calculates user hashes and syncs to Redis
+// phaseHashAndSync calculates user hashes for all affected users and syncs to Redis.
+// This is the single point where hash calculation and ForceSync happen per Pipeline cycle.
 func (p *Pipeline) phaseHashAndSync(affectedUsers map[string]bool) {
 	if p.dataWatcher != nil && len(affectedUsers) > 0 {
+		glog.V(2).Infof("Pipeline Phase 5: calculating hash for %d affected users", len(affectedUsers))
 		for userID := range affectedUsers {
 			userData := p.cacheManager.GetUserData(userID)
 			if userData != nil {
@@ -211,7 +233,7 @@ func (p *Pipeline) phaseHashAndSync(affectedUsers map[string]bool) {
 	}
 	if p.cacheManager != nil {
 		if err := p.cacheManager.ForceSync(); err != nil {
-			glog.Errorf("Pipeline: ForceSync failed: %v", err)
+			glog.Warningf("Pipeline: ForceSync rate limited: %v", err)
 		}
 	}
 }

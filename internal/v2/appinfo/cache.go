@@ -720,7 +720,7 @@ func (cm *CacheManager) Start() error {
 	_wd()
 
 	// Start sync worker goroutine
-	go cm.syncWorker() // + 临时注释
+	go cm.syncWorker()
 
 	// Start periodic cleanup of AppRenderFailed data (every 5 minutes)
 	cm.cleanupTicker = time.NewTicker(5 * time.Minute)

@@ -128,12 +128,13 @@ func (scc *StatusCorrectionChecker) StartWithOptions(enablePeriodicCheck bool) e
 	return nil
 }
 
-// PerformStatusCheckOnce executes one status check cycle, called by serial pipeline
-func (scc *StatusCorrectionChecker) PerformStatusCheckOnce() {
+// PerformStatusCheckOnce executes one status check cycle, called by Pipeline Phase 4.
+// Returns the set of affected user IDs whose data was modified.
+func (scc *StatusCorrectionChecker) PerformStatusCheckOnce() map[string]bool {
 	if !scc.isRunning {
-		return
+		return nil
 	}
-	scc.performStatusCheck()
+	return scc.performStatusCheck()
 }
 
 // Stop stops the periodic status checking
@@ -200,8 +201,9 @@ func (scc *StatusCorrectionChecker) runPeriodicCheck() {
 }
 
 // performStatusCheck performs a single status check cycle
-func (scc *StatusCorrectionChecker) performStatusCheck() {
+func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 	startTime := time.Now()
+	result := make(map[string]bool)
 
 	scc.mutex.Lock()
 	scc.lastCheckTime = startTime
@@ -210,25 +212,22 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 
 	glog.Infof("Starting status check cycle #%d", scc.checkCount)
 
-	// Fetch latest status from app-service
 	latestStatus, err := scc.fetchLatestStatus()
 	if err != nil {
 		glog.Errorf("Failed to fetch latest status from app-service: %v", err)
-		return
+		return result
 	}
 
 	glog.V(2).Infof("Fetched status for %d applications and middlewares from app-service", len(latestStatus))
 
-	// Get current status from cache
 	cachedStatus := scc.getCachedStatus()
 	if len(cachedStatus) == 0 {
 		glog.Infof("No cached status found, skipping comparison")
-		return
+		return result
 	}
 
 	glog.V(2).Infof("Found cached status for %d applications and middlewares", len(cachedStatus))
 
-	// Compare and detect changes
 	changes := scc.compareStatus(latestStatus, cachedStatus)
 
 	glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v", changes)
@@ -237,18 +236,16 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		glog.V(2).Infof("Detected %d status changes, applying corrections", len(changes))
 		scc.applyCorrections(changes, latestStatus)
 
-		// After applying corrections, recalculate and update user data hash for all affected users.
-		// This ensures the hash stays consistent with the latest user data state.
-		// The hash calculation logic is consistent with DataWatcher (see datawatcher_app.go).
-		// affectedUsers := make(map[string]struct{})
-		affectedUsers := make(map[string]*StatusChange)
+		// Apply UserInfo changes and collect affected users.
+		// Hash calculation and ForceSync are deferred to Pipeline Phase 5.
+		changesByUser := make(map[string]*StatusChange)
 		for _, change := range changes {
-			affectedUsers[change.UserID] = &change //change.ChangeType
+			changesByUser[change.UserID] = &change
 		}
-		for userID, cs := range affectedUsers {
+		for userID, cs := range changesByUser {
 			userData := scc.cacheManager.GetUserData(userID)
 			if userData == nil {
-				glog.V(3).Infof("StatusCorrectionChecker: userData not found for user %s, skip hash calculation", userID)
+				glog.V(3).Infof("StatusCorrectionChecker: userData not found for user %s", userID)
 				continue
 			}
 
@@ -263,23 +260,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 				glog.V(2).Infof("[UserChanged] userId: %s, userInfo is null", cs.UserID)
 			}
 
-			// Generate snapshot for hash calculation (reuse logic from DataWatcher)
-			snapshot, err := utils.CreateUserDataSnapshot(userID, userData)
-			if err != nil {
-				glog.Errorf("StatusCorrectionChecker: failed to create snapshot for user %s: %v", userID, err)
-				continue
-			}
-			newHash, err := utils.CalculateUserDataHash(snapshot)
-			if err != nil {
-				glog.Errorf("StatusCorrectionChecker: failed to calculate hash for user %s: %v", userID, err)
-				continue
-			}
-			scc.cacheManager.SetUserHash(userID, newHash)
-			glog.V(2).Infof("StatusCorrectionChecker: user %s hash updated to %s", userID, newHash)
-		}
-		// Force sync after hash update
-		if err := scc.cacheManager.ForceSync(); err != nil {
-			glog.Errorf("StatusCorrectionChecker: ForceSync failed after hash update: %v", err)
+			result[userID] = true
 		}
 
 		scc.mutex.Lock()
@@ -289,10 +270,10 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		glog.V(3).Info("No status changes detected")
 	}
 
-	// Check and correct task statuses
 	scc.checkAndCorrectTaskStatuses(latestStatus)
 
 	glog.V(2).Infof("Status check cycle #%d completed in %v", scc.checkCount, time.Since(startTime))
+	return result
 }
 
 // fetchLatestStatus fetches the latest status from app-service

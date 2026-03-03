@@ -30,6 +30,10 @@ type DataWatcher struct {
 	activeHashCalculations map[string]bool
 	hashMutex              sync.Mutex
 
+	// Dirty users tracking for deferred hash calculation
+	dirtyUsers      map[string]bool
+	dirtyUsersMutex sync.Mutex
+
 	// Metrics - using atomic operations for thread safety
 	totalAppsProcessed int64
 	totalAppsMoved     int64
@@ -46,6 +50,7 @@ func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator, dataSender *
 		stopChan:               make(chan struct{}),
 		isRunning:              0, // Initialize as false
 		activeHashCalculations: make(map[string]bool),
+		dirtyUsers:             make(map[string]bool),
 	}
 }
 
@@ -250,46 +255,9 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 		totalMoved += moved
 	}
 
-	// Step 3: Calculate hash if apps were moved OR if hash is empty
-	shouldCalculateHash := totalMoved > 0 || userData.Hash == ""
-
-	if shouldCalculateHash {
-		if totalMoved > 0 {
-			glog.Infof("DataWatcher: %d apps moved for user %s, scheduling hash calculation", totalMoved, userID)
-		} else {
-			glog.Infof("DataWatcher: Hash is empty for user %s, scheduling hash calculation", userID)
-		}
-
-		// Schedule hash calculation in a separate goroutine without setting the flag here
-		go func() {
-			// Check if hash calculation is already in progress for this user
-			dw.hashMutex.Lock()
-			if dw.activeHashCalculations[userID] {
-				dw.hashMutex.Unlock()
-				glog.Warningf("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
-				return
-			}
-			dw.activeHashCalculations[userID] = true
-			dw.hashMutex.Unlock()
-
-			defer func() {
-				// Clean up tracking when done
-				dw.hashMutex.Lock()
-				delete(dw.activeHashCalculations, userID)
-				dw.hashMutex.Unlock()
-				glog.V(3).Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
-			}()
-
-			// Wait a short time to ensure all source processing locks are released
-			time.Sleep(100 * time.Millisecond)
-			glog.V(3).Infof("DataWatcher: Starting hash calculation for user %s", userID)
-
-			// Call the hash calculation function directly
-			dw.calculateAndSetUserHashDirect(userID, userData)
-		}()
-	} else {
-		glog.V(3).Infof("DataWatcher: No apps moved and hash exists for user %s, skipping hash calculation", userID)
-	}
+	// Hash calculation is deferred to Pipeline Phase 5.
+	// The caller (Pipeline.phaseHydrateApps) tracks affected users and
+	// Phase 5 will calculate hashes for all affected users in one pass.
 
 	return totalProcessed, totalMoved
 }
@@ -357,55 +325,37 @@ func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData 
 	glog.Errorf("DataWatcher: Hash calculation failed after %d attempts for user %s", maxRetries, userID)
 }
 
-// calculateAndSetUserHashDirect calculates hash without tracking (used internally by goroutines)
+// calculateAndSetUserHashDirect calculates and updates hash for a single user.
+// Does NOT call ForceSync — the caller (Pipeline Phase 5) is responsible for syncing.
 func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *types.UserData) bool {
-	glog.V(2).Infof("Serial pipeline: DataWatcherApp, user: %s", userID)
 	glog.V(3).Infof("DataWatcher: Starting direct hash calculation for user %s", userID)
 
-	// Get the original user data from cache manager to ensure we have the latest reference
 	originalUserData := dw.cacheManager.GetUserData(userID)
 	if originalUserData == nil {
 		glog.Errorf("DataWatcher: Failed to get user data from cache manager for user %s", userID)
 		return false
 	}
 
-	// Create snapshot for hash calculation without holding any locks
-	glog.V(3).Infof("DataWatcher: Creating user data snapshot for user %s", userID)
 	snapshot, err := utils.CreateUserDataSnapshot(userID, originalUserData)
 	if err != nil {
 		glog.Errorf("DataWatcher: Failed to create user data snapshot for user %s: %v", userID, err)
 		return false
 	}
 
-	glog.V(4).Infof("DataWatcher: Calculating hash for user %s", userID)
-	// Calculate hash using the snapshot
 	newHash, err := utils.CalculateUserDataHash(snapshot)
 	if err != nil {
 		glog.Errorf("DataWatcher: Failed to calculate hash for user %s: %v", userID, err)
 		return false
 	}
 
-	// Get current hash for comparison
 	currentHash := originalUserData.Hash
-	glog.V(3).Infof("DataWatcher: Hash comparison for user %s - current: '%s', new: '%s'", userID, currentHash, newHash)
-
 	if currentHash == newHash {
 		glog.V(2).Infof("DataWatcher: Hash unchanged for user %s: %s", userID, newHash)
 		return true
 	}
 
 	glog.V(2).Infof("DataWatcher: Hash changed for user %s: %s -> %s", userID, currentHash, newHash)
-
 	dw.cacheManager.SetUserHash(userID, newHash)
-
-	glog.V(3).Infof("DataWatcher: Hash updated for user %s", userID)
-
-	if err := dw.cacheManager.ForceSync(); err != nil {
-		glog.Errorf("DataWatcher: Failed to force sync after hash update for user %s: %v", userID, err)
-		return false
-	} else {
-		glog.V(2).Infof("DataWatcher: Force sync completed after hash update for user %s", userID)
-	}
 
 	return true
 }
@@ -977,6 +927,31 @@ func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
 	}
 
 	return nil
+}
+
+// MarkUserDirty marks a user as needing hash recalculation.
+// Called by event-driven paths (e.g. DataWatcherState) that modify user data
+// outside the Pipeline cycle. The dirty users will be picked up by Pipeline Phase 5.
+func (dw *DataWatcher) MarkUserDirty(userID string) {
+	dw.dirtyUsersMutex.Lock()
+	defer dw.dirtyUsersMutex.Unlock()
+	dw.dirtyUsers[userID] = true
+	glog.V(3).Infof("DataWatcher: Marked user %s as dirty for deferred hash calculation", userID)
+}
+
+// CollectAndClearDirtyUsers returns all dirty user IDs and clears the set.
+// Called by Pipeline Phase 5 to collect users that need hash recalculation
+// from event-driven paths.
+func (dw *DataWatcher) CollectAndClearDirtyUsers() map[string]bool {
+	dw.dirtyUsersMutex.Lock()
+	defer dw.dirtyUsersMutex.Unlock()
+	if len(dw.dirtyUsers) == 0 {
+		return nil
+	}
+	result := dw.dirtyUsers
+	dw.dirtyUsers = make(map[string]bool)
+	glog.V(3).Infof("DataWatcher: Collected %d dirty users for hash calculation", len(result))
+	return result
 }
 
 // getAppVersion extracts app version from pending app data

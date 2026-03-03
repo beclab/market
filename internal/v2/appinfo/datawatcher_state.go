@@ -989,16 +989,9 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		glog.V(2).Infof("Successfully stored app state to cache for user=%s, source=%s, app=%s, state=%s",
 			userID, sourceID, msg.Name, msg.State)
 
-		// Call ForceCalculateAllUsersHash for hash calculation after successful cache update
+		// Mark user as dirty for deferred hash calculation in Pipeline Phase 5
 		if dw.dataWatcher != nil {
-			glog.V(3).Infof("Triggering hash recalculation for all users after cache update")
-			if err := dw.dataWatcher.ForceCalculateAllUsersHash(); err != nil {
-				glog.Errorf("Failed to force calculate all users hash: %v", err)
-			} else {
-				glog.V(2).Infof("Successfully triggered hash recalculation for all users")
-			}
-		} else {
-			glog.V(3).Infof("DataWatcher not available, skipping hash recalculation")
+			dw.dataWatcher.MarkUserDirty(userID)
 		}
 	}
 }

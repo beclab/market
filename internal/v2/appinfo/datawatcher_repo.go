@@ -158,13 +158,14 @@ func (dwr *DataWatcherRepo) StartWithOptions(enablePolling bool) error {
 	return nil
 }
 
-// ProcessOnce executes one round of state change processing, called by serial pipeline
-func (dwr *DataWatcherRepo) ProcessOnce() {
+// ProcessOnce executes one round of state change processing, called by Pipeline Phase 3.
+// Returns the set of affected user IDs whose data was modified.
+func (dwr *DataWatcherRepo) ProcessOnce() map[string]bool {
 	if !dwr.isRunning {
-		return
+		return nil
 	}
 
-	dwr.processStateChanges()
+	return dwr.processStateChanges()
 }
 
 // Stop stops the periodic state checking process
@@ -219,30 +220,29 @@ func (dwr *DataWatcherRepo) monitorStateChanges() {
 }
 
 // processStateChanges fetches and processes new state changes
-func (dwr *DataWatcherRepo) processStateChanges() error {
+func (dwr *DataWatcherRepo) processStateChanges() map[string]bool {
 	glog.V(3).Infof("Processing state changes after ID: %d", dwr.lastProcessedID)
+	affectedUsers := make(map[string]bool)
 
-	// Fetch new state changes from API
 	stateChanges, err := dwr.fetchStateChanges(dwr.lastProcessedID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch state changes: %w", err)
+		glog.Errorf("Failed to fetch state changes: %v", err)
+		return affectedUsers
 	}
 
 	if len(stateChanges) == 0 {
 		glog.V(3).Info("No new state changes found")
-		return nil
+		return affectedUsers
 	}
 
 	glog.V(2).Infof("Found %d new state changes", len(stateChanges))
 
-	// Sort state changes by ID to ensure proper order
 	sort.Slice(stateChanges, func(i, j int) bool {
 		return stateChanges[i].ID < stateChanges[j].ID
 	})
 
 	glog.V(2).Info("State changes sorted by ID, processing in order...")
 
-	// Process state changes in order by ID
 	var lastProcessedID int64
 	for _, change := range stateChanges {
 		if err := dwr.processStateChange(change); err != nil {
@@ -250,17 +250,28 @@ func (dwr *DataWatcherRepo) processStateChanges() error {
 			continue
 		}
 
+		// Track affected users from each change type
+		if change.AppData != nil && change.AppData.UserID != "" {
+			affectedUsers[change.AppData.UserID] = true
+		}
+		if change.Type == "image_info_updated" {
+			// Image updates affect all users
+			allUsers := dwr.cacheManager.GetAllUsersData()
+			for userID := range allUsers {
+				affectedUsers[userID] = true
+			}
+		}
+
 		lastProcessedID = change.ID
 	}
 
-	// Update the last processed ID in Redis
 	ctx := context.Background()
 	err = dwr.redisClient.client.Set(ctx, "datawatcher:last_processed_id", strconv.FormatInt(lastProcessedID, 10), 0).Err()
 	if err != nil {
 		glog.Errorf("Failed to update last processed ID in Redis: %v", err)
 	}
 
-	return nil
+	return affectedUsers
 }
 
 // fetchStateChanges calls the /state-changes API to get new state changes
@@ -380,17 +391,7 @@ func (dwr *DataWatcherRepo) handleImageInfoUpdated(change *StateChange) error {
 	updatedCount := dwr.updateImageInfoInCache(imageName, updatedImageInfo)
 	glog.V(3).Infof("Updated image info for %s in %d cache entries", imageName, updatedCount)
 
-	// Step 3: Trigger hash calculation for all users
-	if dwr.dataWatcher != nil {
-		if err := dwr.dataWatcher.ForceCalculateAllUsersHash(); err != nil {
-			glog.Errorf("Failed to trigger hash calculation for all users: %v", err)
-			return fmt.Errorf("failed to trigger hash calculation: %w", err)
-		}
-		glog.V(3).Info("Successfully triggered hash calculation for all users after image update")
-	} else {
-		glog.V(3).Info("DataWatcher not available, skipping hash calculation")
-	}
-
+	// Hash calculation is deferred to Pipeline Phase 5.
 	glog.V(2).Infof("Successfully handled image info updated for image: %s", imageName)
 	return nil
 }
