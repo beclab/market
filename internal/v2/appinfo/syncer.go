@@ -2,6 +2,7 @@ package appinfo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/golang/glog"
 )
 
@@ -141,17 +143,24 @@ func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) erro
 
 // SyncOnce executes one sync cycle if at least syncInterval has elapsed
 // since the last execution, OR if the sync-relevant configuration has changed
-// (e.g. a new source or user was added/removed). Called by Pipeline on every tick.
+// (e.g. a new source or user was added/removed), OR if a remote source's
+// data hash has changed (lightweight probe). Called by Pipeline on every tick.
 func (s *Syncer) SyncOnce(ctx context.Context) {
 	if !s.isRunning.Load() {
 		return
 	}
 
 	configChanged, reason := s.hasSyncRelevantConfigChanged()
+	throttled := !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval
 
-	if !configChanged && !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval {
-		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)", time.Since(s.lastSyncExecuted), s.syncInterval)
-		return
+	if !configChanged && throttled {
+		if s.hasAnyRemoteHashChanged(ctx) {
+			glog.V(2).Info("SyncOnce: remote data hash changed, forcing sync cycle")
+		} else {
+			glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)",
+				time.Since(s.lastSyncExecuted), s.syncInterval)
+			return
+		}
 	}
 	if configChanged {
 		glog.V(2).Infof("SyncOnce: %s, forcing sync cycle", reason)
@@ -160,6 +169,62 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	if err := s.executeSyncCycle(ctx); err != nil {
 		glog.Errorf("SyncOnce: sync cycle failed: %v", err)
 	}
+}
+
+// hasAnyRemoteHashChanged does a lightweight HTTP probe to each remote source's
+// hash endpoint and returns true if any source's remote hash differs from the
+// locally cached Others.Hash. Errors are silently ignored (conservative: don't
+// force sync on network failure).
+func (s *Syncer) hasAnyRemoteHashChanged(ctx context.Context) bool {
+	config := s.settingsManager.GetMarketSources()
+	if config == nil {
+		return false
+	}
+
+	endpoints := s.settingsManager.GetAPIEndpoints()
+	hashPath := "/api/v1/appstore/hash"
+	if endpoints != nil && endpoints.HashPath != "" {
+		hashPath = endpoints.HashPath
+	}
+
+	version := getVersionForSync()
+	client := resty.New().SetTimeout(3 * time.Second)
+
+	for _, src := range config.Sources {
+		if src.Type != "remote" {
+			continue
+		}
+
+		hashURL := s.settingsManager.BuildAPIURL(src.BaseURL, hashPath)
+		if strings.HasPrefix(hashURL, "file://") {
+			continue
+		}
+
+		resp, err := client.R().SetContext(ctx).SetQueryParam("version", version).Get(hashURL)
+		if err != nil || resp.StatusCode() != 200 {
+			continue
+		}
+
+		var hr struct {
+			Hash string `json:"hash"`
+		}
+		if json.Unmarshal(resp.Body(), &hr) != nil || hr.Hash == "" {
+			continue
+		}
+
+		localHash := ""
+		if cm := s.cacheManager.Load(); cm != nil {
+			localHash = cm.GetSourceOthersHash(src.ID)
+		}
+
+		if hr.Hash != localHash {
+			glog.V(2).Infof("SyncOnce: hash changed for source %s (remote=%s, local=%s)",
+				src.ID, hr.Hash, localHash)
+			return true
+		}
+	}
+
+	return false
 }
 
 // hasSyncRelevantConfigChanged checks whether the remote source list or the

@@ -44,9 +44,6 @@ type CacheManager struct {
 		unlockCount    int64
 	}
 
-	// ForceSync rate limiting
-	forceSyncMutex sync.Mutex
-	lastForceSync  time.Time
 }
 
 // startLockWatchdog starts a 1s watchdog for write lock sections and returns a stopper.
@@ -1693,19 +1690,7 @@ func (cm *CacheManager) requestSync(req SyncRequest) {
 }
 
 // ForceSync forces immediate synchronization of all data to Redis
-// Rate limited to once per minute to prevent excessive Redis operations
 func (cm *CacheManager) ForceSync() error {
-	// Check rate limiting first
-	cm.forceSyncMutex.Lock()
-	now := time.Now()
-	if !cm.lastForceSync.IsZero() && now.Sub(cm.lastForceSync) < time.Minute {
-		cm.forceSyncMutex.Unlock()
-		glog.V(4).Infof("ForceSync: Rate limited, last sync was %v ago", now.Sub(cm.lastForceSync))
-		return fmt.Errorf("force sync rate limited, please wait %v", time.Minute-now.Sub(cm.lastForceSync))
-	}
-	cm.lastForceSync = now
-	cm.forceSyncMutex.Unlock()
-
 	glog.V(2).Infof("Force syncing all cache data to Redis")
 
 	// 1. Quickly obtain a data snapshot to minimize lock holding time
@@ -1756,33 +1741,6 @@ func (cm *CacheManager) ForceSync() error {
 		glog.Errorf("Force sync timed out after 5 seconds")
 		return fmt.Errorf("force sync timed out: %v", ctx.Err())
 	}
-}
-
-// CanForceSync checks if ForceSync can be executed (not rate limited)
-func (cm *CacheManager) CanForceSync() bool {
-	cm.forceSyncMutex.Lock()
-	defer cm.forceSyncMutex.Unlock()
-
-	now := time.Now()
-	return cm.lastForceSync.IsZero() || now.Sub(cm.lastForceSync) >= time.Minute
-}
-
-// GetForceSyncCooldown returns the remaining cooldown time for ForceSync
-func (cm *CacheManager) GetForceSyncCooldown() time.Duration {
-	cm.forceSyncMutex.Lock()
-	defer cm.forceSyncMutex.Unlock()
-
-	now := time.Now()
-	if cm.lastForceSync.IsZero() {
-		return 0
-	}
-
-	elapsed := now.Sub(cm.lastForceSync)
-	if elapsed >= time.Minute {
-		return 0
-	}
-
-	return time.Minute - elapsed
 }
 
 // GetAllUsersData returns all users data from cache using single global lock
