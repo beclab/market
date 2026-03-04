@@ -266,6 +266,8 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string
 	}
 
 	if h.isAppInRenderFailedList(userID, sourceID, appID, appName) {
+		glog.V(2).Infof("HydrateSingleApp: skipping %s %s (user=%s, source=%s) - in render failed list, will retry after cleanup",
+			appID, appName, userID, sourceID)
 		return false
 	}
 
@@ -278,11 +280,15 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string
 		version = pendingData.RawData.Version
 	}
 	if h.isAppInLatestQueue(userID, sourceID, appID, appName, version) {
+		glog.V(2).Infof("HydrateSingleApp: skipping %s %s (user=%s, source=%s) - already in latest queue with version %s",
+			appID, appName, userID, sourceID, version)
 		return false
 	}
 
 	appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
 	if len(appDataMap) == 0 {
+		glog.V(2).Infof("HydrateSingleApp: skipping %s %s (user=%s, source=%s) - convertApplicationInfoEntryToMap returned empty",
+			appID, appName, userID, sourceID)
 		return false
 	}
 
