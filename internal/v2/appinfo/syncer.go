@@ -31,6 +31,7 @@ type Syncer struct {
 	lastSyncExecuted time.Time // Last time a full sync cycle was actually executed
 
 	lastKnownRemoteSourceIDs atomic.Value // string: sorted comma-joined remote source IDs from last sync
+	lastKnownUserIDs         atomic.Value // string: sorted comma-joined user IDs from last sync
 
 	// Status tracking fields
 	lastSyncTime        atomic.Value // time.Time
@@ -69,6 +70,7 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 	s.lastSyncDuration.Store(time.Duration(0))
 	s.currentSource.Store("")
 	s.lastKnownRemoteSourceIDs.Store("")
+	s.lastKnownUserIDs.Store("")
 	return s
 }
 
@@ -138,21 +140,21 @@ func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) erro
 }
 
 // SyncOnce executes one sync cycle if at least syncInterval has elapsed
-// since the last execution, OR if the remote source configuration has changed
-// (e.g. a new source was added). Called by Pipeline on every tick.
+// since the last execution, OR if the sync-relevant configuration has changed
+// (e.g. a new source or user was added/removed). Called by Pipeline on every tick.
 func (s *Syncer) SyncOnce(ctx context.Context) {
 	if !s.isRunning.Load() {
 		return
 	}
 
-	sourceChanged := s.hasRemoteSourceConfigChanged()
+	configChanged, reason := s.hasSyncRelevantConfigChanged()
 
-	if !sourceChanged && !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval {
+	if !configChanged && !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval {
 		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)", time.Since(s.lastSyncExecuted), s.syncInterval)
 		return
 	}
-	if sourceChanged {
-		glog.V(2).Info("SyncOnce: remote source configuration changed, forcing sync cycle")
+	if configChanged {
+		glog.V(2).Infof("SyncOnce: %s, forcing sync cycle", reason)
 	}
 	s.lastSyncExecuted = time.Now()
 	if err := s.executeSyncCycle(ctx); err != nil {
@@ -160,29 +162,47 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	}
 }
 
-// hasRemoteSourceConfigChanged checks if the set of remote market sources has
-// changed since the last sync cycle (e.g. a source was added or removed).
-func (s *Syncer) hasRemoteSourceConfigChanged() bool {
+// hasSyncRelevantConfigChanged checks whether the remote source list or the
+// user list has changed since the last sync cycle. Returns true with a
+// human-readable reason when a change is detected.
+func (s *Syncer) hasSyncRelevantConfigChanged() (changed bool, reason string) {
+	// Check remote sources
 	config := s.settingsManager.GetMarketSources()
-	if config == nil || len(config.Sources) == 0 {
-		return false
-	}
+	if config != nil && len(config.Sources) > 0 {
+		var remoteIDs []string
+		for _, src := range config.Sources {
+			if src.Type == "remote" {
+				remoteIDs = append(remoteIDs, src.ID)
+			}
+		}
+		sort.Strings(remoteIDs)
+		currentKey := strings.Join(remoteIDs, ",")
 
-	var remoteIDs []string
-	for _, src := range config.Sources {
-		if src.Type == "remote" {
-			remoteIDs = append(remoteIDs, src.ID)
+		lastKnown, _ := s.lastKnownRemoteSourceIDs.Load().(string)
+		if currentKey != lastKnown {
+			s.lastKnownRemoteSourceIDs.Store(currentKey)
+			if lastKnown != "" {
+				return true, "remote source configuration changed"
+			}
 		}
 	}
-	sort.Strings(remoteIDs)
-	currentKey := strings.Join(remoteIDs, ",")
 
-	lastKnown, _ := s.lastKnownRemoteSourceIDs.Load().(string)
-	if currentKey != lastKnown {
-		s.lastKnownRemoteSourceIDs.Store(currentKey)
-		return lastKnown != "" // first call (empty -> populated) is not a "change"
+	// Check user list
+	if cm := s.cacheManager.Load(); cm != nil {
+		userIDs := cm.GetUserIDs()
+		sort.Strings(userIDs)
+		currentKey := strings.Join(userIDs, ",")
+
+		lastKnown, _ := s.lastKnownUserIDs.Load().(string)
+		if currentKey != lastKnown {
+			s.lastKnownUserIDs.Store(currentKey)
+			if lastKnown != "" {
+				return true, "user list changed"
+			}
+		}
 	}
-	return false
+
+	return false, ""
 }
 
 // Stop stops the synchronization process
