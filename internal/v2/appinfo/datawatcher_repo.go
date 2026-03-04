@@ -265,6 +265,8 @@ func (dwr *DataWatcherRepo) processStateChanges() map[string]bool {
 		lastProcessedID = change.ID
 	}
 
+	dwr.lastProcessedID = lastProcessedID
+
 	ctx := context.Background()
 	err = dwr.redisClient.client.Set(ctx, "datawatcher:last_processed_id", strconv.FormatInt(lastProcessedID, 10), 0).Err()
 	if err != nil {
