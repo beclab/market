@@ -58,11 +58,13 @@ func NewPipeline(cacheManager *CacheManager, cache *types.CacheData, interval ti
 	}
 }
 
-func (p *Pipeline) SetSyncer(s *Syncer)                                    { p.syncer = s }
-func (p *Pipeline) SetHydrator(h *Hydrator)                                { p.hydrator = h }
-func (p *Pipeline) SetDataWatcher(dw *DataWatcher)                         { p.dataWatcher = dw }
-func (p *Pipeline) SetDataWatcherRepo(dwr *DataWatcherRepo)                { p.dataWatcherRepo = dwr }
-func (p *Pipeline) SetStatusCorrectionChecker(scc *StatusCorrectionChecker) { p.statusCorrectionChecker = scc }
+func (p *Pipeline) SetSyncer(s *Syncer)                     { p.syncer = s }
+func (p *Pipeline) SetHydrator(h *Hydrator)                 { p.hydrator = h }
+func (p *Pipeline) SetDataWatcher(dw *DataWatcher)          { p.dataWatcher = dw }
+func (p *Pipeline) SetDataWatcherRepo(dwr *DataWatcherRepo) { p.dataWatcherRepo = dwr }
+func (p *Pipeline) SetStatusCorrectionChecker(scc *StatusCorrectionChecker) {
+	p.statusCorrectionChecker = scc
+}
 
 func (p *Pipeline) Start(ctx context.Context) error {
 	if p.isRunning.Load() {
@@ -111,6 +113,8 @@ func (p *Pipeline) run(ctx context.Context) {
 	}
 	defer p.mutex.Unlock()
 
+	glog.V(2).Info("Pipeline: [LOOP] cycle start")
+
 	startTime := time.Now()
 
 	// Phase 1-4: only modify data, no hash calculation or ForceSync
@@ -139,9 +143,7 @@ func (p *Pipeline) run(ctx context.Context) {
 
 	p.phaseHashAndSync(allAffected)
 
-	if elapsed := time.Since(startTime); elapsed > 5*time.Second {
-		glog.V(2).Infof("Pipeline: cycle completed in %v", elapsed)
-	}
+	glog.V(2).Infof("Pipeline: [LOOP] cycle completed in %v", time.Since(startTime))
 }
 
 // phaseSyncer fetches remote data
