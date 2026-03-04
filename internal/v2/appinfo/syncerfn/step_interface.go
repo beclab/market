@@ -68,7 +68,7 @@ func NewSyncContextWithManager(cache *types.CacheData, cacheManager types.CacheM
 		Client:       resty.New(),
 		Cache:        cache,
 		CacheManager: cacheManager,
-		LatestData:   &AppStoreInfoResponse{},
+		LatestData:   nil,
 		DetailedApps: make(map[string]interface{}),
 		AppIDs:       make([]string, 0),
 		Errors:       make([]error, 0),
