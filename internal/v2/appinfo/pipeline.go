@@ -173,6 +173,7 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 	items := p.cacheManager.CollectAllPendingItems()
 
 	if len(items) == 0 {
+		glog.V(2).Info("Pipeline Phase 2: no pending apps to process")
 		return affectedUsers
 	}
 
