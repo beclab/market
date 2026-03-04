@@ -183,6 +183,31 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		batchSize = defaultHydrationConcurrency
 	}
 
+	// Filter out items whose user or source has been deleted since collection.
+	// CollectAllPendingItems returns a snapshot; async deletions (RemoveUserData,
+	// SyncMarketSourcesToCache) may have removed the user/source in the meantime.
+	validItems := make([]PendingItem, 0, len(items))
+	for _, item := range items {
+		if p.cacheManager.GetSourceData(item.UserID, item.SourceID) == nil {
+			appID, appName := getAppIdentifiers(item.Pending)
+			glog.V(2).Infof("Pipeline Phase 2: skipping %s %s - user %s or source %s no longer exists",
+				appID, appName, item.UserID, item.SourceID)
+			continue
+		}
+		validItems = append(validItems, item)
+	}
+
+	if len(validItems) == 0 {
+		glog.V(2).Infof("Pipeline Phase 2: all %d pending apps filtered out (user/source deleted)", total)
+		return affectedUsers
+	}
+
+	if len(validItems) < total {
+		glog.V(2).Infof("Pipeline Phase 2: %d/%d pending apps remain after filtering deleted users/sources",
+			len(validItems), total)
+	}
+
+	total = len(validItems)
 	glog.V(2).Infof("Pipeline Phase 2: processing %d pending apps (concurrency=%d)", total, batchSize)
 
 	for batchStart := 0; batchStart < total; batchStart += batchSize {
@@ -198,7 +223,7 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		if batchEnd > total {
 			batchEnd = total
 		}
-		batch := items[batchStart:batchEnd]
+		batch := validItems[batchStart:batchEnd]
 
 		// Log batch items
 		for i, item := range batch {
