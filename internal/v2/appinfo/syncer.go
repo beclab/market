@@ -3,6 +3,8 @@ package appinfo
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +29,8 @@ type Syncer struct {
 	settingsManager *settings.SettingsManager // Settings manager for data source information
 
 	lastSyncExecuted time.Time // Last time a full sync cycle was actually executed
+
+	lastKnownRemoteSourceIDs atomic.Value // string: sorted comma-joined remote source IDs from last sync
 
 	// Status tracking fields
 	lastSyncTime        atomic.Value // time.Time
@@ -64,6 +68,7 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 	s.currentStep.Store("")
 	s.lastSyncDuration.Store(time.Duration(0))
 	s.currentSource.Store("")
+	s.lastKnownRemoteSourceIDs.Store("")
 	return s
 }
 
@@ -133,19 +138,51 @@ func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) erro
 }
 
 // SyncOnce executes one sync cycle if at least syncInterval has elapsed
-// since the last execution. Called by Pipeline on every tick.
+// since the last execution, OR if the remote source configuration has changed
+// (e.g. a new source was added). Called by Pipeline on every tick.
 func (s *Syncer) SyncOnce(ctx context.Context) {
 	if !s.isRunning.Load() {
 		return
 	}
-	if !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval {
+
+	sourceChanged := s.hasRemoteSourceConfigChanged()
+
+	if !sourceChanged && !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval {
 		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)", time.Since(s.lastSyncExecuted), s.syncInterval)
 		return
+	}
+	if sourceChanged {
+		glog.V(2).Info("SyncOnce: remote source configuration changed, forcing sync cycle")
 	}
 	s.lastSyncExecuted = time.Now()
 	if err := s.executeSyncCycle(ctx); err != nil {
 		glog.Errorf("SyncOnce: sync cycle failed: %v", err)
 	}
+}
+
+// hasRemoteSourceConfigChanged checks if the set of remote market sources has
+// changed since the last sync cycle (e.g. a source was added or removed).
+func (s *Syncer) hasRemoteSourceConfigChanged() bool {
+	config := s.settingsManager.GetMarketSources()
+	if config == nil || len(config.Sources) == 0 {
+		return false
+	}
+
+	var remoteIDs []string
+	for _, src := range config.Sources {
+		if src.Type == "remote" {
+			remoteIDs = append(remoteIDs, src.ID)
+		}
+	}
+	sort.Strings(remoteIDs)
+	currentKey := strings.Join(remoteIDs, ",")
+
+	lastKnown, _ := s.lastKnownRemoteSourceIDs.Load().(string)
+	if currentKey != lastKnown {
+		s.lastKnownRemoteSourceIDs.Store(currentKey)
+		return lastKnown != "" // first call (empty -> populated) is not a "change"
+	}
+	return false
 }
 
 // Stop stops the synchronization process
