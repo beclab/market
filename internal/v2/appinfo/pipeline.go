@@ -2,6 +2,8 @@ package appinfo
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +21,8 @@ import (
 //	Phase 3: DataWatcherRepo - process chart-repo state changes
 //	Phase 4: StatusCorrectionChecker - correct app running statuses
 //	Phase 5: Hash calculation + ForceSync
+const defaultHydrationConcurrency = 5
+
 type Pipeline struct {
 	cacheManager            *CacheManager
 	cache                   *types.CacheData
@@ -28,21 +32,29 @@ type Pipeline struct {
 	dataWatcherRepo         *DataWatcherRepo
 	statusCorrectionChecker *StatusCorrectionChecker
 
-	mutex     sync.Mutex
-	stopChan  chan struct{}
-	isRunning atomic.Bool
-	interval  time.Duration
+	mutex                sync.Mutex
+	stopChan             chan struct{}
+	isRunning            atomic.Bool
+	interval             time.Duration
+	hydrationConcurrency int
 }
 
 func NewPipeline(cacheManager *CacheManager, cache *types.CacheData, interval time.Duration) *Pipeline {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
+
+	concurrency := defaultHydrationConcurrency
+	if v, err := strconv.Atoi(os.Getenv("PIPELINE_HYDRATION_CONCURRENCY")); err == nil && v > 0 {
+		concurrency = v
+	}
+
 	return &Pipeline{
-		cacheManager: cacheManager,
-		cache:        cache,
-		stopChan:     make(chan struct{}),
-		interval:     interval,
+		cacheManager:         cacheManager,
+		cache:                cache,
+		stopChan:             make(chan struct{}),
+		interval:             interval,
+		hydrationConcurrency: concurrency,
 	}
 }
 
@@ -148,7 +160,8 @@ func (p *Pipeline) phaseSyncer(ctx context.Context) {
 	p.syncer.SyncOnce(ctx)
 }
 
-// phaseHydrateApps processes pending apps one by one through hydration + move to Latest
+// phaseHydrateApps processes pending apps in concurrent batches through hydration + move to Latest.
+// Batch size is controlled by hydrationConcurrency (default 5, env PIPELINE_HYDRATION_CONCURRENCY).
 func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 	affectedUsers := make(map[string]bool)
 	if p.hydrator == nil || p.cacheManager == nil {
@@ -162,9 +175,14 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 	}
 
 	total := len(items)
-	glog.V(2).Infof("Pipeline Phase 2: processing %d pending apps", total)
+	batchSize := p.hydrationConcurrency
+	if batchSize <= 0 {
+		batchSize = defaultHydrationConcurrency
+	}
 
-	for idx, item := range items {
+	glog.V(2).Infof("Pipeline Phase 2: processing %d pending apps (concurrency=%d)", total, batchSize)
+
+	for batchStart := 0; batchStart < total; batchStart += batchSize {
 		select {
 		case <-ctx.Done():
 			return affectedUsers
@@ -173,15 +191,46 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		default:
 		}
 
-		appID, appName := getAppIdentifiers(item.Pending)
-		glog.V(2).Infof("Pipeline Phase 2: [%d/%d] %s %s (user=%s, source=%s)",
-			idx+1, total, appID, appName, item.UserID, item.SourceID)
-
-		hydrated := p.hydrator.HydrateSingleApp(ctx, item.UserID, item.SourceID, item.Pending)
-		if hydrated && p.dataWatcher != nil {
-			p.dataWatcher.ProcessSingleAppToLatest(item.UserID, item.SourceID, item.Pending)
+		batchEnd := batchStart + batchSize
+		if batchEnd > total {
+			batchEnd = total
 		}
-		affectedUsers[item.UserID] = true
+		batch := items[batchStart:batchEnd]
+
+		// Log batch items
+		for i, item := range batch {
+			appID, appName := getAppIdentifiers(item.Pending)
+			glog.V(2).Infof("Pipeline Phase 2: [%d/%d] %s %s (user=%s, source=%s)",
+				batchStart+i+1, total, appID, appName, item.UserID, item.SourceID)
+		}
+
+		// Process batch concurrently
+		type hydrateResult struct {
+			idx      int
+			hydrated bool
+		}
+		results := make([]hydrateResult, len(batch))
+		var wg sync.WaitGroup
+
+		for i, item := range batch {
+			wg.Add(1)
+			go func(idx int, it PendingItem) {
+				defer wg.Done()
+				results[idx] = hydrateResult{
+					idx:      idx,
+					hydrated: p.hydrator.HydrateSingleApp(ctx, it.UserID, it.SourceID, it.Pending),
+				}
+			}(i, item)
+		}
+		wg.Wait()
+
+		// Move hydrated apps to Latest (sequential — writes to the same source slice)
+		for i, item := range batch {
+			if results[i].hydrated && p.dataWatcher != nil {
+				p.dataWatcher.ProcessSingleAppToLatest(item.UserID, item.SourceID, item.Pending)
+			}
+			affectedUsers[item.UserID] = true
+		}
 	}
 
 	return affectedUsers
