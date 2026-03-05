@@ -22,17 +22,17 @@ import (
 
 // CacheManager manages the in-memory cache and Redis synchronization
 type CacheManager struct {
-	cache        *CacheData
-	redisClient  *RedisClient
-	userConfig   *UserConfig
-	stateMonitor *utils.StateMonitor // State monitor for change detection
-	dataSender        *DataSender         // Direct data sender for bypassing state monitor
-	mutex             sync.RWMutex
-	syncChannel       chan SyncRequest
-	stopChannel       chan bool
-	isRunning         bool
-	settingsManager   *settings.SettingsManager
-	cleanupTicker     *time.Ticker // Timer for periodic cleanup of AppRenderFailed
+	cache           *CacheData
+	redisClient     *RedisClient
+	userConfig      *UserConfig
+	stateMonitor    *utils.StateMonitor // State monitor for change detection
+	dataSender      *DataSender         // Direct data sender for bypassing state monitor
+	mutex           sync.RWMutex
+	syncChannel     chan SyncRequest
+	stopChannel     chan bool
+	isRunning       bool
+	settingsManager *settings.SettingsManager
+	cleanupTicker   *time.Ticker // Timer for periodic cleanup of AppRenderFailed
 
 	// Lock monitoring
 	lockStats struct {
@@ -43,7 +43,6 @@ type CacheManager struct {
 		lockCount      int64
 		unlockCount    int64
 	}
-
 }
 
 // startLockWatchdog starts a 1s watchdog for write lock sections and returns a stopper.
@@ -850,7 +849,6 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 	}
 	return nil
 }
-
 
 // updateAppStateLatest updates or adds a single app state based on name matching
 func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData *SourceData, newAppState *types.AppStateLatestData) {
@@ -2517,7 +2515,7 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 		done := make(chan struct{}, 1)
 		go func() {
 			cm.mutex.Lock()
-				done <- struct{}{}
+			done <- struct{}{}
 		}()
 		select {
 		case <-done:
@@ -2632,4 +2630,29 @@ func (cm *CacheManager) ListUsers() {
 			u.UserInfo.Exists = false
 		}
 	}
+}
+
+func (cm *CacheManager) GetCachedData() string {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	var items []map[string]interface{}
+
+	for un, uv := range cm.cache.Users {
+		var user = make(map[string]interface{})
+		var ss = make(map[string]interface{})
+		for sn, sv := range uv.Sources {
+			var apps = make(map[string]interface{})
+			apps["latest"] = len(sv.AppInfoLatest)
+			apps["pending"] = len(sv.AppInfoLatestPending)
+			apps["failed"] = len(sv.AppRenderFailed)
+			apps["history"] = len(sv.AppInfoHistory)
+			ss[sn] = apps
+		}
+		user[un] = ss
+		items = append(items, user)
+	}
+
+	result, _ := json.Marshal(items)
+	return string(result)
 }

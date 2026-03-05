@@ -108,7 +108,7 @@ func (p *Pipeline) loop(ctx context.Context) {
 
 func (p *Pipeline) run(ctx context.Context) {
 	if !p.mutex.TryLock() {
-		glog.V(3).Info("Pipeline: another run in progress, skipping")
+		glog.Warning("Pipeline: another run in progress, skipping")
 		return
 	}
 	defer p.mutex.Unlock()
@@ -143,7 +143,9 @@ func (p *Pipeline) run(ctx context.Context) {
 
 	p.phaseHashAndSync(allAffected)
 
-	glog.V(2).Infof("Pipeline: [LOOP] cycle completed in %v", time.Since(startTime))
+	cahedData := p.cacheManager.GetCachedData()
+
+	glog.V(2).Infof("Pipeline: [LOOP] cycle completed in %v, cached: %s", time.Since(startTime), cahedData)
 }
 
 // phaseSyncer fetches remote data
