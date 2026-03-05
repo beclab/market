@@ -85,7 +85,7 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		Post(url)
 	duration := time.Since(startTime)
 	if err != nil || resp.StatusCode() >= 300 {
-		glog.Errorf("TaskForApiStep - Request failed in %v for user=%s, source=%s, app=%s: %v", duration, task.UserID, task.SourceID, task.AppID, err)
+		glog.Errorf("TaskForApiStep - Request failed in %v for user=%s, source=%s, app=%s(%s/%s): %v", duration, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion, err)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to call chart repo sync-app: %w", err)

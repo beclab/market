@@ -265,6 +265,7 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 	glog.V(2).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis incomplete for appID=%s, name=%s, TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
 	return false
 }
+
 // convertApplicationInfoEntryToMap converts ApplicationInfoEntry to map for task creation
 func (h *Hydrator) convertApplicationInfoEntryToMap(entry *types.ApplicationInfoEntry) map[string]interface{} {
 	if entry == nil {
@@ -425,6 +426,7 @@ func (h *Hydrator) deepCopyValue(value interface{}, visited map[uintptr]bool) in
 		return nil
 	}
 }
+
 // markTaskCompleted moves task from active to completed
 func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask, startedAt time.Time, duration time.Duration) {
 	// Extract file path for cleanup before the lock
@@ -593,8 +595,8 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 		return
 	}
 
-	glog.V(2).Infof("Successfully moved task %s (app: %s) to render failed list with reason: %s, step: %s",
-		task.ID, task.AppID, failureReason, failureStep)
+	glog.V(2).Infof("Successfully moved task %s (app: %s/%s/%s) to render failed list with reason: %s, step: %s",
+		task.ID, task.AppID, task.AppName, task.AppVersion, failureReason, failureStep)
 
 	// Remove from pending list
 	h.removeFromPendingList(task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion)
@@ -607,7 +609,7 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID, appName, appVe
 		return
 	}
 	h.cacheManager.RemoveFromPendingList(userID, sourceID, appID)
-	glog.V(2).Infof("Removed app %s from pending list for user: %s, source: %s", appID, userID, sourceID)
+	glog.V(2).Infof("Removed app %s(%s) from pending list for user: %s, source: %s", appID, appName, userID, sourceID)
 }
 
 // GetMetrics returns hydrator metrics
@@ -1051,6 +1053,7 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, appName, version 
 	glog.V(3).Infof("DEBUG: isAppInLatestQueue returning %v for appID=%s, version=%s, user=%s, source=%s", result, appID, version, userID, sourceID)
 	return result
 }
+
 // isAppInRenderFailedList checks if an app already exists in the render failed list
 func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID, appName string) bool {
 	if h.cacheManager == nil {

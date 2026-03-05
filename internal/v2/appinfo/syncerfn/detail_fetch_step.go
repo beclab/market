@@ -580,7 +580,7 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 	}
 	// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
 	sourceID := source.ID
-	glog.V(2).Infof("Removing all versions of app %s (name: %s) from cache for source: %s (sourceID=%s) [SUSPEND/REMOVE]", appID, appName, source.Name, sourceID)
+	glog.V(2).Infof("Removing all versions of app %s(%s) from cache for source: %s [SUSPEND/REMOVE]", appID, appName, sourceID)
 
 	if data.CacheManager == nil {
 		glog.V(3).Infof("Warning: CacheManager is nil, cannot remove app from cache")
