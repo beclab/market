@@ -78,19 +78,14 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 
 // AddStep adds a step to the syncer
 func (s *Syncer) AddStep(step syncerfn.SyncStep) {
-	if !s.mutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for AddStep, skipping")
-		return
-	}
+	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.steps = append(s.steps, step)
 }
 
 // RemoveStep removes a step by index
 func (s *Syncer) RemoveStep(index int) error {
-	if !s.mutex.TryLock() {
-		return fmt.Errorf("failed to acquire lock for RemoveStep")
-	}
+	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	if index < 0 || index >= len(s.steps) {
@@ -103,10 +98,7 @@ func (s *Syncer) RemoveStep(index int) error {
 
 // GetSteps returns a copy of all steps
 func (s *Syncer) GetSteps() []syncerfn.SyncStep {
-	if !s.mutex.TryRLock() {
-		glog.Warning("[TryRLock] Failed to acquire read lock for GetSteps, returning empty slice")
-		return make([]syncerfn.SyncStep, 0)
-	}
+	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
 	steps := make([]syncerfn.SyncStep, len(s.steps))
@@ -122,9 +114,7 @@ func (s *Syncer) Start(ctx context.Context) error {
 // StartWithOptions starts the syncer with options.
 // If enableSyncLoop is false, the periodic sync loop is not started (Pipeline handles scheduling).
 func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) error {
-	if !s.mutex.TryLock() {
-		return fmt.Errorf("failed to acquire lock for Start")
-	}
+	s.mutex.Lock()
 	if s.isRunning.Load() {
 		s.mutex.Unlock()
 		return fmt.Errorf("syncer is already running")
@@ -272,10 +262,7 @@ func (s *Syncer) hasSyncRelevantConfigChanged() (changed bool, reason string) {
 
 // Stop stops the synchronization process
 func (s *Syncer) Stop() {
-	if !s.mutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for Stop, skipping")
-		return
-	}
+	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	if !s.isRunning.Load() {
@@ -295,11 +282,9 @@ func (s *Syncer) IsRunning() bool {
 // syncLoop runs the main synchronization loop
 func (s *Syncer) syncLoop(ctx context.Context) {
 	defer func() {
-		// Use TryLock for cleanup to avoid blocking
-		if s.mutex.TryLock() {
-			s.isRunning.Store(false)
-			s.mutex.Unlock()
-		}
+		s.mutex.Lock()
+		s.isRunning.Store(false)
+		s.mutex.Unlock()
 		glog.V(4).Info("Syncer stopped")
 	}()
 
@@ -441,10 +426,7 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 
 // updateSyncSuccess updates status after a successful sync
 func (s *Syncer) updateSyncSuccess(duration time.Duration, startTime time.Time) {
-	if !s.statusMutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for updateSyncSuccess, skipping status update")
-		return
-	}
+	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 
 	s.lastSyncSuccess.Store(time.Now())
@@ -459,10 +441,7 @@ func (s *Syncer) updateSyncSuccess(duration time.Duration, startTime time.Time) 
 
 // updateSyncFailure updates status after a failed sync
 func (s *Syncer) updateSyncFailure(err error, startTime time.Time) {
-	if !s.statusMutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for updateSyncFailure, skipping status update")
-		return
-	}
+	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 
 	duration := time.Since(startTime)
@@ -993,12 +972,9 @@ func DefaultSyncerConfig() SyncerConfig {
 
 // SetCacheManager sets the cache manager for hydration notifications
 func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
-	if !s.mutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for SetCacheManager, skipping")
-		return
-	}
+	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.cacheManager.Store(cacheManager) // Use atomic.Store to set the pointer
+	s.cacheManager.Store(cacheManager)
 }
 
 // SyncDetails contains detailed information about a sync operation

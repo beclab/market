@@ -614,53 +614,29 @@ func (h *Hydrator) removeFromPendingList(userID, sourceID, appID, appName, appVe
 
 // GetMetrics returns hydrator metrics
 func (h *Hydrator) GetMetrics() HydratorMetrics {
-	if !h.taskMutex.TryRLock() {
-		glog.Warning("[TryRLock] Failed to acquire read lock for GetMetrics, returning zero metrics")
-		// Try to get worker status even if we can't get task lock
-		var workers []*WorkerStatus
-		if h.workerStatusMutex.TryRLock() {
-			workers = h.getWorkerStatusList()
-			h.workerStatusMutex.RUnlock()
-		}
-		return HydratorMetrics{
-			TotalTasksProcessed:  h.totalTasksProcessed,
-			TotalTasksSucceeded:  h.totalTasksSucceeded,
-			TotalTasksFailed:     h.totalTasksFailed,
-			ActiveTasksCount:     0,
-			CompletedTasksCount:  0,
-			FailedTasksCount:     0,
-			QueueLength:          int64(len(h.taskQueue)),
-			ActiveTasks:          []*TaskInfo{},
-			RecentCompletedTasks: h.getRecentCompletedTasks(),
-			RecentFailedTasks:    h.getRecentFailedTasks(),
-			Workers:              workers,
-		}
-	}
-
-	// Get active tasks info
+	h.taskMutex.RLock()
 	activeTasksList := make([]*TaskInfo, 0, len(h.activeTasks))
 	for _, task := range h.activeTasks {
 		if task != nil {
 			activeTasksList = append(activeTasksList, h.taskToTaskInfo(task))
 		}
 	}
-
+	activeCount := int64(len(h.activeTasks))
+	completedCount := int64(len(h.completedTasks))
+	failedCount := int64(len(h.failedTasks))
 	h.taskMutex.RUnlock()
 
-	// Get worker status
-	var workers []*WorkerStatus
-	if h.workerStatusMutex.TryRLock() {
-		workers = h.getWorkerStatusList()
-		h.workerStatusMutex.RUnlock()
-	}
+	h.workerStatusMutex.RLock()
+	workers := h.getWorkerStatusList()
+	h.workerStatusMutex.RUnlock()
 
 	return HydratorMetrics{
 		TotalTasksProcessed:  h.totalTasksProcessed,
 		TotalTasksSucceeded:  h.totalTasksSucceeded,
 		TotalTasksFailed:     h.totalTasksFailed,
-		ActiveTasksCount:     int64(len(h.activeTasks)),
-		CompletedTasksCount:  int64(len(h.completedTasks)),
-		FailedTasksCount:     int64(len(h.failedTasks)),
+		ActiveTasksCount:     activeCount,
+		CompletedTasksCount:  completedCount,
+		FailedTasksCount:     failedCount,
 		QueueLength:          int64(len(h.taskQueue)),
 		ActiveTasks:          activeTasksList,
 		RecentCompletedTasks: h.getRecentCompletedTasks(),
@@ -724,13 +700,9 @@ func (h *Hydrator) getWorkerStatusList() []*WorkerStatus {
 
 // getRecentCompletedTasks returns recent completed tasks (thread-safe)
 func (h *Hydrator) getRecentCompletedTasks() []*TaskHistoryEntry {
-	// Return a copy to avoid race conditions
-	if !h.workerStatusMutex.TryRLock() {
-		return make([]*TaskHistoryEntry, 0)
-	}
+	h.workerStatusMutex.RLock()
 	defer h.workerStatusMutex.RUnlock()
 
-	// Return a copy
 	result := make([]*TaskHistoryEntry, len(h.recentCompletedTasks))
 	copy(result, h.recentCompletedTasks)
 	return result
@@ -738,13 +710,9 @@ func (h *Hydrator) getRecentCompletedTasks() []*TaskHistoryEntry {
 
 // getRecentFailedTasks returns recent failed tasks (thread-safe)
 func (h *Hydrator) getRecentFailedTasks() []*TaskHistoryEntry {
-	// Return a copy to avoid race conditions
-	if !h.workerStatusMutex.TryRLock() {
-		return make([]*TaskHistoryEntry, 0)
-	}
+	h.workerStatusMutex.RLock()
 	defer h.workerStatusMutex.RUnlock()
 
-	// Return a copy
 	result := make([]*TaskHistoryEntry, len(h.recentFailedTasks))
 	copy(result, h.recentFailedTasks)
 	return result
@@ -821,10 +789,7 @@ func (h *Hydrator) databaseSyncMonitor(ctx context.Context) {
 
 // processCompletedTask processes a single completed task
 func (h *Hydrator) processCompletedTask(taskID string) {
-	if !h.taskMutex.TryRLock() {
-		glog.Warning("[TryRLock] Failed to acquire read lock for processCompletedTask, skipping")
-		return
-	}
+	h.taskMutex.RLock()
 	task, exists := h.completedTasks[taskID]
 	h.taskMutex.RUnlock()
 
@@ -839,10 +804,7 @@ func (h *Hydrator) processCompletedTask(taskID string) {
 
 // processBatchCompletions processes completed tasks in batches
 func (h *Hydrator) processBatchCompletions() {
-	if !h.taskMutex.TryRLock() {
-		glog.Warning("[TryRLock] Failed to acquire read lock for processBatchCompletions, skipping")
-		return
-	}
+	h.taskMutex.RLock()
 	currentCompleted := h.totalTasksSucceeded
 	h.taskMutex.RUnlock()
 
@@ -862,11 +824,7 @@ func (h *Hydrator) checkAndSyncToDatabase() {
 		return
 	}
 
-	// Check if there are completed tasks that need syncing
-	if !h.taskMutex.TryRLock() {
-		glog.Warning("[TryRLock] Failed to acquire read lock for checkAndSyncToDatabase, skipping")
-		return
-	}
+	h.taskMutex.RLock()
 	completedCount := len(h.completedTasks)
 	h.taskMutex.RUnlock()
 
@@ -904,10 +862,7 @@ func (h *Hydrator) triggerDatabaseSync() {
 
 // cleanupOldCompletedTasks removes old completed tasks from memory
 func (h *Hydrator) cleanupOldCompletedTasks() {
-	if !h.taskMutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for cleanupOldCompletedTasks, skipping")
-		return
-	}
+	h.taskMutex.Lock()
 	defer h.taskMutex.Unlock()
 
 	// Keep only the most recent 100 completed tasks
@@ -944,10 +899,7 @@ func (h *Hydrator) monitorMemoryUsage() {
 
 	h.lastMemoryCheck = time.Now()
 
-	if !h.taskMutex.TryRLock() {
-		glog.Warning("[TryRLock] Failed to acquire read lock for monitorMemoryUsage, skipping")
-		return
-	}
+	h.taskMutex.RLock()
 	activeCount := len(h.activeTasks)
 	completedCount := len(h.completedTasks)
 	failedCount := len(h.failedTasks)
@@ -966,10 +918,7 @@ func (h *Hydrator) monitorMemoryUsage() {
 
 // cleanupOldTasks cleans up old tasks from all task maps
 func (h *Hydrator) cleanupOldTasks() {
-	if !h.taskMutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for cleanupOldTasks, skipping")
-		return
-	}
+	h.taskMutex.Lock()
 	defer h.taskMutex.Unlock()
 
 	now := time.Now()

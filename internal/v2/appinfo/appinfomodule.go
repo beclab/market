@@ -402,25 +402,14 @@ func (m *AppInfoModule) GetRedisConfig() *RedisConfig {
 
 // IsStarted returns whether the module is currently running
 func (m *AppInfoModule) IsStarted() bool {
-	// Boolean read is atomic, but we need to ensure consistency with Start/Stop operations
-	if !m.mutex.TryRLock() {
-		glog.Warning("[TryRLock] AppInfoModule.IsStarted: Read lock not available, returning false")
-		return false
-	}
+	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.isStarted
 }
 
 // GetModuleStatus returns the current status of the module and all components
 func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
-	// Need read lock to ensure consistent snapshot of all component states
-	if !m.mutex.TryRLock() {
-		glog.Warning("[TryRLock] AppInfoModule.GetModuleStatus: Read lock not available, returning error status")
-		return map[string]interface{}{
-			"error":  "lock not available",
-			"status": "unknown",
-		}
-	}
+	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
 	status := map[string]interface{}{
