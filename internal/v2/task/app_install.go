@@ -9,8 +9,6 @@ import (
 	"os"
 	"strings"
 
-	"market/internal/v2/settings"
-
 	"github.com/golang/glog"
 )
 
@@ -128,13 +126,9 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 
 	// Get VC from purchase receipt and inject into environment variables
-	var settingsManager *settings.SettingsManager
-	if tm.mu.TryRLock() {
-		settingsManager = tm.settingsManager
-		tm.mu.RUnlock()
-	} else {
-		glog.Warningf("[TryRLock] Failed to acquire read lock for settingsManager, skipping VC injection for task: %s, user: %s, app: %s", task.ID, task.User, task.AppName)
-	}
+	tm.mu.RLock()
+	settingsManager := tm.settingsManager
+	tm.mu.RUnlock()
 
 	if settingsManager != nil {
 		vcAppID := appName
