@@ -1157,6 +1157,8 @@ func (dw *DataWatcherState) processDelayedMessagesBatch() {
 	dw.delayedMessagesMutex.Lock()
 	defer dw.delayedMessagesMutex.Unlock()
 
+	glog.Info("DatawatcherState process")
+
 	now := time.Now()
 	var remaining []*DelayedMessage
 	maxRetries := 10 // Maximum 10 retries (about 20 seconds total)

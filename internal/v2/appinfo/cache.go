@@ -1767,10 +1767,7 @@ func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
 // HasUserStateDataForSource checks if any user has non-empty state data for a specific source
 func (cm *CacheManager) HasUserStateDataForSource(sourceID string) bool {
 	cm.mutex.RLock()
-	defer func() {
-		cm.mutex.RUnlock()
-		glog.V(4).Infof("[LOCK] cm.mutex.RUnlock() @HasUserStateDataForSource End")
-	}()
+	defer cm.mutex.RUnlock()
 
 	if cm.cache == nil {
 		return false
@@ -2647,6 +2644,15 @@ func (cm *CacheManager) GetCachedData() string {
 			apps["pending"] = len(sv.AppInfoLatestPending)
 			apps["failed"] = len(sv.AppRenderFailed)
 			apps["history"] = len(sv.AppInfoHistory)
+			apps["state"] = len(sv.AppStateLatest)
+			var status []string
+			if len(sv.AppStateLatest) > 0 {
+				for _, state := range sv.AppStateLatest {
+					status = append(status, fmt.Sprintf("%s_%s", state.Status.Name, state.Status.State))
+				}
+			}
+			apps["state_apps"] = status
+
 			ss[sn] = apps
 		}
 		user[un] = ss
