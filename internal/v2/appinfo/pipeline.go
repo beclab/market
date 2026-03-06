@@ -172,6 +172,8 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		return affectedUsers
 	}
 
+	p.cacheManager.RestoreRetryableFailedToPending(50)
+
 	items := p.cacheManager.CollectAllPendingItems()
 
 	if len(items) == 0 {

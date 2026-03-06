@@ -571,6 +571,51 @@ func (cm *CacheManager) CollectAllPendingItems() []PendingItem {
 	return items
 }
 
+// RestoreRetryableFailedToPending moves up to `limit` items from AppRenderFailed
+// back to AppInfoLatestPending (FIFO order) so they can be retried by the hydrator.
+// Items are removed from AppRenderFailed to avoid duplicates.
+// Returns the number of items restored.
+func (cm *CacheManager) RestoreRetryableFailedToPending(limit int) int {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	restored := 0
+	for _, userData := range cm.cache.Users {
+		if restored >= limit {
+			break
+		}
+		for _, sourceData := range userData.Sources {
+			if restored >= limit {
+				break
+			}
+			i := 0
+			for i < len(sourceData.AppRenderFailed) && restored < limit {
+				fd := sourceData.AppRenderFailed[i]
+				if fd == nil || fd.RawData == nil {
+					i++
+					continue
+				}
+				sourceData.AppInfoLatestPending = append(sourceData.AppInfoLatestPending, &types.AppInfoLatestPendingData{
+					Type:            types.AppInfoLatestPending,
+					Timestamp:       fd.Timestamp,
+					Version:         fd.Version,
+					RawData:         fd.RawData,
+					RawPackage:      fd.RawPackage,
+					Values:          fd.Values,
+					AppInfo:         fd.AppInfo,
+					RenderedPackage: fd.RenderedPackage,
+				})
+				sourceData.AppRenderFailed = append(sourceData.AppRenderFailed[:i], sourceData.AppRenderFailed[i+1:]...)
+				restored++
+			}
+		}
+	}
+	if restored > 0 {
+		glog.V(2).Infof("RestoreRetryableFailedToPending: restored %d failed apps to pending queue", restored)
+	}
+	return restored
+}
+
 // SnapshotSourcePending returns shallow copies of the pending and latest slices
 // for the given user/source, safe for iteration outside the lock.
 func (cm *CacheManager) SnapshotSourcePending(userID, sourceID string) (
