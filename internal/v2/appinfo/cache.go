@@ -2455,103 +2455,49 @@ func (cm *CacheManager) cleanupWorker() {
 
 // ClearAppRenderFailedData clears all AppRenderFailed data for all users and sources
 func (cm *CacheManager) ClearAppRenderFailedData() {
-	glog.V(3).Info("INFO: Starting periodic cleanup of AppRenderFailed data")
+	glog.Info("INFO: Starting periodic cleanup of AppRenderFailed data")
 
-	start := time.Now()
-	// 1) Short lock phase: collect keys to be cleaned and count the number
-	type target struct{ userID, sourceID string }
-	targets := make([]target, 0, 128)
-	counts := make(map[target]int)
-
-	glog.V(3).Info("INFO: [Cleanup] Attempting to acquire read lock for scan phase")
 	cm.mutex.RLock()
-	scanLockAcquiredAt := time.Now()
-	glog.V(3).Info("INFO: [Cleanup] Read lock acquired (scan). Hold minimal time")
-
 	if cm.cache == nil {
 		cm.mutex.RUnlock()
-		glog.V(4).Info("WARN: Cache is nil, skipping AppRenderFailed cleanup")
 		return
 	}
+
+	type target struct{ userID, sourceID string }
+	targets := make([]target, 0, 128)
 
 	for userID, userData := range cm.cache.Users {
 		for sourceID, sourceData := range userData.Sources {
-			if n := len(sourceData.AppRenderFailed); n > 0 {
-				t := target{userID: userID, sourceID: sourceID}
-				targets = append(targets, t)
-				counts[t] = n
+			if len(sourceData.AppRenderFailed) > 0 {
+				targets = append(targets, target{userID: userID, sourceID: sourceID})
 			}
 		}
 	}
 
-	// 2) Release read lock after scan
 	cm.mutex.RUnlock()
-	glog.V(3).Infof("INFO: [Cleanup] Released read lock after scan (held %v), targets=%d", time.Since(scanLockAcquiredAt), len(targets))
-
-	// 3) Processing phase: Use batch processing to avoid lock contention
-	totalCleared := 0
 
 	if len(targets) == 0 {
-		glog.V(3).Infof("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
 		return
 	}
 
-	// Use single write lock to batch process all targets to avoid lock contention
-	glog.V(3).Infof("INFO: [Cleanup] Processing %d targets in batch mode", len(targets))
+	start := time.Now()
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
 
-	// Use short timeout to quickly acquire write lock to avoid writer starvation
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-	defer cancel()
-
-	// Use channel to implement non-blocking lock acquisition
-	lockAcquired := make(chan struct{}, 1)
-	lockFailed := make(chan struct{}, 1)
-
-	// Start goroutine to attempt lock acquisition (only for very short time, give up immediately if not acquired)
-	go func() {
-		done := make(chan struct{}, 1)
-		go func() {
-			cm.mutex.Lock()
-			done <- struct{}{}
-		}()
-		select {
-		case <-done:
-			// Successfully acquired lock
-			lockAcquired <- struct{}{}
-		case <-ctx.Done():
-			// Failed to acquire write lock quickly, give up immediately to avoid reader starvation
-			lockFailed <- struct{}{}
-		}
-	}()
-
-	// Wait for lock acquisition result
-	select {
-	case <-lockAcquired:
-		// Successfully acquired lock, batch process all targets
-		defer cm.mutex.Unlock()
-
-		for _, t := range targets {
-			if userData, ok := cm.cache.Users[t.userID]; ok {
-				if sourceData, ok2 := userData.Sources[t.sourceID]; ok2 {
-					originalCount := len(sourceData.AppRenderFailed)
-					if originalCount > 0 {
-						sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
-						totalCleared += originalCount
-						glog.V(3).Infof("INFO: [Cleanup] Cleared %d AppRenderFailed entries for user=%s, source=%s", originalCount, t.userID, t.sourceID)
-					}
+	count := 0
+	for _, t := range targets {
+		if userData, ok := cm.cache.Users[t.userID]; ok {
+			if sourceData, ok := userData.Sources[t.sourceID]; ok {
+				if len(sourceData.AppRenderFailed) > 0 {
+					count += len(sourceData.AppRenderFailed)
+					sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
 				}
 			}
 		}
-
-	case <-lockFailed:
-		glog.Error("DEBUG: [Cleanup] Failed to acquire write lock quickly, skipping cleanup to avoid reader starvation")
-		return
 	}
 
-	if totalCleared > 0 {
-		glog.V(2).Infof("INFO: Periodic cleanup completed, cleared %d total AppRenderFailed entries in %v", totalCleared, time.Since(start))
-	} else {
-		glog.V(3).Infof("DEBUG: No AppRenderFailed entries found during periodic cleanup (took %v)", time.Since(start))
+	if count > 0 {
+		glog.Infof("INFO: [Cleanup] Cleared %d AppRenderFailed entries in %v", count, time.Since(start))
 	}
 }
 
