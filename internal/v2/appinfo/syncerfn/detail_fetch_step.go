@@ -487,8 +487,9 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		glog.V(3).Info("Mutex lock released successfully")
 
 		// Now remove apps from cache after releasing the main lock to avoid nested locks
+		var source = data.GetMarketSource()
 		for _, appToRemove := range appsToRemove {
-			d.removeAppFromCache(appToRemove.appID, appToRemove.appInfoMap, data)
+			d.removeAppFromCache(appToRemove.appID, appToRemove.appInfoMap, data, source)
 		}
 
 		// Count successful and failed apps
@@ -554,7 +555,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 }
 
 // removeAppFromCache removes an app from cache for all users
-func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string]interface{}, data *SyncContext) {
+func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string]interface{}, data *SyncContext, source *settings.MarketSource) {
 	appName, ok := appInfoMap["name"].(string)
 	if !ok || appName == "" {
 		glog.V(3).Infof("Warning: Cannot remove app from cache - app name is empty for app: %s", appID)
@@ -570,14 +571,6 @@ func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string
 
 	glog.V(3).Infof("Starting to remove app %s %s from cache", appID, appName)
 
-	// Get app name for matching - when an app is suspended, remove ALL versions of that app
-
-	// Get source ID from market source
-	source := data.GetMarketSource()
-	if source == nil {
-		glog.V(3).Infof("Warning: MarketSource is nil, cannot remove app %s %s from cache", appID, appName)
-		return
-	}
 	// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
 	sourceID := source.ID
 	glog.V(2).Infof("Removing all versions of app %s(%s) from cache for source: %s [SUSPEND/REMOVE]", appID, appName, sourceID)
@@ -599,10 +592,13 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 	}
 
 	sourceID := ""
-	if marketSource := data.GetMarketSource(); marketSource != nil {
-		// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
-		sourceID = marketSource.ID
+	marketSource := data.GetMarketSource()
+	if marketSource == nil {
+		glog.Error("[DetailFetchStep] MarketSource not found")
+		return
 	}
+
+	sourceID = marketSource.ID
 
 	// Collect apps to remove
 	appsToRemove := make([]struct {
@@ -688,7 +684,7 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 				}
 			}
 			if appInfoMapForRemoval != nil {
-				d.removeAppFromCache(appIDForRemoval, appInfoMapForRemoval, data)
+				d.removeAppFromCache(appIDForRemoval, appInfoMapForRemoval, data, marketSource)
 			}
 		}
 	}

@@ -2500,7 +2500,7 @@ func (cm *CacheManager) cleanupWorker() {
 
 // ClearAppRenderFailedData clears all AppRenderFailed data for all users and sources
 func (cm *CacheManager) ClearAppRenderFailedData() {
-	glog.Info("INFO: Starting periodic cleanup of AppRenderFailed data")
+	glog.Info("INFO: [Cleanup] Starting periodic cleanup of AppRenderFailed data")
 
 	cm.mutex.RLock()
 	if cm.cache == nil {

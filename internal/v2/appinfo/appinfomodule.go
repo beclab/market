@@ -1272,6 +1272,7 @@ func (m *AppInfoModule) SyncUserListToCache() error {
 }
 
 // RefreshUserDataStructures ensures all configured users have proper data structures
+// not used
 func (m *AppInfoModule) RefreshUserDataStructures() error {
 	// Check isStarted without lock since it's only read
 	if !m.isStarted {
