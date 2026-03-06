@@ -321,6 +321,9 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 	if userInfo == nil {
 		userInfo = map[string]interface{}{}
 	}
+	if allUsers == nil {
+		allUsers = make([]map[string]string, 0)
+	}
 	if curUserResource == nil {
 		curUserResource = map[string]interface{}{}
 	}
