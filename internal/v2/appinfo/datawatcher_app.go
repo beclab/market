@@ -103,6 +103,7 @@ func (dw *DataWatcher) IsRunning() bool {
 }
 
 // watchLoop is the main monitoring loop
+// ~ not used
 func (dw *DataWatcher) watchLoop(ctx context.Context) {
 	glog.Infof("DataWatcher monitoring loop started")
 	defer glog.Infof("DataWatcher monitoring loop stopped")
@@ -111,7 +112,7 @@ func (dw *DataWatcher) watchLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	// Run once immediately
-	dw.processCompletedApps()
+	dw.processCompletedApps() // not used
 
 	for {
 		select {
@@ -122,7 +123,7 @@ func (dw *DataWatcher) watchLoop(ctx context.Context) {
 			glog.Infof("DataWatcher stopped due to explicit stop")
 			return
 		case <-ticker.C:
-			dw.processCompletedApps()
+			dw.processCompletedApps() // not used
 		}
 	}
 }
@@ -148,7 +149,7 @@ func (dw *DataWatcher) processCompletedApps() {
 	// Get all users data from cache manager with timeout
 	var allUsersData map[string]*types.UserData
 
-	allUsersData = dw.cacheManager.GetAllUsersData()
+	allUsersData = dw.cacheManager.GetAllUsersData() // not used
 
 	if len(allUsersData) == 0 {
 		glog.Infof("DataWatcher: No users data found, processing cycle completed")
@@ -172,7 +173,7 @@ func (dw *DataWatcher) processCompletedApps() {
 
 		// Process batch when it's full or we've reached the end
 		if len(userBatch) >= batchSize || userCount == len(allUsersData) {
-			batchProcessed, batchMoved := dw.processUserBatch(ctx, userBatch, userDataBatch)
+			batchProcessed, batchMoved := dw.processUserBatch(ctx, userBatch, userDataBatch) // not used
 			totalProcessed += batchProcessed
 			totalMoved += batchMoved
 
@@ -224,7 +225,7 @@ func (dw *DataWatcher) processUserBatch(ctx context.Context, userIDs []string, u
 		}
 
 		glog.V(3).Infof("DataWatcher: Processing user %d/%d in batch: %s", i+1, len(userIDs), userID)
-		processed, moved := dw.processUserData(userID, userData)
+		processed, moved := dw.processUserData(userID, userData) // not used
 		totalProcessed += processed
 		totalMoved += moved
 		glog.V(2).Infof("DataWatcher: User %s completed: %d processed, %d moved", userID, processed, moved)
@@ -234,6 +235,7 @@ func (dw *DataWatcher) processUserBatch(ctx context.Context, userIDs []string, u
 }
 
 // processUserData processes a single user's data
+// ~ not used
 func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) (int64, int64) {
 	if userData == nil {
 		return 0, 0
@@ -250,7 +252,7 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 	totalMoved := int64(0)
 
 	for sourceID, sourceData := range sourceRefs {
-		processed, moved := dw.processSourceData(userID, sourceID, sourceData)
+		processed, moved := dw.processSourceData(userID, sourceID, sourceData) // not used
 		totalProcessed += processed
 		totalMoved += moved
 	}
@@ -388,6 +390,7 @@ func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *typ
 }
 
 // processSourceData processes a single source's data for completed hydration
+// ~ not used
 func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *types.SourceData) (int64, int64) {
 	if sourceData == nil {
 		return 0, 0
@@ -455,12 +458,12 @@ func (dw *DataWatcher) processSourceData(userID, sourceID string, sourceData *ty
 				newVersion = latestData.AppInfo.AppEntry.Version
 			}
 			if oldVersion != newVersion {
-				dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
+				dw.sendNewAppReadyNotification(userID, completedApp, sourceID) // ~ not used
 			}
 			glog.V(3).Infof("DataWatcher: Replaced existing app: %s", appName)
 		} else {
 			glog.V(2).Infof("DataWatcher: Added new app to latest: %s", appName)
-			dw.sendNewAppReadyNotification(userID, completedApp, sourceID)
+			dw.sendNewAppReadyNotification(userID, completedApp, sourceID) // ~ not used
 		}
 		movedCount++
 	}
@@ -914,7 +917,7 @@ func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
 	glog.V(3).Infof("DataWatcher: Force calculating hash for all users")
 
 	// Get all users data
-	allUsersData := dw.cacheManager.GetAllUsersData()
+	allUsersData := dw.cacheManager.GetAllUsersData() // not used
 	if len(allUsersData) == 0 {
 		return fmt.Errorf("no users found in cache")
 	}
@@ -1044,7 +1047,7 @@ func (dw *DataWatcher) ProcessSingleAppToLatest(userID, sourceID string, pending
 
 	appID := dw.getAppID(pendingApp)
 	appName := dw.getAppName(pendingApp)
-	glog.V(2).Infof("Pipeline: ProcessSingleAppToLatest user=%s, source=%s, id=%s, name=%s", userID, sourceID, appID, appName)
+	glog.V(2).Infof("Pipeline Phase 2: ProcessSingleAppToLatest user=%s, source=%s, id=%s, name=%s", userID, sourceID, appID, appName)
 
 	oldVersion, replaced, ok := dw.cacheManager.UpsertLatestAndRemovePending(userID, sourceID, latestData, appID, appName)
 	if !ok {
@@ -1057,12 +1060,12 @@ func (dw *DataWatcher) ProcessSingleAppToLatest(userID, sourceID string, pending
 			newVersion = latestData.AppInfo.AppEntry.Version
 		}
 		if oldVersion != newVersion {
-			dw.sendNewAppReadyNotification(userID, pendingApp, sourceID)
+			dw.sendNewAppReadyNotification(userID, pendingApp, sourceID) // ~ ProcesSingleAppToLatest
 		}
 		glog.V(2).Infof("ProcessSingleAppToLatest: replaced existing app %s (user=%s, source=%s)", appName, userID, sourceID)
 	} else {
 		glog.V(2).Infof("ProcessSingleAppToLatest: added new app %s (user=%s, source=%s)", appName, userID, sourceID)
-		dw.sendNewAppReadyNotification(userID, pendingApp, sourceID)
+		dw.sendNewAppReadyNotification(userID, pendingApp, sourceID) // ~ ProcesSingleAppToLatest
 	}
 
 	atomic.AddInt64(&dw.totalAppsMoved, 1)

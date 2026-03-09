@@ -111,8 +111,8 @@ func (cm *CacheManager) GetDiagnosticJSON() (string, error) {
 	}
 
 	// Get cache stats and users data for JSON response
-	cacheStats := cm.GetCacheStats()
-	allUsersData := cm.GetAllUsersData()
+	cacheStats := cm.GetCacheStats()     // not used
+	allUsersData := cm.GetAllUsersData() // not used
 
 	diagnosticInfo := map[string]interface{}{
 		"cache_stats":   cacheStats,

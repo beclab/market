@@ -138,7 +138,7 @@ func (dwr *DataWatcherRepo) Start() error {
 	glog.V(3).Info("Starting data watcher with 2-minute intervals")
 
 	// Start the monitoring goroutine
-	go dwr.monitorStateChanges()
+	go dwr.monitorStateChanges() // not used
 
 	return nil
 }
@@ -202,14 +202,14 @@ func (dwr *DataWatcherRepo) monitorStateChanges() {
 	glog.V(3).Info("State change monitoring started")
 
 	// Process immediately on start
-	if err := dwr.processStateChanges(); err != nil {
+	if err := dwr.processStateChanges(); err != nil { // not used
 		glog.Errorf("Error processing state changes on startup: %v", err)
 	}
 
 	for {
 		select {
 		case <-dwr.ticker.C:
-			if err := dwr.processStateChanges(); err != nil {
+			if err := dwr.processStateChanges(); err != nil { // not used
 				glog.Errorf("Error processing state changes: %v", err)
 			}
 		case <-dwr.stopChannel:
@@ -221,7 +221,7 @@ func (dwr *DataWatcherRepo) monitorStateChanges() {
 
 // processStateChanges fetches and processes new state changes
 func (dwr *DataWatcherRepo) processStateChanges() map[string]bool {
-	glog.V(3).Infof("Processing state changes after ID: %d", dwr.lastProcessedID)
+	glog.V(2).Infof("Processing state changes after ID: %d", dwr.lastProcessedID)
 	affectedUsers := make(map[string]bool)
 
 	stateChanges, err := dwr.fetchStateChanges(dwr.lastProcessedID)
@@ -231,7 +231,7 @@ func (dwr *DataWatcherRepo) processStateChanges() map[string]bool {
 	}
 
 	if len(stateChanges) == 0 {
-		glog.V(3).Info("No new state changes found")
+		glog.V(2).Info("No new state changes found")
 		return affectedUsers
 	}
 
@@ -250,17 +250,17 @@ func (dwr *DataWatcherRepo) processStateChanges() map[string]bool {
 			continue
 		}
 
-		// Track affected users from each change type
-		if change.AppData != nil && change.AppData.UserID != "" {
-			affectedUsers[change.AppData.UserID] = true
-		}
-		if change.Type == "image_info_updated" {
-			// Image updates affect all users
-			allUsers := dwr.cacheManager.GetAllUsersData()
-			for userID := range allUsers {
-				affectedUsers[userID] = true
-			}
-		}
+		// // Track affected users from each change type
+		// if change.AppData != nil && change.AppData.UserID != "" {
+		// 	affectedUsers[change.AppData.UserID] = true
+		// }
+		// if change.Type == "image_info_updated" {
+		// 	// Image updates affect all users
+		// 	allUsers := dwr.cacheManager.GetAllUsersData()
+		// 	for userID := range allUsers {
+		// 		affectedUsers[userID] = true
+		// 	}
+		// }
 
 		lastProcessedID = change.ID
 	}
@@ -349,7 +349,7 @@ func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *StateChange) error 
 	shouldUpdate := dwr.shouldUpdateAppInCache(change.AppData.UserID, change.AppData.Source, change.AppData.AppName, appInfo)
 
 	if !shouldUpdate {
-		glog.V(3).Infof("App %s already exists in cache with same or newer version for user %s, source %s",
+		glog.V(2).Infof("App %s already exists in cache with same or newer version for user %s, source %s",
 			change.AppData.AppName, change.AppData.UserID, change.AppData.Source)
 		return nil
 	}

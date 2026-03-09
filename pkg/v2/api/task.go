@@ -216,11 +216,11 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if targetApp.AppInfo == nil {
-		glog.V(2).Infof("installApp: targetApp.AppInfo is nil for app=%s source=%s", request.AppName, request.Source)
+		glog.V(2).Infof("installApp: targetApp.AppInfo is nil for app=%s, source=%s", request.AppName, request.Source)
 	} else if targetApp.AppInfo.Price == nil {
-		glog.V(2).Infof("installApp: targetApp.AppInfo.Price is nil for app=%s source=%s", request.AppName, request.Source)
+		glog.V(2).Infof("installApp: targetApp.AppInfo.Price is nil for app=%s, source=%s", request.AppName, request.Source)
 	} else {
-		glog.V(2).Infof("installApp: targetApp.AppInfo.Price detected for app=%s source=%s", request.AppName, request.Source)
+		glog.V(2).Infof("installApp: targetApp.AppInfo.Price detected for app=%s, source=%s", request.AppName, request.Source)
 	}
 
 	// Step 8: Verify chart package exists
@@ -254,7 +254,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	productID, developerName := extractInstallProductMetadata(targetApp.AppInfo)
-	glog.V(2).Infof("installApp: extracted product metadata app=%s source=%s productID=%s developer=%s", request.AppName, request.Source, productID, developerName)
+	glog.V(2).Infof("installApp: extracted product metadata app=%s, source=%s, productID=%s, developer=%s", request.AppName, request.Source, productID, developerName)
 
 	realAppID := request.AppName
 	if targetApp.AppInfo != nil && targetApp.AppInfo.AppEntry != nil && targetApp.AppInfo.AppEntry.ID != "" {
@@ -262,7 +262,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	} else if targetApp.RawData != nil && targetApp.RawData.AppID != "" {
 		realAppID = targetApp.RawData.AppID
 	}
-	glog.V(2).Infof("installApp: resolved realAppID=%s for app=%s source=%s", realAppID, request.AppName, request.Source)
+	glog.V(2).Infof("installApp: resolved realAppID=%s for app=%s, source=%s, sync=%v", realAppID, request.AppName, request.Source, request.Sync)
 
 	// Step 10: Create installation task
 	taskMetadata := map[string]interface{}{
@@ -278,15 +278,15 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if productID != "" {
 		taskMetadata["productID"] = productID
-		glog.V(2).Infof("installApp: added productID=%s to metadata for app=%s source=%s", productID, request.AppName, request.Source)
+		glog.V(2).Infof("installApp: added productID=%s to metadata for app=%s, source=%s", productID, request.AppName, request.Source)
 	}
 	if developerName != "" {
 		taskMetadata["developerName"] = developerName
-		glog.V(2).Infof("installApp: added developerName=%s to metadata for app=%s source=%s", developerName, request.AppName, request.Source)
+		glog.V(2).Infof("installApp: added developerName=%s to metadata for app=%s, source=%s", developerName, request.AppName, request.Source)
 	}
 	if realAppID != "" {
 		taskMetadata["realAppID"] = realAppID
-		glog.V(2).Infof("installApp: added realAppID=%s to metadata for app=%s source=%s", realAppID, request.AppName, request.Source)
+		glog.V(2).Infof("installApp: added realAppID=%s to metadata for app=%s, source=%s", realAppID, request.AppName, request.Source)
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -311,7 +311,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		glog.V(2).Infof("Created synchronous installation task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
+		glog.V(2).Infof("Created synchronous installation task: ID=%s for app: %s, version: %s", task.ID, request.AppName, request.Version)
 
 		// Wait for task completion
 		<-done
@@ -356,7 +356,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	glog.V(2).Infof("Created asynchronous installation task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
+	glog.V(2).Infof("Created asynchronous installation task: ID=%s for app: %s, version: %s", task.ID, request.AppName, request.Version)
 
 	// Return immediately for asynchronous requests
 	s.sendResponse(w, http.StatusOK, true, "App installation started successfully", map[string]interface{}{

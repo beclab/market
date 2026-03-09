@@ -762,7 +762,7 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 
 	// Build the set of delisted app IDs (apps NOT in validApps)
 	delistedAppIDs := make(map[string]bool)
-	allUsersData := m.cacheManager.GetAllUsersData()
+	allUsersData := m.cacheManager.GetAllUsersData() // ~ correctCacheWithChartRepo
 	for _, userData := range allUsersData {
 		for sourceID, sourceData := range userData.Sources {
 			for _, app := range sourceData.AppInfoLatest {
@@ -1110,7 +1110,7 @@ func (m *AppInfoModule) SetAppData(userID, sourceID string, dataType AppDataType
 	if !m.isStarted || m.cacheManager == nil {
 		return fmt.Errorf("module is not started or cache manager is not available")
 	}
-	return m.cacheManager.SetAppData(userID, sourceID, dataType, data)
+	return m.cacheManager.SetAppData(userID, sourceID, dataType, data, "AppInfoModule")
 }
 
 // GetAppData is a convenience function to get app data
@@ -1318,7 +1318,7 @@ func (m *AppInfoModule) GetCachedUsers() []string {
 		return []string{}
 	}
 
-	allUsersData := m.cacheManager.GetAllUsersData()
+	allUsersData := m.cacheManager.GetAllUsersData() // not used
 	users := make([]string, 0, len(allUsersData))
 	for userID := range allUsersData {
 		users = append(users, userID)
@@ -1357,7 +1357,7 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 		},
 	}
 
-	allUsersForReport := m.cacheManager.GetAllUsersData()
+	allUsersForReport := m.cacheManager.GetAllUsersData() // not used
 
 	totalUsers := 0
 	totalSources := 0

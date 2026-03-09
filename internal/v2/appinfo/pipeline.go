@@ -172,8 +172,8 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		return affectedUsers
 	}
 
-	count := p.cacheManager.RestoreRetryableFailedToPending(20)
-	glog.Infof("Pipeline Phase 2: restore %d Failed to Pending", count)
+	// count := p.cacheManager.RestoreRetryableFailedToPending(20)
+	// glog.Infof("Pipeline Phase 2: restore %d Failed to Pending", count)
 
 	items := p.cacheManager.CollectAllPendingItems()
 
@@ -281,7 +281,7 @@ func (p *Pipeline) phaseDataWatcherRepo(ctx context.Context) map[string]bool {
 		return nil
 	default:
 	}
-	glog.V(3).Info("Pipeline Phase 3: DataWatcherRepo")
+	glog.V(2).Info("Pipeline Phase 3: DataWatcherRepo")
 	return p.dataWatcherRepo.ProcessOnce()
 }
 
@@ -297,7 +297,7 @@ func (p *Pipeline) phaseStatusCorrection(ctx context.Context) map[string]bool {
 		return nil
 	default:
 	}
-	glog.V(3).Info("Pipeline Phase 4: StatusCorrectionChecker")
+	glog.V(2).Info("Pipeline Phase 4: StatusCorrectionChecker")
 	return p.statusCorrectionChecker.PerformStatusCheckOnce()
 }
 
@@ -315,7 +315,7 @@ func (p *Pipeline) phaseHashAndSync(affectedUsers map[string]bool) {
 	}
 	if p.cacheManager != nil {
 		if err := p.cacheManager.ForceSync(); err != nil {
-			glog.Warningf("Pipeline: ForceSync rate limited: %v", err)
+			glog.Errorf("Pipeline Phase 5: ForceSync rate limited: %v", err)
 		}
 	}
 }
@@ -348,7 +348,7 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string
 	}
 
 	if h.isAppInRenderFailedList(userID, sourceID, appID, appName) {
-		glog.V(2).Infof("HydrateSingleApp: skipping %s %s (user=%s, source=%s) - in render failed list, will retry after cleanup",
+		glog.V(2).Infof("HydrateSingleApp: skipping %s(%s) (user=%s, source=%s) - in render failed list, will retry after cleanup",
 			appID, appName, userID, sourceID)
 		return false
 	}
@@ -362,14 +362,14 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string
 		version = pendingData.RawData.Version
 	}
 	if h.isAppInLatestQueue(userID, sourceID, appID, appName, version) {
-		glog.V(2).Infof("HydrateSingleApp: skipping %s %s (user=%s, source=%s) - already in latest queue with version %s",
+		glog.V(2).Infof("HydrateSingleApp: skipping %s(%s) (user=%s, source=%s) - already in latest queue with version %s",
 			appID, appName, userID, sourceID, version)
 		return false
 	}
 
 	appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
 	if len(appDataMap) == 0 {
-		glog.V(2).Infof("HydrateSingleApp: skipping %s %s (user=%s, source=%s) - convertApplicationInfoEntryToMap returned empty",
+		glog.V(2).Infof("HydrateSingleApp: skipping %s(%s) (user=%s, source=%s) - convertApplicationInfoEntryToMap returned empty",
 			appID, appName, userID, sourceID)
 		return false
 	}
@@ -394,7 +394,7 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string
 		if err := step.Execute(ctx, task); err != nil {
 			failureReason := err.Error()
 			failureStep := step.GetStepName()
-			glog.Errorf("HydrateSingleApp: step %s failed for app %s %s: %v", failureStep, appID, appName, err)
+			glog.Errorf("HydrateSingleApp: step %s failed for app %s(%s): %v", failureStep, appID, appName, err)
 			h.moveTaskToRenderFailed(task, failureReason, failureStep)
 			duration := time.Since(taskStartTime)
 			h.markTaskFailed(task, taskStartTime, duration, failureStep, failureReason)
@@ -404,13 +404,13 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string
 	}
 
 	if !h.isAppHydrationComplete(pendingData) {
-		glog.Warningf("HydrateSingleApp: steps completed but data incomplete for app %s %s, will retry next cycle", appID, appName)
+		glog.Warningf("HydrateSingleApp: steps completed but data incomplete for app %s(%s), will retry next cycle", appID, appName)
 		return false
 	}
 
 	task.SetStatus(hydrationfn.TaskStatusCompleted)
 	duration := time.Since(taskStartTime)
 	h.markTaskCompleted(task, taskStartTime, duration)
-	glog.V(2).Infof("HydrateSingleApp: completed for app %s %s in %v", appID, appName, duration)
+	glog.V(2).Infof("HydrateSingleApp: completed for app %s(%s) in %v", appID, appName, duration)
 	return true
 }

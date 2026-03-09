@@ -59,7 +59,7 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	glog.Infof("Sending HTTP request for app cancel: task=%s, app_name=%s", task.ID, appName)
+	glog.Infof("[APP] Sending HTTP request for app cancel: task=%s, app_name=%s", task.ID, appName)
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, nil)
 	if err != nil {
 		glog.Errorf("HTTP request failed for app cancel: task=%s, error=%v", task.ID, err)
@@ -78,7 +78,7 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 		return string(errorJSON), err
 	}
 
-	glog.Infof("HTTP request completed successfully for app cancel: task=%s, response_length=%d", task.ID, len(response))
+	glog.Infof("[APP] HTTP request completed successfully for app cancel: task=%s, response_length=%d", task.ID, len(response))
 
 	// Parse response to extract opID if cancel is successful
 	var responseData map[string]interface{}

@@ -212,7 +212,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	glog.Infof("Sending HTTP request for app clone: task=%s", task.ID)
+	glog.Infof("[APP] Sending HTTP request for app clone: task=%s", task.ID)
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
 		glog.Errorf("HTTP request failed for app clone: task=%s, error=%v", task.ID, err)

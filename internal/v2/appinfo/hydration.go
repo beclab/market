@@ -590,7 +590,7 @@ func (h *Hydrator) moveTaskToRenderFailed(task *hydrationfn.HydrationTask, failu
 	// Add to render failed list in cache
 	if err := h.cacheManager.SetAppData(task.UserID, task.SourceID, types.AppRenderFailed, map[string]interface{}{
 		"failed_app": failedData,
-	}); err != nil {
+	}, "Hydrator"); err != nil {
 		glog.Errorf("Failed to add task to render failed list: %s, error: %v", task.ID, err)
 		return
 	}

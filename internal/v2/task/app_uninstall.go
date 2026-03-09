@@ -71,7 +71,7 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	glog.Infof("Sending HTTP request for app uninstallation: task=%s, all=%v", task.ID, all)
+	glog.Infof("[APP] Sending HTTP request for app uninstallation: task=%s, all=%v", task.ID, all)
 
 	// Create request body with all parameter
 	requestBody := map[string]interface{}{
@@ -99,7 +99,7 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		return string(errorJSON), err
 	}
 
-	glog.Infof("HTTP request completed successfully for app uninstallation: task=%s, response_length=%d", task.ID, len(response))
+	glog.Infof("[APP] HTTP request completed successfully for app uninstallation: task=%s, response_length=%d", task.ID, len(response))
 
 	// Parse response to extract opID if uninstallation is successful
 	var responseData map[string]interface{}

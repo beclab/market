@@ -124,7 +124,7 @@ func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) erro
 
 	if enableSyncLoop {
 		glog.V(2).Infof("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
-		go s.syncLoop(ctx)
+		go s.syncLoop(ctx) // not use
 	} else {
 		glog.V(2).Infof("Starting syncer with %d steps (passive mode, Pipeline handles scheduling)", len(s.steps))
 	}
@@ -298,7 +298,7 @@ func (s *Syncer) syncLoop(ctx context.Context) {
 			return
 		default:
 			// Execute sync cycle
-			if err := s.executeSyncCycle(ctx); err != nil {
+			if err := s.executeSyncCycle(ctx); err != nil { // not use
 				glog.Errorf("Sync cycle failed: %v", err)
 			}
 
@@ -913,7 +913,7 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			glog.V(3).Infof("Using CacheManager to store data for user: %s, source: %s", userID, sourceID)
-			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData)
+			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData,"Syncer")
 			if err != nil {
 				glog.Errorf("Failed to store data via CacheManager for user: %s, source: %s, error: %v", userID, sourceID, err)
 				// Fall back to direct cache access

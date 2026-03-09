@@ -102,7 +102,7 @@ func (scc *StatusCorrectionChecker) Start() error {
 	glog.Infof("Middleware service endpoint: http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort)
 
 	// Start the periodic checking goroutine
-	go scc.runPeriodicCheck()
+	go scc.runPeriodicCheck() // not used
 
 	return nil
 }
@@ -120,7 +120,7 @@ func (scc *StatusCorrectionChecker) StartWithOptions(enablePeriodicCheck bool) e
 
 	if enablePeriodicCheck {
 		glog.Infof("Starting status correction checker with interval: %v", scc.checkInterval)
-		go scc.runPeriodicCheck()
+		go scc.runPeriodicCheck() // not use
 	} else {
 		glog.Infof("Starting status correction checker in passive mode (serial pipeline handles processing)")
 	}
@@ -134,7 +134,7 @@ func (scc *StatusCorrectionChecker) PerformStatusCheckOnce() map[string]bool {
 	if !scc.isRunning {
 		return nil
 	}
-	return scc.performStatusCheck()
+	return scc.performStatusCheck() // pipeline start
 }
 
 // Stop stops the periodic status checking
@@ -187,12 +187,12 @@ func (scc *StatusCorrectionChecker) runPeriodicCheck() {
 	glog.Infof("Status correction checker periodic loop started")
 
 	// Perform initial check immediately
-	scc.performStatusCheck()
+	scc.performStatusCheck() // not use
 
 	for {
 		select {
 		case <-ticker.C:
-			scc.performStatusCheck()
+			scc.performStatusCheck() //  not use
 		case <-scc.stopChan:
 			glog.Infof("Status correction checker periodic loop stopped")
 			return
@@ -245,7 +245,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 		for userID, cs := range changesByUser {
 			userData := scc.cacheManager.GetUserData(userID)
 			if userData == nil {
-				glog.V(3).Infof("StatusCorrectionChecker: userData not found for user %s", userID)
+				glog.Warningf("StatusCorrectionChecker: userData not found for user %s", userID)
 				continue
 			}
 
@@ -292,6 +292,8 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceRespo
 		// Return only apps status if middlewares fetch fails
 		return appsStatus, nil
 	}
+
+	// glog.Infof("[SCC] appStatus: %s, middlewareStatus: %s", utils.ParseJson(appsStatus), utils.ParseJson(middlewaresStatus))
 
 	// Combine apps and middlewares status
 	// Convert middlewares to AppServiceResponse format and merge with apps
@@ -899,13 +901,13 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID) // app_appeared
 			if appStateData == nil {
 				glog.V(3).Infof("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
-			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+			stateData := scc.createStateDataFromAppStateData(appStateData) // app_appeared
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData, "SCC_app_appeared"); err != nil {
 				glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
@@ -941,13 +943,13 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID) // state_change
 			if appStateData == nil {
 				glog.V(3).Infof("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
-			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+			stateData := scc.createStateDataFromAppStateData(appStateData) // state_change
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData, "SCC_state_change"); err != nil {
 				glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
@@ -997,14 +999,14 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID) // state_inconsistency
 			if appStateData == nil {
 				glog.V(3).Infof("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
 			appStateData.Status.State = "running"
-			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+			stateData := scc.createStateDataFromAppStateData(appStateData) // state_inconsistency
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData, "SCC_state_inconsistency"); err != nil {
 				glog.Errorf("Failed to update cache with corrected state for inconsistent app %s (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
@@ -1265,7 +1267,7 @@ func (scc *StatusCorrectionChecker) ForceCheck() error {
 	}
 
 	glog.Infof("Forcing immediate status check")
-	scc.performStatusCheck()
+	scc.performStatusCheck() // not used
 	return nil
 }
 
