@@ -97,6 +97,7 @@ type FilteredSourceData struct {
 // FilteredSourceDataForState represents filtered source data for state endpoint (only AppStateLatest)
 type FilteredSourceDataForState struct {
 	Type           types.SourceDataType        `json:"type"`
+	AppInfoLatest  []*types.AppInfoLatestData  `json:"app_info_latest,omitempty"`
 	AppStateLatest []*types.AppStateLatestData `json:"app_state_latest"`
 }
 
@@ -754,7 +755,113 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 
 		// Filter the user data to include only AppStateLatest fields with timeout
 		filterStart := time.Now()
-		filteredUserData := s.filterUserDataForStateWithTimeout(ctx, userData)
+		filteredUserData := s.filterUserDataForStateWithTimeout(ctx, userData, false)
+		if filteredUserData == nil {
+			glog.V(3).Infof("Data filtering timed out or failed for user: %s", userID)
+			resultChan <- result{err: fmt.Errorf("data filtering timeout")}
+			return
+		}
+		glog.V(3).Infof("Data filtering took %v for user: %s", time.Since(filterStart), userID)
+
+		// Prepare response data
+		responseData := MarketStateResponse{
+			UserData:  filteredUserData,
+			UserID:    userID,
+			Timestamp: time.Now().Unix(),
+		}
+
+		resultChan <- result{data: responseData}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case <-ctx.Done():
+		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/state")
+		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
+		return
+	case res := <-resultChan:
+		if res.err != nil {
+			glog.Errorf("Error retrieving market state: %v", res.err)
+			if res.err.Error() == "user data not found" {
+				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
+			} else {
+				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market state", nil)
+			}
+			return
+		}
+
+		glog.V(2).Infof("Market state retrieved successfully for user: %s", userID)
+		s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", res.data)
+	}
+}
+
+// Get market state information (only AppStateLatest data)
+func (s *Server) getMarketStateSimple(w http.ResponseWriter, r *http.Request) {
+	requestStart := time.Now()
+	glog.V(2).Infof("GET /api/v2/market/statesimple - Getting market state simple, request start: %v", requestStart)
+
+	// Add timeout context
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	// Check if cache manager is available
+	if s.cacheManager == nil {
+		glog.V(3).Info("Cache manager is not initialized")
+		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+		return
+	}
+
+	// Convert http.Request to restful.Request to reuse utils functions
+	restfulReq := s.httpToRestfulRequest(r)
+
+	// Get user information from request using utils module
+	authStart := time.Now()
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		glog.Errorf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+	glog.V(3).Infof("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
+
+	// Create a channel to receive the result
+	type result struct {
+		data MarketStateResponse
+		err  error
+	}
+	resultChan := make(chan result, 1)
+
+	// Run the data retrieval in a goroutine
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				glog.Errorf("Panic in getMarketState: %v", r)
+				resultChan <- result{err: fmt.Errorf("internal error occurred")}
+			}
+		}()
+
+		// Get user data from cache with timeout check
+		start := time.Now()
+		userData := s.cacheManager.GetUserData(userID)
+		if userData == nil {
+			glog.V(3).Infof("User data not found for user: %s", userID)
+			resultChan <- result{err: fmt.Errorf("user data not found")}
+			return
+		}
+		glog.V(3).Infof("GetUserData took %v for user: %s", time.Since(start), userID)
+
+		// Check if we're still within timeout before filtering
+		select {
+		case <-ctx.Done():
+			glog.V(3).Infof("Context cancelled during user data retrieval for user: %s", userID)
+			resultChan <- result{err: fmt.Errorf("request cancelled")}
+			return
+		default:
+		}
+
+		// Filter the user data to include only AppStateLatest fields with timeout
+		filterStart := time.Now()
+		filteredUserData := s.filterUserDataForStateWithTimeout(ctx, userData, true)
 		if filteredUserData == nil {
 			glog.V(3).Infof("Data filtering timed out or failed for user: %s", userID)
 			resultChan <- result{err: fmt.Errorf("data filtering timeout")}
@@ -1041,7 +1148,7 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 }
 
 // filterUserDataForStateWithTimeout filters user data to include only AppStateLatest fields with timeout
-func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData *types.UserData) *FilteredUserDataForState {
+func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData *types.UserData, withAppInfoLatest bool) *FilteredUserDataForState {
 	if userData == nil {
 		return nil
 	}
@@ -1073,7 +1180,7 @@ func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData
 		}
 
 		// Convert data directly without additional locks
-		filteredSourceData := s.convertSourceDataToFilteredForState(sourceData)
+		filteredSourceData := s.convertSourceDataToFilteredForState(sourceData, withAppInfoLatest)
 		if filteredSourceData != nil {
 			filteredUserData.Sources[sourceID] = filteredSourceData
 		}
@@ -1084,7 +1191,7 @@ func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData
 }
 
 // convertSourceDataToFilteredForState converts source data to filtered format for state endpoint (only AppStateLatest)
-func (s *Server) convertSourceDataToFilteredForState(sourceData *types.SourceData) *FilteredSourceDataForState {
+func (s *Server) convertSourceDataToFilteredForState(sourceData *types.SourceData, withAppInfoLatest bool) *FilteredSourceDataForState {
 	if sourceData == nil {
 		return nil
 	}
@@ -1092,6 +1199,17 @@ func (s *Server) convertSourceDataToFilteredForState(sourceData *types.SourceDat
 	filteredSourceData := &FilteredSourceDataForState{
 		Type:           sourceData.Type,
 		AppStateLatest: sourceData.AppStateLatest,
+	}
+
+	if withAppInfoLatest {
+		var appInfoLatest []*types.AppInfoLatestData
+		for _, app := range sourceData.AppInfoLatest {
+			var info = &types.AppInfoLatestData{
+				AppSimpleInfo: app.AppSimpleInfo,
+			}
+			appInfoLatest = append(appInfoLatest, info)
+		}
+		filteredSourceData.AppInfoLatest = appInfoLatest
 	}
 
 	return filteredSourceData

@@ -86,6 +86,9 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/market/state", s.getMarketState).Methods("GET")
 	glog.V(3).Info("Route configured: GET /app-store/api/v2/market/state")
 
+	api.HandleFunc("/market/statesimple", s.getMarketStateSimple).Methods("GET")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/market/statesimple")
+
 	// 2. Get specific application information (supports multiple queries)
 	api.HandleFunc("/apps", s.getAppsInfo).Methods("POST")
 	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps")
