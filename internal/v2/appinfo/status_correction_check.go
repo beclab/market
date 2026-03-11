@@ -418,6 +418,16 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 					Url       string `json:"url"`
 					Invisible bool   `json:"invisible"`
 				} `json:"entrances"`
+				Settings struct {
+					ClusterScoped   string `json:"clusterScoped"`
+					MobileSupported string `json:"mobileSupported"`
+					Policy          string `json:"policy"`
+					RequiredGPU     string `json:"requiredGPU"`
+					Source          string `json:"source"`
+					Target          string `json:"target"`
+					Title           string `json:"title"`
+					Version         string `json:"version"`
+				} `json:"settings"`
 			}{
 				Name:   middleware.Metadata.Name,
 				AppID:  middleware.Metadata.Name,
