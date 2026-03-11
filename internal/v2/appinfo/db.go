@@ -159,6 +159,10 @@ func (r *RedisClient) LoadCacheFromRedis() (*CacheData, error) {
 func (r *RedisClient) loadUserData(userID string) (*UserData, error) {
 	userData := NewUserDataEx(userID) // NewUserData()
 
+	if userData.UserInfo == nil {
+		return nil, fmt.Errorf("User %s not exists in cluster", userID)
+	}
+
 	// Load user hash from Redis
 	userHashKey := fmt.Sprintf("appinfo:user:%s:hash", userID)
 	hashValue, err := r.client.Get(r.ctx, userHashKey).Result()
@@ -166,7 +170,7 @@ func (r *RedisClient) loadUserData(userID string) (*UserData, error) {
 		userData.Hash = hashValue
 		glog.Infof("Loaded user hash from Redis: user=%s, hash=%s", userID, hashValue)
 	} else if err != redis.Nil {
-		glog.Warningf("Failed to load user hash from Redis: user=%s, error=%v", userID, err)
+		glog.Errorf("Failed to load user hash from Redis: user=%s, error=%v", userID, err)
 	}
 
 	// Get all source keys for this user

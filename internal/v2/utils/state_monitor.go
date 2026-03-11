@@ -10,7 +10,7 @@ import (
 
 // DataSenderInterface defines the interface for sending app info updates
 type DataSenderInterface interface {
-	SendAppInfoUpdate(update types.AppInfoUpdate) error
+	SendAppInfoUpdate(update types.AppInfoUpdate, trace string) error
 	IsConnected() bool
 	Close()
 }
@@ -66,7 +66,7 @@ func (sm *StateMonitor) NotifyStateChange(
 		Source:         sourceID,
 	}
 
-	return sm.dataSender.SendAppInfoUpdate(update)
+	return sm.dataSender.SendAppInfoUpdate(update, "state_monitor")
 }
 
 // HasStateChanged checks if the app state has changed compared to existing state

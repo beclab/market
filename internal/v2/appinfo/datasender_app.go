@@ -96,7 +96,7 @@ func loadConfig() Config {
 }
 
 // SendAppInfoUpdate sends app info update to NATS
-func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
+func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate, trace string) error {
 	if !ds.enabled {
 		glog.V(3).Info("NATS data sender is disabled, skipping message send")
 		return nil
@@ -116,9 +116,9 @@ func (ds *DataSender) SendAppInfoUpdate(update types.AppInfoUpdate) error {
 
 	// Log before sending
 	if len(string(data)) > 800 {
-		glog.V(2).Infof("App - Sending app info update to NATS subject '%s': %s", subject, string(data)[:800])
+		glog.V(2).Infof("App - Sending app info update to NATS subject '%s'(trace: %s): %s", subject, trace, string(data)[:800])
 	} else {
-		glog.V(2).Infof("App - Sending app info update to NATS subject '%s': %s", subject, string(data))
+		glog.V(2).Infof("App - Sending app info update to NATS subject '%s'(trace: %s): %s", subject, trace, string(data))
 	}
 
 	// Send message to NATS

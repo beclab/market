@@ -982,7 +982,7 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 							Source:         sourceID,
 						}
 
-						if err := cm.dataSender.SendAppInfoUpdate(update); err != nil {
+						if err := cm.dataSender.SendAppInfoUpdate(update, "cache"); err != nil {
 							glog.Errorf("Force push state update for app %s failed: %v", newAppState.Status.Name, err)
 						} else {
 							glog.V(3).Infof("Force pushed state update for app %s due to EntranceStatuses fallback (only metadata changed)", newAppState.Status.Name)
@@ -2561,16 +2561,16 @@ func (cm *CacheManager) HandlerEvent() cache.ResourceEventHandler {
 		},
 		Handler: cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				cm.ListUsers()
+				cm.ListUsers("Add")
 			},
 			DeleteFunc: func(obj interface{}) {
-				cm.ListUsers()
+				cm.ListUsers("Delete")
 			},
 		},
 	}
 }
 
-func (cm *CacheManager) ListUsers() {
+func (cm *CacheManager) ListUsers(opType string) {
 	dynamicClient := client.Factory.Client()
 	unstructuredUsers, err := dynamicClient.Resource(client.UserGVR).List(context.Background(), v1.ListOptions{})
 	if err != nil {
@@ -2578,6 +2578,7 @@ func (cm *CacheManager) ListUsers() {
 		return
 	}
 
+	glog.Infof("[Cache] User watch handler, type: %s", opType)
 	var userList = make([]*client.User, 0)
 
 	for _, unstructuredUser := range unstructuredUsers.Items {
@@ -2628,6 +2629,30 @@ func (cm *CacheManager) ListUsers() {
 	}
 }
 
+func (cm *CacheManager) RemoveDeletedUser() {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	var users []string
+	for _, user := range cm.cache.Users {
+		if user.UserInfo == nil {
+			continue
+		}
+		if !user.UserInfo.Exists {
+			users = append(users, user.UserInfo.Name)
+		}
+	}
+
+	if len(users) == 0 {
+		return
+	}
+
+	glog.Infof("[Cache] Remove deleted users: %v", users)
+	for _, u := range users {
+		delete(cm.cache.Users, u)
+	}
+}
+
 func (cm *CacheManager) GetCachedData() string {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
@@ -2641,6 +2666,14 @@ func (cm *CacheManager) GetCachedData() string {
 			var apps = make(map[string]interface{})
 			apps["latest"] = len(sv.AppInfoLatest)
 			apps["pending"] = len(sv.AppInfoLatestPending)
+			var pendings []string
+			if len(sv.AppInfoLatestPending) < 10 {
+				for _, pending := range sv.AppInfoLatestPending {
+					pendings = append(pendings, fmt.Sprintf("%s_%s_%s", sn, pending.AppInfo.AppEntry.Name, pending.AppInfo.AppEntry.Version))
+				}
+			}
+			apps["pending_apps"] = pendings
+
 			apps["failed"] = len(sv.AppRenderFailed)
 			apps["history"] = len(sv.AppInfoHistory)
 			apps["state"] = len(sv.AppStateLatest)

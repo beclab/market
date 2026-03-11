@@ -117,6 +117,9 @@ func (p *Pipeline) run(ctx context.Context) {
 
 	startTime := time.Now()
 
+	// add check current all users in cluster
+	p.cacheManager.RemoveDeletedUser()
+
 	// Phase 1-4: only modify data, no hash calculation or ForceSync
 	p.phaseSyncer(ctx)
 	hydrateUsers := p.phaseHydrateApps(ctx)

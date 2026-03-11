@@ -108,14 +108,14 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 				if err := s.writeAppDataToCache(task, appData); err != nil {
 					glog.Errorf("Warning: failed to write app_data to cache: %v", err)
 				} else {
-					glog.V(3).Infof("Successfully wrote app_data to cache for user=%s, source=%s, app=%s, appName=%s",
+					glog.V(2).Infof("Successfully wrote app_data to cache for user=%s, source=%s, app=%s, appName=%s",
 						task.UserID, task.SourceID, task.AppID, task.AppName)
 				}
 			}
 		}
 	}
 
-	glog.V(3).Info("SyncApp to chart repo completed successfully")
+	glog.V(2).Infof("[TaskForApi] SyncApp %s(%s %s) to chart repo completed successfully", task.AppID, task.AppName, task.AppVersion)
 	return nil
 }
 
