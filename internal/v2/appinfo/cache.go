@@ -20,6 +20,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type CompareAppStateMsgFunc func(appState *AppStateLatestData)
+
 // CacheManager manages the in-memory cache and Redis synchronization
 type CacheManager struct {
 	cache           *CacheData
@@ -1507,8 +1509,9 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	return nil
 }
 
-func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
+func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}, tracing string) error {
 
+	glog.Infof("[SetAppData] user: %s, source: %s, dataType: %s, trace: %s", userID, sourceID, dataType, tracing)
 	// go func() {
 	if err := cm.setAppDataInternal(userID, sourceID, dataType, data); err != nil {
 		glog.Errorf("Failed to set app data in goroutine: %v", err)
@@ -2368,6 +2371,7 @@ func (cm *CacheManager) GetSettingsManager() *settings.SettingsManager {
 }
 
 // SyncMarketSourcesToCache synchronizes market sources to all users in cache
+// todo remove watch dog
 func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.MarketSource) error {
 	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@SyncMarketSourcesToCache")
@@ -2530,11 +2534,15 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	defer cm.mutex.Unlock()
 
 	count := 0
+	failedAppNames := []string{}
 	for _, t := range targets {
 		if userData, ok := cm.cache.Users[t.userID]; ok {
 			if sourceData, ok := userData.Sources[t.sourceID]; ok {
 				if len(sourceData.AppRenderFailed) > 0 {
 					count += len(sourceData.AppRenderFailed)
+					for _, f := range sourceData.AppRenderFailed {
+						failedAppNames = append(failedAppNames, fmt.Sprintf("%s_%s_%s", t.userID, t.sourceID, f.AppInfo.AppEntry.Name))
+					}
 					sourceData.AppRenderFailed = make([]*types.AppRenderFailedData, 0)
 				}
 			}
@@ -2542,7 +2550,7 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	}
 
 	if count > 0 {
-		glog.Infof("INFO: [Cleanup] Cleared %d AppRenderFailed entries in %v", count, time.Since(start))
+		glog.Infof("INFO: [Cleanup] Cleared %d AppRenderFailed entries in %v, apps: %v", count, time.Since(start), failedAppNames)
 	}
 }
 
@@ -2652,4 +2660,27 @@ func (cm *CacheManager) GetCachedData() string {
 
 	result, _ := json.Marshal(items)
 	return string(result)
+}
+
+func (cm *CacheManager) CompareAppStateMsg(userID string, sourceID string, appName string, checker CompareAppStateMsgFunc) {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	userData := cm.cache.Users[userID]
+	if userData == nil {
+		return
+	}
+
+	sourceData := userData.Sources[sourceID]
+	if sourceData == nil {
+		return
+	}
+
+	for _, appState := range sourceData.AppStateLatest {
+		if appState.Status.Name != appName {
+			continue
+		}
+		checker(appState)
+		return
+	}
 }
