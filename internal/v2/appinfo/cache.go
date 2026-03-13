@@ -233,6 +233,23 @@ func (cm *CacheManager) UpsertLatestAndRemovePending(
 	}
 	sourceData.AppInfoLatestPending = newPending
 
+	// Remove the same app from render-failed list after successful move to latest.
+	// Keep Pending/Failed disjoint and avoid stale failed entries.
+	newFailed := make([]*types.AppRenderFailedData, 0, len(sourceData.AppRenderFailed))
+	for _, f := range sourceData.AppRenderFailed {
+		if f == nil || f.RawData == nil {
+			newFailed = append(newFailed, f)
+			continue
+		}
+		matchedByID := appID != "" && (f.RawData.ID == appID || f.RawData.AppID == appID)
+		matchedByName := appName != "" && f.RawData.Name == appName
+		if matchedByID || matchedByName {
+			continue
+		}
+		newFailed = append(newFailed, f)
+	}
+	sourceData.AppRenderFailed = newFailed
+
 	return oldVersion, replaced, true
 }
 
@@ -1369,6 +1386,27 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				latestVersionMap[latestApp.RawData.ID] = v
 			}
 		}
+		// Build version map from AppRenderFailed to avoid re-adding the same failed app
+		// into Pending on every sync cycle.
+		failedVersionMap := make(map[string]string)
+		for _, failedApp := range sourceData.AppRenderFailed {
+			if failedApp == nil || failedApp.RawData == nil {
+				continue
+			}
+			v := failedApp.Version
+			if v == "" {
+				v = failedApp.RawData.Version
+			}
+			if failedApp.RawData.Name != "" {
+				failedVersionMap[failedApp.RawData.Name] = v
+			}
+			if failedApp.RawData.AppID != "" {
+				failedVersionMap[failedApp.RawData.AppID] = v
+			}
+			if failedApp.RawData.ID != "" {
+				failedVersionMap[failedApp.RawData.ID] = v
+			}
+		}
 
 		originalCount := len(sourceData.AppInfoLatestPending)
 		sourceData.AppInfoLatestPending = sourceData.AppInfoLatestPending[:0]
@@ -1379,18 +1417,41 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				return false
 			}
 			incomingVersion := appData.RawData.Version
-			if incomingVersion == "" {
-				return false
-			}
-			if name := appData.RawData.Name; name != "" {
-				if existing, ok := latestVersionMap[name]; ok && existing == incomingVersion {
-					return true
+			if incomingVersion != "" {
+				if name := appData.RawData.Name; name != "" {
+					if existing, ok := latestVersionMap[name]; ok && existing == incomingVersion {
+						return true
+					}
+				}
+				if id := appData.RawData.AppID; id != "" {
+					if existing, ok := latestVersionMap[id]; ok && existing == incomingVersion {
+						return true
+					}
+				}
+				if id := appData.RawData.ID; id != "" {
+					if existing, ok := latestVersionMap[id]; ok && existing == incomingVersion {
+						return true
+					}
 				}
 			}
-			if id := appData.RawData.AppID; id != "" {
-				if existing, ok := latestVersionMap[id]; ok && existing == incomingVersion {
+
+			// Skip app when the same app-version is already in render-failed.
+			// If either side has empty version, still skip to prevent Pending/Failed overlap.
+			matchFailed := func(key string) bool {
+				if key == "" {
+					return false
+				}
+				failedVersion, ok := failedVersionMap[key]
+				if !ok {
+					return false
+				}
+				if failedVersion == "" || incomingVersion == "" {
 					return true
 				}
+				return failedVersion == incomingVersion
+			}
+			if matchFailed(appData.RawData.Name) || matchFailed(appData.RawData.AppID) || matchFailed(appData.RawData.ID) {
+				return true
 			}
 			return false
 		}
@@ -1483,14 +1544,36 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			}
 		}
 
-		glog.V(2).Infof("Updated AppInfoLatestPending: %d new, %d skipped (unchanged version) for user=%s, source=%s",
+		glog.V(2).Infof("Updated AppInfoLatestPending: %d new, %d skipped (unchanged version or in render-failed) for user=%s, source=%s",
 			len(sourceData.AppInfoLatestPending), skippedCount, userID, sourceID)
 
 	case types.AppRenderFailed:
 		// Handle render failed data - this is typically set by the hydrator when tasks fail
 		if failedAppData, hasFailedApp := data["failed_app"].(*types.AppRenderFailedData); hasFailedApp {
-			sourceData.AppRenderFailed = append(sourceData.AppRenderFailed, failedAppData)
-			glog.V(3).Infof("Added render failed app for user=%s, source=%s, app=%s, reason=%s",
+			if failedAppData == nil || failedAppData.RawData == nil {
+				glog.Errorf("Invalid render failed data: nil failed app or raw data for user=%s, source=%s", userID, sourceID)
+				return fmt.Errorf("invalid render failed data: nil failed app or raw data")
+			}
+
+			replaced := false
+			for i, existing := range sourceData.AppRenderFailed {
+				if existing == nil || existing.RawData == nil {
+					continue
+				}
+				matchedByID := (failedAppData.RawData.ID != "" && existing.RawData.ID == failedAppData.RawData.ID) ||
+					(failedAppData.RawData.AppID != "" && existing.RawData.AppID == failedAppData.RawData.AppID)
+				matchedByName := failedAppData.RawData.Name != "" && existing.RawData.Name == failedAppData.RawData.Name
+				if matchedByID || matchedByName {
+					sourceData.AppRenderFailed[i] = failedAppData
+					replaced = true
+					break
+				}
+			}
+
+			if !replaced {
+				sourceData.AppRenderFailed = append(sourceData.AppRenderFailed, failedAppData)
+			}
+			glog.V(3).Infof("Upserted render failed app for user=%s, source=%s, app=%s, reason=%s",
 				userID, sourceID, failedAppData.RawData.AppID, failedAppData.FailureReason)
 		} else {
 			glog.Errorf("Invalid render failed data format for user=%s, source=%s", userID, sourceID)
