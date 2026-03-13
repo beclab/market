@@ -1003,11 +1003,12 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, appName, version 
 	return result
 }
 
-// isAppInRenderFailedList checks if an app already exists in the render failed list
-func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID, appName string) bool {
+// isAppInRenderFailedList checks if an app already exists in the render failed list.
+// When version is provided, only same-version failure will block hydration.
+func (h *Hydrator) isAppInRenderFailedList(userID, sourceID, appID, appName, version string) bool {
 	if h.cacheManager == nil {
 		glog.V(2).Infof("Warning: CacheManager not available for isAppInRenderFailedList")
 		return false
 	}
-	return h.cacheManager.IsAppInRenderFailedList(userID, sourceID, appID)
+	return h.cacheManager.IsAppInRenderFailedList(userID, sourceID, appID, appName, version)
 }
