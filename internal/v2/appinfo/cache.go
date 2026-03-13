@@ -475,7 +475,8 @@ func (cm *CacheManager) IsAppInLatestQueue(userID, sourceID, appID, version stri
 }
 
 // IsAppInRenderFailedList checks if an app exists in the render failed list.
-func (cm *CacheManager) IsAppInRenderFailedList(userID, sourceID, appID string) bool {
+// When version is provided, only same-version failures will be treated as a match.
+func (cm *CacheManager) IsAppInRenderFailedList(userID, sourceID, appID, appName, version string) bool {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()
 
@@ -488,10 +489,27 @@ func (cm *CacheManager) IsAppInRenderFailedList(userID, sourceID, appID string) 
 		return false
 	}
 	for _, fd := range sourceData.AppRenderFailed {
-		if fd.RawData != nil &&
-			(fd.RawData.ID == appID || fd.RawData.AppID == appID || fd.RawData.Name == appID) {
-			return true
+		if fd == nil || fd.RawData == nil {
+			continue
 		}
+
+		matchedByID := appID != "" && (fd.RawData.ID == appID || fd.RawData.AppID == appID || fd.RawData.Name == appID)
+		matchedByName := appName != "" && fd.RawData.Name == appName
+		if !matchedByID && !matchedByName {
+			continue
+		}
+
+		// If incoming version is known, only block when failed record has the same known version.
+		if version != "" {
+			failedVersion := fd.Version
+			if failedVersion == "" {
+				failedVersion = fd.RawData.Version
+			}
+			if failedVersion == "" || failedVersion != version {
+				continue
+			}
+		}
+		return true
 	}
 	return false
 }
@@ -1435,18 +1453,15 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				}
 			}
 
-			// Skip app when the same app-version is already in render-failed.
-			// If either side has empty version, still skip to prevent Pending/Failed overlap.
+			// Skip app only when the same app-version is already in render-failed.
+			// Unknown versions should not block upgrades/new retries.
 			matchFailed := func(key string) bool {
-				if key == "" {
+				if key == "" || incomingVersion == "" {
 					return false
 				}
 				failedVersion, ok := failedVersionMap[key]
-				if !ok {
+				if !ok || failedVersion == "" {
 					return false
-				}
-				if failedVersion == "" || incomingVersion == "" {
-					return true
 				}
 				return failedVersion == incomingVersion
 			}
