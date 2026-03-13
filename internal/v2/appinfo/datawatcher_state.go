@@ -557,6 +557,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 		case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
 		case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
 		case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
+		case appStateMsg.State == "running" && appState.Status.State == "resuming":
 		default:
 			// state = downloading
 			if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
