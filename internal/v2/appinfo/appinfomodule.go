@@ -646,7 +646,7 @@ func (m *AppInfoModule) initDataWatcherUser() error {
 
 // initDataWatcherRepo initializes the DataWatcherRepo
 func (m *AppInfoModule) initDataWatcherRepo() error {
-	glog.V(3).Info("Initializing DataWatcherRepo...")
+	glog.V(2).Info("Initializing DataWatcherRepo...")
 
 	if m.redisClient == nil {
 		return fmt.Errorf("redis client is required for DataWatcherRepo")
@@ -669,7 +669,7 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 
 // initStatusCorrectionChecker initializes the StatusCorrectionChecker
 func (m *AppInfoModule) initStatusCorrectionChecker() error {
-	glog.V(3).Info("Initializing StatusCorrectionChecker...")
+	glog.V(2).Info("Initializing StatusCorrectionChecker...")
 
 	if m.cacheManager == nil {
 		return fmt.Errorf("cache manager is required for StatusCorrectionChecker")

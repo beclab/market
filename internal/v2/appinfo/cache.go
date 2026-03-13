@@ -2767,12 +2767,20 @@ func (cm *CacheManager) GetCachedData() string {
 			var pendings []string
 			if len(sv.AppInfoLatestPending) < 10 {
 				for _, pending := range sv.AppInfoLatestPending {
-					pendings = append(pendings, fmt.Sprintf("%s_%s_%s", sn, pending.AppInfo.AppEntry.Name, pending.AppInfo.AppEntry.Version))
+					pendings = append(pendings, fmt.Sprintf("%s_%s", pending.AppInfo.AppEntry.Name, pending.AppInfo.AppEntry.Version))
 				}
 			}
 			apps["pending_apps"] = pendings
 
 			apps["failed"] = len(sv.AppRenderFailed)
+			var failes []string
+			if len(sv.AppRenderFailed) < 5 {
+				for _, fail := range sv.AppRenderFailed {
+					failes = append(failes, fmt.Sprintf("%s_%s", fail.AppInfo.AppEntry.Name, fail.AppInfo.AppEntry.Version))
+				}
+			}
+			apps["failed_apps"] = failes
+
 			apps["history"] = len(sv.AppInfoHistory)
 			apps["state"] = len(sv.AppStateLatest)
 			var status []string

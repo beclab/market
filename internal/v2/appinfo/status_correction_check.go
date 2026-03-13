@@ -214,26 +214,26 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 
 	latestStatus, err := scc.fetchLatestStatus()
 	if err != nil {
-		glog.Errorf("Failed to fetch latest status from app-service: %v", err)
+		glog.Errorf("[UserChanged] Failed to fetch latest status from app-service: %v", err)
 		return result
 	}
 
-	glog.V(2).Infof("Fetched status for %d applications and middlewares from app-service", len(latestStatus))
+	glog.V(2).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), utils.ParseJson(latestStatus))
 
 	cachedStatus := scc.getCachedStatus()
 	if len(cachedStatus) == 0 {
-		glog.Infof("No cached status found, skipping comparison")
+		glog.Error("[UserChanged] No cached status found, skipping comparison")
 		return result
 	}
 
-	glog.V(2).Infof("Found cached status for %d applications and middlewares", len(cachedStatus))
+	glog.V(2).Infof("[UserChanged] Found cached status for %d applications and middlewares: %s", len(cachedStatus), utils.ParseJson(cachedStatus))
 
 	changes := scc.compareStatus(latestStatus, cachedStatus)
 
-	glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v", changes)
+	glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v, app: %d, middlewares: %d", changes, len(latestStatus), len(cachedStatus))
 
 	if len(changes) > 0 {
-		glog.V(2).Infof("Detected %d status changes, applying corrections", len(changes))
+		glog.V(2).Infof("[UserChanged] Detected %d status changes, applying corrections, changes: %s", len(changes), utils.ParseJson(changes))
 		scc.applyCorrections(changes, latestStatus)
 
 		// Apply UserInfo changes and collect affected users.
@@ -1340,7 +1340,7 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 		return
 	}
 
-	glog.Infof("Checking %d running tasks for status correction", len(runningTasks))
+	glog.Infof("[SCC] Checking %d running tasks for status correction", len(runningTasks))
 
 	// Create a map of app statuses for quick lookup: user:appName -> app status
 	appStatusMap := make(map[string]*utils.AppServiceResponse)
@@ -1371,39 +1371,39 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 				if runningTask.Type == task.CloneApp {
 					taskTypeStr = "Clone"
 				}
-				glog.Infof("Task status correction: %s task %s for app %s (user: %s) should be completed - app is running",
+				glog.Infof("[SCC] Task status correction: %s task %s for app %s (user: %s) should be completed - app is running",
 					taskTypeStr, runningTask.ID, runningTask.AppName, runningTask.User)
 				if err := scc.taskModule.InstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
-					glog.Warningf("Failed to mark %s task as succeeded: %v", taskTypeStr, err)
+					glog.Warningf("[SCC] Failed to mark %s task as succeeded: %v", taskTypeStr, err)
 				} else {
 					correctedCount++
-					glog.Infof("Successfully corrected %s task status: %s", taskTypeStr, runningTask.ID)
+					glog.Infof("[SCC] Successfully corrected %s task status: %s", taskTypeStr, runningTask.ID)
 				}
 			}
 
 		case task.UninstallApp:
 			// For uninstall tasks: if app doesn't exist, mark task as completed
 			if !exists {
-				glog.Infof("Task status correction: Uninstall task %s for app %s (user: %s) should be completed - app no longer exists",
+				glog.Infof("[SCC] Task status correction: Uninstall task %s for app %s (user: %s) should be completed - app no longer exists",
 					runningTask.ID, runningTask.AppName, runningTask.User)
 				if err := scc.taskModule.UninstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
-					glog.Warningf("Failed to mark uninstall task as succeeded: %v", err)
+					glog.Warningf("[SCC] Failed to mark uninstall task as succeeded: %v", err)
 				} else {
 					correctedCount++
-					glog.Infof("Successfully corrected uninstall task status: %s", runningTask.ID)
+					glog.Infof("[SCC] Successfully corrected uninstall task status: %s", runningTask.ID)
 				}
 			}
 
 		case task.CancelAppInstall:
 			// For cancel install tasks: if app doesn't exist, mark task as completed
 			if !exists {
-				glog.Infof("Task status correction: Cancel install task %s for app %s (user: %s) should be completed - app no longer exists",
+				glog.Infof("[SCC] Task status correction: Cancel install task %s for app %s (user: %s) should be completed - app no longer exists",
 					runningTask.ID, runningTask.AppName, runningTask.User)
 				if err := scc.taskModule.CancelInstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
-					glog.Warningf("Failed to mark cancel install task as succeeded: %v", err)
+					glog.Warningf("[SCC] Failed to mark cancel install task as succeeded: %v", err)
 				} else {
 					correctedCount++
-					glog.Infof("Successfully corrected cancel install task status: %s", runningTask.ID)
+					glog.Infof("[SCC] Successfully corrected cancel install task status: %s", runningTask.ID)
 				}
 			}
 
@@ -1413,14 +1413,14 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 			// are typically completed through their normal execution flow.
 			// We log it for monitoring but don't auto-correct to avoid conflicts.
 			if exists && appStatus != nil && appStatus.Status.State == "running" {
-				glog.Infof("Task status correction: Upgrade task %s for app %s (user: %s) appears completed - app is running (not auto-correcting)",
+				glog.Infof("[SCC] Task status correction: Upgrade task %s for app %s (user: %s) appears completed - app is running (not auto-correcting)",
 					runningTask.ID, runningTask.AppName, runningTask.User)
 			}
 		}
 	}
 
 	if correctedCount > 0 {
-		glog.Infof("Task status correction completed: corrected %d task(s)", correctedCount)
+		glog.Infof("[SCC] Task status correction completed: corrected %d task(s)", correctedCount)
 		scc.mutex.Lock()
 		scc.correctionCount += int64(correctedCount)
 		scc.mutex.Unlock()
