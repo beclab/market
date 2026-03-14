@@ -59,6 +59,8 @@ type AppStateMessage struct {
 	State            string           `json:"state"`
 	User             string           `json:"user"`
 	Progress         string           `json:"progress"`
+	Reason           string           `json:"reason"`
+	Message          string           `json:"message"`
 	EntranceStatuses []EntranceStatus `json:"entranceStatuses"`
 	SharedEntrances  []SharedEntrance `json:"sharedEntrances,omitempty"`
 }
@@ -584,6 +586,9 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 				case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
 				case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
 				case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
+				case appStateMsg.State == "running" && appState.Status.State == "resuming":
+				case appStateMsg.State == "stopped" && appState.Status.State == "resuming":
+				case appStateMsg.State == "installingCanceled" && appState.Status.State == "resuming":
 				default:
 					if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
 						glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
@@ -755,6 +760,8 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		"rawAppName":         msg.RawAppName, // Add raw app name for clone app support
 		"title":              msg.Title,      // Add title from message
 		"opType":             msg.OpType,     // Add operation type from message
+		"message":            msg.Message,
+		"reason":             msg.Reason,
 	}
 
 	// Add SharedEntrances if present
@@ -1035,6 +1042,8 @@ func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	glog.V(2).Infof("Operation Type: %s", msg.OpType)
 	glog.V(2).Infof("Operation ID: %s", msg.OpID)
 	glog.V(2).Infof("User: %s", msg.User)
+	glog.V(2).Infof("Reason: %s", msg.Reason)
+	glog.V(2).Infof("Message: %s", msg.Message)
 	glog.V(2).Info("Entrance Statuses:")
 	for i, status := range msg.EntranceStatuses {
 		glog.V(2).Infof("  [%d] Name: %s, State: %s, Status Time: %s, Reason: %s",

@@ -1150,6 +1150,8 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			LastTransitionTime string `json:"lastTransitionTime"`
 			Progress           string `json:"progress"`
 			OpType             string `json:"opType,omitempty"`
+			Message            string `json:"message"`
+			Reason             string `json:"reason"`
 			EntranceStatuses   []struct {
 				ID         string `json:"id"`
 				Name       string `json:"name"`

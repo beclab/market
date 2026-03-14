@@ -167,6 +167,8 @@ type AppStateLatestData struct {
 		LastTransitionTime string `json:"lastTransitionTime"`
 		Progress           string `json:"progress"`
 		OpType             string `json:"opType,omitempty"` // Operation type: install, upgrade, uninstall, etc.
+		Message            string `json:"message"`
+		Reason             string `json:"reason"`
 		EntranceStatuses   []struct {
 			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
 			Name       string `json:"name"`
@@ -576,6 +578,7 @@ type AppInfoUpdate struct {
 	AppName        string              `json:"app_name"`    // App name
 	NotifyType     string              `json:"notify_type"` // Notify type
 	Source         string              `json:"source"`      // Source
+	Message        string              `json:"message"`
 }
 
 type MarketSystemUpdate struct {
@@ -713,6 +716,9 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		Invisible  bool   `json:"invisible"`
 	}
 
+	var statusReason = ""
+	var statusMessage = ""
+
 	// Extract name from various possible fields
 	if nameVal, ok := data["name"].(string); ok && nameVal != "" {
 		name = nameVal
@@ -756,6 +762,14 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	// Extract opType from data
 	if opTypeVal, ok := data["opType"].(string); ok {
 		opType = opTypeVal
+	}
+	// Extract reason from data
+	if reasonVal, ok := data["reason"]; ok && reasonVal != nil {
+		statusReason = reasonVal.(string)
+	}
+	// Extract message from data
+	if messageVal, ok := data["message"]; ok && messageVal != nil {
+		statusMessage = messageVal.(string)
 	}
 
 	// Extract SharedEntrances
@@ -1033,6 +1047,8 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			LastTransitionTime string `json:"lastTransitionTime"`
 			Progress           string `json:"progress"`
 			OpType             string `json:"opType,omitempty"`
+			Message            string `json:"message"`
+			Reason             string `json:"reason"`
 			EntranceStatuses   []struct {
 				ID         string `json:"id"`
 				Name       string `json:"name"`
@@ -1065,6 +1081,8 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			LastTransitionTime: lastTransitionTime,
 			Progress:           progress,
 			OpType:             opType,
+			Message:            statusMessage,
+			Reason:             statusReason,
 			EntranceStatuses:   entranceStatuses,
 			SharedEntrances:    sharedEntrances,
 		},
