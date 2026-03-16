@@ -589,6 +589,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 				case appStateMsg.State == "running" && appState.Status.State == "resuming":
 				case appStateMsg.State == "stopped" && appState.Status.State == "resuming":
 				case appStateMsg.State == "installingCanceled" && appState.Status.State == "resuming":
+				case appStateMsg.State == "stopped" && appState.Status.State == "stopping":
 				default:
 					if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
 						glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
