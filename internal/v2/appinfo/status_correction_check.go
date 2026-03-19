@@ -401,13 +401,14 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 				Namespace: middleware.Namespace,
 			},
 			Spec: struct {
-				Name      string `json:"name"`
-				AppID     string `json:"appid"`
-				Owner     string `json:"owner"`
-				Icon      string `json:"icon"`
-				Title     string `json:"title"`
-				Source    string `json:"source"`
-				Entrances []struct {
+				Name       string `json:"name"`
+				RawAppName string `json:"rawAppName"`
+				AppID      string `json:"appid"`
+				Owner      string `json:"owner"`
+				Icon       string `json:"icon"`
+				Title      string `json:"title"`
+				Source     string `json:"source"`
+				Entrances  []struct {
 					Name      string `json:"name"`
 					Url       string `json:"url"`
 					Invisible bool   `json:"invisible"`

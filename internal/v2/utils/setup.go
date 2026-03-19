@@ -23,13 +23,14 @@ type AppServiceResponse struct {
 		Namespace string `json:"namespace"`
 	} `json:"metadata"`
 	Spec struct {
-		Name      string `json:"name"`
-		AppID     string `json:"appid"`
-		Owner     string `json:"owner"`
-		Icon      string `json:"icon"`
-		Title     string `json:"title"`
-		Source    string `json:"source"`
-		Entrances []struct {
+		Name       string `json:"name"`
+		RawAppName string `json:"rawAppName"`
+		AppID      string `json:"appid"`
+		Owner      string `json:"owner"`
+		Icon       string `json:"icon"`
+		Title      string `json:"title"`
+		Source     string `json:"source"`
+		Entrances  []struct {
 			Name      string `json:"name"`
 			Url       string `json:"url"`
 			Invisible bool   `json:"invisible"`
@@ -595,6 +596,7 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*types.AppStateLatestData, string) {
 	data := map[string]interface{}{
 		"name":               app.Spec.Name,
+		"rawAppName":         app.Spec.RawAppName,
 		"title":              app.Spec.Title,
 		"state":              app.Status.State,
 		"updateTime":         app.Status.UpdateTime,
