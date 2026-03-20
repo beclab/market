@@ -1089,6 +1089,8 @@ func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *Filt
 		}
 	}
 
+	s.patchStateRawName(sourceData)
+
 	filteredSourceData := &FilteredSourceData{
 		Type:           sourceData.Type,
 		AppStateLatest: sourceData.AppStateLatest,
@@ -1195,6 +1197,8 @@ func (s *Server) convertSourceDataToFilteredForState(sourceData *types.SourceDat
 	if sourceData == nil {
 		return nil
 	}
+
+	s.patchStateRawName(sourceData)
 
 	filteredSourceData := &FilteredSourceDataForState{
 		Type:           sourceData.Type,
@@ -2787,4 +2791,23 @@ func (s *Server) resendPaymentVC(w http.ResponseWriter, r *http.Request) {
 	s.sendResponse(w, http.StatusOK, true, "VC resent to LarePass successfully", map[string]interface{}{
 		"product_id": productID,
 	})
+}
+
+// helper
+func (s *Server) patchStateRawName(sourceData *types.SourceData) {
+	if len(sourceData.AppStateLatest) == 0 || len(sourceData.AppInfoLatest) == 0 {
+		return
+	}
+
+	for _, state := range sourceData.AppStateLatest {
+		if state.Status.RawAppName == "" {
+			for _, app := range sourceData.AppInfoLatest {
+				if strings.HasPrefix(state.Status.Name, app.AppInfo.AppEntry.Name) {
+					state.Status.RawAppName = app.AppInfo.AppEntry.Name
+					glog.Infof("[PATCH] App state: %s, app: %s", state.Status.Name, app.AppInfo.AppEntry.Name)
+					break
+				}
+			}
+		}
+	}
 }
