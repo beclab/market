@@ -1861,6 +1861,7 @@ func (s *Server) createSafeTagCopy(tag *types.Tag) map[string]interface{} {
 type DeleteLocalAppRequest struct {
 	AppName    string `json:"app_name"`
 	AppVersion string `json:"app_version"`
+	Source     string `json:"source"`
 }
 
 // deleteLocalApp handles DELETE /api/v2/apps/delete
@@ -1916,9 +1917,15 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	glog.V(2).Infof("Received delete request for app: %s, version: %s from user: %s", request.AppName, request.AppVersion, userID)
+	// Default source_id to "upload" for backward compatibility
+	sourceID := request.Source
+	if sourceID == "" {
+		sourceID = "upload"
+	}
 
-	// Step 5: Check if app exists in upload source
+	glog.V(2).Infof("Received delete request for app: %s, version: %s, source: %s from user: %s", request.AppName, request.AppVersion, sourceID, userID)
+
+	// Step 5: Check if app exists in the specified source
 	userData := s.cacheManager.GetUserData(userID)
 	if userData == nil {
 		glog.V(3).Infof("User data not found for user: %s", userID)
@@ -1926,10 +1933,10 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sourceData, exists := userData.Sources["upload"]
+	sourceData, exists := userData.Sources[sourceID]
 	if !exists {
-		glog.V(3).Infof("upload source not found for user: %s", userID)
-		s.sendResponse(w, http.StatusNotFound, false, "upload source not found", nil)
+		glog.V(3).Infof("Source '%s' not found for user: %s", sourceID, userID)
+		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("Source '%s' not found", sourceID), nil)
 		return
 	}
 
@@ -1967,18 +1974,18 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !appExists {
-		glog.V(3).Infof("App %s version %s not found in upload source for user: %s", request.AppName, request.AppVersion, userID)
-		s.sendResponse(w, http.StatusNotFound, false, "App not found in upload source", nil)
+		glog.V(3).Infof("App %s version %s not found in source '%s' for user: %s", request.AppName, request.AppVersion, sourceID, userID)
+		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("App not found in source '%s'", sourceID), nil)
 		return
 	}
 
-	// Step 6.5: Check if app is uninstalled in upload source (including clone apps)
+	// Step 6.5: Check if app is uninstalled in the source (including clone apps)
 	// Only allow deletion if the app is uninstalled or not found in AppStateLatest
-	glog.V(3).Infof("Checking if app %s is uninstalled in upload source for user: %s", request.AppName, userID)
+	glog.V(3).Infof("Checking if app %s is uninstalled in source '%s' for user: %s", request.AppName, sourceID, userID)
 	appInstalled := false
 	var installedAppName string
 
-	// Check upload source for installed instances of this app
+	// Check the source for installed instances of this app
 	if sourceData.AppStateLatest != nil {
 		for _, appState := range sourceData.AppStateLatest {
 			if appState == nil {
@@ -2002,8 +2009,8 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 				glog.Infof("App %s state: %s", request.AppName, appState.Status.State)
 				if appState.Status.State != "uninstalled" && appState.Status.State != "installFailed" && appState.Status.State != "downloadFailed" && appState.Status.State != "installingCanceled" && appState.Status.State != "downloadingCanceled" && appState.Status.State != "pendingCanceled" {
 					appInstalled = true
-					glog.V(2).Infof("App %s (or its clone %s) is still installed in upload source with state: %s",
-						request.AppName, installedAppName, appState.Status.State)
+					glog.V(2).Infof("App %s (or its clone %s) is still installed in source '%s' with state: %s",
+						request.AppName, installedAppName, sourceID, appState.Status.State)
 					break
 				}
 			}
@@ -2011,19 +2018,19 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if appInstalled {
-		glog.V(2).Infof("Cannot delete app %s: app (or its clone %s) is still installed in upload source",
-			request.AppName, installedAppName)
+		glog.V(2).Infof("Cannot delete app %s: app (or its clone %s) is still installed in source '%s'",
+			request.AppName, installedAppName, sourceID)
 		s.sendResponse(w, http.StatusBadRequest, false,
 			fmt.Sprintf("Cannot delete app: app (or its clone %s) is still installed. Please uninstall it first.",
 				installedAppName), nil)
 		return
 	}
 
-	glog.V(3).Infof("App %s is uninstalled in upload source, proceeding with deletion", request.AppName)
+	glog.V(3).Infof("App %s is uninstalled in source '%s', proceeding with deletion", request.AppName, sourceID)
 
 	// Step 7: Delete chart files using LocalRepo
 	// Delete chart package file
-	if err := s.localRepo.DeleteApp(userID, request.AppName, request.AppVersion, token); err != nil {
+	if err := s.localRepo.DeleteApp(userID, request.AppName, request.AppVersion, sourceID, token); err != nil {
 		glog.Errorf("Failed to delete chart package: %v", err)
 		// Continue with deletion even if chart file doesn't exist
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to delete chart package", nil)
@@ -2031,13 +2038,13 @@ func (s *Server) deleteLocalApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 8: Remove app from AppStateLatest
-	if err := s.cacheManager.RemoveAppStateData(userID, "upload", request.AppName); err != nil {
+	if err := s.cacheManager.RemoveAppStateData(userID, sourceID, request.AppName); err != nil {
 		glog.Errorf("Failed to remove app from AppStateLatest: %v", err)
 		// Continue with deletion even if app state doesn't exist
 	}
 
 	// Step 9: Remove app from AppInfoLatest
-	if err := s.cacheManager.RemoveAppInfoLatestData(userID, "upload", request.AppName); err != nil {
+	if err := s.cacheManager.RemoveAppInfoLatestData(userID, sourceID, request.AppName); err != nil {
 		glog.Errorf("Failed to remove app from AppInfoLatest: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to remove app from cache", nil)
 		return

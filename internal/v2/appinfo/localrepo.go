@@ -268,7 +268,7 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	}
 
 	// Add source field
-	if err := writer.WriteField("source", "upload"); err != nil {
+	if err := writer.WriteField("source", sourceID); err != nil {
 		return nil, fmt.Errorf("failed to write source field: %w", err)
 	}
 
@@ -353,13 +353,17 @@ func (lr *LocalRepo) UploadAppPackage(userID, sourceID string, fileBytes []byte,
 	return latest.RawData, nil
 }
 
-func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string) error {
-	glog.V(2).Infof("Deleting app: %s, version: %s, user: %s", appName, appVersion, userID)
+func (lr *LocalRepo) DeleteApp(userID, appName, appVersion, sourceID string, token string) error {
+	glog.V(2).Infof("Deleting app: %s, version: %s, source: %s, user: %s", appName, appVersion, sourceID, userID)
+
+	if sourceID == "" {
+		sourceID = "upload"
+	}
 
 	// Check if the app is currently being installed
 	if lr.taskModule != nil {
 		taskType, source, found, completed := lr.taskModule.GetLatestTaskByAppNameAndUser(appName, userID)
-		if found && !completed && taskType == "install" && source == "upload" {
+		if found && !completed && taskType == "install" && source == sourceID {
 			glog.V(3).Infof("Cannot delete app %s: app is currently being installed (task type: %s, source: %s)", appName, taskType, source)
 			return fmt.Errorf("cannot delete app %s: app is currently being installed", appName)
 		}
@@ -381,7 +385,7 @@ func (lr *LocalRepo) DeleteApp(userID, appName, appVersion string, token string)
 	bodyMap := map[string]string{
 		"app_name":    appName,
 		"app_version": appVersion,
-		"source_id":   "upload",
+		"source_id":   sourceID,
 	}
 	bodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
