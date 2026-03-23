@@ -175,8 +175,8 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		return affectedUsers
 	}
 
-	// count := p.cacheManager.RestoreRetryableFailedToPending(20)
-	// glog.Infof("Pipeline Phase 2: restore %d Failed to Pending", count)
+	count := p.cacheManager.RestoreRetryableFailedToPending(20)
+	glog.Infof("Pipeline Phase 2: restore %d Failed to Pending", count)
 
 	items := p.cacheManager.CollectAllPendingItems()
 

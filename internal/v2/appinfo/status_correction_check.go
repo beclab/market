@@ -218,7 +218,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 		return result
 	}
 
-	glog.V(2).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), utils.ParseJson(latestStatus))
+	glog.V(3).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), utils.ParseJson(latestStatus))
 
 	cachedStatus := scc.getCachedStatus()
 	if len(cachedStatus) == 0 {
@@ -226,7 +226,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 		return result
 	}
 
-	glog.V(2).Infof("[UserChanged] Found cached status for %d applications and middlewares: %s", len(cachedStatus), utils.ParseJson(cachedStatus))
+	glog.V(3).Infof("[UserChanged] Found cached status for %d applications and middlewares: %s", len(cachedStatus), utils.ParseJson(cachedStatus))
 
 	changes := scc.compareStatus(latestStatus, cachedStatus)
 
@@ -293,7 +293,14 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceRespo
 		return appsStatus, nil
 	}
 
-	// glog.Infof("[SCC] appStatus: %s, middlewareStatus: %s", utils.ParseJson(appsStatus), utils.ParseJson(middlewaresStatus))
+	var printf []interface{}
+	for _, md := range appsStatus {
+		if md.Spec.Name != "olares-app" {
+			printf = append(printf, md)
+		}
+	}
+
+	glog.Infof("[SCC] fetch latest appStatus: %s", utils.ParseJson(printf))
 
 	// Combine apps and middlewares status
 	// Convert middlewares to AppServiceResponse format and merge with apps
@@ -520,6 +527,15 @@ func (scc *StatusCorrectionChecker) getCachedStatus() map[string]*types.AppState
 			}
 		}
 	}
+
+	var printf = make(map[string]interface{})
+	for k, v := range cachedStatus {
+		if !strings.HasSuffix(k, "olares-app") {
+			printf[k] = v
+		}
+	}
+
+	glog.Infof("[SCC] fetch cached appStatus: %s", utils.ParseJson(printf))
 
 	return cachedStatus
 }
