@@ -120,7 +120,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	glog.Infof("Sending HTTP request for app upgrade: task=%s, version=%s", task.ID, version)
+	glog.Infof("[APP] Sending HTTP request for app upgrade: task=%s, version=%s", task.ID, version)
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
 		glog.Errorf("HTTP request failed for app upgrade: task=%s, error=%v", task.ID, err)
@@ -140,7 +140,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		return string(errorJSON), err
 	}
 
-	glog.Infof("HTTP request completed successfully for app upgrade: task=%s, response_length=%d", task.ID, len(response))
+	glog.Infof("[APP] HTTP request completed successfully for app upgrade: task=%s, response_length=%d", task.ID, len(response))
 
 	// Create success result
 	successResult := map[string]interface{}{

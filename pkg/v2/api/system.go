@@ -407,27 +407,7 @@ func doGetWithBflUser(url, bflUser string) (interface{}, error) {
 }
 
 func doGetUsers(cm *appinfo.CacheManager) ([]map[string]string, error) {
-	if ok := cm.TryRLock(); !ok {
-		glog.Warning("[TryRLock] doGetUsers: CacheManager read lock not available")
-		return nil, nil
-	}
-	defer cm.RUnlock()
-
-	var usersInfo []map[string]string
-
-	getUsers := cm.GetCache().Users
-	for _, v := range getUsers {
-		if v.UserInfo != nil && v.UserInfo.Exists {
-			var ui = make(map[string]string)
-			ui["id"] = v.UserInfo.Id
-			ui["name"] = v.UserInfo.Name
-			ui["role"] = v.UserInfo.Role
-			ui["status"] = v.UserInfo.Status
-			usersInfo = append(usersInfo, ui)
-		}
-	}
-
-	return usersInfo, nil
+	return cm.ListActiveUsers(), nil
 }
 
 func getenv(key string) string {

@@ -177,7 +177,7 @@ func (dw *DataWatcherUser) subscribeToMessages() error {
 
 // processMessage processes incoming NATS messages
 func (dw *DataWatcherUser) processMessage(data []byte) {
-	glog.V(2).Infof("User - Received message from NATS subject %s: %s", string(data))
+	glog.V(2).Infof("User - Received message from NATS subject %s", string(data))
 	var message UserStateMessage
 
 	if err := json.Unmarshal(data, &message); err != nil {
@@ -186,7 +186,7 @@ func (dw *DataWatcherUser) processMessage(data []byte) {
 	}
 
 	// Print the received message
-	glog.V(3).Infof("Received app state message - EventType: %s, Username: %s, Timestamp: %s",
+	glog.V(2).Infof("User - Received watcher user message - EventType: %s, Username: %s, Timestamp: %s",
 		message.EventType, message.Username, message.Timestamp)
 
 	// Write to history

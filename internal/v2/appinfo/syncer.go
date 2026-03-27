@@ -2,7 +2,10 @@ package appinfo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/golang/glog"
 )
 
@@ -25,6 +29,11 @@ type Syncer struct {
 	isRunning       atomic.Bool               // Use atomic.Bool for thread-safe boolean operations
 	mutex           sync.RWMutex              // Keep mutex for steps slice operations
 	settingsManager *settings.SettingsManager // Settings manager for data source information
+
+	lastSyncExecuted time.Time // Last time a full sync cycle was actually executed
+
+	lastKnownRemoteSourceIDs atomic.Value // string: sorted comma-joined remote source IDs from last sync
+	lastKnownUserIDs         atomic.Value // string: sorted comma-joined user IDs from last sync
 
 	// Status tracking fields
 	lastSyncTime        atomic.Value // time.Time
@@ -42,6 +51,7 @@ type Syncer struct {
 	lastSyncedAppCount  atomic.Int64
 	lastSyncDetails     atomic.Value // *SyncDetails
 	statusMutex         sync.RWMutex // Mutex for complex status updates
+	tryOnce atomic.Bool
 }
 
 // NewSyncer creates a new syncer with the given steps
@@ -54,6 +64,7 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 		stopChan:        make(chan struct{}),
 		isRunning:       atomic.Bool{}, // Initialize with false
 		settingsManager: settingsManager,
+		tryOnce: atomic.Bool{},
 	}
 	// Initialize atomic values
 	s.lastSyncTime.Store(time.Time{})
@@ -62,24 +73,21 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 	s.currentStep.Store("")
 	s.lastSyncDuration.Store(time.Duration(0))
 	s.currentSource.Store("")
+	s.lastKnownRemoteSourceIDs.Store("")
+	s.lastKnownUserIDs.Store("")
 	return s
 }
 
 // AddStep adds a step to the syncer
 func (s *Syncer) AddStep(step syncerfn.SyncStep) {
-	if !s.mutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for AddStep, skipping")
-		return
-	}
+	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.steps = append(s.steps, step)
 }
 
 // RemoveStep removes a step by index
 func (s *Syncer) RemoveStep(index int) error {
-	if !s.mutex.TryLock() {
-		return fmt.Errorf("failed to acquire lock for RemoveStep")
-	}
+	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	if index < 0 || index >= len(s.steps) {
@@ -92,10 +100,7 @@ func (s *Syncer) RemoveStep(index int) error {
 
 // GetSteps returns a copy of all steps
 func (s *Syncer) GetSteps() []syncerfn.SyncStep {
-	if !s.mutex.TryRLock() {
-		glog.Warning("[TryRLock] Failed to acquire read lock for GetSteps, returning empty slice")
-		return make([]syncerfn.SyncStep, 0)
-	}
+	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
 	steps := make([]syncerfn.SyncStep, len(s.steps))
@@ -103,11 +108,15 @@ func (s *Syncer) GetSteps() []syncerfn.SyncStep {
 	return steps
 }
 
-// Start begins the synchronization process
+// Start begins the synchronization process with its own sync loop
 func (s *Syncer) Start(ctx context.Context) error {
-	if !s.mutex.TryLock() {
-		return fmt.Errorf("failed to acquire lock for Start")
-	}
+	return s.StartWithOptions(ctx, true)
+}
+
+// StartWithOptions starts the syncer with options.
+// If enableSyncLoop is false, the periodic sync loop is not started (Pipeline handles scheduling).
+func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) error {
+	s.mutex.Lock()
 	if s.isRunning.Load() {
 		s.mutex.Unlock()
 		return fmt.Errorf("syncer is already running")
@@ -115,18 +124,154 @@ func (s *Syncer) Start(ctx context.Context) error {
 	s.isRunning.Store(true)
 	s.mutex.Unlock()
 
-	glog.V(2).Infof("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
-
-	go s.syncLoop(ctx)
+	if enableSyncLoop {
+		glog.V(2).Infof("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
+		go s.syncLoop(ctx) // not use
+	} else {
+		glog.V(2).Infof("Starting syncer with %d steps (passive mode, Pipeline handles scheduling)", len(s.steps))
+	}
 	return nil
+}
+
+// SyncOnce executes one sync cycle if at least syncInterval has elapsed
+// since the last execution, OR if the sync-relevant configuration has changed
+// (e.g. a new source or user was added/removed), OR if a remote source's
+// data hash has changed (lightweight probe). Called by Pipeline on every tick.
+func (s *Syncer) SyncOnce(ctx context.Context) {
+	if !s.isRunning.Load() {
+		return
+	}
+
+	flag := s.tryOnce.Load()
+	if flag {
+		// return
+	}
+
+	configChanged, reason := s.hasSyncRelevantConfigChanged()
+	throttled := !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval
+
+	if !configChanged && throttled {
+		if s.hasAnyRemoteHashChanged(ctx) {
+			glog.V(2).Info("SyncOnce: remote data hash changed, forcing sync cycle")
+		} else {
+			glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)",
+				time.Since(s.lastSyncExecuted), s.syncInterval)
+			return
+		}
+	}
+	if configChanged {
+		glog.V(2).Infof("SyncOnce: %s, forcing sync cycle", reason)
+	}
+	s.lastSyncExecuted = time.Now()
+	if err := s.executeSyncCycle(ctx); err != nil {
+		glog.Errorf("SyncOnce: sync cycle failed: %v", err)
+	}
+
+	s.tryOnce.Store(true)
+}
+
+// hasAnyRemoteHashChanged does a lightweight HTTP probe to each remote source's
+// hash endpoint and returns true if any source's remote hash differs from the
+// locally cached Others.Hash. Errors are silently ignored (conservative: don't
+// force sync on network failure).
+func (s *Syncer) hasAnyRemoteHashChanged(ctx context.Context) bool {
+	config := s.settingsManager.GetMarketSources()
+	if config == nil {
+		return false
+	}
+
+	endpoints := s.settingsManager.GetAPIEndpoints()
+	hashPath := "/api/v1/appstore/hash"
+	if endpoints != nil && endpoints.HashPath != "" {
+		hashPath = endpoints.HashPath
+	}
+
+	version := getVersionForSync()
+	client := resty.New().SetTimeout(3 * time.Second)
+
+	for _, src := range config.Sources {
+		if src.Type != "remote" {
+			continue
+		}
+
+		hashURL := s.settingsManager.BuildAPIURL(src.BaseURL, hashPath)
+		if strings.HasPrefix(hashURL, "file://") {
+			continue
+		}
+
+		resp, err := client.R().SetContext(ctx).SetQueryParam("version", version).Get(hashURL)
+		if err != nil || resp.StatusCode() != 200 {
+			continue
+		}
+
+		var hr struct {
+			Hash string `json:"hash"`
+		}
+		if json.Unmarshal(resp.Body(), &hr) != nil || hr.Hash == "" {
+			continue
+		}
+
+		localHash := ""
+		if cm := s.cacheManager.Load(); cm != nil {
+			localHash = cm.GetSourceOthersHash(src.ID)
+		}
+
+		if hr.Hash != localHash {
+			glog.V(2).Infof("SyncOnce: hash changed for source %s (remote=%s, local=%s)",
+				src.ID, hr.Hash, localHash)
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasSyncRelevantConfigChanged checks whether the remote source list or the
+// user list has changed since the last sync cycle. Returns true with a
+// human-readable reason when a change is detected.
+func (s *Syncer) hasSyncRelevantConfigChanged() (changed bool, reason string) {
+	// Check remote sources
+	config := s.settingsManager.GetMarketSources()
+	if config != nil && len(config.Sources) > 0 {
+		var remoteIDs []string
+		for _, src := range config.Sources {
+			if src.Type == "remote" {
+				remoteIDs = append(remoteIDs, src.ID)
+			}
+		}
+		sort.Strings(remoteIDs)
+		currentKey := strings.Join(remoteIDs, ",")
+
+		lastKnown, _ := s.lastKnownRemoteSourceIDs.Load().(string)
+		if currentKey != lastKnown {
+			s.lastKnownRemoteSourceIDs.Store(currentKey)
+			if lastKnown != "" {
+				return true, "remote source configuration changed"
+			}
+		}
+	}
+
+	// Check user list
+	if cm := s.cacheManager.Load(); cm != nil {
+		userIDs := cm.GetUserIDs()
+		sort.Strings(userIDs)
+		currentKey := strings.Join(userIDs, ",")
+
+		lastKnown, _ := s.lastKnownUserIDs.Load().(string)
+		if currentKey != lastKnown {
+			s.lastKnownUserIDs.Store(currentKey)
+			if lastKnown != "" {
+				return true, "user list changed"
+			}
+		}
+	}
+
+	return false, ""
 }
 
 // Stop stops the synchronization process
 func (s *Syncer) Stop() {
-	if !s.mutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for Stop, skipping")
-		return
-	}
+	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	if !s.isRunning.Load() {
@@ -146,11 +291,9 @@ func (s *Syncer) IsRunning() bool {
 // syncLoop runs the main synchronization loop
 func (s *Syncer) syncLoop(ctx context.Context) {
 	defer func() {
-		// Use TryLock for cleanup to avoid blocking
-		if s.mutex.TryLock() {
-			s.isRunning.Store(false)
-			s.mutex.Unlock()
-		}
+		s.mutex.Lock()
+		s.isRunning.Store(false)
+		s.mutex.Unlock()
 		glog.V(4).Info("Syncer stopped")
 	}()
 
@@ -164,7 +307,7 @@ func (s *Syncer) syncLoop(ctx context.Context) {
 			return
 		default:
 			// Execute sync cycle
-			if err := s.executeSyncCycle(ctx); err != nil {
+			if err := s.executeSyncCycle(ctx); err != nil { // not use
 				glog.Errorf("Sync cycle failed: %v", err)
 			}
 
@@ -292,10 +435,7 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 
 // updateSyncSuccess updates status after a successful sync
 func (s *Syncer) updateSyncSuccess(duration time.Duration, startTime time.Time) {
-	if !s.statusMutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for updateSyncSuccess, skipping status update")
-		return
-	}
+	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 
 	s.lastSyncSuccess.Store(time.Now())
@@ -310,10 +450,7 @@ func (s *Syncer) updateSyncSuccess(duration time.Duration, startTime time.Time) 
 
 // updateSyncFailure updates status after a failed sync
 func (s *Syncer) updateSyncFailure(err error, startTime time.Time) {
-	if !s.statusMutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for updateSyncFailure, skipping status update")
-		return
-	}
+	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 
 	duration := time.Since(startTime)
@@ -466,43 +603,11 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		sourceID := source.ID // Use market source name as source ID
 		glog.V(3).Infof("Using source ID: %s for data storage", sourceID)
 
-		// Get all existing user IDs with minimal locking
+		// Get all existing user IDs, creating a system user if none exist
 		var userIDs []string
-		// Use CacheManager if available, otherwise use direct cache access
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-			// Use CacheManager's lock
-			if !cacheManager.mutex.TryRLock() {
-				glog.Warning("[TryRLock] Syncer: CacheManager read lock not available, skipping user ID collection")
-				return fmt.Errorf("read lock not available")
-			}
-			for userID := range s.cache.Users {
-				userIDs = append(userIDs, userID)
-			}
-			cacheManager.mutex.RUnlock()
-
-			// If no users exist, create a system user as fallback
-			if len(userIDs) == 0 {
-				glog.V(3).Infof("[LOCK] cacheManager.mutex.TryLock() @syncer:createSystemUser Start")
-				if !cacheManager.mutex.TryLock() {
-					glog.Warning("[TryLock] Syncer: CacheManager write lock not available for system user creation, skipping")
-					return fmt.Errorf("write lock not available")
-				}
-				// Double-check after acquiring write lock
-				if len(s.cache.Users) == 0 {
-					systemUserID := "system"
-					s.cache.Users[systemUserID] = NewUserDataEx(systemUserID) // NewUserData()
-					userIDs = append(userIDs, systemUserID)
-					glog.V(3).Infof("No existing users found, created system user as fallback")
-				} else {
-					// Users were added by another goroutine
-					for userID := range s.cache.Users {
-						userIDs = append(userIDs, userID)
-					}
-				}
-				cacheManager.mutex.Unlock()
-			}
+			userIDs = cacheManager.GetOrCreateUserIDs("system")
 		} else {
-			// Fallback to direct cache access without lock (not recommended)
 			glog.V(3).Info("Warning: CacheManager not available, using direct cache access")
 			for userID := range s.cache.Users {
 				userIDs = append(userIDs, userID)
@@ -531,18 +636,16 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 
 // storeDataDirectly stores data directly to cache without going through CacheManager
 func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[string]interface{}) {
-	// Use CacheManager's lock if available
-	if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-		glog.V(3).Infof("[LOCK] cacheManager.mutex.TryLock() @syncer:storeDataDirectly Start")
-		if !cacheManager.mutex.TryLock() {
-			glog.Warning("[TryLock] Syncer: CacheManager write lock not available for data storage, skipping")
-			return
-		}
-		defer cacheManager.mutex.Unlock()
-	} else {
-		// Fallback: no lock protection (not recommended)
+	cacheManager := s.cacheManager.Load()
+	if cacheManager == nil {
 		glog.V(3).Infof("Warning: CacheManager not available for storeDataDirectly")
+		return
 	}
+	// TODO: refactor storeDataDirectly to use CacheManager write methods
+	// For now, use the internal mutex directly as this function contains
+	// complex parsing logic (~250 lines) that runs under the lock.
+	cacheManager.mutex.Lock()
+	defer cacheManager.mutex.Unlock()
 
 	userData := s.cache.Users[userID]
 
@@ -810,29 +913,16 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 	for _, userID := range userIDs {
 		// Check if the source is local type - skip syncer operations for local sources
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-			if !cacheManager.mutex.TryRLock() {
-				glog.Warningf("[TryRLock] Syncer.storeDataViaCacheManager: CacheManager read lock not available for user %s, source %s, skipping", userID, sourceID)
+			if cacheManager.IsLocalSource(userID, sourceID) {
+				glog.V(3).Infof("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
 				continue
 			}
-			userData, userExists := s.cache.Users[userID]
-			if userExists {
-				sourceData, sourceExists := userData.Sources[sourceID]
-				if sourceExists {
-					sourceType := sourceData.Type
-					if sourceType == types.SourceDataTypeLocal {
-						glog.V(3).Infof("Skipping syncer CacheManager operation for local source: user=%s, source=%s", userID, sourceID)
-						cacheManager.mutex.RUnlock()
-						continue
-					}
-				}
-			}
-			cacheManager.mutex.RUnlock()
 		}
 
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			glog.V(3).Infof("Using CacheManager to store data for user: %s, source: %s", userID, sourceID)
-			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData)
+			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData,"Syncer")
 			if err != nil {
 				glog.Errorf("Failed to store data via CacheManager for user: %s, source: %s, error: %v", userID, sourceID, err)
 				// Fall back to direct cache access
@@ -891,12 +981,9 @@ func DefaultSyncerConfig() SyncerConfig {
 
 // SetCacheManager sets the cache manager for hydration notifications
 func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
-	if !s.mutex.TryLock() {
-		glog.Warning("[TryLock] Failed to acquire lock for SetCacheManager, skipping")
-		return
-	}
+	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.cacheManager.Store(cacheManager) // Use atomic.Store to set the pointer
+	s.cacheManager.Store(cacheManager)
 }
 
 // SyncDetails contains detailed information about a sync operation

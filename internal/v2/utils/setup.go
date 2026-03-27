@@ -35,6 +35,16 @@ type AppServiceResponse struct {
 			Url       string `json:"url"`
 			Invisible bool   `json:"invisible"`
 		} `json:"entrances"`
+		Settings struct {
+			ClusterScoped   string `json:"clusterScoped"`
+			MobileSupported string `json:"mobileSupported"`
+			Policy          string `json:"policy"`
+			RequiredGPU     string `json:"requiredGPU"`
+			Source          string `json:"source"`
+			Target          string `json:"target"`
+			Title           string `json:"title"`
+			Version         string `json:"version"`
+		} `json:"settings"`
 	} `json:"spec"`
 	Status struct {
 		State              string `json:"state"`
@@ -597,7 +607,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	data := map[string]interface{}{
 		"name":               app.Spec.Name,
 		"rawAppName":         app.Spec.RawAppName,
-		"title":              app.Spec.Title,
+		"title":              app.Spec.Settings.Title,
 		"state":              app.Status.State,
 		"updateTime":         app.Status.UpdateTime,
 		"statusTime":         app.Status.StatusTime,

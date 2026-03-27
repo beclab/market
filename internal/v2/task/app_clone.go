@@ -7,8 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"market/internal/v2/settings"
-
 	"github.com/golang/glog"
 )
 
@@ -144,13 +142,9 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	}
 
 	// Get VC from purchase receipt using rawAppName and inject into environment variables
-	var settingsManager *settings.SettingsManager
-	if tm.mu.TryRLock() {
-		settingsManager = tm.settingsManager
-		tm.mu.RUnlock()
-	} else {
-		glog.Warningf("Failed to acquire read lock for settingsManager, skipping VC injection for task: %s", task.ID)
-	}
+	tm.mu.RLock()
+	settingsManager := tm.settingsManager
+	tm.mu.RUnlock()
 
 	if settingsManager != nil {
 		vc := getVCForClone(settingsManager, user, rawAppName, task.Metadata)
@@ -218,7 +212,7 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	glog.Infof("Sending HTTP request for app clone: task=%s", task.ID)
+	glog.Infof("[APP] Sending HTTP request for app clone: task=%s", task.ID)
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
 		glog.Errorf("HTTP request failed for app clone: task=%s, error=%v", task.ID, err)

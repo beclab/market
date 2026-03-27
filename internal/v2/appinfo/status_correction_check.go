@@ -102,9 +102,39 @@ func (scc *StatusCorrectionChecker) Start() error {
 	glog.Infof("Middleware service endpoint: http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort)
 
 	// Start the periodic checking goroutine
-	go scc.runPeriodicCheck()
+	go scc.runPeriodicCheck() // not used
 
 	return nil
+}
+
+// StartWithOptions starts with options
+func (scc *StatusCorrectionChecker) StartWithOptions(enablePeriodicCheck bool) error {
+	scc.mutex.Lock()
+	defer scc.mutex.Unlock()
+
+	if scc.isRunning {
+		return fmt.Errorf("status correction checker is already running")
+	}
+
+	scc.isRunning = true
+
+	if enablePeriodicCheck {
+		glog.Infof("Starting status correction checker with interval: %v", scc.checkInterval)
+		go scc.runPeriodicCheck() // not use
+	} else {
+		glog.Infof("Starting status correction checker in passive mode (serial pipeline handles processing)")
+	}
+
+	return nil
+}
+
+// PerformStatusCheckOnce executes one status check cycle, called by Pipeline Phase 4.
+// Returns the set of affected user IDs whose data was modified.
+func (scc *StatusCorrectionChecker) PerformStatusCheckOnce() map[string]bool {
+	if !scc.isRunning {
+		return nil
+	}
+	return scc.performStatusCheck() // pipeline start
 }
 
 // Stop stops the periodic status checking
@@ -157,12 +187,12 @@ func (scc *StatusCorrectionChecker) runPeriodicCheck() {
 	glog.Infof("Status correction checker periodic loop started")
 
 	// Perform initial check immediately
-	scc.performStatusCheck()
+	scc.performStatusCheck() // not use
 
 	for {
 		select {
 		case <-ticker.C:
-			scc.performStatusCheck()
+			scc.performStatusCheck() //  not use
 		case <-scc.stopChan:
 			glog.Infof("Status correction checker periodic loop stopped")
 			return
@@ -171,8 +201,9 @@ func (scc *StatusCorrectionChecker) runPeriodicCheck() {
 }
 
 // performStatusCheck performs a single status check cycle
-func (scc *StatusCorrectionChecker) performStatusCheck() {
+func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 	startTime := time.Now()
+	result := make(map[string]bool)
 
 	scc.mutex.Lock()
 	scc.lastCheckTime = startTime
@@ -181,45 +212,40 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 
 	glog.Infof("Starting status check cycle #%d", scc.checkCount)
 
-	// Fetch latest status from app-service
 	latestStatus, err := scc.fetchLatestStatus()
 	if err != nil {
-		glog.Errorf("Failed to fetch latest status from app-service: %v", err)
-		return
+		glog.Errorf("[UserChanged] Failed to fetch latest status from app-service: %v", err)
+		return result
 	}
 
-	glog.V(2).Infof("Fetched status for %d applications and middlewares from app-service", len(latestStatus))
+	glog.V(3).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), utils.ParseJson(latestStatus))
 
-	// Get current status from cache
 	cachedStatus := scc.getCachedStatus()
 	if len(cachedStatus) == 0 {
-		glog.Infof("No cached status found, skipping comparison")
-		return
+		glog.Error("[UserChanged] No cached status found, skipping comparison")
+		return result
 	}
 
-	glog.V(2).Infof("Found cached status for %d applications and middlewares", len(cachedStatus))
+	glog.V(3).Infof("[UserChanged] Found cached status for %d applications and middlewares: %s", len(cachedStatus), utils.ParseJson(cachedStatus))
 
-	// Compare and detect changes
 	changes := scc.compareStatus(latestStatus, cachedStatus)
 
-	glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v", changes)
+	glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v, app: %d, middlewares: %d", changes, len(latestStatus), len(cachedStatus))
 
 	if len(changes) > 0 {
-		glog.V(2).Infof("Detected %d status changes, applying corrections", len(changes))
+		glog.V(2).Infof("[UserChanged] Detected %d status changes, applying corrections, changes: %s", len(changes), utils.ParseJson(changes))
 		scc.applyCorrections(changes, latestStatus)
 
-		// After applying corrections, recalculate and update user data hash for all affected users.
-		// This ensures the hash stays consistent with the latest user data state.
-		// The hash calculation logic is consistent with DataWatcher (see datawatcher_app.go).
-		// affectedUsers := make(map[string]struct{})
-		affectedUsers := make(map[string]*StatusChange)
+		// Apply UserInfo changes and collect affected users.
+		// Hash calculation and ForceSync are deferred to Pipeline Phase 5.
+		changesByUser := make(map[string]*StatusChange)
 		for _, change := range changes {
-			affectedUsers[change.UserID] = &change //change.ChangeType
+			changesByUser[change.UserID] = &change
 		}
-		for userID, cs := range affectedUsers {
+		for userID, cs := range changesByUser {
 			userData := scc.cacheManager.GetUserData(userID)
 			if userData == nil {
-				glog.V(3).Infof("StatusCorrectionChecker: userData not found for user %s, skip hash calculation", userID)
+				glog.Warningf("StatusCorrectionChecker: userData not found for user %s", userID)
 				continue
 			}
 
@@ -234,30 +260,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 				glog.V(2).Infof("[UserChanged] userId: %s, userInfo is null", cs.UserID)
 			}
 
-			// Generate snapshot for hash calculation (reuse logic from DataWatcher)
-			snapshot, err := utils.CreateUserDataSnapshot(userID, userData)
-			if err != nil {
-				glog.Errorf("StatusCorrectionChecker: failed to create snapshot for user %s: %v", userID, err)
-				continue
-			}
-			newHash, err := utils.CalculateUserDataHash(snapshot)
-			if err != nil {
-				glog.Errorf("StatusCorrectionChecker: failed to calculate hash for user %s: %v", userID, err)
-				continue
-			}
-			// Write back hash with lock
-			glog.V(3).Infof("[LOCK] scc.cacheManager.mutex.TryLock() @status_correction:updateHash Start")
-			if !scc.cacheManager.mutex.TryLock() {
-				glog.Warning("[TryLock] StatusCorrectionChecker: CacheManager write lock not available for hash update, skipping")
-				continue
-			}
-			userData.Hash = newHash
-			scc.cacheManager.mutex.Unlock()
-			glog.V(2).Infof("StatusCorrectionChecker: user %s hash updated to %s", userID, newHash)
-		}
-		// Force sync after hash update
-		if err := scc.cacheManager.ForceSync(); err != nil {
-			glog.Errorf("StatusCorrectionChecker: ForceSync failed after hash update: %v", err)
+			result[userID] = true
 		}
 
 		scc.mutex.Lock()
@@ -267,10 +270,10 @@ func (scc *StatusCorrectionChecker) performStatusCheck() {
 		glog.V(3).Info("No status changes detected")
 	}
 
-	// Check and correct task statuses
 	scc.checkAndCorrectTaskStatuses(latestStatus)
 
 	glog.V(2).Infof("Status check cycle #%d completed in %v", scc.checkCount, time.Since(startTime))
+	return result
 }
 
 // fetchLatestStatus fetches the latest status from app-service
@@ -289,6 +292,15 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceRespo
 		// Return only apps status if middlewares fetch fails
 		return appsStatus, nil
 	}
+
+	var printf []interface{}
+	for _, md := range appsStatus {
+		if md.Spec.Name != "olares-app" {
+			printf = append(printf, md)
+		}
+	}
+
+	glog.Infof("[SCC] fetch latest appStatus: %s", utils.ParseJson(printf))
 
 	// Combine apps and middlewares status
 	// Convert middlewares to AppServiceResponse format and merge with apps
@@ -413,6 +425,16 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 					Url       string `json:"url"`
 					Invisible bool   `json:"invisible"`
 				} `json:"entrances"`
+				Settings struct {
+					ClusterScoped   string `json:"clusterScoped"`
+					MobileSupported string `json:"mobileSupported"`
+					Policy          string `json:"policy"`
+					RequiredGPU     string `json:"requiredGPU"`
+					Source          string `json:"source"`
+					Target          string `json:"target"`
+					Title           string `json:"title"`
+					Version         string `json:"version"`
+				} `json:"settings"`
 			}{
 				Name:   middleware.Metadata.Name,
 				AppID:  middleware.Metadata.Name,
@@ -505,6 +527,15 @@ func (scc *StatusCorrectionChecker) getCachedStatus() map[string]*types.AppState
 			}
 		}
 	}
+
+	var printf = make(map[string]interface{})
+	for k, v := range cachedStatus {
+		if !strings.HasSuffix(k, "olares-app") {
+			printf[k] = v
+		}
+	}
+
+	glog.Infof("[SCC] fetch cached appStatus: %s", utils.ParseJson(printf))
 
 	return cachedStatus
 }
@@ -897,13 +928,13 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID) // app_appeared
 			if appStateData == nil {
 				glog.V(3).Infof("Failed to create app state data for appeared app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
-			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+			stateData := scc.createStateDataFromAppStateData(appStateData) // app_appeared
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData, "SCC_app_appeared"); err != nil {
 				glog.Errorf("Failed to add appeared app %s to cache (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
@@ -939,13 +970,13 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID) // state_change
 			if appStateData == nil {
 				glog.V(3).Infof("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
-			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+			stateData := scc.createStateDataFromAppStateData(appStateData) // state_change
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData, "SCC_state_change"); err != nil {
 				glog.Errorf("Failed to update cache with corrected status for app %s (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
@@ -995,14 +1026,14 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 				}
 			}
 
-			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID)
+			appStateData, sourceID := scc.createAppStateDataFromResponse(*appToUpdate, change.UserID) // state_inconsistency
 			if appStateData == nil {
 				glog.V(3).Infof("Failed to create app state data for app %s (user: %s)", change.AppName, change.UserID)
 				continue
 			}
 			appStateData.Status.State = "running"
-			stateData := scc.createStateDataFromAppStateData(appStateData)
-			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData); err != nil {
+			stateData := scc.createStateDataFromAppStateData(appStateData) // state_inconsistency
+			if err := scc.cacheManager.SetAppData(change.UserID, sourceID, AppStateLatest, stateData, "SCC_state_inconsistency"); err != nil {
 				glog.Errorf("Failed to update cache with corrected state for inconsistent app %s (user: %s, source: %s): %v",
 					change.AppName, change.UserID, sourceID, err)
 			} else {
@@ -1265,7 +1296,7 @@ func (scc *StatusCorrectionChecker) ForceCheck() error {
 	}
 
 	glog.Infof("Forcing immediate status check")
-	scc.performStatusCheck()
+	scc.performStatusCheck() // not used
 	return nil
 }
 
@@ -1327,7 +1358,7 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 		return
 	}
 
-	glog.Infof("Checking %d running tasks for status correction", len(runningTasks))
+	glog.Infof("[SCC] Checking %d running tasks for status correction", len(runningTasks))
 
 	// Create a map of app statuses for quick lookup: user:appName -> app status
 	appStatusMap := make(map[string]*utils.AppServiceResponse)
@@ -1358,39 +1389,39 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 				if runningTask.Type == task.CloneApp {
 					taskTypeStr = "Clone"
 				}
-				glog.Infof("Task status correction: %s task %s for app %s (user: %s) should be completed - app is running",
+				glog.Infof("[SCC] Task status correction: %s task %s for app %s (user: %s) should be completed - app is running",
 					taskTypeStr, runningTask.ID, runningTask.AppName, runningTask.User)
 				if err := scc.taskModule.InstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
-					glog.Warningf("Failed to mark %s task as succeeded: %v", taskTypeStr, err)
+					glog.Warningf("[SCC] Failed to mark %s task as succeeded: %v", taskTypeStr, err)
 				} else {
 					correctedCount++
-					glog.Infof("Successfully corrected %s task status: %s", taskTypeStr, runningTask.ID)
+					glog.Infof("[SCC] Successfully corrected %s task status: %s", taskTypeStr, runningTask.ID)
 				}
 			}
 
 		case task.UninstallApp:
 			// For uninstall tasks: if app doesn't exist, mark task as completed
 			if !exists {
-				glog.Infof("Task status correction: Uninstall task %s for app %s (user: %s) should be completed - app no longer exists",
+				glog.Infof("[SCC] Task status correction: Uninstall task %s for app %s (user: %s) should be completed - app no longer exists",
 					runningTask.ID, runningTask.AppName, runningTask.User)
 				if err := scc.taskModule.UninstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
-					glog.Warningf("Failed to mark uninstall task as succeeded: %v", err)
+					glog.Warningf("[SCC] Failed to mark uninstall task as succeeded: %v", err)
 				} else {
 					correctedCount++
-					glog.Infof("Successfully corrected uninstall task status: %s", runningTask.ID)
+					glog.Infof("[SCC] Successfully corrected uninstall task status: %s", runningTask.ID)
 				}
 			}
 
 		case task.CancelAppInstall:
 			// For cancel install tasks: if app doesn't exist, mark task as completed
 			if !exists {
-				glog.Infof("Task status correction: Cancel install task %s for app %s (user: %s) should be completed - app no longer exists",
+				glog.Infof("[SCC] Task status correction: Cancel install task %s for app %s (user: %s) should be completed - app no longer exists",
 					runningTask.ID, runningTask.AppName, runningTask.User)
 				if err := scc.taskModule.CancelInstallTaskSucceed(runningTask.OpID, runningTask.AppName, runningTask.User); err != nil {
-					glog.Warningf("Failed to mark cancel install task as succeeded: %v", err)
+					glog.Warningf("[SCC] Failed to mark cancel install task as succeeded: %v", err)
 				} else {
 					correctedCount++
-					glog.Infof("Successfully corrected cancel install task status: %s", runningTask.ID)
+					glog.Infof("[SCC] Successfully corrected cancel install task status: %s", runningTask.ID)
 				}
 			}
 
@@ -1400,14 +1431,14 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 			// are typically completed through their normal execution flow.
 			// We log it for monitoring but don't auto-correct to avoid conflicts.
 			if exists && appStatus != nil && appStatus.Status.State == "running" {
-				glog.Infof("Task status correction: Upgrade task %s for app %s (user: %s) appears completed - app is running (not auto-correcting)",
+				glog.Infof("[SCC] Task status correction: Upgrade task %s for app %s (user: %s) appears completed - app is running (not auto-correcting)",
 					runningTask.ID, runningTask.AppName, runningTask.User)
 			}
 		}
 	}
 
 	if correctedCount > 0 {
-		glog.Infof("Task status correction completed: corrected %d task(s)", correctedCount)
+		glog.Infof("[SCC] Task status correction completed: corrected %d task(s)", correctedCount)
 		scc.mutex.Lock()
 		scc.correctionCount += int64(correctedCount)
 		scc.mutex.Unlock()

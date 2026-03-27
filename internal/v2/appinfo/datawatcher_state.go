@@ -21,6 +21,8 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+var nanoTimeLayout = "2006-01-02T15:04:05.999999999Z" // 2006-01-02T15:04:05.000000000Z
+
 // EntranceStatus represents the status of an entrance
 type EntranceStatus struct {
 	ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
@@ -59,6 +61,7 @@ type AppStateMessage struct {
 	State            string           `json:"state"`
 	User             string           `json:"user"`
 	Progress         string           `json:"progress"`
+	MarketSource     string           `json:"marketSource"`
 	Reason           string           `json:"reason"`
 	Message          string           `json:"message"`
 	EntranceStatuses []EntranceStatus `json:"entranceStatuses"`
@@ -158,30 +161,27 @@ func (dw *DataWatcherState) resolveInvisibleFlag(raw *bool, entranceName, appNam
 // fetchInvisibleFromAppService fetches invisible flag from app-service API's spec.entrances
 // Uses caching to avoid repeated API calls for the same app
 func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entranceName string) (bool, error) {
-	// Check cache first (using TryRLock to avoid blocking)
 	cacheKey := fmt.Sprintf("%s:%s", userID, appName)
-	if dw.appServiceCacheMutex.TryRLock() {
-		if appCache, exists := dw.appServiceCache[cacheKey]; exists {
-			if invisible, found := appCache[entranceName]; found {
-				dw.appServiceCacheMutex.RUnlock()
-				glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - using cached invisible=%t for entrance %s (app=%s, user=%s)",
-					invisible, entranceName, appName, userID)
-				return invisible, nil
-			}
-		}
-		dw.appServiceCacheMutex.RUnlock()
-	} else {
-		glog.Warningf("[TryRLock] DEBUG: fetchInvisibleFromAppService - read lock not available, skipping cache check for entrance %s (app=%s, user=%s)",
-			entranceName, appName, userID)
-	}
 
-	// Fetch from API
+	// Check cache first (short read lock)
+	dw.appServiceCacheMutex.RLock()
+	if appCache, exists := dw.appServiceCache[cacheKey]; exists {
+		if invisible, found := appCache[entranceName]; found {
+			dw.appServiceCacheMutex.RUnlock()
+			glog.V(3).Infof("fetchInvisibleFromAppService - cached invisible=%t for entrance %s (app=%s, user=%s)",
+				invisible, entranceName, appName, userID)
+			return invisible, nil
+		}
+	}
+	dw.appServiceCacheMutex.RUnlock()
+
+	// Fetch from API (no lock held)
 	host := getEnvOrDefault("APP_SERVICE_SERVICE_HOST", "localhost")
 	port := getEnvOrDefault("APP_SERVICE_SERVICE_PORT", "80")
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
 
 	client := &http.Client{
-		Timeout: 5 * time.Second, // Short timeout to avoid blocking
+		Timeout: 5 * time.Second,
 	}
 
 	resp, err := client.Get(url)
@@ -204,10 +204,8 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 		return false, fmt.Errorf("failed to parse app-service response: %v", err)
 	}
 
-	// Find the app matching appName and userID
 	for _, app := range apps {
 		if app.Spec.Name == appName && app.Spec.Owner == userID {
-			// Find the entrance in spec.entrances first
 			var foundInvisible bool
 			var invisibleValue bool
 			for _, specEntrance := range app.Spec.Entrances {
@@ -222,22 +220,18 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 				return false, fmt.Errorf("entrance %s not found in spec.entrances for app %s", entranceName, appName)
 			}
 
-			// Cache all entrances for this app to avoid future API calls (using TryLock to avoid blocking)
-			if dw.appServiceCacheMutex.TryLock() {
-				if dw.appServiceCache[cacheKey] == nil {
-					dw.appServiceCache[cacheKey] = make(map[string]bool)
-				}
-				for _, specEntrance := range app.Spec.Entrances {
-					dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
-				}
-				dw.appServiceCacheMutex.Unlock()
-				glog.V(3).Infof("DEBUG: fetchInvisibleFromAppService - fetched and cached invisible=%t for entrance %s (app=%s, user=%s)",
-					invisibleValue, entranceName, appName, userID)
-			} else {
-				glog.Warningf("[TryLock] DEBUG: fetchInvisibleFromAppService - write lock not available, skipping cache update for entrance %s (app=%s, user=%s)",
-					entranceName, appName, userID)
+			// Write cache (separate write lock, no read lock held)
+			dw.appServiceCacheMutex.Lock()
+			if dw.appServiceCache[cacheKey] == nil {
+				dw.appServiceCache[cacheKey] = make(map[string]bool)
 			}
+			for _, specEntrance := range app.Spec.Entrances {
+				dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
+			}
+			dw.appServiceCacheMutex.Unlock()
 
+			glog.V(3).Infof("fetchInvisibleFromAppService - fetched and cached invisible=%t for entrance %s (app=%s, user=%s)",
+				invisibleValue, entranceName, appName, userID)
 			return invisibleValue, nil
 		}
 	}
@@ -375,7 +369,7 @@ func (dw *DataWatcherState) startNatsConnection() error {
 }
 
 // handleMessage processes incoming NATS messages
-func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
+func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 	glog.V(2).Infof("State - Received message from NATS subject %s: %s", msg.Subject, string(msg.Data))
 
 	var appStateMsg AppStateMessage
@@ -503,7 +497,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 				// This avoids blocking NATS message processing
 				glog.V(2).Infof("Delaying pending state message for app=%s, user=%s, opID=%s - failed to acquire lock",
 					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
-				dw.addDelayedMessage(msg, appStateMsg)
+				dw.addDelayedMessage(msg, appStateMsg) // install + pending
 				return
 			}
 			if hasPendingTask {
@@ -511,7 +505,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 				// This avoids matching to the wrong source when a new install starts
 				glog.V(2).Infof("Delaying pending state message for app=%s, user=%s, opID=%s - found pending/running install task",
 					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
-				dw.addDelayedMessage(msg, appStateMsg)
+				dw.addDelayedMessage(msg, appStateMsg) // install + pending
 				return
 			}
 		}
@@ -539,7 +533,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 					// Task not found in database, delay to wait for task to be persisted
 					glog.Errorf("Delaying pending state message for app=%s, user=%s, opID=%s - task not found in DB, waiting for persistence",
 						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID)
-					dw.addDelayedMessage(msg, appStateMsg)
+					dw.addDelayedMessage(msg, appStateMsg) // install + pending
 					return
 				}
 				// Task found in database, can proceed (storeStateToCache will use OpID to query from DB)
@@ -549,78 +543,132 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) {
 		}
 	}
 
-	userData := dw.cacheManager.getUserData(appStateMsg.User)
-	if userData == nil {
-		glog.V(2).Infof("User data not found for user %s", appStateMsg.User)
-		return
-	}
+	shouldUpdate := true
+	checker := func(appState *AppStateLatestData) {
+		switch {
+		//   NATS State                        APP State
+		case appStateMsg.State == "running" && appState.Status.State == "installing":
+		case appStateMsg.State == "running" && appState.Status.State == "initializing":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCanceling":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCancelFailed":
+		case appStateMsg.State == "pendingCanceled" && appState.Status.State == "pending":
+		case appStateMsg.State == "stopped" && appState.Status.State == "pending":
+		case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "downloadingCanceling":
+		case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
+		case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
+		case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
+		case appStateMsg.State == "running" && appState.Status.State == "resuming":
+		case appStateMsg.State == "stopped" && appState.Status.State == "resuming":
+		case appStateMsg.State == "installingCanceled" && appState.Status.State == "resuming":
+		case appStateMsg.State == "stopped" && appState.Status.State == "stopping":
+		default:
+			// state = downloading
+			if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
+				glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
+					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, appState.Status.State, appStateMsg.State)
+				shouldUpdate = false
+				return
+			}
+		}
 
-	for _, sourceData := range userData.Sources {
-		for _, appState := range sourceData.AppStateLatest {
-			if appState.Status.Name == appStateMsg.Name { // && appState.Status.State == appStateMsg.State
+		// Compare timestamps properly by parsing them
+		if appState.Status.StatusTime != "" && appStateMsg.CreateTime != "" {
+			statusTime, err1 := time.Parse(nanoTimeLayout, appState.Status.StatusTime)
+			createTime, err2 := time.Parse(nanoTimeLayout, appStateMsg.CreateTime)
 
-				/**
-				 * [Mandatory Sync Whitelist]
-				 * The cases below define critical state transition scenarios that must be processed.
-				 *
-				 * Background:
-				 * When a user performs an action in the UI (e.g., canceling installation/download) or when an app lifecycle event completes (e.g., installation finished, uninstallation finished),
-				 * the final state pushed by NATS (appStateMsg.State) may differ from the cached state in memory (appState.Status.State).
-				 *
-				 * Purpose:
-				 * Even if the progress (Progress) has not changed and there is no entrance information (EntranceStatuses),
-				 * as long as the following conditions are met, we must bypass the "deduplication check" in the default branch.
-				 * This forces the local state to update and pushes the change to the frontend, ensuring the UI promptly reflects the final result.
-				 */
-				switch {
-				//   NATS State                        APP State
-				case appStateMsg.State == "running" && appState.Status.State == "installing":
-				case appStateMsg.State == "running" && appState.Status.State == "initializing":
-				case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
-				case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
-				case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
-				case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCanceling":
-				case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCancelFailed":
-				case appStateMsg.State == "stopped" && appState.Status.State == "pending":
-				case appStateMsg.State == "pendingCanceled" && appState.Status.State == "pending":
-				case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "downloadingCanceling":
-				case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
-				case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
-				case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
-				case appStateMsg.State == "running" && appState.Status.State == "resuming":
-				case appStateMsg.State == "stopped" && appState.Status.State == "resuming":
-				case appStateMsg.State == "installingCanceled" && appState.Status.State == "resuming":
-				case appStateMsg.State == "stopped" && appState.Status.State == "stopping":
-				default:
-					if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
-						glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
-							appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, appState.Status.State, appStateMsg.State)
-						return
-					}
+			if err1 == nil && err2 == nil {
+				if statusTime.After(createTime) {
+					glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s, appTime: %s, msgTime: %s. Skipping update.",
+						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, statusTime.String(), createTime.String())
+					shouldUpdate = false
+					return
 				}
-
-				// Compare timestamps properly by parsing them
-				if appState.Status.StatusTime != "" && appStateMsg.CreateTime != "" {
-					statusTime, err1 := time.Parse("2006-01-02T15:04:05.000000000Z", appState.Status.StatusTime)
-					createTime, err2 := time.Parse("2006-01-02T15:04:05.000000000Z", appStateMsg.CreateTime)
-
-					if err1 == nil && err2 == nil {
-						if statusTime.After(createTime) {
-							glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s, appTime: %s, msgTime: %s. Skipping update.",
-								appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, statusTime.String(), createTime.String())
-							return
-						}
-					} else {
-						glog.Errorf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
-							appState.Status.StatusTime, appStateMsg.CreateTime, err1, err2)
-					}
-				}
+			} else {
+				glog.Errorf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
+					appState.Status.StatusTime, appStateMsg.CreateTime, err1, err2)
 			}
 		}
 	}
 
+	dw.cacheManager.CompareAppStateMsg(appStateMsg.User, appStateMsg.MarketSource, appStateMsg.Name, checker)
+
+	if !shouldUpdate {
+		return
+	}
+
+	// userData := dw.cacheManager.getUserData(appStateMsg.User)
+	// if userData == nil {
+	// 	glog.V(2).Infof("User data not found for user %s", appStateMsg.User)
+	// 	return
+	// }
+
+	// for sourceId, sourceData := range userData.Sources {
+	// 	if appStateMsg.MarketSource != "" && sourceId != appStateMsg.MarketSource {
+	// 		continue
+	// 	}
+	// 	for _, appState := range sourceData.AppStateLatest {
+	// 		if appState.Status.Name == appStateMsg.Name { // && appState.Status.State == appStateMsg.State
+
+	// 			/**
+	// 			 * [Mandatory Sync Whitelist]
+	// 			 * The cases below define critical state transition scenarios that must be processed.
+	// 			 *
+	// 			 * Background:
+	// 			 * When a user performs an action in the UI (e.g., canceling installation/download) or when an app lifecycle event completes (e.g., installation finished, uninstallation finished),
+	// 			 * the final state pushed by NATS (appStateMsg.State) may differ from the cached state in memory (appState.Status.State).
+	// 			 *
+	// 			 * Purpose:
+	// 			 * Even if the progress (Progress) has not changed and there is no entrance information (EntranceStatuses),
+	// 			 * as long as the following conditions are met, we must bypass the "deduplication check" in the default branch.
+	// 			 * This forces the local state to update and pushes the change to the frontend, ensuring the UI promptly reflects the final result.
+	// 			 */
+	// 			switch {
+	// 			//   NATS State                        APP State
+	// 			case appStateMsg.State == "running" && appState.Status.State == "installing":
+	// 			case appStateMsg.State == "running" && appState.Status.State == "initializing":
+	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
+	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
+	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
+	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCanceling":
+	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCancelFailed":
+	// 			case appStateMsg.State == "pendingCanceled" && appState.Status.State == "pending":
+	// 			case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "downloadingCanceling":
+	// 			case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
+	// 			case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
+	// 			case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
+	// 			default:
+	// 				if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
+	// 					glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
+	// 						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, appState.Status.State, appStateMsg.State)
+	// 					return
+	// 				}
+	// 			}
+
+	// 			// Compare timestamps properly by parsing them
+	// 			if appState.Status.StatusTime != "" && appStateMsg.CreateTime != "" {
+	// 				statusTime, err1 := time.Parse("2006-01-02T15:04:05.000000000Z", appState.Status.StatusTime)
+	// 				createTime, err2 := time.Parse("2006-01-02T15:04:05.000000000Z", appStateMsg.CreateTime)
+
+	// 				if err1 == nil && err2 == nil {
+	// 					if statusTime.After(createTime) {
+	// 						glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s, appTime: %s, msgTime: %s. Skipping update.",
+	// 							appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, statusTime.String(), createTime.String())
+	// 						return
+	// 					}
+	// 				} else {
+	// 					glog.Errorf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
+	// 						appState.Status.StatusTime, appStateMsg.CreateTime, err1, err2)
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
+
 	// Process the message
-	glog.V(2).Infof("State - Processs message from NATS subject %s, for internal for opID: %s, app: %s, user: %s, msgState: %s",
+	glog.V(2).Infof("State - Processs update message from NATS subject %s, for internal for opID: %s, app: %s, user: %s, msgState: %s",
 		msg.Subject, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, appStateMsg.State)
 	dw.processMessageInternal(msg, appStateMsg)
 }
@@ -855,7 +903,8 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 						// Parse statusTime for sorting
 						var statusTime time.Time
 						if appState.Status.StatusTime != "" {
-							if parsedTime, err := time.Parse("2006-01-02T15:04:05.000000000Z", appState.Status.StatusTime); err == nil {
+
+							if parsedTime, err := time.Parse(nanoTimeLayout, appState.Status.StatusTime); err == nil {
 								statusTime = parsedTime
 							} else {
 								// If parsing fails, use zero time (will be sorted to the end)
@@ -1001,22 +1050,15 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		return
 	}
 
-	if err := dw.cacheManager.SetAppData(userID, sourceID, AppStateLatest, stateData); err != nil { // + App - Sending
+	if err := dw.cacheManager.SetAppData(userID, sourceID, AppStateLatest, stateData, "DataWatcherState"); err != nil { // + App - Sending
 		glog.Errorf("Failed to store app state to cache: %v", err)
 	} else {
 		glog.V(2).Infof("Successfully stored app state to cache for user=%s, source=%s, app=%s, state=%s",
 			userID, sourceID, msg.Name, msg.State)
 
-		// Call ForceCalculateAllUsersHash for hash calculation after successful cache update
+		// Mark user as dirty for deferred hash calculation in Pipeline Phase 5
 		if dw.dataWatcher != nil {
-			glog.V(3).Infof("Triggering hash recalculation for all users after cache update")
-			if err := dw.dataWatcher.ForceCalculateAllUsersHash(); err != nil {
-				glog.Errorf("Failed to force calculate all users hash: %v", err)
-			} else {
-				glog.V(2).Infof("Successfully triggered hash recalculation for all users")
-			}
-		} else {
-			glog.V(3).Infof("DataWatcher not available, skipping hash recalculation")
+			dw.dataWatcher.MarkUserDirty(userID)
 		}
 	}
 }

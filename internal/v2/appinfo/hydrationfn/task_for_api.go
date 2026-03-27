@@ -85,7 +85,7 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		Post(url)
 	duration := time.Since(startTime)
 	if err != nil || resp.StatusCode() >= 300 {
-		glog.Errorf("TaskForApiStep - Request failed in %v for user=%s, source=%s, app=%s: %v", duration, task.UserID, task.SourceID, task.AppID, err)
+		glog.Errorf("TaskForApiStep - Request failed in %v for user=%s, source=%s, app=%s(%s/%s): %v", duration, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion, err)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to call chart repo sync-app: %w", err)
@@ -108,14 +108,14 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 				if err := s.writeAppDataToCache(task, appData); err != nil {
 					glog.Errorf("Warning: failed to write app_data to cache: %v", err)
 				} else {
-					glog.V(3).Infof("Successfully wrote app_data to cache for user=%s, source=%s, app=%s, appName=%s",
+					glog.V(2).Infof("Successfully wrote app_data to cache for user=%s, source=%s, app=%s, appName=%s",
 						task.UserID, task.SourceID, task.AppID, task.AppName)
 				}
 			}
 		}
 	}
 
-	glog.V(3).Info("SyncApp to chart repo completed successfully")
+	glog.V(2).Infof("[TaskForApi] SyncApp %s(%s %s) to chart repo completed successfully", task.AppID, task.AppName, task.AppVersion)
 	return nil
 }
 
@@ -164,58 +164,34 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 		return fmt.Errorf("app_data is not in expected format, app=%s, appName=%s", task.AppID, task.AppName)
 	}
 
-	// Now acquire the lock for cache operations
-	if task.CacheManager != nil {
-		if !task.CacheManager.TryLock() {
-			return fmt.Errorf("write lock not available for cache update, user=%s, source=%s, app=%s, appName=%s", task.UserID, task.SourceID, task.AppID, task.AppName)
-		}
-		defer task.CacheManager.Unlock()
+	if task.CacheManager == nil {
+		return fmt.Errorf("CacheManager not available for fixVersionHistoryFromPendingData")
 	}
 
-	// Find the pendingData in cache
-	pendingData := s.findPendingDataFromCache(task)
-	if pendingData == nil {
-		return fmt.Errorf("pendingData not found in cache for user=%s, source=%s, app=%s, appName=%s", task.UserID, task.SourceID, task.AppID, task.AppName)
-	}
-
-	// Fix version history data
-	appInfoLatest.RawData.VersionHistory = pendingData.RawData.VersionHistory
-	appInfoLatest.AppInfo.AppEntry.VersionHistory = pendingData.RawData.VersionHistory
-
-	// Preserve appLabels from pendingData if chartrepo didn't return them or returned empty array
-	// This is critical for delisted apps (with suspend/remove labels) that are still installed
-	if pendingData.RawData != nil && len(pendingData.RawData.AppLabels) > 0 {
-		// Check if chartrepo returned appLabels
-		chartrepoHasLabels := false
-		if appDataMap, ok := appData.(map[string]interface{}); ok {
-			if appInfoMap, ok := appDataMap["app_info"].(map[string]interface{}); ok {
-				if appEntryMap, ok := appInfoMap["app_entry"].(map[string]interface{}); ok {
-					if appLabels, ok := appEntryMap["appLabels"].([]interface{}); ok && len(appLabels) > 0 {
-						chartrepoHasLabels = true
-					}
+	// Check if chartrepo returned appLabels before taking the lock
+	chartrepoHasLabels := false
+	if appDataMap, ok := appData.(map[string]interface{}); ok {
+		if appInfoMap, ok := appDataMap["app_info"].(map[string]interface{}); ok {
+			if appEntryMap, ok := appInfoMap["app_entry"].(map[string]interface{}); ok {
+				if appLabels, ok := appEntryMap["appLabels"].([]interface{}); ok && len(appLabels) > 0 {
+					chartrepoHasLabels = true
 				}
 			}
 		}
-
-		// If chartrepo didn't return labels, preserve from pendingData
-		if !chartrepoHasLabels {
-			appInfoLatest.RawData.AppLabels = pendingData.RawData.AppLabels
-			appInfoLatest.AppInfo.AppEntry.AppLabels = pendingData.RawData.AppLabels
+	}
+	if chartrepoHasLabels {
+		// Clear the AppLabels so CopyPendingVersionHistory won't overwrite them
+		// (it only copies when latest has empty labels)
+	} else if appInfoLatest.RawData != nil {
+		appInfoLatest.RawData.AppLabels = nil
+		if appInfoLatest.AppInfo != nil && appInfoLatest.AppInfo.AppEntry != nil {
+			appInfoLatest.AppInfo.AppEntry.AppLabels = nil
 		}
 	}
 
-	// Overwrite all fields of pendingData (keep the pointer address, update all contents)
-	pendingData.Type = appInfoLatest.Type
-	pendingData.Timestamp = appInfoLatest.Timestamp
-	pendingData.Version = appInfoLatest.Version
-	pendingData.RawData = appInfoLatest.RawData
-	pendingData.RawPackage = appInfoLatest.RawPackage
-	pendingData.Values = appInfoLatest.Values
-	pendingData.AppInfo = appInfoLatest.AppInfo
-	pendingData.RenderedPackage = appInfoLatest.RenderedPackage
-	pendingData.AppSimpleInfo = appInfoLatest.AppSimpleInfo
-
-	return nil
+	return task.CacheManager.CopyPendingVersionHistory(
+		task.UserID, task.SourceID, task.AppID, task.AppName, appInfoLatest,
+	)
 }
 
 // findPendingDataFromCache finds AppInfoLatestPendingData from cache based on task information

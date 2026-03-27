@@ -26,10 +26,11 @@ type AppInfoModule struct {
 	redisClient             *RedisClient
 	syncer                  *Syncer
 	hydrator                *Hydrator
+	pipeline                *Pipeline
 	dataWatcher             *DataWatcher
 	dataWatcherState        *DataWatcherState
 	dataWatcherUser         *DataWatcherUser
-	dataWatcherRepo         *DataWatcherRepo // Add DataWatcherRepo for image info updates
+	dataWatcherRepo         *DataWatcherRepo
 	dataSender              *DataSender
 	statusCorrectionChecker *StatusCorrectionChecker
 	settingsManager         *settings.SettingsManager
@@ -223,10 +224,29 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
-	// Set up hydration notifier connection if both cache and hydrator are enabled
-	if m.config.EnableCache && m.config.EnableHydrator && m.cacheManager != nil && m.hydrator != nil {
-		m.cacheManager.SetHydrationNotifier(m.hydrator)
-		glog.Infof("Hydration notifier connection established between cache manager and hydrator")
+	// Create and start Pipeline to orchestrate all components serially
+	if m.config.EnableHydrator && m.cacheManager != nil {
+		p := NewPipeline(m.cacheManager, m.cacheManager.cache, 30*time.Second)
+		if m.syncer != nil {
+			p.SetSyncer(m.syncer)
+		}
+		if m.hydrator != nil {
+			p.SetHydrator(m.hydrator)
+		}
+		if m.dataWatcher != nil {
+			p.SetDataWatcher(m.dataWatcher)
+		}
+		if m.dataWatcherRepo != nil {
+			p.SetDataWatcherRepo(m.dataWatcherRepo)
+		}
+		if m.statusCorrectionChecker != nil {
+			p.SetStatusCorrectionChecker(m.statusCorrectionChecker)
+		}
+		if err := p.Start(m.ctx); err != nil {
+			return fmt.Errorf("failed to start Pipeline: %w", err)
+		}
+		m.pipeline = p
+		glog.Infof("Pipeline started, all components orchestrated serially")
 	}
 
 	m.isStarted = true
@@ -245,7 +265,11 @@ func (m *AppInfoModule) Stop() error {
 
 	glog.V(3).Info("Stopping AppInfo module...")
 
-	// Stop components in reverse order
+	// Stop Pipeline first (it orchestrates other components)
+	if m.pipeline != nil {
+		m.pipeline.Stop()
+	}
+
 	if m.hydrator != nil {
 		m.hydrator.Stop()
 	}
@@ -378,25 +402,14 @@ func (m *AppInfoModule) GetRedisConfig() *RedisConfig {
 
 // IsStarted returns whether the module is currently running
 func (m *AppInfoModule) IsStarted() bool {
-	// Boolean read is atomic, but we need to ensure consistency with Start/Stop operations
-	if !m.mutex.TryRLock() {
-		glog.Warning("[TryRLock] AppInfoModule.IsStarted: Read lock not available, returning false")
-		return false
-	}
+	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.isStarted
 }
 
 // GetModuleStatus returns the current status of the module and all components
 func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
-	// Need read lock to ensure consistent snapshot of all component states
-	if !m.mutex.TryRLock() {
-		glog.Warning("[TryRLock] AppInfoModule.GetModuleStatus: Read lock not available, returning error status")
-		return map[string]interface{}{
-			"error":  "lock not available",
-			"status": "unknown",
-		}
-	}
+	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
 	status := map[string]interface{}{
@@ -517,12 +530,12 @@ func (m *AppInfoModule) initSyncer() error {
 		glog.V(3).Info("Cache manager reference set in syncer for hydration notifications")
 	}
 
-	// Start syncer
-	if err := m.syncer.Start(m.ctx); err != nil {
+	// Start syncer in passive mode (Pipeline handles scheduling)
+	if err := m.syncer.StartWithOptions(m.ctx, false); err != nil {
 		return fmt.Errorf("failed to start syncer: %w", err)
 	}
 
-	glog.V(2).Info("Syncer initialized successfully")
+	glog.V(2).Info("Syncer initialized (passive mode, Pipeline handles scheduling)")
 	return nil
 }
 
@@ -583,12 +596,11 @@ func (m *AppInfoModule) initDataWatcher() error {
 	// Create DataWatcher instance
 	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator, m.dataSender)
 
-	// Start DataWatcher
-	if err := m.dataWatcher.Start(m.ctx); err != nil {
+	if err := m.dataWatcher.StartWithOptions(m.ctx, false); err != nil {
 		return fmt.Errorf("failed to start DataWatcher: %w", err)
 	}
 
-	glog.V(2).Info("DataWatcher initialized successfully")
+	glog.V(2).Info("DataWatcher initialized (passive mode)")
 	return nil
 }
 
@@ -634,7 +646,7 @@ func (m *AppInfoModule) initDataWatcherUser() error {
 
 // initDataWatcherRepo initializes the DataWatcherRepo
 func (m *AppInfoModule) initDataWatcherRepo() error {
-	glog.V(3).Info("Initializing DataWatcherRepo...")
+	glog.V(2).Info("Initializing DataWatcherRepo...")
 
 	if m.redisClient == nil {
 		return fmt.Errorf("redis client is required for DataWatcherRepo")
@@ -647,18 +659,17 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 	// Create DataWatcherRepo instance
 	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.cacheManager, m.dataWatcher, m.dataSender)
 
-	// Start DataWatcherRepo
-	if err := m.dataWatcherRepo.Start(); err != nil {
+	if err := m.dataWatcherRepo.StartWithOptions(false); err != nil {
 		return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
 	}
 
-	glog.V(2).Info("DataWatcherRepo initialized successfully")
+	glog.V(2).Info("DataWatcherRepo initialized (passive mode)")
 	return nil
 }
 
 // initStatusCorrectionChecker initializes the StatusCorrectionChecker
 func (m *AppInfoModule) initStatusCorrectionChecker() error {
-	glog.V(3).Info("Initializing StatusCorrectionChecker...")
+	glog.V(2).Info("Initializing StatusCorrectionChecker...")
 
 	if m.cacheManager == nil {
 		return fmt.Errorf("cache manager is required for StatusCorrectionChecker")
@@ -666,12 +677,11 @@ func (m *AppInfoModule) initStatusCorrectionChecker() error {
 
 	m.statusCorrectionChecker = NewStatusCorrectionChecker(m.cacheManager)
 
-	// Start StatusCorrectionChecker
-	if err := m.statusCorrectionChecker.Start(); err != nil {
+	if err := m.statusCorrectionChecker.StartWithOptions(false); err != nil {
 		return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
 	}
 
-	glog.V(2).Info("StatusCorrectionChecker initialized successfully")
+	glog.V(2).Info("StatusCorrectionChecker initialized (passive mode)")
 	return nil
 }
 
@@ -750,17 +760,11 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 		return fmt.Errorf("cache manager not available")
 	}
 
-	// Add detailed lock logs for diagnosis
-	glog.V(3).Infof("[LOCK] m.cacheManager.mutex.TryLock() @appinfomodule:cleanup Start")
-	if !m.cacheManager.mutex.TryLock() {
-		glog.Warning("[TryLock] AppInfoModule cleanup: CacheManager write lock not available, skipping cleanup")
-		return nil
-	}
-	defer m.cacheManager.mutex.Unlock()
-	removedCount := 0
-	for userID, userData := range m.cacheManager.cache.Users {
+	// Build the set of delisted app IDs (apps NOT in validApps)
+	delistedAppIDs := make(map[string]bool)
+	allUsersData := m.cacheManager.GetAllUsersData() // ~ correctCacheWithChartRepo
+	for _, userData := range allUsersData {
 		for sourceID, sourceData := range userData.Sources {
-			newLatest := sourceData.AppInfoLatest[:0]
 			for _, app := range sourceData.AppInfoLatest {
 				var appID string
 				if app != nil && app.RawData != nil {
@@ -772,22 +776,19 @@ func (m *AppInfoModule) correctCacheWithChartRepo() error {
 						appID = app.RawData.Name
 					}
 				}
-				if appID != "" && validApps[sourceID] != nil {
-					if _, ok := validApps[sourceID][appID]; ok {
-						newLatest = append(newLatest, app)
-					} else {
-						removedCount++
-						glog.V(3).Infof("Removed app from cache: user=%s source=%s appID=%s", userID, sourceID, appID)
-					}
-				} else {
-					// If appID is empty, treat as invalid and remove
-					removedCount++
-					glog.V(3).Infof("Removed app from cache (empty appID): user=%s source=%s", userID, sourceID)
+				if appID == "" {
+					continue
+				}
+				if validApps[sourceID] == nil {
+					delistedAppIDs[appID] = true
+				} else if _, ok := validApps[sourceID][appID]; !ok {
+					delistedAppIDs[appID] = true
 				}
 			}
-			sourceData.AppInfoLatest = newLatest
 		}
 	}
+
+	removedCount := m.cacheManager.RemoveDelistedApps(delistedAppIDs)
 	glog.V(2).Infof("Cache correction finished, removed %d apps not in chart repo", removedCount)
 	return nil
 }
@@ -1109,7 +1110,7 @@ func (m *AppInfoModule) SetAppData(userID, sourceID string, dataType AppDataType
 	if !m.isStarted || m.cacheManager == nil {
 		return fmt.Errorf("module is not started or cache manager is not available")
 	}
-	return m.cacheManager.SetAppData(userID, sourceID, dataType, data)
+	return m.cacheManager.SetAppData(userID, sourceID, dataType, data, "AppInfoModule")
 }
 
 // GetAppData is a convenience function to get app data
@@ -1271,6 +1272,7 @@ func (m *AppInfoModule) SyncUserListToCache() error {
 }
 
 // RefreshUserDataStructures ensures all configured users have proper data structures
+// not used
 func (m *AppInfoModule) RefreshUserDataStructures() error {
 	// Check isStarted without lock since it's only read
 	if !m.isStarted {
@@ -1316,7 +1318,7 @@ func (m *AppInfoModule) GetCachedUsers() []string {
 		return []string{}
 	}
 
-	allUsersData := m.cacheManager.GetAllUsersData()
+	allUsersData := m.cacheManager.GetAllUsersData() // not used
 	users := make([]string, 0, len(allUsersData))
 	for userID := range allUsersData {
 		users = append(users, userID)
@@ -1355,21 +1357,14 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 		},
 	}
 
-	if !m.cacheManager.mutex.TryRLock() {
-		glog.Warning("[TryRLock] AppInfoModule: CacheManager read lock not available, skipping operation")
-		return map[string]interface{}{
-			"error":  "lock not available",
-			"status": "unknown",
-		}
-	}
-	defer m.cacheManager.mutex.RUnlock()
+	allUsersForReport := m.cacheManager.GetAllUsersData() // not used
 
 	totalUsers := 0
 	totalSources := 0
 	totalPendingData := 0
 	totalInvalidData := 0
 
-	for userID, userData := range m.cacheManager.cache.Users {
+	for userID, userData := range allUsersForReport {
 		totalUsers++
 		userReport := map[string]interface{}{
 			"sources": make(map[string]interface{}),

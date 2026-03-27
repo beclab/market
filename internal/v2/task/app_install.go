@@ -9,8 +9,6 @@ import (
 	"os"
 	"strings"
 
-	"market/internal/v2/settings"
-
 	"github.com/golang/glog"
 )
 
@@ -128,13 +126,9 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 
 	// Get VC from purchase receipt and inject into environment variables
-	var settingsManager *settings.SettingsManager
-	if tm.mu.TryRLock() {
-		settingsManager = tm.settingsManager
-		tm.mu.RUnlock()
-	} else {
-		glog.Warningf("[TryRLock] Failed to acquire read lock for settingsManager, skipping VC injection for task: %s, user: %s, app: %s", task.ID, task.User, task.AppName)
-	}
+	tm.mu.RLock()
+	settingsManager := tm.settingsManager
+	tm.mu.RUnlock()
 
 	if settingsManager != nil {
 		vcAppID := appName
@@ -202,7 +196,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	}
 
 	// Send HTTP request and get response
-	glog.V(2).Infof("Sending HTTP request for app installation: task=%s, data: %s", task.ID, string(ms))
+	glog.Infof("[APP] Sending HTTP request for app installation: task=%s, data: %s", task.ID, string(ms))
 	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
 	if err != nil {
 		glog.Errorf("HTTP request failed for app installation: task=%s, error=%v", task.ID, err)
@@ -222,7 +216,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		return string(errorJSON), err
 	}
 
-	glog.V(2).Infof("HTTP request completed successfully for app installation: task=%s, response_length=%d, resp=%s", task.ID, len(response), response)
+	glog.Infof("[APP] HTTP request completed successfully for app installation: task=%s, response_length=%d, resp=%s", task.ID, len(response), response)
 
 	// Parse response to extract opID if installation is successful
 	var responseData map[string]interface{}
