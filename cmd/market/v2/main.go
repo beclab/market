@@ -13,6 +13,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/client"
+	"market/internal/v2/db"
 	"market/internal/v2/history"
 	"market/internal/v2/paymentnew"
 	runtimestate "market/internal/v2/runtime"
@@ -172,6 +173,18 @@ func main() {
 		break
 	}
 	glog.V(2).Info("=== End pre-startup step ===")
+
+	// + Init Db
+	if err := db.NewDbModule(); err != nil {
+		glog.Exitf("Failed to init Db module, error: %v", err)
+	}
+
+	// + Pipeline
+	pipeline := appinfo.NewPipelineV2()
+
+	if err := pipeline.Start(context.Background()); err != nil {
+		glog.Exitf("Failed to start pipeline, error: %v", err)
+	}
 
 	// Initialize Settings Manager
 	settingsManager := settings.NewSettingsManager(redisClient)
