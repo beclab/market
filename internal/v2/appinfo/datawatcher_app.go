@@ -23,13 +23,6 @@ type DataWatcher struct {
 	isRunning    int32 // 0 = false, 1 = true, using atomic operations
 	stopChan     chan struct{}
 
-	// Processing mutex to ensure only one cycle runs at a time
-	processingMutex sync.Mutex
-
-	// Active hash calculations tracking
-	activeHashCalculations map[string]bool
-	hashMutex              sync.Mutex
-
 	// Dirty users tracking for deferred hash calculation
 	dirtyUsers      map[string]bool
 	dirtyUsersMutex sync.Mutex
@@ -43,14 +36,13 @@ type DataWatcher struct {
 // NewDataWatcher creates a new DataWatcher instance
 func NewDataWatcher(cacheManager *CacheManager, hydrator *Hydrator, dataSender *DataSender) *DataWatcher {
 	return &DataWatcher{
-		cacheManager:           cacheManager,
-		hydrator:               hydrator,
-		dataSender:             dataSender,
-		interval:               30 * time.Second, // Run every 30 seconds
-		stopChan:               make(chan struct{}),
-		isRunning:              0, // Initialize as false
-		activeHashCalculations: make(map[string]bool),
-		dirtyUsers:             make(map[string]bool),
+		cacheManager: cacheManager,
+		hydrator:     hydrator,
+		dataSender:   dataSender,
+		interval:     30 * time.Second, // Run every 30 seconds
+		stopChan:     make(chan struct{}),
+		isRunning:    0, // Initialize as false
+		dirtyUsers:   make(map[string]bool),
 	}
 }
 
@@ -130,13 +122,6 @@ func (dw *DataWatcher) watchLoop(ctx context.Context) {
 
 // processCompletedApps checks for completed hydration apps and moves them
 func (dw *DataWatcher) processCompletedApps() {
-	// Ensure only one processing cycle runs at a time
-	if !dw.processingMutex.TryLock() {
-		glog.Warningf("DataWatcher: Previous processing cycle still running, skipping this cycle")
-		return
-	}
-	defer dw.processingMutex.Unlock()
-
 	processingStart := time.Now()
 	atomic.StoreInt64(&dw.lastRunTime, processingStart.Unix())
 
@@ -264,43 +249,6 @@ func (dw *DataWatcher) processUserData(userID string, userData *types.UserData) 
 	return totalProcessed, totalMoved
 }
 
-// calculateAndSetUserHash calculates and sets the hash for user data (with tracking)
-func (dw *DataWatcher) calculateAndSetUserHash(userID string, userData *types.UserData) {
-	// Add a per-user calculation flag to prevent concurrent execution
-	var isCalculatingKey = "isCalculating_" + userID
-
-	// Use a map in DataWatcher to track per-user calculation state
-	dw.hashMutex.Lock()
-	if dw.activeHashCalculations[isCalculatingKey] {
-		dw.hashMutex.Unlock()
-		glog.V(4).Infof("DataWatcher: Hash calculation already in progress for user %s (isCalculating), skipping", userID)
-		return
-	}
-
-	dw.activeHashCalculations[isCalculatingKey] = true
-	// Also keep the original tracking for compatibility
-	if dw.activeHashCalculations[userID] {
-		// delete(dw.activeHashCalculations, isCalculatingKey)
-		dw.hashMutex.Unlock()
-		glog.V(4).Infof("DataWatcher: Hash calculation already in progress for user %s, skipping", userID)
-		return
-	}
-	dw.activeHashCalculations[userID] = true
-	dw.hashMutex.Unlock()
-
-	defer func() {
-		// Clean up tracking when done
-		dw.hashMutex.Lock()
-		delete(dw.activeHashCalculations, userID)
-		delete(dw.activeHashCalculations, isCalculatingKey)
-		dw.hashMutex.Unlock()
-		glog.V(3).Infof("DataWatcher: Hash calculation tracking cleaned up for user %s", userID)
-	}()
-
-	// Call the direct calculation function
-	_ = dw.calculateAndSetUserHashDirect(userID, userData)
-}
-
 // calculateAndSetUserHashWithRetry calculates hash with retry mechanism for data consistency
 func (dw *DataWatcher) calculateAndSetUserHashWithRetry(userID string, userData *types.UserData) {
 	maxRetries := 3
@@ -360,33 +308,6 @@ func (dw *DataWatcher) calculateAndSetUserHashDirect(userID string, userData *ty
 	dw.cacheManager.SetUserHash(userID, newHash)
 
 	return true
-}
-
-// calculateAndSetUserHashAsync calculates and sets hash for user data asynchronously
-func (dw *DataWatcher) calculateAndSetUserHashAsync(userID string, userData *types.UserData) {
-	glog.Infof("DataWatcher: Starting async hash calculation for user %s", userID)
-
-	// Add timeout to prevent hanging
-	done := make(chan bool, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("DataWatcher: Panic during hash calculation for user %s: %v", userID, r)
-			}
-		}()
-		glog.Infof("DataWatcher: Hash calculation goroutine started for user %s", userID)
-		dw.calculateAndSetUserHash(userID, userData)
-		glog.Infof("DataWatcher: Hash calculation goroutine completed for user %s", userID)
-		done <- true
-	}()
-
-	select {
-	case <-done:
-		// Hash calculation completed successfully
-		glog.Infof("DataWatcher: Hash calculation finished successfully for user %s", userID)
-	case <-time.After(10 * time.Second):
-		glog.Errorf("DataWatcher: Hash calculation timeout for user %s after 10 seconds", userID)
-	}
 }
 
 // processSourceData processes a single source's data for completed hydration
@@ -910,26 +831,6 @@ func (dw *DataWatcher) ForceCalculateUserHash(userID string) error {
 	// // Call hash calculation directly
 	// dw.calculateAndSetUserHashWithRetry(userID, userData)
 	// return nil
-}
-
-// ForceCalculateAllUsersHash forces hash calculation for all users
-func (dw *DataWatcher) ForceCalculateAllUsersHash() error {
-	glog.V(3).Infof("DataWatcher: Force calculating hash for all users")
-
-	// Get all users data
-	allUsersData := dw.cacheManager.GetAllUsersData() // not used
-	if len(allUsersData) == 0 {
-		return fmt.Errorf("no users found in cache")
-	}
-
-	for userID, userData := range allUsersData {
-		if userData != nil {
-			glog.V(3).Infof("DataWatcher: Force calculating hash for user: %s", userID)
-			dw.calculateAndSetUserHash(userID, userData)
-		}
-	}
-
-	return nil
 }
 
 // MarkUserDirty marks a user as needing hash recalculation.

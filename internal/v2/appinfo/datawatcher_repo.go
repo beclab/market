@@ -10,7 +10,6 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -63,7 +62,6 @@ type DataWatcherRepo struct {
 	cacheManager    *CacheManager // Add cache manager reference
 	dataWatcher     *DataWatcher  // Add DataWatcher reference for hash calculation
 	dataSender      *DataSender   // Add DataSender reference for NATS communication
-	mu              sync.RWMutex
 	ticker          *time.Ticker
 	stopChannel     chan bool
 	isRunning       bool
@@ -124,9 +122,6 @@ func (dwr *DataWatcherRepo) initializeLastProcessedID() error {
 
 // Start begins the periodic state checking process
 func (dwr *DataWatcherRepo) Start() error {
-	dwr.mu.Lock()
-	defer dwr.mu.Unlock()
-
 	if dwr.isRunning {
 		return fmt.Errorf("data watcher is already running")
 	}
@@ -145,9 +140,6 @@ func (dwr *DataWatcherRepo) Start() error {
 
 // StartWithOptions starts with options, if enablePolling is false, the periodic polling is not started
 func (dwr *DataWatcherRepo) StartWithOptions(enablePolling bool) error {
-	dwr.mu.Lock()
-	defer dwr.mu.Unlock()
-
 	if dwr.isRunning {
 		return fmt.Errorf("DataWatcherRepo is already running")
 	}
@@ -170,9 +162,6 @@ func (dwr *DataWatcherRepo) ProcessOnce() map[string]bool {
 
 // Stop stops the periodic state checking process
 func (dwr *DataWatcherRepo) Stop() error {
-	dwr.mu.Lock()
-	defer dwr.mu.Unlock()
-
 	if !dwr.isRunning {
 		return fmt.Errorf("data watcher is not running")
 	}
@@ -192,8 +181,6 @@ func (dwr *DataWatcherRepo) Stop() error {
 
 // IsRunning returns whether the data watcher is currently running
 func (dwr *DataWatcherRepo) IsRunning() bool {
-	dwr.mu.RLock()
-	defer dwr.mu.RUnlock()
 	return dwr.isRunning
 }
 
@@ -561,16 +548,12 @@ func (dwr *DataWatcherRepo) updateCacheWithAppInfo(userID, sourceID string, appI
 
 // SetCacheManager sets the cache manager for the data watcher repository
 func (dwr *DataWatcherRepo) SetCacheManager(cacheManager *CacheManager) {
-	dwr.mu.Lock()
-	defer dwr.mu.Unlock()
 	dwr.cacheManager = cacheManager
 	glog.V(3).Info("Cache manager set for data watcher repository")
 }
 
 // GetCacheManager returns the current cache manager
 func (dwr *DataWatcherRepo) GetCacheManager() *CacheManager {
-	dwr.mu.RLock()
-	defer dwr.mu.RUnlock()
 	return dwr.cacheManager
 }
 
@@ -596,8 +579,6 @@ func (dwr *DataWatcherRepo) GetDataSender() *DataSender {
 
 // GetLastProcessedID returns the last processed ID
 func (dwr *DataWatcherRepo) GetLastProcessedID() int64 {
-	dwr.mu.RLock()
-	defer dwr.mu.RUnlock()
 	return dwr.lastProcessedID
 }
 
@@ -608,8 +589,6 @@ func (dwr *DataWatcherRepo) GetApiBaseURL() string {
 
 // SetApiBaseURL updates the API base URL
 func (dwr *DataWatcherRepo) SetApiBaseURL(url string) {
-	dwr.mu.Lock()
-	defer dwr.mu.Unlock()
 	dwr.apiBaseURL = url
 	glog.V(3).Infof("API base URL updated to: %s", url)
 }

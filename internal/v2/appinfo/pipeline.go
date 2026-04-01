@@ -396,6 +396,7 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string
 			continue
 		}
 		if err := step.Execute(ctx, task); err != nil {
+			task.SetError(err)
 			failureReason := err.Error()
 			failureStep := step.GetStepName()
 			glog.Errorf("HydrateSingleApp: step %s failed for app %s(%s): %v", failureStep, appID, appName, err)

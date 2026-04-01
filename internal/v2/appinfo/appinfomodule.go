@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"market/internal/v2/history"
@@ -36,7 +35,6 @@ type AppInfoModule struct {
 	settingsManager         *settings.SettingsManager
 	ctx                     context.Context
 	cancel                  context.CancelFunc
-	mutex                   sync.RWMutex
 	isStarted               bool
 	taskModule              *task.TaskModule
 	historyModule           *history.HistoryModule
@@ -142,9 +140,6 @@ func NewAppInfoModule(config *ModuleConfig) (*AppInfoModule, error) {
 
 // Start initializes and starts all module components
 func (m *AppInfoModule) Start() error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
 	if m.isStarted {
 		return fmt.Errorf("module is already started")
 	}
@@ -256,9 +251,6 @@ func (m *AppInfoModule) Start() error {
 
 // Stop gracefully shuts down the module
 func (m *AppInfoModule) Stop() error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
 	if !m.isStarted {
 		return nil
 	}
@@ -402,16 +394,11 @@ func (m *AppInfoModule) GetRedisConfig() *RedisConfig {
 
 // IsStarted returns whether the module is currently running
 func (m *AppInfoModule) IsStarted() bool {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
 	return m.isStarted
 }
 
 // GetModuleStatus returns the current status of the module and all components
 func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
 	status := map[string]interface{}{
 		"is_started":                       m.isStarted,
 		"enable_sync":                      m.config.EnableSync,
@@ -1229,9 +1216,6 @@ func (m *AppInfoModule) GetUserPermissions(userID string) []string {
 
 // UpdateUserConfig updates the user configuration for the module and cache manager
 func (m *AppInfoModule) UpdateUserConfig(newUserConfig *UserConfig) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
 	if !m.isStarted {
 		return fmt.Errorf("module is not started")
 	}
@@ -1464,8 +1448,6 @@ func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
 
 // SetTaskModule sets the task module for recording task events
 func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
 	m.taskModule = taskModule
 	glog.V(3).Info("Task module reference set in AppInfo module")
 
@@ -1481,8 +1463,6 @@ func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 
 // SetHistoryModule sets the history module reference
 func (m *AppInfoModule) SetHistoryModule(historyModule *history.HistoryModule) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
 	m.historyModule = historyModule
 	glog.V(3).Info("History module reference set in AppInfo module")
 
@@ -1509,8 +1489,6 @@ func (m *AppInfoModule) GetTaskModule() *task.TaskModule {
 
 // SetSettingsManager sets the settings manager for the module
 func (m *AppInfoModule) SetSettingsManager(settingsManager *settings.SettingsManager) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
 	m.settingsManager = settingsManager
 	glog.V(2).Info("Settings manager set in AppInfo module")
 }
