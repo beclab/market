@@ -8,7 +8,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"market/internal/v2/history"
@@ -27,7 +26,6 @@ type StatusCorrectionChecker struct {
 	appServicePort  string
 	stopChan        chan struct{}
 	isRunning       bool
-	mutex           sync.RWMutex
 	lastCheckTime   time.Time
 	checkCount      int64
 	correctionCount int64
@@ -80,9 +78,6 @@ func NewStatusCorrectionChecker(cacheManager *CacheManager) *StatusCorrectionChe
 
 // Start begins the periodic status checking
 func (scc *StatusCorrectionChecker) Start() error {
-	scc.mutex.Lock()
-	defer scc.mutex.Unlock()
-
 	if scc.isRunning {
 		return fmt.Errorf("status correction checker is already running")
 	}
@@ -109,9 +104,6 @@ func (scc *StatusCorrectionChecker) Start() error {
 
 // StartWithOptions starts with options
 func (scc *StatusCorrectionChecker) StartWithOptions(enablePeriodicCheck bool) error {
-	scc.mutex.Lock()
-	defer scc.mutex.Unlock()
-
 	if scc.isRunning {
 		return fmt.Errorf("status correction checker is already running")
 	}
@@ -139,9 +131,6 @@ func (scc *StatusCorrectionChecker) PerformStatusCheckOnce() map[string]bool {
 
 // Stop stops the periodic status checking
 func (scc *StatusCorrectionChecker) Stop() {
-	scc.mutex.Lock()
-	defer scc.mutex.Unlock()
-
 	if !scc.isRunning {
 		return
 	}
@@ -158,16 +147,11 @@ func (scc *StatusCorrectionChecker) Stop() {
 
 // IsRunning returns whether the checker is currently running
 func (scc *StatusCorrectionChecker) IsRunning() bool {
-	scc.mutex.RLock()
-	defer scc.mutex.RUnlock()
 	return scc.isRunning
 }
 
 // GetStats returns statistics about the checker
 func (scc *StatusCorrectionChecker) GetStats() map[string]interface{} {
-	scc.mutex.RLock()
-	defer scc.mutex.RUnlock()
-
 	return map[string]interface{}{
 		"is_running":             scc.isRunning,
 		"check_interval":         scc.checkInterval,
@@ -205,10 +189,8 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 	startTime := time.Now()
 	result := make(map[string]bool)
 
-	scc.mutex.Lock()
 	scc.lastCheckTime = startTime
 	scc.checkCount++
-	scc.mutex.Unlock()
 
 	glog.Infof("Starting status check cycle #%d", scc.checkCount)
 
@@ -263,9 +245,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 			result[userID] = true
 		}
 
-		scc.mutex.Lock()
 		scc.correctionCount += int64(len(changes))
-		scc.mutex.Unlock()
 	} else {
 		glog.V(3).Info("No status changes detected")
 	}
@@ -1302,8 +1282,6 @@ func (scc *StatusCorrectionChecker) ForceCheck() error {
 
 // SetCheckInterval sets the check interval
 func (scc *StatusCorrectionChecker) SetCheckInterval(interval time.Duration) {
-	scc.mutex.Lock()
-	defer scc.mutex.Unlock()
 	scc.checkInterval = interval
 	glog.Infof("Status correction check interval updated to: %v", interval)
 }
@@ -1334,15 +1312,11 @@ func (scc *StatusCorrectionChecker) isStateInconsistent(app utils.AppServiceResp
 
 // SetHistoryModule sets the history module for status correction checker
 func (scc *StatusCorrectionChecker) SetHistoryModule(hm *history.HistoryModule) {
-	scc.mutex.Lock()
-	defer scc.mutex.Unlock()
 	scc.historyModule = hm
 }
 
 // SetTaskModule sets the task module for status correction checker
 func (scc *StatusCorrectionChecker) SetTaskModule(tm *task.TaskModule) {
-	scc.mutex.Lock()
-	defer scc.mutex.Unlock()
 	scc.taskModule = tm
 }
 
@@ -1439,8 +1413,6 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 
 	if correctedCount > 0 {
 		glog.Infof("[SCC] Task status correction completed: corrected %d task(s)", correctedCount)
-		scc.mutex.Lock()
 		scc.correctionCount += int64(correctedCount)
-		scc.mutex.Unlock()
 	}
 }

@@ -19,20 +19,15 @@ type CacheVersionGetter interface {
 
 var (
 	cacheVersionGetter CacheVersionGetter
-	cacheGetterMutex   sync.RWMutex
 )
 
 // SetCacheVersionGetter sets the cache version getter interface
 func SetCacheVersionGetter(getter CacheVersionGetter) {
-	cacheGetterMutex.Lock()
-	defer cacheGetterMutex.Unlock()
 	cacheVersionGetter = getter
 }
 
 // getVersionFromCacheState gets app version from cache state if available
 func getVersionFromCacheState(userID, sourceID, appName string) (version string, found bool) {
-	cacheGetterMutex.RLock()
-	defer cacheGetterMutex.RUnlock()
 	if cacheVersionGetter != nil {
 		return cacheVersionGetter.GetAppVersionFromState(userID, sourceID, appName)
 	}

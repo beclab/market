@@ -27,7 +27,6 @@ type Syncer struct {
 	syncInterval    time.Duration
 	stopChan        chan struct{}
 	isRunning       atomic.Bool               // Use atomic.Bool for thread-safe boolean operations
-	mutex           sync.RWMutex              // Keep mutex for steps slice operations
 	settingsManager *settings.SettingsManager // Settings manager for data source information
 
 	lastSyncExecuted time.Time // Last time a full sync cycle was actually executed
@@ -80,16 +79,11 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 
 // AddStep adds a step to the syncer
 func (s *Syncer) AddStep(step syncerfn.SyncStep) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
 	s.steps = append(s.steps, step)
 }
 
 // RemoveStep removes a step by index
 func (s *Syncer) RemoveStep(index int) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
 	if index < 0 || index >= len(s.steps) {
 		return fmt.Errorf("step index %d out of range", index)
 	}
@@ -100,9 +94,6 @@ func (s *Syncer) RemoveStep(index int) error {
 
 // GetSteps returns a copy of all steps
 func (s *Syncer) GetSteps() []syncerfn.SyncStep {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-
 	steps := make([]syncerfn.SyncStep, len(s.steps))
 	copy(steps, s.steps)
 	return steps
@@ -116,13 +107,10 @@ func (s *Syncer) Start(ctx context.Context) error {
 // StartWithOptions starts the syncer with options.
 // If enableSyncLoop is false, the periodic sync loop is not started (Pipeline handles scheduling).
 func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) error {
-	s.mutex.Lock()
 	if s.isRunning.Load() {
-		s.mutex.Unlock()
 		return fmt.Errorf("syncer is already running")
 	}
 	s.isRunning.Store(true)
-	s.mutex.Unlock()
 
 	if enableSyncLoop {
 		glog.V(2).Infof("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
@@ -271,9 +259,6 @@ func (s *Syncer) hasSyncRelevantConfigChanged() (changed bool, reason string) {
 
 // Stop stops the synchronization process
 func (s *Syncer) Stop() {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
 	if !s.isRunning.Load() {
 		return
 	}
@@ -291,9 +276,7 @@ func (s *Syncer) IsRunning() bool {
 // syncLoop runs the main synchronization loop
 func (s *Syncer) syncLoop(ctx context.Context) {
 	defer func() {
-		s.mutex.Lock()
 		s.isRunning.Store(false)
-		s.mutex.Unlock()
 		glog.V(4).Info("Syncer stopped")
 	}()
 
@@ -981,8 +964,6 @@ func DefaultSyncerConfig() SyncerConfig {
 
 // SetCacheManager sets the cache manager for hydration notifications
 func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
 	s.cacheManager.Store(cacheManager)
 }
 
