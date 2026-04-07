@@ -41,6 +41,7 @@ type AppServiceResponse struct {
 			Policy          string `json:"policy"`
 			RequiredGPU     string `json:"requiredGPU"`
 			Source          string `json:"source"`
+			MarketSource    string `json:"market_source"`
 			Target          string `json:"target"`
 			Title           string `json:"title"`
 			Version         string `json:"version"`
