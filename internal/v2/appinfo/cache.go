@@ -800,10 +800,6 @@ func (cm *CacheManager) Start() error {
 	// Start sync worker goroutine
 	go cm.syncWorker()
 
-	// Start periodic cleanup of AppRenderFailed data (every 5 minutes)
-	cm.cleanupTicker = time.NewTicker(5 * time.Minute)
-	go cm.cleanupWorker() // +
-
 	glog.V(3).Infof("Cache manager started successfully")
 	return nil
 }
@@ -853,6 +849,7 @@ func (cm *CacheManager) processSyncRequest(req SyncRequest) {
 		return
 	}
 
+	glog.Infof("[CACHE] SyncRequest, user: %s, source: %s, type: %d", req.UserID, req.SourceID, req.Type)
 	switch req.Type {
 	case SyncUser:
 		if userData := cm.getUserData(req.UserID); userData != nil {
@@ -926,6 +923,8 @@ func (cm *CacheManager) GetAppVersionFromState(userID, sourceID, appName string)
 
 // getSourceData internal method to get source data without external locking
 func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
 	if userData, exists := cm.cache.Users[userID]; exists {
 		return userData.Sources[sourceID]
 	}
@@ -1523,7 +1522,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 					glog.V(3).Infof("Added app %s for user=%s, source=%s", appID, userID, sourceID)
 				}
 			}
-		} else {
+		} else { // syncer
 			if dataSection, hasData := data["data"].(map[string]interface{}); hasData {
 				if appsData, hasApps := dataSection["apps"].(map[string]interface{}); hasApps {
 					for appID, appDataInterface := range appsData {
@@ -1789,16 +1788,6 @@ func (cm *CacheManager) addUserInternal(userID string) error {
 			Type:   SyncUser,
 		})
 	}
-	return nil
-}
-
-// AddUser adds a new user to the cache
-func (cm *CacheManager) AddUser(userID string) error {
-	go func() {
-		if err := cm.addUserInternal(userID); err != nil {
-			glog.Errorf("Failed to add user in goroutine: %v", err)
-		}
-	}()
 	return nil
 }
 
@@ -2331,6 +2320,7 @@ func (cm *CacheManager) updateLockStats(lockType string) {
 
 // RemoveAppStateData removes a specific app from AppStateLatest for a user and source
 func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName string) error {
+	glog.Infof("[CACHE], remove appStateData, user: %s, source: %s, app: %s", userID, sourceID, appName)
 	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@RemoveAppStateData")
 	defer func() { cm.mutex.Unlock(); _wd() }()
@@ -2384,6 +2374,7 @@ func (cm *CacheManager) RemoveAppStateData(userID, sourceID, appName string) err
 
 // RemoveAppInfoLatestData removes a specific app from AppInfoLatest for a user and source
 func (cm *CacheManager) removeAppInfoLatestDataInternal(userID, sourceID, appName string) error {
+	glog.Infof("[CACHE], remove appInfoLatestData, user: %s, source: %s, app: %s", userID, sourceID, appName)
 	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@RemoveAppInfoLatestData")
 	defer func() { cm.mutex.Unlock(); _wd() }()
@@ -2582,22 +2573,6 @@ func (cm *CacheManager) ResynceUser() error {
 		}
 	}()
 	return nil
-}
-
-// cleanupWorker processes periodic cleanup of AppRenderFailed data
-func (cm *CacheManager) cleanupWorker() {
-	glog.V(3).Info("INFO: Starting AppRenderFailed cleanup worker")
-
-	for range cm.cleanupTicker.C {
-		if !cm.isRunning {
-			glog.V(3).Info("INFO: CacheManager stopped, cleanup worker exiting")
-			break
-		}
-
-		cm.ClearAppRenderFailedData()
-	}
-
-	glog.V(3).Info("INFO: AppRenderFailed cleanup worker stopped")
 }
 
 // ClearAppRenderFailedData clears all AppRenderFailed data for all users and sources

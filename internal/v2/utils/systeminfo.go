@@ -17,18 +17,6 @@ type VersionInfo struct {
 	Version string `json:"version"`
 }
 
-// GetTerminusVersion retrieves the Terminus version with environment-aware logic
-func GetTerminusVersion() (string, error) {
-	// Check if running in development environment
-	if IsDevelopmentEnvironment() {
-		glog.Infof("Running in development environment, returning fixed version: 1.12.3")
-		return "1.12.3", nil
-	}
-
-	// For production environment, try to get version from service
-	return getTerminusVersionFromService()
-}
-
 // GetTerminusVersionValue returns the parsed version string
 func GetTerminusVersionValue() (string, error) {
 	// Check public environment first

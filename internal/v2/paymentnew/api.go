@@ -1094,7 +1094,7 @@ func PreprocessAppPaymentData(ctx context.Context, appInfo *types.AppInfo, userI
 		return nil, fmt.Errorf("state machine not initialized")
 	}
 	var state *PaymentState
-	if s, err := globalStateMachine.LoadState(userID, appID, productID); err == nil {
+	if s, err := globalStateMachine.LoadState(userID, appID, productID); err == nil { // + PreprocessAppPaymentData
 		state = s
 	}
 

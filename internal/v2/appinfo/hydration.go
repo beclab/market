@@ -162,19 +162,13 @@ func (h *Hydrator) AddStep(step hydrationfn.HydrationStep) {
 }
 
 // Start begins the hydration process in passive mode (Pipeline handles scheduling)
-func (h *Hydrator) Start(ctx context.Context) error {
+func (h *Hydrator) StartWithOptions(ctx context.Context) error {
 	if h.isRunning.Load() {
 		return fmt.Errorf("hydrator is already running")
 	}
 	h.isRunning.Store(true)
 
 	glog.V(3).Infof("Starting hydrator with %d steps (passive mode, Pipeline handles scheduling)", len(h.steps))
-
-	go h.batchCompletionProcessor(ctx)
-
-	if h.cacheManager != nil {
-		go h.databaseSyncMonitor(ctx)
-	}
 
 	return nil
 }

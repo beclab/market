@@ -291,26 +291,3 @@ func (ht *HydrationTask) SetError(err error) {
 	ht.RetryCount++
 	ht.UpdatedAt = time.Now()
 }
-
-// CanRetry returns true if the task can be retried
-func (ht *HydrationTask) CanRetry() bool {
-	ht.mutex.RLock()
-	defer ht.mutex.RUnlock()
-	return ht.RetryCount < ht.MaxRetries
-}
-
-// ResetForRetry resets the task for retry
-func (ht *HydrationTask) ResetForRetry() {
-	ht.mutex.Lock()
-	defer ht.mutex.Unlock()
-	ht.Status = TaskStatusPending
-	ht.CurrentStep = 0
-	ht.UpdatedAt = time.Now()
-}
-
-// IsCompleted returns true if the task is completed
-func (ht *HydrationTask) IsCompleted() bool {
-	ht.mutex.RLock()
-	defer ht.mutex.RUnlock()
-	return ht.Status == TaskStatusCompleted || ht.Status == TaskStatusFailed || ht.Status == TaskStatusCancelled
-}

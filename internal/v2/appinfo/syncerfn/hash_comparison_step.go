@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"market/internal/v2/settings"
-	"market/internal/v2/types"
 
 	"github.com/golang/glog"
 )
@@ -117,58 +116,4 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 // CanSkip determines if this step can be skipped
 func (h *HashComparisonStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 	return false // Always execute hash comparison
-}
-
-// calculateLocalHash computes hash from local SourceData Others.Hash for specific market source
-func (h *HashComparisonStep) calculateLocalHash(cache *types.CacheData, marketSource *settings.MarketSource) string {
-	if cache == nil {
-		glog.V(3).Infof("Cache is nil, returning empty_cache hash")
-		return "empty_cache"
-	}
-
-	if marketSource == nil {
-		glog.V(3).Infof("MarketSource is nil, returning no_market_source hash")
-		return "no_market_source"
-	}
-
-	// Use market source name as source ID to match syncer.go behavior
-	sourceID := marketSource.ID
-
-	// Note: This function is called from SyncContext with proper locking
-
-	// If no users exist, return empty hash
-	if len(cache.Users) == 0 {
-		glog.V(3).Infof("No users in cache, returning empty hash")
-		return "empty_cache_no_users"
-	}
-
-	// Look for Others.Hash only in the current market source
-	var sourceHash string
-	var foundValidHash bool
-
-	for userID, userData := range cache.Users {
-		// Check if this user has data for the specific source
-		if sourceData, exists := userData.Sources[sourceID]; exists {
-			// Check if Others exists and has a Hash
-			if sourceData.Others != nil && sourceData.Others.Hash != "" {
-				sourceHash = sourceData.Others.Hash
-				foundValidHash = true
-				glog.V(3).Infof("Found Others.Hash for user:%s source:%s hash:%s", userID, sourceID, sourceHash)
-				break // Use the first valid hash found
-			} else {
-				glog.V(3).Infof("No valid Others.Hash for user:%s source:%s (Others: %v)", userID, sourceID, sourceData.Others)
-			}
-		} else {
-			glog.V(3).Infof("No data found for user:%s source:%s", userID, sourceID)
-		}
-	}
-
-	// If no valid Others.Hash found for the specific source, return appropriate hash
-	if !foundValidHash {
-		glog.V(3).Infof("No valid Others.Hash found for source:%s, returning no_source_hash", sourceID)
-		return "no_source_hash"
-	}
-
-	glog.V(3).Infof("Using Others.Hash from source:%s as local hash: %s", sourceID, sourceHash)
-	return sourceHash
 }

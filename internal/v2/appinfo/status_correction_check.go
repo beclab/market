@@ -76,46 +76,15 @@ func NewStatusCorrectionChecker(cacheManager *CacheManager) *StatusCorrectionChe
 	}
 }
 
-// Start begins the periodic status checking
-func (scc *StatusCorrectionChecker) Start() error {
-	if scc.isRunning {
-		return fmt.Errorf("status correction checker is already running")
-	}
-
-	if scc.cacheManager == nil {
-		return fmt.Errorf("cache manager is required")
-	}
-
-	scc.isRunning = true
-	scc.lastCheckTime = time.Time{} // Zero time indicates no checks yet
-	scc.checkCount = 0
-	scc.correctionCount = 0
-	scc.stopChan = make(chan struct{}) // Recreate stopChan for each start
-
-	glog.Infof("Starting status correction checker with interval: %v", scc.checkInterval)
-	glog.Infof("App service endpoint: http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort)
-	glog.Infof("Middleware service endpoint: http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort)
-
-	// Start the periodic checking goroutine
-	go scc.runPeriodicCheck() // not used
-
-	return nil
-}
-
 // StartWithOptions starts with options
-func (scc *StatusCorrectionChecker) StartWithOptions(enablePeriodicCheck bool) error {
+func (scc *StatusCorrectionChecker) StartWithOptions() error {
 	if scc.isRunning {
 		return fmt.Errorf("status correction checker is already running")
 	}
 
 	scc.isRunning = true
 
-	if enablePeriodicCheck {
-		glog.Infof("Starting status correction checker with interval: %v", scc.checkInterval)
-		go scc.runPeriodicCheck() // not use
-	} else {
-		glog.Infof("Starting status correction checker in passive mode (serial pipeline handles processing)")
-	}
+	glog.Infof("Starting status correction checker in passive mode (serial pipeline handles processing)")
 
 	return nil
 }
@@ -160,27 +129,6 @@ func (scc *StatusCorrectionChecker) GetStats() map[string]interface{} {
 		"correction_count":       scc.correctionCount,
 		"app_service_url":        fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort),
 		"middleware_service_url": fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort),
-	}
-}
-
-// runPeriodicCheck runs the periodic status checking loop
-func (scc *StatusCorrectionChecker) runPeriodicCheck() {
-	ticker := time.NewTicker(scc.checkInterval)
-	defer ticker.Stop()
-
-	glog.Infof("Status correction checker periodic loop started")
-
-	// Perform initial check immediately
-	scc.performStatusCheck() // not use
-
-	for {
-		select {
-		case <-ticker.C:
-			scc.performStatusCheck() //  not use
-		case <-scc.stopChan:
-			glog.Infof("Status correction checker periodic loop stopped")
-			return
-		}
 	}
 }
 
@@ -1267,47 +1215,6 @@ func (scc *StatusCorrectionChecker) createStateDataFromAppStateData(appStateData
 	}
 
 	return stateData
-}
-
-// ForceCheck performs an immediate status check
-func (scc *StatusCorrectionChecker) ForceCheck() error {
-	if !scc.IsRunning() {
-		return fmt.Errorf("status correction checker is not running")
-	}
-
-	glog.Infof("Forcing immediate status check")
-	scc.performStatusCheck() // not used
-	return nil
-}
-
-// SetCheckInterval sets the check interval
-func (scc *StatusCorrectionChecker) SetCheckInterval(interval time.Duration) {
-	scc.checkInterval = interval
-	glog.Infof("Status correction check interval updated to: %v", interval)
-}
-
-// isStateInconsistent checks if the app state is inconsistent with the entrance statuses
-// Returns true if all entrances are running but the app state is not running
-func (scc *StatusCorrectionChecker) isStateInconsistent(app utils.AppServiceResponse) bool {
-	// If app state is already running, no inconsistency
-	if app.Status.State == "running" {
-		return false
-	}
-
-	// If no entrances, no inconsistency
-	if len(app.Status.EntranceStatuses) == 0 {
-		return false
-	}
-
-	// Check if all entrances are running
-	for _, entrance := range app.Status.EntranceStatuses {
-		if entrance.State != "running" {
-			return false
-		}
-	}
-
-	// All entrances are running but app state is not running - this is inconsistent
-	return true
 }
 
 // SetHistoryModule sets the history module for status correction checker
