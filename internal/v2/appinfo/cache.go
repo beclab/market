@@ -932,19 +932,9 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 	return nil
 }
 
-// isProgressBearingAppState returns whether this state can legitimately carry installation progress.
-func isProgressBearingAppState(state string) bool {
-	switch state {
-	case "pending", "downloading", "installing", "initializing", "resuming", "installingCanceling", "downloadingCanceling", "stopping", "uninstalling":
-		return true
-	default:
-		return false
-	}
-}
-
-// normalizeIncomingProgress keeps existing progress when startup/SCC snapshots provide an empty value.
-func normalizeIncomingProgress(incomingState, incomingProgress, existingProgress string) string {
-	if incomingProgress == "" && existingProgress != "" && isProgressBearingAppState(incomingState) {
+// normalizeIncomingProgress keeps existing progress only for downloading snapshots that miss progress.
+func normalizeIncomingProgress(incomingState, existingState, incomingProgress, existingProgress string) string {
+	if incomingState == "downloading" && existingState == "downloading" && incomingProgress == "" && existingProgress != "" {
 		return existingProgress
 	}
 	return incomingProgress
@@ -982,6 +972,7 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 		if existingAppState != nil && existingAppState.Status.Name == newAppState.Status.Name {
 			newAppState.Status.Progress = normalizeIncomingProgress(
 				newAppState.Status.State,
+				existingAppState.Status.State,
 				newAppState.Status.Progress,
 				existingAppState.Status.Progress,
 			)
@@ -1218,6 +1209,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						if existingState != nil && existingState.Status.Name == appName {
 							appState.Status.Progress = normalizeIncomingProgress(
 								appState.Status.State,
+								existingState.Status.State,
 								appState.Status.Progress,
 								existingState.Status.Progress,
 							)
@@ -1343,6 +1335,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						if existingState != nil && existingState.Status.Name == appName {
 							appData.Status.Progress = normalizeIncomingProgress(
 								appData.Status.State,
+								existingState.Status.State,
 								appData.Status.Progress,
 								existingState.Status.Progress,
 							)

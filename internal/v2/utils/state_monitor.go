@@ -20,19 +20,10 @@ type StateMonitor struct {
 	dataSender DataSenderInterface
 }
 
-// isProgressBearingAppState returns whether this state can legitimately carry installation progress.
-func isProgressBearingAppState(state string) bool {
-	switch state {
-	case "pending", "downloading", "installing", "initializing", "resuming", "installingCanceling", "downloadingCanceling", "stopping", "uninstalling":
-		return true
-	default:
-		return false
-	}
-}
-
-// normalizeIncomingProgress keeps existing progress when startup/SCC snapshots provide an empty value.
-func normalizeIncomingProgress(incomingState, incomingProgress, existingProgress string) string {
-	if incomingProgress == "" && existingProgress != "" && isProgressBearingAppState(incomingState) {
+// normalizeIncomingProgress keeps existing progress only for downloading->downloading
+// when startup/SCC snapshots provide an empty value.
+func normalizeIncomingProgress(incomingState, existingState, incomingProgress, existingProgress string) string {
+	if incomingState == "downloading" && existingState == "downloading" && incomingProgress == "" && existingProgress != "" {
 		return existingProgress
 	}
 	return incomingProgress
@@ -119,6 +110,7 @@ func (sm *StateMonitor) HasStateChanged(
 	// Compare progress
 	normalizedNewProgress := normalizeIncomingProgress(
 		newStateData.Status.State,
+		existingState.Status.State,
 		newStateData.Status.Progress,
 		existingState.Status.Progress,
 	)
