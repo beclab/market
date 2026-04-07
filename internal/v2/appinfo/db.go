@@ -420,6 +420,8 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 		} else {
 			pipeline.Set(r.ctx, baseKey+":app-info-history", historyJSON, 0)
 		}
+	} else {
+		pipeline.Del(r.ctx, baseKey+":app-info-history")
 	}
 
 	if len(appStateLatest) > 0 {
@@ -429,6 +431,8 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 		} else {
 			pipeline.Set(r.ctx, baseKey+":app-state-latest", stateJSON, 0)
 		}
+	} else {
+		pipeline.Del(r.ctx, baseKey+":app-state-latest")
 	}
 
 	if len(appInfoLatest) > 0 {
@@ -444,6 +448,8 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 		} else {
 			pipeline.Set(r.ctx, baseKey+":app-info-latest", infoJSON, 0)
 		}
+	} else {
+		pipeline.Del(r.ctx, baseKey+":app-info-latest")
 	}
 
 	if len(appInfoLatestPending) > 0 {
@@ -459,6 +465,8 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 		} else {
 			pipeline.Set(r.ctx, baseKey+":app-info-latest-pending", infoPendingJSON, 0)
 		}
+	} else {
+		pipeline.Del(r.ctx, baseKey+":app-info-latest-pending")
 	}
 
 	// glog.V(2).Infof("[DB] Prepared batch Redis operations for user=%s, source=%s", userID, sourceID)
