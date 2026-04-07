@@ -19,6 +19,15 @@ type StateMonitor struct {
 	dataSender DataSenderInterface
 }
 
+// normalizeIncomingProgress keeps existing progress only for downloading->downloading
+// when startup/SCC snapshots provide an empty value.
+func normalizeIncomingProgress(incomingState, existingState, incomingProgress, existingProgress string) string {
+	if incomingState == "downloading" && existingState == "downloading" && incomingProgress == "" && existingProgress != "" {
+		return existingProgress
+	}
+	return incomingProgress
+}
+
 // NewStateMonitor creates a new StateMonitor instance
 func NewStateMonitor(dataSender DataSenderInterface) *StateMonitor {
 	return &StateMonitor{
@@ -98,8 +107,14 @@ func (sm *StateMonitor) HasStateChanged(
 	}
 
 	// Compare progress
-	if newStateData.Status.Progress != existingState.Status.Progress {
-		return true, "progress changed: " + existingState.Status.Progress + " -> " + newStateData.Status.Progress
+	normalizedNewProgress := normalizeIncomingProgress(
+		newStateData.Status.State,
+		existingState.Status.State,
+		newStateData.Status.Progress,
+		existingState.Status.Progress,
+	)
+	if normalizedNewProgress != existingState.Status.Progress {
+		return true, "progress changed: " + existingState.Status.Progress + " -> " + normalizedNewProgress
 	}
 
 	// Compare entrance statuses
