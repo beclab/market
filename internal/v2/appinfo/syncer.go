@@ -99,25 +99,17 @@ func (s *Syncer) GetSteps() []syncerfn.SyncStep {
 	return steps
 }
 
-// Start begins the synchronization process with its own sync loop
-func (s *Syncer) Start(ctx context.Context) error {
-	return s.StartWithOptions(ctx, true)
-}
-
 // StartWithOptions starts the syncer with options.
 // If enableSyncLoop is false, the periodic sync loop is not started (Pipeline handles scheduling).
-func (s *Syncer) StartWithOptions(ctx context.Context, enableSyncLoop bool) error {
+func (s *Syncer) StartWithOptions(ctx context.Context) error {
 	if s.isRunning.Load() {
 		return fmt.Errorf("syncer is already running")
 	}
+
 	s.isRunning.Store(true)
 
-	if enableSyncLoop {
-		glog.V(2).Infof("Starting syncer with %d steps, sync interval: %v", len(s.steps), s.syncInterval)
-		go s.syncLoop(ctx) // not use
-	} else {
-		glog.V(2).Infof("Starting syncer with %d steps (passive mode, Pipeline handles scheduling)", len(s.steps))
-	}
+	glog.V(2).Infof("Starting syncer with %d steps (passive mode, Pipeline handles scheduling)", len(s.steps))
+
 	return nil
 }
 
@@ -273,39 +265,6 @@ func (s *Syncer) IsRunning() bool {
 	return s.isRunning.Load()
 }
 
-// syncLoop runs the main synchronization loop
-func (s *Syncer) syncLoop(ctx context.Context) {
-	defer func() {
-		s.isRunning.Store(false)
-		glog.V(4).Info("Syncer stopped")
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			glog.V(4).Info("Context cancelled, stopping syncer")
-			return
-		case <-s.stopChan:
-			glog.V(4).Info("Stop signal received, stopping syncer")
-			return
-		default:
-			// Execute sync cycle
-			if err := s.executeSyncCycle(ctx); err != nil { // not use
-				glog.Errorf("Sync cycle failed: %v", err)
-			}
-
-			// Wait for next cycle or stop signal
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.stopChan:
-				return
-			case <-time.After(s.syncInterval):
-				// Continue to next cycle
-			}
-		}
-	}
-}
 
 // getVersionForSync returns the version to use for sync operations with fallback
 func getVersionForSync() string {
@@ -359,6 +318,9 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		s.updateSyncSuccess(time.Since(startTime), startTime)
 		return nil
 	}
+
+	// clears all AppRenderFailed data for all users and sources
+	s.cacheManager.Load().ClearAppRenderFailedData()
 
 	glog.V(3).Infof("Found %d configured market sources (%d remote, %d local)", len(config.Sources), len(remoteSources), len(config.Sources)-len(remoteSources))
 
@@ -955,13 +917,6 @@ type SyncerConfig struct {
 	SyncInterval time.Duration `json:"sync_interval"`
 }
 
-// DefaultSyncerConfig returns a default configuration
-func DefaultSyncerConfig() SyncerConfig {
-	return SyncerConfig{
-		SyncInterval: 5 * time.Minute,
-	}
-}
-
 // SetCacheManager sets the cache manager for hydration notifications
 func (s *Syncer) SetCacheManager(cacheManager *CacheManager) {
 	s.cacheManager.Store(cacheManager)
@@ -1086,13 +1041,6 @@ func (s *Syncer) GetMetrics() SyncerMetrics {
 		SuccessRate:         successRate,
 		NextSyncTime:        nextSyncTime,
 		LastSyncDetails:     lastSyncDetails,
-	}
-}
-
-// RecordSyncDetails records detailed information about a sync operation
-func (s *Syncer) RecordSyncDetails(details *SyncDetails) {
-	if details != nil {
-		s.lastSyncDetails.Store(details)
 	}
 }
 

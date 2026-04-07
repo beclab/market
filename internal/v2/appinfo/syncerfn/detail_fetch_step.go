@@ -799,44 +799,6 @@ func (d *DetailFetchStep) mergeAppData(originalAppData interface{}, appInfoMap m
 	return detailedAppData
 }
 
-// preserveFieldsForDelistedApp preserves fields from original data if detail API returns empty/null values
-// This ensures installed delisted apps retain all their information
-func (d *DetailFetchStep) preserveFieldsForDelistedApp(originalMap, detailMap map[string]interface{}, appID string) {
-	// List of fields to preserve if detail API returns empty/null
-	fieldsToPreserve := []string{
-		"icon", "description", "title", "developer", "promoteImage", "promoteVideo",
-		"subCategory", "locale", "requiredMemory", "requiredDisk", "supportClient",
-		"requiredGPU", "requiredCPU", "rating", "target", "permission", "entrances",
-		"middleware", "options", "submitter", "doc", "website", "featuredImage",
-		"sourceCode", "license", "legal", "i18n", "modelSize", "namespace",
-		"onlyAdmin", "lastCommitHash", "createTime", "updateTime", "count",
-		"variants", "screenshots", "tags", "metadata", "updated_at", "versionHistory",
-		"fullDescription", "upgradeDescription", "cfgType", "chartName", "versionName",
-	}
-
-	for _, field := range fieldsToPreserve {
-		detailValue := detailMap[field]
-		originalValue, hasOriginal := originalMap[field]
-
-		// Check if detail API returned empty/null value
-		shouldPreserve := false
-		if detailValue == nil {
-			shouldPreserve = true
-		} else if strValue, ok := detailValue.(string); ok && strValue == "" {
-			shouldPreserve = true
-		} else if sliceValue, ok := detailValue.([]interface{}); ok && len(sliceValue) == 0 {
-			shouldPreserve = true
-		} else if mapValue, ok := detailValue.(map[string]interface{}); ok && len(mapValue) == 0 {
-			shouldPreserve = true
-		}
-
-		// Preserve original value if detail API returned empty/null and original has value
-		if shouldPreserve && hasOriginal && originalValue != nil {
-			originalMap[field] = originalValue
-		}
-	}
-}
-
 // isAppInstalled determines whether the given app is currently installed for the active source.
 func (d *DetailFetchStep) isAppInstalled(appName, sourceID string, data *SyncContext) bool {
 	if appName == "" || sourceID == "" || data == nil || data.CacheManager == nil {

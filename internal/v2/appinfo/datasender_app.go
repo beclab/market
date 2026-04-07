@@ -242,11 +242,3 @@ func (ds *DataSender) Close() {
 		glog.V(3).Info("NATS connection closed")
 	}
 }
-
-// IsConnected checks if NATS connection is active
-func (ds *DataSender) IsConnected() bool {
-	if !ds.enabled || ds.conn == nil {
-		return false
-	}
-	return ds.conn.IsConnected()
-}

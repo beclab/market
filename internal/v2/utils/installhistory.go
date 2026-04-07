@@ -26,14 +26,6 @@ func SetCacheVersionGetter(getter CacheVersionGetter) {
 	cacheVersionGetter = getter
 }
 
-// getVersionFromCacheState gets app version from cache state if available
-func getVersionFromCacheState(userID, sourceID, appName string) (version string, found bool) {
-	if cacheVersionGetter != nil {
-		return cacheVersionGetter.GetAppVersionFromState(userID, sourceID, appName)
-	}
-	return "", false
-}
-
 // GetAppInfoFromDownloadRecord fetches app version and source from chart-repo service
 func GetAppInfoFromDownloadRecord(userID, appName string) (string, string, error) {
 

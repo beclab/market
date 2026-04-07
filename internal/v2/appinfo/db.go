@@ -407,6 +407,9 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 		appInfoLatestPending = sourceData.AppInfoLatestPending
 	}
 
+	glog.Infof("[DB] BatchSourceDataSave, history: %d, state: %d, latest: %d, pending: %d",
+		len(appInfoHistory), len(appStateLatest), len(appInfoLatest), len(appInfoLatestPending))
+
 	baseKey := fmt.Sprintf("appinfo:user:%s:source:%s", userID, sourceID)
 
 	// Prepare JSON serialization outside of locks
@@ -458,7 +461,7 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 		}
 	}
 
-	glog.V(3).Infof("Prepared batch Redis operations for user=%s, source=%s", userID, sourceID)
+	// glog.V(2).Infof("[DB] Prepared batch Redis operations for user=%s, source=%s", userID, sourceID)
 	return nil
 }
 
@@ -514,7 +517,7 @@ func (r *RedisClient) SaveSourceDataToRedis(userID, sourceID string, sourceData 
 	if failedOps > 0 {
 		glog.Warningf("Redis pipeline completed with %d failed operations out of %d total for user=%s, source=%s", failedOps, len(results), userID, sourceID)
 	} else {
-		glog.V(4).Infof("Successfully saved source data to Redis for user=%s, source=%s in %v (%d operations)", userID, sourceID, duration, len(results))
+		glog.V(2).Infof("Successfully saved source data to Redis for user=%s, source=%s in %v (%d operations)", userID, sourceID, duration, len(results))
 	}
 
 	return nil

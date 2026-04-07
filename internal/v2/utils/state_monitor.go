@@ -11,7 +11,6 @@ import (
 // DataSenderInterface defines the interface for sending app info updates
 type DataSenderInterface interface {
 	SendAppInfoUpdate(update types.AppInfoUpdate, trace string) error
-	IsConnected() bool
 	Close()
 }
 
@@ -198,12 +197,4 @@ func (sm *StateMonitor) Close() {
 	if sm.dataSender != nil {
 		sm.dataSender.Close()
 	}
-}
-
-// IsConnected checks if the data sender is connected
-func (sm *StateMonitor) IsConnected() bool {
-	if sm.dataSender == nil {
-		return false
-	}
-	return sm.dataSender.IsConnected()
 }

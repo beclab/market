@@ -121,30 +121,31 @@ func (dwr *DataWatcherRepo) initializeLastProcessedID() error {
 }
 
 // Start begins the periodic state checking process
-func (dwr *DataWatcherRepo) Start() error {
-	if dwr.isRunning {
-		return fmt.Errorf("data watcher is already running")
-	}
+// func (dwr *DataWatcherRepo) Start() error {
+// 	if dwr.isRunning {
+// 		return fmt.Errorf("data watcher is already running")
+// 	}
 
-	// Create ticker for 2-minute intervals
-	dwr.ticker = time.NewTicker(2 * time.Minute)
-	dwr.isRunning = true
+// 	// Create ticker for 2-minute intervals
+// 	dwr.ticker = time.NewTicker(2 * time.Minute)
+// 	dwr.isRunning = true
 
-	glog.V(3).Info("Starting data watcher with 2-minute intervals")
+// 	glog.V(3).Info("Starting data watcher with 2-minute intervals")
 
-	// Start the monitoring goroutine
-	go dwr.monitorStateChanges() // not used
+// 	// Start the monitoring goroutine
+// 	go dwr.monitorStateChanges()
 
-	return nil
-}
+// 	return nil
+// }
 
 // StartWithOptions starts with options, if enablePolling is false, the periodic polling is not started
-func (dwr *DataWatcherRepo) StartWithOptions(enablePolling bool) error {
+func (dwr *DataWatcherRepo) StartWithOptions() error {
 	if dwr.isRunning {
 		return fmt.Errorf("DataWatcherRepo is already running")
 	}
 
 	dwr.isRunning = true
+
 	glog.V(3).Info("Starting DataWatcherRepo in passive mode (serial pipeline handles processing)")
 
 	return nil
@@ -182,28 +183,6 @@ func (dwr *DataWatcherRepo) Stop() error {
 // IsRunning returns whether the data watcher is currently running
 func (dwr *DataWatcherRepo) IsRunning() bool {
 	return dwr.isRunning
-}
-
-// monitorStateChanges runs the main monitoring loop
-func (dwr *DataWatcherRepo) monitorStateChanges() {
-	glog.V(3).Info("State change monitoring started")
-
-	// Process immediately on start
-	if err := dwr.processStateChanges(); err != nil { // not used
-		glog.Errorf("Error processing state changes on startup: %v", err)
-	}
-
-	for {
-		select {
-		case <-dwr.ticker.C:
-			if err := dwr.processStateChanges(); err != nil { // not used
-				glog.Errorf("Error processing state changes: %v", err)
-			}
-		case <-dwr.stopChannel:
-			glog.V(3).Info("State change monitoring stopped")
-			return
-		}
-	}
 }
 
 // processStateChanges fetches and processes new state changes

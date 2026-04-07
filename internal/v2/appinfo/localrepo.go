@@ -369,7 +369,7 @@ func (lr *LocalRepo) DeleteApp(userID, appName, appVersion, sourceID string, tok
 		}
 		glog.V(3).Infof("App %s installation check passed: found=%v, completed=%v, taskType=%s, source=%s", appName, found, completed, taskType, source)
 	} else {
-		glog.V(3).Infof("Task module not available, skipping installation status check for app: %s", appName)
+		glog.V(2).Infof("Task module not available, skipping installation status check for app: %s", appName)
 	}
 
 	// Get chart repo service host from environment variable

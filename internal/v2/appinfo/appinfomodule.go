@@ -518,7 +518,7 @@ func (m *AppInfoModule) initSyncer() error {
 	}
 
 	// Start syncer in passive mode (Pipeline handles scheduling)
-	if err := m.syncer.StartWithOptions(m.ctx, false); err != nil {
+	if err := m.syncer.StartWithOptions(m.ctx); err != nil {
 		return fmt.Errorf("failed to start syncer: %w", err)
 	}
 
@@ -550,7 +550,7 @@ func (m *AppInfoModule) initHydrator() error {
 	m.hydrator = NewHydrator(cacheData, m.settingsManager, m.cacheManager, hydratorConfig)
 
 	// Start hydrator with context
-	if err := m.hydrator.Start(m.ctx); err != nil {
+	if err := m.hydrator.StartWithOptions(m.ctx); err != nil {
 		return fmt.Errorf("failed to start hydrator: %w", err)
 	}
 
@@ -583,7 +583,7 @@ func (m *AppInfoModule) initDataWatcher() error {
 	// Create DataWatcher instance
 	m.dataWatcher = NewDataWatcher(m.cacheManager, m.hydrator, m.dataSender)
 
-	if err := m.dataWatcher.StartWithOptions(m.ctx, false); err != nil {
+	if err := m.dataWatcher.StartWithOptions(m.ctx); err != nil {
 		return fmt.Errorf("failed to start DataWatcher: %w", err)
 	}
 
@@ -646,7 +646,7 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 	// Create DataWatcherRepo instance
 	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.cacheManager, m.dataWatcher, m.dataSender)
 
-	if err := m.dataWatcherRepo.StartWithOptions(false); err != nil {
+	if err := m.dataWatcherRepo.StartWithOptions(); err != nil {
 		return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
 	}
 
@@ -664,7 +664,7 @@ func (m *AppInfoModule) initStatusCorrectionChecker() error {
 
 	m.statusCorrectionChecker = NewStatusCorrectionChecker(m.cacheManager)
 
-	if err := m.statusCorrectionChecker.StartWithOptions(false); err != nil {
+	if err := m.statusCorrectionChecker.StartWithOptions(); err != nil {
 		return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
 	}
 
@@ -1082,16 +1082,6 @@ func DefaultModuleConfig() *ModuleConfig {
 	}
 }
 
-// GetDockerImageInfo is a convenience function to get Docker image information
-func (m *AppInfoModule) GetDockerImageInfo(imageName, appName string) (*utils.DockerImageInfo, error) {
-	return utils.GetDockerImageInfo(imageName, appName)
-}
-
-// GetLayerDownloadProgress is a convenience function to get layer download progress
-func (m *AppInfoModule) GetLayerDownloadProgress(layerDigest string) (*utils.LayerInfo, error) {
-	return utils.GetLayerDownloadProgress(layerDigest)
-}
-
 // SetAppData is a convenience function to set app data
 func (m *AppInfoModule) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
 	if !m.isStarted || m.cacheManager == nil {
@@ -1255,197 +1245,6 @@ func (m *AppInfoModule) SyncUserListToCache() error {
 	return m.cacheManager.SyncUserListToCache()
 }
 
-// RefreshUserDataStructures ensures all configured users have proper data structures
-// not used
-func (m *AppInfoModule) RefreshUserDataStructures() error {
-	// Check isStarted without lock since it's only read
-	if !m.isStarted {
-		return fmt.Errorf("module is not started")
-	}
-
-	glog.V(3).Info("Refreshing user data structures")
-
-	// First sync user list to cache
-	if err := m.SyncUserListToCache(); err != nil {
-		return fmt.Errorf("failed to sync user list to cache: %w", err)
-	}
-
-	// Force sync to Redis to ensure persistence
-	// Cache manager pointer access is atomic
-	if m.cacheManager != nil {
-		if err := m.cacheManager.ForceSync(); err != nil {
-			glog.Errorf("Failed to force sync after refreshing user data structures: %v", err)
-		}
-	}
-
-	glog.V(3).Info("User data structures refreshed successfully")
-	return nil
-}
-
-// GetConfiguredUsers returns the list of configured users
-func (m *AppInfoModule) GetConfiguredUsers() []string {
-	// Config is read-only after initialization, no need for read lock
-	if m.config.User == nil {
-		return []string{}
-	}
-
-	// Return a copy to prevent external modification
-	users := make([]string, len(m.config.User.UserList))
-	copy(users, m.config.User.UserList)
-	return users
-}
-
-// GetCachedUsers returns the list of users currently in cache
-func (m *AppInfoModule) GetCachedUsers() []string {
-	// Check isStarted and cache manager without lock since they're only read
-	if !m.isStarted || m.cacheManager == nil {
-		return []string{}
-	}
-
-	allUsersData := m.cacheManager.GetAllUsersData() // not used
-	users := make([]string, 0, len(allUsersData))
-	for userID := range allUsersData {
-		users = append(users, userID)
-	}
-
-	return users
-}
-
-// CleanupInvalidData cleans up invalid pending data entries from cache
-func (m *AppInfoModule) CleanupInvalidData() (int, error) {
-	if m.cacheManager == nil {
-		return 0, fmt.Errorf("cache manager not available")
-	}
-
-	cleanedCount := m.cacheManager.CleanupInvalidPendingData()
-	glog.V(3).Infof("Cleaned up %d invalid pending data entries", cleanedCount)
-
-	return cleanedCount, nil
-}
-
-// GetInvalidDataReport returns a detailed report of invalid pending data entries
-func (m *AppInfoModule) GetInvalidDataReport() map[string]interface{} {
-	if m.cacheManager == nil {
-		return map[string]interface{}{
-			"error": "cache manager not available",
-		}
-	}
-
-	report := map[string]interface{}{
-		"users": make(map[string]interface{}),
-		"totals": map[string]int{
-			"total_users":        0,
-			"total_sources":      0,
-			"total_pending_data": 0,
-			"total_invalid_data": 0,
-		},
-	}
-
-	allUsersForReport := m.cacheManager.GetAllUsersData() // not used
-
-	totalUsers := 0
-	totalSources := 0
-	totalPendingData := 0
-	totalInvalidData := 0
-
-	for userID, userData := range allUsersForReport {
-		totalUsers++
-		userReport := map[string]interface{}{
-			"sources": make(map[string]interface{}),
-			"totals": map[string]int{
-				"total_sources":      0,
-				"total_pending_data": 0,
-				"total_invalid_data": 0,
-			},
-		}
-
-		for sourceID, sourceData := range userData.Sources {
-			totalSources++
-
-			sourceReport := map[string]interface{}{
-				"total_pending_data": len(sourceData.AppInfoLatestPending),
-				"invalid_entries":    make([]map[string]interface{}, 0),
-			}
-
-			invalidCount := 0
-			for i, pendingData := range sourceData.AppInfoLatestPending {
-				isValid := false
-				invalidReasons := make([]string, 0)
-
-				if pendingData.RawData != nil {
-					if (pendingData.RawData.ID != "" && pendingData.RawData.ID != "0") ||
-						(pendingData.RawData.AppID != "" && pendingData.RawData.AppID != "0") ||
-						(pendingData.RawData.Name != "" && pendingData.RawData.Name != "unknown") {
-						isValid = true
-					} else {
-						if pendingData.RawData.ID == "" || pendingData.RawData.ID == "0" {
-							invalidReasons = append(invalidReasons, "empty or zero ID")
-						}
-						if pendingData.RawData.AppID == "" || pendingData.RawData.AppID == "0" {
-							invalidReasons = append(invalidReasons, "empty or zero AppID")
-						}
-						if pendingData.RawData.Name == "" || pendingData.RawData.Name == "unknown" {
-							invalidReasons = append(invalidReasons, "empty or unknown Name")
-						}
-					}
-				} else {
-					invalidReasons = append(invalidReasons, "null RawData")
-				}
-
-				if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil && !isValid {
-					if (pendingData.AppInfo.AppEntry.ID != "" && pendingData.AppInfo.AppEntry.ID != "0") ||
-						(pendingData.AppInfo.AppEntry.AppID != "" && pendingData.AppInfo.AppEntry.AppID != "0") ||
-						(pendingData.AppInfo.AppEntry.Name != "" && pendingData.AppInfo.AppEntry.Name != "unknown") {
-						isValid = true
-						invalidReasons = make([]string, 0) // Clear reasons if AppInfo is valid
-					}
-				}
-
-				if !isValid {
-					invalidCount++
-					invalidEntry := map[string]interface{}{
-						"index":   i,
-						"reasons": invalidReasons,
-						"data": map[string]interface{}{
-							"timestamp": pendingData.Timestamp,
-							"version":   pendingData.Version,
-						},
-					}
-
-					if pendingData.RawData != nil {
-						invalidEntry["raw_data"] = map[string]interface{}{
-							"id":     pendingData.RawData.ID,
-							"app_id": pendingData.RawData.AppID,
-							"name":   pendingData.RawData.Name,
-							"title":  pendingData.RawData.Title,
-						}
-					}
-
-					sourceReport["invalid_entries"] = append(sourceReport["invalid_entries"].([]map[string]interface{}), invalidEntry)
-				}
-			}
-
-			sourceReport["invalid_count"] = invalidCount
-			totalPendingData += len(sourceData.AppInfoLatestPending)
-			totalInvalidData += invalidCount
-
-			userReport["sources"].(map[string]interface{})[sourceID] = sourceReport
-			userReport["totals"].(map[string]int)["total_sources"]++
-			userReport["totals"].(map[string]int)["total_pending_data"] += len(sourceData.AppInfoLatestPending)
-			userReport["totals"].(map[string]int)["total_invalid_data"] += invalidCount
-		}
-
-		report["users"].(map[string]interface{})[userID] = userReport
-	}
-
-	report["totals"].(map[string]int)["total_users"] = totalUsers
-	report["totals"].(map[string]int)["total_sources"] = totalSources
-	report["totals"].(map[string]int)["total_pending_data"] = totalPendingData
-	report["totals"].(map[string]int)["total_invalid_data"] = totalInvalidData
-
-	return report
-}
-
 // SetTaskModule sets the task module for recording task events
 func (m *AppInfoModule) SetTaskModule(taskModule *task.TaskModule) {
 	m.taskModule = taskModule
@@ -1491,10 +1290,4 @@ func (m *AppInfoModule) GetTaskModule() *task.TaskModule {
 func (m *AppInfoModule) SetSettingsManager(settingsManager *settings.SettingsManager) {
 	m.settingsManager = settingsManager
 	glog.V(2).Info("Settings manager set in AppInfo module")
-}
-
-// GetSettingsManager returns the settings manager instance
-func (m *AppInfoModule) GetSettingsManager() *settings.SettingsManager {
-	// Pointer assignment is atomic, no need for read lock
-	return m.settingsManager
 }

@@ -1,8 +1,6 @@
 package appinfo
 
 import (
-	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/golang/glog"
@@ -91,45 +89,6 @@ func (cm *CacheManager) DiagnoseCacheAndRedis() error {
 	return nil
 }
 
-// PrintDiagnosticInfo prints diagnostic information in a readable format
-func (cm *CacheManager) PrintDiagnosticInfo() error {
-	err := cm.DiagnoseCacheAndRedis()
-	if err != nil {
-		return err
-	}
-
-	glog.Infof("=== CACHE AND REDIS DIAGNOSTIC REPORT ===")
-	glog.Infof("Diagnostic completed successfully")
-	return nil
-}
-
-// GetDiagnosticJSON returns diagnostic information as JSON
-func (cm *CacheManager) GetDiagnosticJSON() (string, error) {
-	err := cm.DiagnoseCacheAndRedis()
-	if err != nil {
-		return "", err
-	}
-
-	// Get cache stats and users data for JSON response
-	cacheStats := cm.GetCacheStats()     // not used
-	allUsersData := cm.GetAllUsersData() // not used
-
-	diagnosticInfo := map[string]interface{}{
-		"cache_stats":   cacheStats,
-		"users_data":    allUsersData,
-		"total_users":   len(allUsersData),
-		"total_sources": cacheStats["total_sources"],
-		"is_running":    cacheStats["is_running"],
-	}
-
-	jsonData, err := json.MarshalIndent(diagnosticInfo, "", "  ")
-	if err != nil {
-		return "", err
-	}
-
-	return string(jsonData), nil
-}
-
 // ForceReloadFromRedis forces a complete reload of cache data from Redis
 func (cm *CacheManager) ForceReloadFromRedis() error {
 	glog.Infof("Force reloading cache data from Redis")
@@ -146,53 +105,4 @@ func (cm *CacheManager) ForceReloadFromRedis() error {
 
 	glog.Infof("Successfully reloaded cache data from Redis")
 	return nil
-}
-
-// ValidateSourceData validates source data integrity
-func (cm *CacheManager) ValidateSourceData(userID, sourceID string) (*SourceAnalysis, error) {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
-
-	userData, exists := cm.cache.Users[userID]
-	if !exists {
-		return nil, fmt.Errorf("user %s not found in cache", userID)
-	}
-
-	sourceData, exists := userData.Sources[sourceID]
-	if !exists {
-		return nil, fmt.Errorf("source %s not found for user %s", sourceID, userID)
-	}
-
-	analysis := &SourceAnalysis{
-		SourceID:                sourceID,
-		HasAppInfoLatest:        len(sourceData.AppInfoLatest) > 0,
-		HasAppInfoLatestPending: len(sourceData.AppInfoLatestPending) > 0,
-		HasAppStateLatest:       len(sourceData.AppStateLatest) > 0,
-		HasAppInfoHistory:       len(sourceData.AppInfoHistory) > 0,
-		AppInfoLatestCount:      len(sourceData.AppInfoLatest),
-		AppInfoPendingCount:     len(sourceData.AppInfoLatestPending),
-		AppStateLatestCount:     len(sourceData.AppStateLatest),
-		AppInfoHistoryCount:     len(sourceData.AppInfoHistory),
-		Issues:                  make([]string, 0),
-	}
-
-	// Validate pending data
-	for i, pendingData := range sourceData.AppInfoLatestPending {
-		if pendingData == nil {
-			analysis.Issues = append(analysis.Issues, fmt.Sprintf("Pending data at index %d is nil", i))
-			continue
-		}
-
-		if pendingData.RawData == nil {
-			analysis.Issues = append(analysis.Issues, fmt.Sprintf("Pending data at index %d has nil RawData", i))
-			continue
-		}
-
-		// Check for valid identifiers
-		if pendingData.RawData.ID == "" && pendingData.RawData.AppID == "" && pendingData.RawData.Name == "" {
-			analysis.Issues = append(analysis.Issues, fmt.Sprintf("Pending data at index %d has no valid identifiers", i))
-		}
-	}
-
-	return analysis, nil
 }

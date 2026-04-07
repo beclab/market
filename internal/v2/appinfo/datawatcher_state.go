@@ -545,6 +545,19 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 
 	shouldUpdate := true
 	checker := func(appState *AppStateLatestData) {
+		// 			/**
+		// 			 * [Mandatory Sync Whitelist]
+		// 			 * The cases below define critical state transition scenarios that must be processed.
+		// 			 *
+		// 			 * Background:
+		// 			 * When a user performs an action in the UI (e.g., canceling installation/download) or when an app lifecycle event completes (e.g., installation finished, uninstallation finished),
+		// 			 * the final state pushed by NATS (appStateMsg.State) may differ from the cached state in memory (appState.Status.State).
+		// 			 *
+		// 			 * Purpose:
+		// 			 * Even if the progress (Progress) has not changed and there is no entrance information (EntranceStatuses),
+		// 			 * as long as the following conditions are met, we must bypass the "deduplication check" in the default branch.
+		// 			 * This forces the local state to update and pushes the change to the frontend, ensuring the UI promptly reflects the final result.
+		// 			 */
 		switch {
 		//   NATS State                        APP State
 		case appStateMsg.State == "running" && appState.Status.State == "installing":
@@ -598,74 +611,6 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 	if !shouldUpdate {
 		return
 	}
-
-	// userData := dw.cacheManager.getUserData(appStateMsg.User)
-	// if userData == nil {
-	// 	glog.V(2).Infof("User data not found for user %s", appStateMsg.User)
-	// 	return
-	// }
-
-	// for sourceId, sourceData := range userData.Sources {
-	// 	if appStateMsg.MarketSource != "" && sourceId != appStateMsg.MarketSource {
-	// 		continue
-	// 	}
-	// 	for _, appState := range sourceData.AppStateLatest {
-	// 		if appState.Status.Name == appStateMsg.Name { // && appState.Status.State == appStateMsg.State
-
-	// 			/**
-	// 			 * [Mandatory Sync Whitelist]
-	// 			 * The cases below define critical state transition scenarios that must be processed.
-	// 			 *
-	// 			 * Background:
-	// 			 * When a user performs an action in the UI (e.g., canceling installation/download) or when an app lifecycle event completes (e.g., installation finished, uninstallation finished),
-	// 			 * the final state pushed by NATS (appStateMsg.State) may differ from the cached state in memory (appState.Status.State).
-	// 			 *
-	// 			 * Purpose:
-	// 			 * Even if the progress (Progress) has not changed and there is no entrance information (EntranceStatuses),
-	// 			 * as long as the following conditions are met, we must bypass the "deduplication check" in the default branch.
-	// 			 * This forces the local state to update and pushes the change to the frontend, ensuring the UI promptly reflects the final result.
-	// 			 */
-	// 			switch {
-	// 			//   NATS State                        APP State
-	// 			case appStateMsg.State == "running" && appState.Status.State == "installing":
-	// 			case appStateMsg.State == "running" && appState.Status.State == "initializing":
-	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
-	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
-	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
-	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCanceling":
-	// 			case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCancelFailed":
-	// 			case appStateMsg.State == "pendingCanceled" && appState.Status.State == "pending":
-	// 			case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "downloadingCanceling":
-	// 			case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
-	// 			case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
-	// 			case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
-	// 			default:
-	// 				if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
-	// 					glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
-	// 						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, appState.Status.State, appStateMsg.State)
-	// 					return
-	// 				}
-	// 			}
-
-	// 			// Compare timestamps properly by parsing them
-	// 			if appState.Status.StatusTime != "" && appStateMsg.CreateTime != "" {
-	// 				statusTime, err1 := time.Parse("2006-01-02T15:04:05.000000000Z", appState.Status.StatusTime)
-	// 				createTime, err2 := time.Parse("2006-01-02T15:04:05.000000000Z", appStateMsg.CreateTime)
-
-	// 				if err1 == nil && err2 == nil {
-	// 					if statusTime.After(createTime) {
-	// 						glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s, appTime: %s, msgTime: %s. Skipping update.",
-	// 							appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, statusTime.String(), createTime.String())
-	// 						return
-	// 					}
-	// 				} else {
-	// 					glog.Errorf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
-	// 						appState.Status.StatusTime, appStateMsg.CreateTime, err1, err2)
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// }
 
 	// Process the message
 	glog.V(2).Infof("State - Processs update message from NATS subject %s, for internal for opID: %s, app: %s, user: %s, msgState: %s",
