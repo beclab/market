@@ -932,6 +932,24 @@ func (cm *CacheManager) getSourceData(userID, sourceID string) *SourceData {
 	return nil
 }
 
+// isProgressBearingAppState returns whether this state can legitimately carry installation progress.
+func isProgressBearingAppState(state string) bool {
+	switch state {
+	case "pending", "downloading", "installing", "initializing", "resuming", "installingCanceling", "downloadingCanceling", "stopping", "uninstalling":
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizeIncomingProgress keeps existing progress when startup/SCC snapshots provide an empty value.
+func normalizeIncomingProgress(incomingState, incomingProgress, existingProgress string) string {
+	if incomingProgress == "" && existingProgress != "" && isProgressBearingAppState(incomingState) {
+		return existingProgress
+	}
+	return incomingProgress
+}
+
 // updateAppStateLatest updates or adds a single app state based on name matching
 func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData *SourceData, newAppState *types.AppStateLatestData) {
 	if newAppState == nil {
@@ -962,6 +980,12 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 	found := false
 	for i, existingAppState := range sourceData.AppStateLatest {
 		if existingAppState != nil && existingAppState.Status.Name == newAppState.Status.Name {
+			newAppState.Status.Progress = normalizeIncomingProgress(
+				newAppState.Status.State,
+				newAppState.Status.Progress,
+				existingAppState.Status.Progress,
+			)
+
 			// Preserve rawAppName from existing state if new state doesn't have it
 			if newAppState.Status.RawAppName == "" && existingAppState.Status.RawAppName != "" {
 				glog.V(3).Infof("New app state for %s has empty RawAppName, preserving old RawAppName: %s", newAppState.Status.Name, existingAppState.Status.RawAppName)
@@ -1189,6 +1213,18 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 					}
 					glog.V(3).Infof("DEBUG: Adding batch pending notification for app=%s (index=%d)", appName, i)
 
+					// Align change detection with update merge logic to avoid empty-progress startup regressions.
+					for _, existingState := range sourceData.AppStateLatest {
+						if existingState != nil && existingState.Status.Name == appName {
+							appState.Status.Progress = normalizeIncomingProgress(
+								appState.Status.State,
+								appState.Status.Progress,
+								existingState.Status.Progress,
+							)
+							break
+						}
+					}
+
 					// Check if state has changed before creating notification
 					hasChanged, changeReason := cm.stateMonitor.HasStateChanged(appName, appState, sourceData.AppStateLatest)
 					glog.V(3).Infof("DEBUG: Batch state change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
@@ -1303,6 +1339,17 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				appName := appData.Status.Name
 				glog.V(2).Infof("DEBUG: State monitor available, appName=%s, appData=%v", appName, appData != nil)
 				if appName != "" {
+					for _, existingState := range sourceData.AppStateLatest {
+						if existingState != nil && existingState.Status.Name == appName {
+							appData.Status.Progress = normalizeIncomingProgress(
+								appData.Status.State,
+								appData.Status.Progress,
+								existingState.Status.Progress,
+							)
+							break
+						}
+					}
+
 					// Check if state has changed before creating notification
 					hasChanged, changeReason := cm.stateMonitor.HasStateChanged(appName, appData, sourceData.AppStateLatest)
 					glog.V(4).Infof("DEBUG: State change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
