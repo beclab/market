@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -643,82 +642,82 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 	}
 
 	// 4) Prune duplicates: same user+app across multiple sources -> keep only the latest-installed
-	for key, entries := range cachedAppsByUserAndName {
-		if len(entries) <= 1 {
-			continue
-		}
+	// for key, entries := range cachedAppsByUserAndName {
+	// 	if len(entries) <= 1 {
+	// 		continue
+	// 	}
 
-		parts := strings.SplitN(key, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		userID, appName := parts[0], parts[1]
+	// 	parts := strings.SplitN(key, ":", 2)
+	// 	if len(parts) != 2 {
+	// 		continue
+	// 	}
+	// 	userID, appName := parts[0], parts[1]
 
-		// Prefer the source recorded by GetAppInfoLastInstalled as latest-installed
-		preferredSource := ""
-		if _, src, err := utils.GetAppInfoLastInstalled(userID, appName); err == nil && src != "" {
-			preferredSource = src
-		}
+	// 	// Prefer the source recorded by GetAppInfoLastInstalled as latest-installed
+	// 	preferredSource := ""
+	// 	if _, src, err := utils.GetAppInfoLastInstalled(userID, appName); err == nil && src != "" {
+	// 		preferredSource = src
+	// 	}
 
-		// Fallback: use newest StatusTime when no record found
-		if preferredSource == "" {
-			sort.Slice(entries, func(i, j int) bool {
-				return entries[i].statusTime.After(entries[j].statusTime)
-			})
-			preferredSource = entries[0].sourceID
-		}
+	// 	// Fallback: use newest StatusTime when no record found
+	// 	if preferredSource == "" {
+	// 		sort.Slice(entries, func(i, j int) bool {
+	// 			return entries[i].statusTime.After(entries[j].statusTime)
+	// 		})
+	// 		preferredSource = entries[0].sourceID
+	// 	}
 
-		for _, entry := range entries {
-			if entry.sourceID == preferredSource || entry.appState == nil {
-				continue
-			}
+	// 	for _, entry := range entries {
+	// 		if entry.sourceID == preferredSource || entry.appState == nil {
+	// 			continue
+	// 		}
 
-			change := StatusChange{
-				UserID:     userID,
-				SourceID:   entry.sourceID,
-				AppName:    appName,
-				ChangeType: "duplicate_prune",
-				OldState:   entry.appState.Status.State,
-				NewState:   "removed",
-				Timestamp:  time.Now(),
-			}
-			changes = append(changes, change)
+	// 		change := StatusChange{
+	// 			UserID:     userID,
+	// 			SourceID:   entry.sourceID,
+	// 			AppName:    appName,
+	// 			ChangeType: "duplicate_prune",
+	// 			OldState:   entry.appState.Status.State,
+	// 			NewState:   "removed",
+	// 			Timestamp:  time.Now(),
+	// 		}
+	// 		changes = append(changes, change)
 
-			glog.Infof("Duplicate app detected (user=%s, app=%s): keep source=%s, prune source=%s (state=%s)",
-				userID, appName, preferredSource, entry.sourceID, entry.appState.Status.State)
-		}
-	}
+	// 		glog.Infof("Duplicate app detected (user=%s, app=%s): keep source=%s, prune source=%s (state=%s)",
+	// 			userID, appName, preferredSource, entry.sourceID, entry.appState.Status.State)
+	// 	}
+	// }
 
 	// 5. Check for state inconsistency (all entrances running but app state is not running)
-	for _, app := range latestStatus {
-		userID := app.Spec.Owner
-		appName := app.Spec.Name
-		key := fmt.Sprintf("%s:%s", userID, appName)
+	// for _, app := range latestStatus {
+	// 	userID := app.Spec.Owner
+	// 	appName := app.Spec.Name
+	// 	key := fmt.Sprintf("%s:%s", userID, appName)
 
-		entries := cachedAppsByUserAndName[key]
-		if len(entries) == 0 {
-			continue
-		}
+	// 	entries := cachedAppsByUserAndName[key]
+	// 	if len(entries) == 0 {
+	// 		continue
+	// 	}
 
-		// // Check for state inconsistency
-		// for _, entry := range entries {
-		// 	if entry.appState == nil {
-		// 		continue
-		// 	}
-		// 	if scc.isStateInconsistent(app) {
-		// 		change := StatusChange{
-		// 			UserID:     userID,
-		// 			SourceID:   entry.sourceID,
-		// 			AppName:    appName,
-		// 			ChangeType: "state_inconsistency",
-		// 			OldState:   entry.appState.Status.State,
-		// 			NewState:   "running",
-		// 			Timestamp:  time.Now(),
-		// 		}
-		// 		changes = append(changes, change)
-		// 	}
-		// }
-	}
+	// 	// // Check for state inconsistency
+	// 	// for _, entry := range entries {
+	// 	// 	if entry.appState == nil {
+	// 	// 		continue
+	// 	// 	}
+	// 	// 	if scc.isStateInconsistent(app) {
+	// 	// 		change := StatusChange{
+	// 	// 			UserID:     userID,
+	// 	// 			SourceID:   entry.sourceID,
+	// 	// 			AppName:    appName,
+	// 	// 			ChangeType: "state_inconsistency",
+	// 	// 			OldState:   entry.appState.Status.State,
+	// 	// 			NewState:   "running",
+	// 	// 			Timestamp:  time.Now(),
+	// 	// 		}
+	// 	// 		changes = append(changes, change)
+	// 	// 	}
+	// 	// }
+	// }
 
 	return changes
 }

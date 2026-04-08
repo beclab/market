@@ -1026,6 +1026,7 @@ func (dw *DataWatcherState) printAppStateMessage(msg AppStateMessage) {
 	glog.V(2).Infof("Name: %s", msg.Name)
 	glog.V(2).Infof("Raw App Name: %s", msg.RawAppName)
 	glog.V(2).Infof("Title: %s", msg.Title)
+	glog.V(2).Infof("Source: %s", msg.MarketSource)
 	glog.V(2).Infof("State: %s", msg.State)
 	glog.V(2).Infof("Progress: %s", msg.Progress)
 	glog.V(2).Infof("Operation Type: %s", msg.OpType)
