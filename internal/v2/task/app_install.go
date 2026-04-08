@@ -27,8 +27,13 @@ type InstallOptions struct {
 }
 
 type AppEnvVar struct {
-	EnvName string `json:"envName" yaml:"envName" validate:"required"`
-	Value   string `json:"value,omitempty" yaml:"value,omitempty"`
+	EnvName   string           `json:"envName" yaml:"envName" validate:"required"`
+	Value     string           `json:"value,omitempty" yaml:"value,omitempty"`
+	ValueFrom *AppEnvValueFrom `json:"valueFrom,omitempty" yaml:"valueFrom,omitempty"`
+}
+
+type AppEnvValueFrom struct {
+	EnvName string `json:"envName,omitempty" yaml:"envName,omitempty"`
 }
 
 type Image struct {
