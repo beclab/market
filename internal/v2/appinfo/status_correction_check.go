@@ -344,6 +344,7 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 				Name       string `json:"name"`
 				RawAppName string `json:"rawAppName"`
 				AppID      string `json:"appid"`
+				IsSysApp   bool   `json:"isSysApp"`
 				Owner      string `json:"owner"`
 				Icon       string `json:"icon"`
 				Title      string `json:"title"`

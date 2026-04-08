@@ -169,8 +169,10 @@ func checkAndUpdateCacheData() error {
 	if err := migrateAppinfoSources(redisClient, "local", "upload"); err != nil {
 		glog.Errorf("Failed to migrate appinfo sources from 'local' to 'upload': %v", err)
 	}
+	if err := removePreOlaresAppStateLatest(redisClient); err != nil {
+		glog.Errorf("Failed to remove last olares-app states key: %v", err)
+	}
 
-	// 自动扫描处理：对大小写/空格等变体做统一迁移
 	deprecatedMap := map[string]string{
 		"official-market-sources": "market.olares",
 		"market-local":            "upload",
@@ -281,9 +283,34 @@ func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID str
 	return nil
 }
 
-// mergeJSONArraysIfNeeded 针对数组类型的 JSON 做合并；非数组则以新值覆盖为准
+func removePreOlaresAppStateLatest(redisClient RedisClient) error {
+	if redisClient == nil {
+		glog.Info("Redis client not available, skipping system app states remove")
+		return nil
+	}
+
+	glog.Infof("Remove last version system app states key")
+
+	keys, err := redisClient.ScanAllKeys("appinfo:user:*:source::app-state-latest", 500)
+	if err != nil {
+		return fmt.Errorf("failed to scan keys: %w", err)
+	}
+	glog.Infof("Found %d keys to remove", len(keys))
+
+	for _, removeKey := range keys {
+		err := redisClient.Del(removeKey)
+		if err != nil {
+			glog.Errorf("Warning: failed to delete old key %s: %v", removeKey, err)
+			continue
+		} else {
+			glog.Infof("Remove last version system app states key: %s", removeKey)
+		}
+	}
+
+	return nil
+}
+
 func mergeJSONArraysIfNeeded(key string, existing, incoming string) string {
-	// 快速判断：如果不是 '[' 开头，则直接覆盖
 	if len(existing) == 0 || existing[0] != '[' || len(incoming) == 0 || incoming[0] != '[' {
 		return incoming
 	}
@@ -295,7 +322,7 @@ func mergeJSONArraysIfNeeded(key string, existing, incoming string) string {
 	if err := json.Unmarshal([]byte(incoming), &arr2); err != nil {
 		return incoming
 	}
-	// 合并并做简单去重（依据 timestamp + type）
+
 	seen := make(map[string]bool)
 	merged := make([]map[string]interface{}, 0, len(arr1)+len(arr2))
 	for _, it := range arr1 {

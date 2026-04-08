@@ -15,6 +15,10 @@ import (
 	"github.com/golang/glog"
 )
 
+const (
+	DEFAULT_SYSTEM_SOURCE_ID = "system"
+)
+
 // AppServiceResponse represents the response structure from app-service
 type AppServiceResponse struct {
 	Metadata struct {
@@ -26,6 +30,7 @@ type AppServiceResponse struct {
 		Name       string `json:"name"`
 		RawAppName string `json:"rawAppName"`
 		AppID      string `json:"appid"`
+		IsSysApp   bool   `json:"isSysApp"`
 		Owner      string `json:"owner"`
 		Icon       string `json:"icon"`
 		Title      string `json:"title"`
@@ -289,6 +294,10 @@ func processAppData(apps []AppServiceResponse) error {
 
 		// Create AppStateLatestData for this app (startup process)
 		appStateData, sourceID := createAppStateLatestData(app, true)
+
+		if app.Spec.IsSysApp {
+			sourceID = DEFAULT_SYSTEM_SOURCE_ID
+		}
 
 		// Add to user's app state data only if creation was successful
 		if appStateData != nil {
