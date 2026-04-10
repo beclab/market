@@ -429,19 +429,22 @@ func (h *Hydrator) markTaskCompleted(task *hydrationfn.HydrationTask, startedAt 
 		sourceChartPath = path
 	}
 
-	h.taskMutex.Lock()
-	delete(h.activeTasks, task.ID)
+	func() {
+		h.taskMutex.Lock()
+		defer h.taskMutex.Unlock()
 
-	// Clean up in-memory data under lock
-	task.ChartData = make(map[string]interface{})
-	task.DatabaseUpdateData = make(map[string]interface{})
-	task.AppData = make(map[string]interface{})
+		delete(h.activeTasks, task.ID)
 
-	h.completedTasks[task.ID] = task
+		// Clean up in-memory data under lock
+		task.ChartData = make(map[string]interface{})
+		task.DatabaseUpdateData = make(map[string]interface{})
+		task.AppData = make(map[string]interface{})
 
-	h.totalTasksProcessed++
-	h.totalTasksSucceeded++
-	h.taskMutex.Unlock() // Unlock before channel send and I/O
+		h.completedTasks[task.ID] = task
+
+		h.totalTasksProcessed++
+		h.totalTasksSucceeded++
+	}()
 
 	// Add to task history
 	h.addToCompletedHistory(task, startedAt, duration)
@@ -471,37 +474,40 @@ func (h *Hydrator) markTaskFailed(task *hydrationfn.HydrationTask, startedAt tim
 		sourceChartPath = path
 	}
 
-	h.taskMutex.Lock()
-	task.SetStatus(hydrationfn.TaskStatusFailed)
-	delete(h.activeTasks, task.ID)
+	func() {
+		h.taskMutex.Lock()
+		defer h.taskMutex.Unlock()
 
-	// Limit the size of failed tasks map
-	maxFailedTasks := 10
-	if len(h.failedTasks) >= maxFailedTasks {
-		// Remove oldest failed tasks
-		oldestTaskID := ""
-		oldestTime := time.Now()
-		for id, failedTask := range h.failedTasks {
-			if failedTask.UpdatedAt.Before(oldestTime) {
-				oldestTime = failedTask.UpdatedAt
-				oldestTaskID = id
+		task.SetStatus(hydrationfn.TaskStatusFailed)
+		delete(h.activeTasks, task.ID)
+
+		// Limit the size of failed tasks map
+		maxFailedTasks := 10
+		if len(h.failedTasks) >= maxFailedTasks {
+			// Remove oldest failed tasks
+			oldestTaskID := ""
+			oldestTime := time.Now()
+			for id, failedTask := range h.failedTasks {
+				if failedTask.UpdatedAt.Before(oldestTime) {
+					oldestTime = failedTask.UpdatedAt
+					oldestTaskID = id
+				}
+			}
+			if oldestTaskID != "" {
+				delete(h.failedTasks, oldestTaskID)
 			}
 		}
-		if oldestTaskID != "" {
-			delete(h.failedTasks, oldestTaskID)
-		}
-	}
 
-	// Clean up in-memory data under lock
-	task.ChartData = make(map[string]interface{})
-	task.DatabaseUpdateData = make(map[string]interface{})
-	task.AppData = make(map[string]interface{})
+		// Clean up in-memory data under lock
+		task.ChartData = make(map[string]interface{})
+		task.DatabaseUpdateData = make(map[string]interface{})
+		task.AppData = make(map[string]interface{})
 
-	h.failedTasks[task.ID] = task
+		h.failedTasks[task.ID] = task
 
-	h.totalTasksProcessed++
-	h.totalTasksFailed++
-	h.taskMutex.Unlock() // Unlock before I/O
+		h.totalTasksProcessed++
+		h.totalTasksFailed++
+	}()
 
 	// Add to task history
 	h.addToFailedHistory(task, startedAt, duration, failedStep, errorMsg)
