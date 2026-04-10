@@ -28,8 +28,8 @@ func NewStateStore() *StateStore {
 
 // UpdateAppState updates or creates an app flow state
 func (s *StateStore) UpdateAppState(state *AppFlowState) {
-	// s.mu.Lock()
-	// defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	key := s.getAppStateKey(state.UserID, state.SourceID, state.AppName)
 	state.LastUpdate = time.Now()
