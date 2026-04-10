@@ -51,8 +51,6 @@ type Hydrator struct {
 	lastMemoryCheck     time.Time
 	memoryCheckInterval time.Duration
 
-	// Worker status tracking
-	workerStatus      map[int]*WorkerStatus // Worker ID -> WorkerStatus
 	workerStatusMutex sync.RWMutex
 
 	// Task history (keep recent completed/failed tasks)
@@ -121,7 +119,6 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 		syncInterval:         30 * time.Second,       // Default sync interval
 		memoryCheckInterval:  5 * time.Minute,
 		lastMemoryCheck:      time.Now(),
-		workerStatus:         make(map[int]*WorkerStatus),
 		recentCompletedTasks: make([]*TaskHistoryEntry, 0),
 		recentFailedTasks:    make([]*TaskHistoryEntry, 0),
 		maxHistorySize:       50, // Keep last 50 completed and 50 failed tasks
@@ -681,18 +678,14 @@ func (h *Hydrator) taskToTaskInfo(task *hydrationfn.HydrationTask) *TaskInfo {
 
 // getWorkerStatusList returns a list of all worker statuses
 func (h *Hydrator) getWorkerStatusList() []*WorkerStatus {
-	workers := make([]*WorkerStatus, 0, len(h.workerStatus))
+	workers := make([]*WorkerStatus, 0, h.workerCount)
+	now := time.Now()
 	for i := 0; i < h.workerCount; i++ {
-		if status, ok := h.workerStatus[i]; ok {
-			workers = append(workers, status)
-		} else {
-			// Worker not in map means it's idle
-			workers = append(workers, &WorkerStatus{
-				WorkerID:     i,
-				IsIdle:       true,
-				LastActivity: time.Now(),
-			})
-		}
+		workers = append(workers, &WorkerStatus{
+			WorkerID:     i,
+			IsIdle:       true,
+			LastActivity: now,
+		})
 	}
 	return workers
 }

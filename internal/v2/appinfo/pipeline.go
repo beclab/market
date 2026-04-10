@@ -32,7 +32,7 @@ type Pipeline struct {
 	dataWatcherRepo         *DataWatcherRepo
 	statusCorrectionChecker *StatusCorrectionChecker
 
-	mutex                sync.Mutex
+	runGuard             atomic.Bool
 	stopChan             chan struct{}
 	isRunning            atomic.Bool
 	interval             time.Duration
@@ -106,11 +106,11 @@ func (p *Pipeline) loop(ctx context.Context) {
 }
 
 func (p *Pipeline) run(ctx context.Context) {
-	if !p.mutex.TryLock() {
+	if !p.runGuard.CompareAndSwap(false, true) {
 		glog.Warning("Pipeline: another run in progress, skipping")
 		return
 	}
-	defer p.mutex.Unlock()
+	defer p.runGuard.Store(false)
 
 	glog.V(2).Info("Pipeline: [LOOP] cycle start")
 

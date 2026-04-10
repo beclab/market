@@ -12,7 +12,6 @@ import (
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
 
-	"runtime"
 	"runtime/debug"
 
 	"github.com/golang/glog"
@@ -36,15 +35,6 @@ type CacheManager struct {
 	settingsManager *settings.SettingsManager
 	cleanupTicker   *time.Ticker // Timer for periodic cleanup of AppRenderFailed
 
-	// Lock monitoring
-	lockStats struct {
-		sync.Mutex
-		lastLockTime   time.Time
-		lastUnlockTime time.Time
-		lockDuration   time.Duration
-		lockCount      int64
-		unlockCount    int64
-	}
 }
 
 // startLockWatchdog starts a 1s watchdog for write lock sections and returns a stopper.
@@ -1074,7 +1064,6 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	}
 
 	cm.mutex.Lock()
-	cm.updateLockStats("lock")
 	// Watchdog: warn if write lock is held >1s
 	watchdogFired := make(chan struct{}, 1)
 	timer := time.AfterFunc(1*time.Second, func() {
@@ -1100,8 +1089,6 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 	defer func() {
 		cm.mutex.Unlock()
-		cm.updateLockStats("unlock")
-		glog.V(4).Infof("[LOCK] cm.mutex.Unlock() @269 End")
 		if timer.Stop() {
 			// timer stopped before firing; try to drain channel if any
 			select {
@@ -1673,13 +1660,10 @@ func (cm *CacheManager) SetAppData(userID, sourceID string, dataType AppDataType
 
 func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataType AppDataType, data types.AppInfoLatestData) error {
 	cm.mutex.Lock()
-	cm.updateLockStats("lock")
 	_wd := cm.startLockWatchdog("@SetLocalAppData")
 
 	defer func() {
 		cm.mutex.Unlock()
-		cm.updateLockStats("unlock")
-		glog.V(4).Infof("[LOCK] cm.mutex.Unlock() @SetLocalAppData End")
 		_wd()
 	}()
 
@@ -2304,71 +2288,6 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 	}
 
 	return enhancedData
-}
-
-// getLockStats returns current lock statistics for internal monitoring
-func (cm *CacheManager) getLockStats() map[string]interface{} {
-	cm.lockStats.Lock()
-	defer cm.lockStats.Unlock()
-
-	stats := make(map[string]interface{})
-	stats["last_lock_time"] = cm.lockStats.lastLockTime
-	stats["last_unlock_time"] = cm.lockStats.lastUnlockTime
-	stats["lock_duration"] = cm.lockStats.lockDuration
-	stats["lock_count"] = cm.lockStats.lockCount
-	stats["unlock_count"] = cm.lockStats.unlockCount
-
-	if cm.lockStats.lockCount > cm.lockStats.unlockCount {
-		stats["lock_imbalance"] = cm.lockStats.lockCount - cm.lockStats.unlockCount
-		stats["potential_deadlock"] = true
-	} else {
-		stats["lock_imbalance"] = 0
-		stats["potential_deadlock"] = false
-	}
-
-	if !cm.lockStats.lastLockTime.IsZero() && cm.lockStats.lockDuration > 30*time.Second {
-		stats["long_lock_duration"] = true
-		stats["current_lock_duration"] = time.Since(cm.lockStats.lastLockTime)
-	} else {
-		stats["long_lock_duration"] = false
-	}
-
-	return stats
-}
-
-// dumpLockInfo prints lock stats and all goroutine stacks for diagnosing lock holders
-func (cm *CacheManager) dumpLockInfo(reason string) {
-	glog.V(4).Infof("LOCK DIAG: reason=%s", reason)
-	stats := cm.getLockStats()
-	glog.V(4).Infof("LOCK DIAG: stats=%v", stats)
-
-	buf := make([]byte, 1<<20)
-	n := runtime.Stack(buf, true)
-	glog.V(4).Infof("LOCK DIAG: goroutine dump (%d bytes)\n%s", n, string(buf[:n]))
-}
-
-// updateLockStats updates lock statistics
-func (cm *CacheManager) updateLockStats(lockType string) {
-	glog.V(4).Infof("[LOCK] cm.lockStats.Lock() Start")
-	cm.lockStats.Lock()
-	defer func() {
-		cm.lockStats.Unlock()
-		glog.V(4).Infof("[LOCK] cm.lockStats.Unlock() End")
-	}()
-
-	now := time.Now()
-	if lockType == "lock" {
-		cm.lockStats.lastLockTime = now
-		cm.lockStats.lockCount++
-		glog.V(4).Infof("[LOCK] Lock stats updated - lock count: %d", cm.lockStats.lockCount)
-	} else if lockType == "unlock" {
-		cm.lockStats.lastUnlockTime = now
-		cm.lockStats.unlockCount++
-		if !cm.lockStats.lastLockTime.IsZero() {
-			cm.lockStats.lockDuration = now.Sub(cm.lockStats.lastLockTime)
-		}
-		glog.V(4).Infof("[LOCK] Lock stats updated - unlock count: %d, duration: %v", cm.lockStats.unlockCount, cm.lockStats.lockDuration)
-	}
 }
 
 // RemoveAppStateData removes a specific app from AppStateLatest for a user and source
