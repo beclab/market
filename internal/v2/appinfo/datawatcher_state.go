@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"market/internal/v2/history" // Import history module with correct path
@@ -88,9 +89,9 @@ type DataWatcherState struct {
 	natsUser      string
 	natsPass      string
 	subject       string
-	historyModule *history.HistoryModule // Add history module
-	cacheManager  *CacheManager          // Add cache manager reference
-	taskModule    *task.TaskModule       // Add task module reference
+	historyModule atomic.Pointer[history.HistoryModule]
+	cacheManager  *CacheManager
+	taskModule    atomic.Pointer[task.TaskModule]
 	dataWatcher   *DataWatcher           // Add data watcher reference for hash calculation
 	// Cache for app-service API responses to avoid repeated calls
 	appServiceCache      map[string]map[string]bool // key: "userID:appName", value: map[entranceName]invisible
@@ -252,12 +253,16 @@ func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule
 		natsUser:        getEnvOrDefault("NATS_USERNAME", ""),
 		natsPass:        getEnvOrDefault("NATS_PASSWORD", ""),
 		subject:         getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
-		historyModule:   historyModule,
-		cacheManager:    cacheManager, // Set cache manager reference
-		taskModule:      taskModule,   // Set task module reference
-		dataWatcher:     dataWatcher,  // Set data watcher reference
+		cacheManager:    cacheManager,
+		dataWatcher:     dataWatcher,
 		appServiceCache: make(map[string]map[string]bool),
 		delayedMessages: make([]*DelayedMessage, 0),
+	}
+	if taskModule != nil {
+		dw.taskModule.Store(taskModule)
+	}
+	if historyModule != nil {
+		dw.historyModule.Store(historyModule)
 	}
 
 	return dw
@@ -265,14 +270,24 @@ func NewDataWatcherState(cacheManager *CacheManager, taskModule *task.TaskModule
 
 // SetTaskModule updates the task module reference without restarting subscriptions.
 func (dw *DataWatcherState) SetTaskModule(taskModule *task.TaskModule) {
-	dw.taskModule = taskModule
+	dw.taskModule.Store(taskModule)
 	glog.V(3).Info("DataWatcherState task module updated")
+}
+
+// getTaskModule returns the current task module pointer (thread-safe).
+func (dw *DataWatcherState) getTaskModule() *task.TaskModule {
+	return dw.taskModule.Load()
 }
 
 // SetHistoryModule updates the history module reference without restarting subscriptions.
 func (dw *DataWatcherState) SetHistoryModule(historyModule *history.HistoryModule) {
-	dw.historyModule = historyModule
+	dw.historyModule.Store(historyModule)
 	glog.V(3).Info("DataWatcherState history module updated")
+}
+
+// getHistoryModule returns the current history module pointer (thread-safe).
+func (dw *DataWatcherState) getHistoryModule() *history.HistoryModule {
+	return dw.historyModule.Load()
 }
 
 // Start starts the data watcher
@@ -310,8 +325,8 @@ func (dw *DataWatcherState) Stop() error {
 	}
 
 	// Close history module
-	if dw.historyModule != nil {
-		if err := dw.historyModule.Close(); err != nil {
+	if hm := dw.getHistoryModule(); hm != nil {
+		if err := hm.Close(); err != nil {
 			glog.Errorf("Error closing history module: %v", err)
 		}
 	}
@@ -384,8 +399,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		// Call InstallTaskSucceed if task module is available
-		if dw.taskModule != nil {
-			if err := dw.taskModule.InstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
+		if tm := dw.getTaskModule(); tm != nil {
+			if err := tm.InstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
 				glog.Errorf("Failed to mark install task as succeeded for opID %s: %v", appStateMsg.OpID, err)
 			} else {
 				glog.V(2).Infof("Successfully marked install task as succeeded for opID: %s, app: %s, user: %s",
@@ -402,9 +417,9 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 			appStateMsg.State, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		// Call InstallTaskFailed if task module is available
-		if dw.taskModule != nil {
+		if tm := dw.getTaskModule(); tm != nil {
 			errorMsg := fmt.Sprintf("Installation failed for app %s", appStateMsg.Name)
-			if err := dw.taskModule.InstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
+			if err := tm.InstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
 				glog.Errorf("Failed to mark install task as failed for opID %s: %v", appStateMsg.OpID, err)
 			} else {
 				glog.V(2).Infof("Successfully marked install task as failed for opID: %s, app: %s, user: %s",
@@ -421,8 +436,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		// Call CancelInstallTaskSucceed if task module is available
-		if dw.taskModule != nil {
-			if err := dw.taskModule.CancelInstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
+		if tm := dw.getTaskModule(); tm != nil {
+			if err := tm.CancelInstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
 				glog.Errorf("Failed to mark cancel install task as succeeded for opID %s: %v", appStateMsg.OpID, err)
 			} else {
 				glog.V(2).Infof("Successfully marked cancel install task as succeeded for opID: %s, app: %s, user: %s",
@@ -439,9 +454,9 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 			appStateMsg.State, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
 		// Call CancelInstallTaskFailed if task module is available
-		if dw.taskModule != nil {
+		if tm := dw.getTaskModule(); tm != nil {
 			errorMsg := fmt.Sprintf("Cancel installation failed for app %s", appStateMsg.Name)
-			if err := dw.taskModule.CancelInstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
+			if err := tm.CancelInstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
 				glog.Errorf("Failed to mark cancel install task as failed for opID %s: %v", appStateMsg.OpID, err)
 			} else {
 				glog.V(2).Infof("Successfully marked cancel install task as failed for opID: %s, app: %s, user: %s",
@@ -457,8 +472,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 		glog.V(2).Infof("Detected uninstall operation with uninstalled state for opID: %s, app: %s, user: %s",
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
-		if dw.taskModule != nil {
-			if err := dw.taskModule.UninstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
+		if tm := dw.getTaskModule(); tm != nil {
+			if err := tm.UninstallTaskSucceed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User); err != nil {
 				glog.Warningf("Failed to mark uninstall task as succeeded for opID %s: %v", appStateMsg.OpID, err)
 			} else {
 				glog.V(2).Infof("Successfully marked uninstall task as succeeded for opID: %s, app: %s, user: %s",
@@ -474,9 +489,9 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 		glog.V(3).Infof("Detected uninstall operation with uninstallFailed state for opID: %s, app: %s, user: %s",
 			appStateMsg.OpID, appStateMsg.Name, appStateMsg.User)
 
-		if dw.taskModule != nil {
+		if tm := dw.getTaskModule(); tm != nil {
 			errorMsg := fmt.Sprintf("Uninstallation failed for app %s", appStateMsg.Name)
-			if err := dw.taskModule.UninstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
+			if err := tm.UninstallTaskFailed(appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, errorMsg); err != nil {
 				glog.Errorf("Failed to mark uninstall task as failed for opID %s: %v", appStateMsg.OpID, err)
 			} else {
 				glog.V(2).Infof("Successfully marked uninstall task as failed for opID: %s, app: %s, user: %s",
@@ -490,8 +505,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 	// Special handling for pending state: delay processing if there are pending/running install tasks
 	// Or if task is not found in memory and we need to wait for database persistence
 	if appStateMsg.OpType == "install" && appStateMsg.State == "pending" {
-		if dw.taskModule != nil {
-			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(appStateMsg.Name, appStateMsg.User)
+		if tm := dw.getTaskModule(); tm != nil {
+			hasPendingTask, lockAcquired := tm.HasPendingOrRunningInstallTask(appStateMsg.Name, appStateMsg.User)
 			if !lockAcquired {
 				// If we can't acquire the lock, delay processing to be safe
 				// This avoids blocking NATS message processing
@@ -555,7 +570,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 
 // storeHistoryRecord stores the app state message as a history record
 func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage string) {
-	if dw.historyModule == nil {
+	hm := dw.getHistoryModule()
+	if hm == nil {
 		glog.V(3).Infof("History module not available, skipping record storage")
 		return
 	}
@@ -577,7 +593,7 @@ func (dw *DataWatcherState) storeHistoryRecord(msg AppStateMessage, rawMessage s
 		Extended: rawMessage,         // Store complete message in Extended field
 	}
 
-	if err := dw.historyModule.StoreRecord(record); err != nil {
+	if err := hm.StoreRecord(record); err != nil {
 		glog.Errorf("Failed to store history record: %v", err)
 	} else {
 		glog.V(3).Infof("Stored history record for app %s with user %s and ID %d", msg.Name, msg.User, record.ID)
@@ -718,8 +734,8 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 
 	if shouldPrioritizeOpID {
 		// Try OpID lookup first (from memory or database)
-		if dw.taskModule != nil {
-			_, src, found, _ := dw.taskModule.GetTaskByOpID(msg.OpID)
+		if tm := dw.getTaskModule(); tm != nil {
+			_, src, found, _ := tm.GetTaskByOpID(msg.OpID)
 			if found && src != "" {
 				sourceID = src
 				glog.V(3).Infof("Found task with source=%s by OpID=%s for app=%s, user=%s (prioritized OpID lookup)",
@@ -832,10 +848,10 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	}
 
 	// If OpID lookup was not prioritized (non-install ops or missing OpID), try fallback methods
-	if sourceID == "" && dw.taskModule != nil {
+	if tm := dw.getTaskModule(); sourceID == "" && tm != nil {
 		// For non-install ops or when OpID is missing, try OpID lookup as fallback
 		if msg.OpID != "" && !shouldPrioritizeOpID {
-			_, src, found, _ := dw.taskModule.GetTaskByOpID(msg.OpID)
+			_, src, found, _ := tm.GetTaskByOpID(msg.OpID)
 			if found && src != "" {
 				sourceID = src
 				glog.V(3).Infof("Found task with source=%s by OpID=%s for app=%s, user=%s", src, msg.OpID, msg.Name, userID)
@@ -873,7 +889,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 		}
 		// If OpID match failed, try to find by appName and user
 		if sourceID == "" {
-			_, src, found, _ := dw.taskModule.GetLatestTaskByAppNameAndUser(msg.Name, userID)
+			_, src, found, _ := tm.GetLatestTaskByAppNameAndUser(msg.Name, userID)
 			if found && src != "" {
 				sourceID = src
 				glog.V(3).Infof("Found task with source=%s for app=%s, user=%s", src, msg.Name, userID)
@@ -1003,7 +1019,8 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 	userID := msg.User
 	appName := msg.Name
 
-	if dw.historyModule == nil {
+	hm := dw.getHistoryModule()
+	if hm == nil {
 		glog.V(3).Infof("History module not available, cannot compare with DB, proceeding with message storage")
 		return false
 	}
@@ -1017,7 +1034,7 @@ func (dw *DataWatcherState) shouldSkipDownloadingMessage(msg AppStateMessage) bo
 		Offset:  0,
 	}
 
-	records, err := dw.historyModule.QueryRecords(cond)
+	records, err := hm.QueryRecords(cond)
 	if err != nil {
 		glog.Errorf("Failed to query history records for app %s, user %s: %v", appName, userID, err)
 		return false
@@ -1197,8 +1214,8 @@ func (dw *DataWatcherState) processDelayedMessagesBatch() {
 			continue
 		}
 
-		if dw.taskModule != nil {
-			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User)
+		if tm := dw.getTaskModule(); tm != nil {
+			hasPendingTask, lockAcquired := tm.HasPendingOrRunningInstallTask(delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User)
 			if !lockAcquired || hasPendingTask {
 				delayedMsg.retryCount++
 				delayedMsg.nextRetry = now.Add(2 * time.Second)
