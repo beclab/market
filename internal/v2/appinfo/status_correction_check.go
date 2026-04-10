@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,10 +26,9 @@ type StatusCorrectionChecker struct {
 	appServicePort  string
 	stopChan        chan struct{}
 	running         atomic.Bool
-	statsMu         sync.Mutex
-	lastCheckTime   time.Time
-	checkCount      int64
-	correctionCount int64
+	lastCheckTime   atomic.Value // time.Time
+	checkCount      atomic.Int64
+	correctionCount atomic.Int64
 
 	historyModule *history.HistoryModule
 	taskModule    *task.TaskModule
@@ -119,18 +117,17 @@ func (scc *StatusCorrectionChecker) IsRunning() bool {
 
 // GetStats returns statistics about the checker
 func (scc *StatusCorrectionChecker) GetStats() map[string]interface{} {
-	scc.statsMu.Lock()
-	lastCheck := scc.lastCheckTime
-	checkCount := scc.checkCount
-	correctionCount := scc.correctionCount
-	scc.statsMu.Unlock()
+	var lastCheck time.Time
+	if v := scc.lastCheckTime.Load(); v != nil {
+		lastCheck = v.(time.Time)
+	}
 
 	return map[string]interface{}{
 		"is_running":             scc.running.Load(),
 		"check_interval":         scc.checkInterval,
 		"last_check_time":        lastCheck,
-		"check_count":            checkCount,
-		"correction_count":       correctionCount,
+		"check_count":            scc.checkCount.Load(),
+		"correction_count":       scc.correctionCount.Load(),
 		"app_service_url":        fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort),
 		"middleware_service_url": fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort),
 	}
@@ -141,11 +138,8 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 	startTime := time.Now()
 	result := make(map[string]bool)
 
-	scc.statsMu.Lock()
-	scc.lastCheckTime = startTime
-	scc.checkCount++
-	cycle := scc.checkCount
-	scc.statsMu.Unlock()
+	scc.lastCheckTime.Store(startTime)
+	cycle := scc.checkCount.Add(1)
 
 	glog.Infof("Starting status check cycle #%d", cycle)
 
@@ -200,9 +194,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 			result[userID] = true
 		}
 
-		scc.statsMu.Lock()
-		scc.correctionCount += int64(len(changes))
-		scc.statsMu.Unlock()
+		scc.correctionCount.Add(int64(len(changes)))
 	} else {
 		glog.V(3).Info("No status changes detected")
 	}
@@ -1331,8 +1323,6 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 
 	if correctedCount > 0 {
 		glog.Infof("[SCC] Task status correction completed: corrected %d task(s)", correctedCount)
-		scc.statsMu.Lock()
-		scc.correctionCount += int64(correctedCount)
-		scc.statsMu.Unlock()
+		scc.correctionCount.Add(int64(correctedCount))
 	}
 }
