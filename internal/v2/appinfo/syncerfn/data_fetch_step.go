@@ -223,7 +223,7 @@ func getMapKeys(m map[string]interface{}) []string {
 
 // extractAndUpdateOthers extracts and updates Others data in SourceData
 func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
-	glog.V(2).Info("DEBUG: Starting extractAndUpdateOthers")
+	glog.V(2).Info("Starting extractAndUpdateOthers")
 	// Check if we have valid response data
 	if data.LatestData == nil {
 		glog.V(3).Infof("Warning: no latest data found for Others extraction")
@@ -268,33 +268,33 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 
 	// Extract recommends data
 	if data.LatestData.Data.Recommends != nil {
-		glog.V(2).Infof("DEBUG: Processing recommends data, count: %d", len(data.LatestData.Data.Recommends))
+		glog.V(2).Infof("Processing recommends data, count: %d", len(data.LatestData.Data.Recommends))
 		for i, recommendData := range data.LatestData.Data.Recommends {
 			if recommendMap, ok := recommendData.(map[string]interface{}); ok {
-				glog.V(3).Infof("DEBUG: Processing recommend[%d], keys: %v", i, getMapKeys(recommendMap))
+				glog.V(3).Infof("Processing recommend[%d], keys: %v", i, getMapKeys(recommendMap))
 				if dataField, exists := recommendMap["data"]; exists {
-					glog.V(3).Infof("DEBUG: Recommend[%d] has data field, type: %T, value: %+v", i, dataField, dataField)
+					glog.V(3).Infof("Recommend[%d] has data field, type: %T, value: %+v", i, dataField, dataField)
 				} else {
-					glog.V(3).Infof("DEBUG: Recommend[%d] missing data field", i)
+					glog.V(3).Infof("Recommend[%d] missing data field", i)
 				}
 				recommend := d.mapToRecommend(recommendMap)
 				if recommend != nil {
-					glog.V(3).Infof("DEBUG: Recommend[%d] mapped successfully, has Data: %v", i, recommend.Data != nil)
+					glog.V(3).Infof("Recommend[%d] mapped successfully, has Data: %v", i, recommend.Data != nil)
 					if recommend.Data != nil {
-						glog.V(3).Infof("DEBUG: Recommend[%d] Data.Title count: %d, Data.Description count: %d",
+						glog.V(3).Infof("Recommend[%d] Data.Title count: %d, Data.Description count: %d",
 							i, len(recommend.Data.Title), len(recommend.Data.Description))
 					}
 					others.Recommends = append(others.Recommends, recommend)
 				} else {
-					glog.V(3).Infof("DEBUG: Recommend[%s] mapping failed", i)
+					glog.V(3).Infof("Recommend[%s] mapping failed", i)
 				}
 			} else {
-				glog.V(3).Infof("DEBUG: Recommend[%s] is not a map, type: %T", i, recommendData)
+				glog.V(3).Infof("Recommend[%s] is not a map, type: %T", i, recommendData)
 			}
 		}
-		glog.V(3).Infof("DEBUG: Extracted %d recommends from response", len(others.Recommends))
+		glog.V(3).Infof("Extracted %d recommends from response", len(others.Recommends))
 	} else {
-		glog.V(3).Infof("DEBUG: No recommends data found in response")
+		glog.V(3).Infof("No recommends data found in response")
 	}
 
 	// Extract pages data
@@ -332,19 +332,19 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 		for k := range data.LatestData.Data.Tags {
 			keys = append(keys, k)
 		}
-		glog.V(3).Infof("DEBUG: Processing tags data, type: %T, keys: %v", data.LatestData.Data.Tags, keys)
+		glog.V(3).Infof("Processing tags data, type: %T, keys: %v", data.LatestData.Data.Tags, keys)
 		for tagKey, tagData := range data.LatestData.Data.Tags {
 			if tagMap, ok := tagData.(map[string]interface{}); ok {
 				tag := d.mapToTag(tagMap)
 				if tag != nil {
 					others.Tags = append(others.Tags, tag)
-					glog.V(3).Infof("DEBUG: Added tag %s to others", tagKey)
+					glog.V(3).Infof("Added tag %s to others", tagKey)
 				}
 			}
 		}
-		glog.V(3).Infof("DEBUG: Extracted %d tags from response", len(others.Tags))
+		glog.V(3).Infof("Extracted %d tags from response", len(others.Tags))
 	} else {
-		glog.V(3).Infof("DEBUG: No tags data found in response")
+		glog.V(3).Infof("No tags data found in response")
 	}
 
 	// Update Others in the cache for current source
@@ -357,16 +357,16 @@ func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
 
 	// Log detailed summary of recommends data
 	if len(others.Recommends) > 0 {
-		glog.V(3).Infof("DEBUG: Final recommends summary - total: %d", len(others.Recommends))
+		glog.V(3).Infof("Final recommends summary - total: %d", len(others.Recommends))
 		for i, rec := range others.Recommends {
-			glog.V(3).Infof("DEBUG: Final recommend[%d] '%s', has Data: %v", i, rec.Name, rec.Data != nil)
+			glog.V(3).Infof("Final recommend[%d] '%s', has Data: %v", i, rec.Name, rec.Data != nil)
 			if rec.Data != nil {
-				glog.V(3).Infof("DEBUG: Final recommend[%d] Data.Title count: %d, Data.Description count: %d",
+				glog.V(3).Infof("Final recommend[%d] Data.Title count: %d, Data.Description count: %d",
 					i, len(rec.Data.Title), len(rec.Data.Description))
 			}
 		}
 	} else {
-		glog.V(3).Infof("DEBUG: No recommends data in final Others structure")
+		glog.V(3).Infof("No recommends data in final Others structure")
 	}
 }
 
@@ -507,42 +507,42 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 	}
 
 	// Handle Data field
-	glog.V(3).Infof("DEBUG: mapToRecommend - checking for data field, available keys: %v", getMapKeys(m))
+	glog.V(3).Infof("mapToRecommend - checking for data field, available keys: %v", getMapKeys(m))
 	if dataField, ok := m["data"].(map[string]interface{}); ok {
-		glog.V(3).Infof("DEBUG: mapToRecommend - found data field, type: %T, keys: %v", dataField, getMapKeys(dataField))
+		glog.V(3).Infof("mapToRecommend - found data field, type: %T, keys: %v", dataField, getMapKeys(dataField))
 		recommend.Data = &types.RecommendData{}
 
 		if title, ok := dataField["title"].(map[string]interface{}); ok {
-			glog.V(3).Infof("DEBUG: mapToRecommend - found title field, keys: %v", getMapKeys(title))
+			glog.V(3).Infof("mapToRecommend - found title field, keys: %v", getMapKeys(title))
 			recommend.Data.Title = make(map[string]string)
 			for k, v := range title {
 				if str, ok := v.(string); ok {
 					recommend.Data.Title[k] = str
 				} else {
-					glog.V(3).Infof("DEBUG: mapToRecommend - title[%s] is not string, type: %T, value: %v", k, v, v)
+					glog.V(3).Infof("mapToRecommend - title[%s] is not string, type: %T, value: %v", k, v, v)
 				}
 			}
-			glog.V(3).Infof("DEBUG: mapToRecommend - processed title, count: %d", len(recommend.Data.Title))
+			glog.V(3).Infof("mapToRecommend - processed title, count: %d", len(recommend.Data.Title))
 		} else {
-			glog.V(3).Infof("DEBUG: mapToRecommend - title field not found or not a map")
+			glog.V(3).Infof("mapToRecommend - title field not found or not a map")
 		}
 
 		if description, ok := dataField["description"].(map[string]interface{}); ok {
-			glog.V(3).Infof("DEBUG: mapToRecommend - found description field, keys: %v", getMapKeys(description))
+			glog.V(3).Infof("mapToRecommend - found description field, keys: %v", getMapKeys(description))
 			recommend.Data.Description = make(map[string]string)
 			for k, v := range description {
 				if str, ok := v.(string); ok {
 					recommend.Data.Description[k] = str
 				} else {
-					glog.V(3).Infof("DEBUG: mapToRecommend - description[%s] is not string, type: %T, value: %v", k, v, v)
+					glog.V(3).Infof("mapToRecommend - description[%s] is not string, type: %T, value: %v", k, v, v)
 				}
 			}
-			glog.V(3).Infof("DEBUG: mapToRecommend - processed description, count: %d", len(recommend.Data.Description))
+			glog.V(3).Infof("mapToRecommend - processed description, count: %d", len(recommend.Data.Description))
 		} else {
-			glog.V(3).Infof("DEBUG: mapToRecommend - description field not found or not a map")
+			glog.V(3).Infof("mapToRecommend - description field not found or not a map")
 		}
 	} else {
-		glog.V(3).Infof("DEBUG: mapToRecommend - data field not found or not a map, type: %T", m["data"])
+		glog.V(3).Infof("mapToRecommend - data field not found or not a map, type: %T", m["data"])
 	}
 
 	// Handle Source field
@@ -550,7 +550,7 @@ func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommen
 		recommend.Source = source
 	}
 
-	glog.V(3).Infof("DEBUG: mapToRecommend - final result, has Data: %v", recommend.Data != nil)
+	glog.V(3).Infof("mapToRecommend - final result, has Data: %v", recommend.Data != nil)
 	return recommend
 }
 

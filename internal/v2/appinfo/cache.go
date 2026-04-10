@@ -1111,16 +1111,16 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 		}
 
 		// Send notifications after the global lock is released to avoid deadlocks
-		glog.V(4).Infof("DEBUG: Processing %d pending notifications", len(pendingNotifications))
+		glog.V(4).Infof("Processing %d pending notifications", len(pendingNotifications))
 		if cm.stateMonitor != nil {
-			glog.V(4).Infof("DEBUG: State monitor is available for processing notifications")
+			glog.V(4).Infof("State monitor is available for processing notifications")
 			for i, p := range pendingNotifications {
-				glog.V(4).Infof("DEBUG: Processing notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
+				glog.V(4).Infof("Processing notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
 				if p.appName == "" || p.state == nil {
-					glog.Warningf("DEBUG: Skipping notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
+					glog.V(4).Infof("Skipping notification %d: appName=%s, state=%v", i, p.appName, p.state != nil)
 					continue
 				}
-				glog.V(4).Infof("DEBUG: Calling NotifyStateChange for app=%s", p.appName)
+				glog.V(4).Infof("Calling NotifyStateChange for app=%s", p.appName)
 				if err := cm.stateMonitor.NotifyStateChange(
 					p.userID, p.sourceID, p.appName,
 					p.state,
@@ -1131,11 +1131,11 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 				); err != nil {
 					glog.Errorf("Failed to check and notify state change for app %s: %v", p.appName, err)
 				} else {
-					glog.V(2).Infof("DEBUG: Successfully processed notification for app=%s", p.appName)
+					glog.V(2).Infof("Successfully processed notification for app=%s", p.appName)
 				}
 			}
 		} else {
-			glog.V(3).Infof("DEBUG: State monitor is nil, cannot process %d pending notifications", len(pendingNotifications))
+			glog.V(3).Infof("State monitor is nil, cannot process %d pending notifications", len(pendingNotifications))
 		}
 	}()
 
@@ -1200,21 +1200,21 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	case AppStateLatest:
 		// Check if this is a list of app states
 		if appStatesData, hasAppStates := data["app_states"].([]*types.AppStateLatestData); hasAppStates {
-			glog.V(2).Infof("DEBUG: Processing batch of %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
+			glog.V(2).Infof("Processing batch of %d app states for user=%s, source=%s", len(appStatesData), userID, sourceID)
 			// Collect state change notifications for each app state (send after unlock)
 			if cm.stateMonitor != nil {
-				glog.V(3).Infof("DEBUG: State monitor available for batch processing")
+				glog.V(3).Infof("State monitor available for batch processing")
 				for i, appState := range appStatesData {
 					if appState == nil {
-						glog.V(4).Infof("DEBUG: App state %d is nil, skipping", i)
+						glog.V(4).Infof("App state %d is nil, skipping", i)
 						continue
 					}
 					appName := appState.Status.Name
 					if appName == "" {
-						glog.V(4).Infof("DEBUG: App state %d has empty name, skipping", i)
+						glog.V(4).Infof("App state %d has empty name, skipping", i)
 						continue
 					}
-					glog.V(3).Infof("DEBUG: Adding batch pending notification for app=%s (index=%d)", appName, i)
+					glog.V(3).Infof("Adding batch pending notification for app=%s (index=%d)", appName, i)
 
 					// Align change detection with update merge logic to avoid empty-progress startup regressions.
 					for _, existingState := range sourceData.AppStateLatest {
@@ -1231,7 +1231,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 					// Check if state has changed before creating notification
 					hasChanged, changeReason := cm.stateMonitor.HasStateChanged(appName, appState, sourceData.AppStateLatest)
-					glog.V(3).Infof("DEBUG: Batch state change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
+					glog.V(3).Infof("Batch state change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
 
 					pendingNotifications = append(pendingNotifications, pendingNotify{
 						userID:       userID,
@@ -1243,10 +1243,10 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						hasChanged:   hasChanged,
 						changeReason: changeReason,
 					})
-					glog.V(3).Infof("DEBUG: Added batch pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
+					glog.V(3).Infof("Added batch pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
 				}
 			} else {
-				glog.V(3).Infof("DEBUG: State monitor is nil, skipping batch pending notifications for %d app states", len(appStatesData))
+				glog.V(3).Infof("State monitor is nil, skipping batch pending notifications for %d app states", len(appStatesData))
 			}
 
 			// Update each app state individually using name matching
@@ -1341,7 +1341,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			// Collect single state change notification (send after unlock)
 			if cm.stateMonitor != nil {
 				appName := appData.Status.Name
-				glog.V(2).Infof("DEBUG: State monitor available, appName=%s, appData=%v", appName, appData != nil)
+				glog.V(2).Infof("State monitor available, appName=%s, appData=%v", appName, appData != nil)
 				if appName != "" {
 					for _, existingState := range sourceData.AppStateLatest {
 						if existingState != nil && existingState.Status.Name == appName {
@@ -1357,7 +1357,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 
 					// Check if state has changed before creating notification
 					hasChanged, changeReason := cm.stateMonitor.HasStateChanged(appName, appData, sourceData.AppStateLatest)
-					glog.V(4).Infof("DEBUG: State change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
+					glog.V(4).Infof("State change check for app=%s: hasChanged=%v, reason=%s", appName, hasChanged, changeReason)
 
 					pendingNotifications = append(pendingNotifications, pendingNotify{
 						userID:       userID,
@@ -1369,12 +1369,12 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 						hasChanged:   hasChanged,
 						changeReason: changeReason,
 					})
-					glog.V(2).Infof("DEBUG: Added pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
+					glog.V(2).Infof("Added pending notification for app=%s, total pending=%d", appName, len(pendingNotifications))
 				} else {
-					glog.V(3).Infof("DEBUG: AppName is empty, skipping pending notification")
+					glog.V(3).Infof("AppName is empty, skipping pending notification")
 				}
 			} else {
-				glog.V(3).Infof("DEBUG: State monitor is nil, skipping pending notification for app=%s", appData.Status.Name)
+				glog.V(3).Infof("State monitor is nil, skipping pending notification for app=%s", appData.Status.Name)
 			}
 
 			// Update or add the app state using name matching
@@ -2211,9 +2211,9 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 
 	// Add debug logging for input data
 	if entranceStatusesVal, ok := data["entranceStatuses"]; ok {
-		glog.V(2).Infof("DEBUG: enhanceAppStateDataWithUrls - input entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
+		glog.V(2).Infof("enhanceAppStateDataWithUrls - input entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 	} else {
-		glog.V(3).Info("DEBUG: enhanceAppStateDataWithUrls - no entranceStatuses found in input data")
+		glog.V(3).Info("enhanceAppStateDataWithUrls - no entranceStatuses found in input data")
 	}
 
 	// Extract app name for URL fetching
@@ -2292,13 +2292,13 @@ func (cm *CacheManager) enhanceAppStateDataWithUrls(data map[string]interface{},
 				}
 
 				enhancedData["entranceStatuses"] = updatedEntrances
-				glog.V(3).Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
+				glog.V(3).Infof("enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
 				return enhancedData
 			}
 
 			// If no running entrances with empty URLs, return as is
 			enhancedData["entranceStatuses"] = entranceStatuses
-			glog.V(2).Infof("DEBUG: enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
+			glog.V(2).Infof("enhanceAppStateDataWithUrls - output entranceStatuses type: %T, value: %+v", enhancedData["entranceStatuses"], enhancedData["entranceStatuses"])
 			return enhancedData
 		}
 	}

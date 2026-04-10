@@ -528,12 +528,6 @@ func CalculateUserDataHash(userData UserDataInterface) (string, error) {
 	return hex.EncodeToString(finalHash[:]), nil
 }
 
-// CalculateSourceDataHash calculates hash for a single source
-func CalculateSourceDataHash(sourceData SourceDataInterface) (string, error) {
-	hash, _, err := CalculateSourceDataHashWithSize(sourceData)
-	return hash, err
-}
-
 // CalculateSourceDataHashWithSize calculates hash for a single source and returns data size
 func CalculateSourceDataHashWithSize(sourceData SourceDataInterface) (string, int, error) {
 	// Extract the data components that need to be hashed

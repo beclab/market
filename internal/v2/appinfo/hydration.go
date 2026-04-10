@@ -221,41 +221,41 @@ func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendin
 		appName = pendingData.RawData.Name
 	}
 
-	glog.V(3).Infof("DEBUG: isAppHydrationComplete checking appID=%s(%s), RawPackage=%s, RenderedPackage=%s",
+	glog.V(3).Infof("isAppHydrationComplete checking appID=%s(%s), RawPackage=%s, RenderedPackage=%s",
 		appID, appName, pendingData.RawPackage, pendingData.RenderedPackage)
 
 	if pendingData.RawPackage == "" {
-		glog.Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - RawPackage is empty for appID=%s(%s)", appID, appName)
+		glog.V(4).Infof("isAppHydrationComplete RETURNING FALSE - RawPackage is empty for appID=%s(%s)", appID, appName)
 		return false
 	}
 
 	if pendingData.RenderedPackage == "" {
-		glog.Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - RenderedPackage is empty for appID=%s(%s)", appID, appName)
+		glog.V(4).Infof("isAppHydrationComplete RETURNING FALSE - RenderedPackage is empty for appID=%s(%s)", appID, appName)
 		return false
 	}
 
 	if pendingData.AppInfo == nil {
-		glog.Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - AppInfo is nil for appID=%s(%s)", appID, appName)
+		glog.V(4).Infof("isAppHydrationComplete RETURNING FALSE - AppInfo is nil for appID=%s(%s)", appID, appName)
 		return false
 	}
 
 	imageAnalysis := pendingData.AppInfo.ImageAnalysis
 	if imageAnalysis == nil {
-		glog.Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis is nil for appID=%s(%s)", appID, appName)
+		glog.V(4).Infof("isAppHydrationComplete RETURNING FALSE - ImageAnalysis is nil for appID=%s(%s)", appID, appName)
 		return false
 	}
 
 	if imageAnalysis.TotalImages > 0 {
-		glog.Infof("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages > 0 for appID=%s(%s), TotalImages: %d", appID, appName, imageAnalysis.TotalImages)
+		glog.V(4).Infof("isAppHydrationComplete RETURNING TRUE - TotalImages > 0 for appID=%s(%s), TotalImages: %d", appID, appName, imageAnalysis.TotalImages)
 		return true
 	}
 
 	if imageAnalysis.TotalImages == 0 && imageAnalysis.Images != nil {
-		glog.Infof("DEBUG: isAppHydrationComplete RETURNING TRUE - TotalImages=0 but Images not nil for appID=%s(%s), Images: %v", appID, appName, imageAnalysis.Images)
+		glog.V(4).Infof("isAppHydrationComplete RETURNING TRUE - TotalImages=0 but Images not nil for appID=%s(%s), Images: %v", appID, appName, imageAnalysis.Images)
 		return true
 	}
 
-	glog.V(2).Infof("DEBUG: isAppHydrationComplete RETURNING FALSE - ImageAnalysis incomplete for appID=%s(%s), TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
+	glog.V(2).Infof("isAppHydrationComplete RETURNING FALSE - ImageAnalysis incomplete for appID=%s(%s), TotalImages: %d, Images: %v", appID, appName, imageAnalysis.TotalImages, imageAnalysis.Images)
 	return false
 }
 
@@ -990,7 +990,7 @@ func (h *Hydrator) cleanupOldTasks() {
 
 // isAppInLatestQueue checks if an app already exists in the AppInfoLatest queue with version comparison
 func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, appName, version string) bool {
-	glog.V(3).Infof("DEBUG: isAppInLatestQueue checking appID=%s %s, version=%s for user=%s, source=%s", appID, appName, version, userID, sourceID)
+	glog.V(3).Infof("isAppInLatestQueue checking appID=%s %s, version=%s for user=%s, source=%s", appID, appName, version, userID, sourceID)
 
 	if h.cacheManager == nil {
 		glog.V(3).Infof("Warning: CacheManager not available for isAppInLatestQueue")
@@ -998,7 +998,7 @@ func (h *Hydrator) isAppInLatestQueue(userID, sourceID, appID, appName, version 
 	}
 
 	result := h.cacheManager.IsAppInLatestQueue(userID, sourceID, appID, version)
-	glog.V(3).Infof("DEBUG: isAppInLatestQueue returning %v for appID=%s, version=%s, user=%s, source=%s", result, appID, version, userID, sourceID)
+	glog.V(3).Infof("isAppInLatestQueue returning %v for appID=%s, version=%s, user=%s, source=%s", result, appID, version, userID, sourceID)
 	return result
 }
 
