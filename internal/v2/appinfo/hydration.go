@@ -175,13 +175,12 @@ func (h *Hydrator) StartWithOptions(ctx context.Context) error {
 
 // Stop stops the hydration process
 func (h *Hydrator) Stop() {
-	if !h.isRunning.Load() {
+	if !h.isRunning.CompareAndSwap(true, false) {
 		return
 	}
 
 	glog.V(4).Info("Stopping hydrator...")
 	close(h.stopChan)
-	h.isRunning.Store(false)
 }
 
 // IsRunning returns whether the hydrator is currently running
