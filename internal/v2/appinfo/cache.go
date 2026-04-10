@@ -1064,6 +1064,15 @@ func (cm *CacheManager) updateAppStateLatest(userID, sourceID string, sourceData
 }
 
 func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
+	// Pre-enhance outside the lock to avoid holding the global write lock
+	// during a potentially slow HTTP call (up to 30s timeout).
+	var preEnhancedData map[string]interface{}
+	if dataType == AppStateLatest {
+		if _, isBatch := data["app_states"].([]*types.AppStateLatestData); !isBatch {
+			preEnhancedData = cm.enhanceAppStateDataWithUrls(data, userID)
+		}
+	}
+
 	cm.mutex.Lock()
 	cm.updateLockStats("lock")
 	// Watchdog: warn if write lock is held >1s
@@ -1313,8 +1322,8 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			}
 		} else {
 			// Fallback to old logic for backward compatibility
-			// Check if entrance URLs are missing and fetch them if needed
-			enhancedData := cm.enhanceAppStateDataWithUrls(data, userID)
+			// Use pre-enhanced data computed before the lock was acquired
+			enhancedData := preEnhancedData
 
 			appData, sourceIDFromRecord := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppInfoLastInstalled)
 
