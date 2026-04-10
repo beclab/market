@@ -50,11 +50,11 @@ func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
 
 	for userID, sourceData := range allUserAppStateData {
 		if len(sourceData) == 0 {
-			glog.V(2).Info("No app state data found from pre-startup step")
-			return
+			glog.V(2).Infof("No app state data found for user %s, skipping", userID)
+			continue
 		}
 
-		glog.V(2).Infof("Loading app state data for %d users", len(sourceData))
+		glog.V(2).Infof("Loading app state data for user %s (%d sources)", userID, len(sourceData))
 
 		// For each user, load their app state data into the official source
 		for sourceID, appStateDataList := range sourceData {
@@ -424,37 +424,6 @@ func main() {
 	glog.V(3).Info("  curl -H 'X-Market-User: user1' -H 'X-Market-Source: web-console' http://localhost:82/index.yaml")
 	glog.V(3).Info("  helm repo add myrepo http://localhost:82 --header 'X-Market-User=user1' --header 'X-Market-Source=web-console'")
 	glog.V(3).Info("")
-
-	// // Create and start DataWatcherRepo for monitoring state changes
-	// glog.Info("=== Creating DataWatcherRepo for state change monitoring ===")
-
-	// // Get Redis client from AppInfo module
-	// var redisClientForRepo *appinfo.RedisClient
-	// if !utils.IsPublicEnvironment() && appInfoModule != nil {
-	// 	redisClientForRepo = appInfoModule.GetRedisClient()
-	// } else {
-	// 	glog.Info("Public environment detected or AppInfo module not available, skipping DataWatcherRepo creation")
-	// }
-
-	// if redisClientForRepo != nil {
-	// 	// Create DataWatcherRepo instance
-	// 	dataWatcherRepo := appinfo.NewDataWatcherRepo(redisClientForRepo, cacheManager, appInfoModule.GetDataWatcher())
-
-	// 	// Start DataWatcherRepo
-	// 	if err := dataWatcherRepo.Start(); err != nil {
-	// 		glog.Errorf("Warning: Failed to start DataWatcherRepo: %v", err)
-	// 	} else {
-	// 		glog.Info("DataWatcherRepo started successfully for monitoring state changes")
-
-	// 		// Set DataWatcherRepo reference in AppInfo module if available
-	// 		if appInfoModule != nil {
-	// 			// Note: We need to add a method to set DataWatcherRepo in AppInfoModule
-	// 			// For now, we'll just log that it's created
-	// 			glog.Info("DataWatcherRepo is ready to monitor image info updates and other state changes")
-	// 		}
-	// 	}
-	// }
-	// glog.Info("=== End DataWatcherRepo creation ===")
 
 	// Setup graceful shutdown
 	c := make(chan os.Signal, 1)
