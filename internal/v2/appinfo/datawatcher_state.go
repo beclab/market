@@ -146,11 +146,11 @@ func (dw *DataWatcherState) resolveInvisibleFlag(raw *bool, entranceName, appNam
 	// This matches the behavior during startup where we get invisible from spec.entrances
 	if dw != nil && appName != "" && userID != "" {
 		if specInvisible, err := dw.fetchInvisibleFromAppService(appName, userID, entranceName); err == nil {
-			glog.V(3).Infof("DEBUG: resolveInvisibleFlag - fetched invisible=%t for entrance %s (app=%s, user=%s) from app-service API",
+			glog.V(3).Infof("resolveInvisibleFlag - fetched invisible=%t for entrance %s (app=%s, user=%s) from app-service API",
 				specInvisible, entranceName, appName, userID)
 			return specInvisible
 		} else {
-			glog.Errorf("DEBUG: resolveInvisibleFlag - failed to fetch invisible for entrance %s (app=%s, user=%s) from app-service: %v",
+			glog.Errorf("resolveInvisibleFlag - failed to fetch invisible for entrance %s (app=%s, user=%s) from app-service: %v",
 				entranceName, appName, userID, err)
 		}
 	}
@@ -688,19 +688,19 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	// Preload existing invisible flags to avoid overwriting when upstream omits the field.
 	existingInvisible := dw.getExistingEntranceInvisibleMap(userID, msg.Name)
 	if len(existingInvisible) > 0 {
-		glog.V(2).Infof("DEBUG: storeStateToCache - found %d existing invisible flags in cache for app %s (user=%s)",
+		glog.V(2).Infof("storeStateToCache - found %d existing invisible flags in cache for app %s (user=%s)",
 			len(existingInvisible), msg.Name, userID)
 		for name, val := range existingInvisible {
-			glog.V(3).Infof("DEBUG: storeStateToCache - cached invisible[%s]=%t", name, val)
+			glog.V(3).Infof("storeStateToCache - cached invisible[%s]=%t", name, val)
 		}
 	} else {
-		glog.V(3).Infof("DEBUG: storeStateToCache - no existing invisible flags found in cache for app %s (user=%s)",
+		glog.V(3).Infof("storeStateToCache - no existing invisible flags found in cache for app %s (user=%s)",
 			msg.Name, userID)
 	}
 
 	// Add debug logging for entranceStatuses
 	if len(msg.EntranceStatuses) > 0 {
-		glog.V(2).Infof("DEBUG: storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
+		glog.V(2).Infof("storeStateToCache - entranceStatuses count: %d", len(msg.EntranceStatuses))
 	}
 	for i, entrance := range msg.EntranceStatuses {
 		upstreamValue := "nil"
@@ -708,7 +708,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			upstreamValue = fmt.Sprintf("%t", *entrance.Invisible)
 		}
 		invisible := dw.resolveInvisibleFlag(entrance.Invisible, entrance.Name, msg.Name, userID, existingInvisible)
-		glog.V(3).Infof("DEBUG: storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, UpstreamInvisible=%s, ResolvedInvisible=%t",
+		glog.V(3).Infof("storeStateToCache - entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s, UpstreamInvisible=%s, ResolvedInvisible=%t",
 			i, entrance.ID, entrance.Name, entrance.State, entrance.Url, upstreamValue, invisible)
 	}
 
@@ -765,9 +765,9 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 	}
 
 	// Add debug logging for stateData
-	glog.V(2).Infof("DEBUG: storeStateToCache - stateData keys: %v", getMapKeys(stateData))
+	glog.V(2).Infof("storeStateToCache - stateData keys: %v", getMapKeys(stateData))
 	if entranceStatusesVal, ok := stateData["entranceStatuses"]; ok {
-		glog.V(3).Infof("DEBUG: storeStateToCache - entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
+		glog.V(3).Infof("storeStateToCache - entranceStatuses type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
 	}
 
 	sourceID := ""

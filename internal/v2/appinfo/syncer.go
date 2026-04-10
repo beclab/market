@@ -811,8 +811,8 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 			for appID, appDataInterface := range appsData {
 				if appDataMap, ok := appDataInterface.(map[string]interface{}); ok {
 					// Create AppInfoLatestPendingData for this specific app using the basic function
-					glog.V(3).Infof("DEBUG: CALL POINT 3 - Processing app %s for user %s, source %s", appID, userID, sourceID)
-					glog.V(3).Infof("DEBUG: CALL POINT 3 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
+					glog.V(3).Infof("CALL POINT 3 - Processing app %s for user %s, source %s", appID, userID, sourceID)
+					glog.V(3).Infof("CALL POINT 3 - App data before calling NewAppInfoLatestPendingDataFromLegacyData: %+v", appDataMap)
 					appData := NewAppInfoLatestPendingDataFromLegacyData(appDataMap)
 					// Check if app data creation was successful
 					if appData == nil {

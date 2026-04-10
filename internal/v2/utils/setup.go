@@ -151,14 +151,6 @@ func GetExtractedUsers() []string {
 	return extractedUsers
 }
 
-// GetUserAppStateData returns the app state data for a specific user
-func GetUserAppStateData(userID string) map[string][]*types.AppStateLatestData {
-	if data, exists := userAppStateData[userID]; exists {
-		return data
-	}
-	return make(map[string][]*types.AppStateLatestData)
-}
-
 // GetAllUserAppStateData returns all user app state data
 func GetAllUserAppStateData() map[string]map[string][]*types.AppStateLatestData {
 	if IsPublicEnvironment() {
