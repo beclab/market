@@ -543,72 +543,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 		}
 	}
 
-	shouldUpdate := true
-	checker := func(appState *AppStateLatestData) {
-		// 			/**
-		// 			 * [Mandatory Sync Whitelist]
-		// 			 * The cases below define critical state transition scenarios that must be processed.
-		// 			 *
-		// 			 * Background:
-		// 			 * When a user performs an action in the UI (e.g., canceling installation/download) or when an app lifecycle event completes (e.g., installation finished, uninstallation finished),
-		// 			 * the final state pushed by NATS (appStateMsg.State) may differ from the cached state in memory (appState.Status.State).
-		// 			 *
-		// 			 * Purpose:
-		// 			 * Even if the progress (Progress) has not changed and there is no entrance information (EntranceStatuses),
-		// 			 * as long as the following conditions are met, we must bypass the "deduplication check" in the default branch.
-		// 			 * This forces the local state to update and pushes the change to the frontend, ensuring the UI promptly reflects the final result.
-		// 			 */
-		switch {
-		//   NATS State                        APP State
-		case appStateMsg.State == "running" && appState.Status.State == "installing":
-		case appStateMsg.State == "running" && appState.Status.State == "initializing":
-		case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
-		case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
-		case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
-		case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCanceling":
-		case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCancelFailed":
-		case appStateMsg.State == "pendingCanceled" && appState.Status.State == "pending":
-		case appStateMsg.State == "stopped" && appState.Status.State == "pending":
-		case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "downloadingCanceling":
-		case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
-		case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
-		case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
-		case appStateMsg.State == "running" && appState.Status.State == "resuming":
-		case appStateMsg.State == "stopped" && appState.Status.State == "resuming":
-		case appStateMsg.State == "installingCanceled" && appState.Status.State == "resuming":
-		case appStateMsg.State == "stopped" && appState.Status.State == "stopping":
-		default:
-			// state = downloading
-			if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
-				glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
-					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, appState.Status.State, appStateMsg.State)
-				shouldUpdate = false
-				return
-			}
-		}
-
-		// Compare timestamps properly by parsing them
-		if appState.Status.StatusTime != "" && appStateMsg.CreateTime != "" {
-			statusTime, err1 := time.Parse(nanoTimeLayout, appState.Status.StatusTime)
-			createTime, err2 := time.Parse(nanoTimeLayout, appStateMsg.CreateTime)
-
-			if err1 == nil && err2 == nil {
-				if statusTime.After(createTime) {
-					glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s, appTime: %s, msgTime: %s. Skipping update.",
-						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, statusTime.String(), createTime.String())
-					shouldUpdate = false
-					return
-				}
-			} else {
-				glog.Errorf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
-					appState.Status.StatusTime, appStateMsg.CreateTime, err1, err2)
-			}
-		}
-	}
-
-	dw.cacheManager.CompareAppStateMsg(appStateMsg.User, appStateMsg.MarketSource, appStateMsg.Name, checker)
-
-	if !shouldUpdate {
+	if !dw.shouldProcessStateMessage(appStateMsg) {
 		return
 	}
 
@@ -1152,6 +1087,64 @@ func (dw *DataWatcherState) addDelayedMessage(msg *nats.Msg, appStateMsg AppStat
 		appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, len(dw.delayedMessages))
 }
 
+// shouldProcessStateMessage checks whether an incoming app state message
+// should be applied to the cache. Returns false when the cached state is
+// already newer or identical (deduplication / timestamp guard).
+func (dw *DataWatcherState) shouldProcessStateMessage(appStateMsg AppStateMessage) bool {
+	shouldUpdate := true
+	checker := func(appState *AppStateLatestData) {
+		// [Mandatory Sync Whitelist]
+		// Critical state transitions that must always be processed,
+		// even when progress and entrance statuses are unchanged.
+		switch {
+		case appStateMsg.State == "running" && appState.Status.State == "installing":
+		case appStateMsg.State == "running" && appState.Status.State == "initializing":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "running":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "stopped":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "uninstalling":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCanceling":
+		case appStateMsg.State == "uninstalled" && appState.Status.State == "installingCancelFailed":
+		case appStateMsg.State == "pendingCanceled" && appState.Status.State == "pending":
+		case appStateMsg.State == "stopped" && appState.Status.State == "pending":
+		case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "downloadingCanceling":
+		case appStateMsg.State == "downloadingCanceled" && appState.Status.State == "pending":
+		case appStateMsg.State == "installingCanceled" && appState.Status.State == "installing":
+		case appStateMsg.State == "installingCanceled" && appState.Status.State == "installingCanceling":
+		case appStateMsg.State == "running" && appState.Status.State == "resuming":
+		case appStateMsg.State == "stopped" && appState.Status.State == "resuming":
+		case appStateMsg.State == "installingCanceled" && appState.Status.State == "resuming":
+		case appStateMsg.State == "stopped" && appState.Status.State == "stopping":
+		default:
+			if len(appStateMsg.EntranceStatuses) == 0 && appState.Status.Progress == appStateMsg.Progress {
+				glog.V(2).Infof("App state message is the same as the cached app state message for app %s, user %s, source %s, appState: %s, msgState: %s",
+					appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, appState.Status.State, appStateMsg.State)
+				shouldUpdate = false
+				return
+			}
+		}
+
+		if appState.Status.StatusTime != "" && appStateMsg.CreateTime != "" {
+			statusTime, err1 := time.Parse(nanoTimeLayout, appState.Status.StatusTime)
+			createTime, err2 := time.Parse(nanoTimeLayout, appStateMsg.CreateTime)
+
+			if err1 == nil && err2 == nil {
+				if statusTime.After(createTime) {
+					glog.V(2).Infof("Cached app state is newer than incoming message for app %s, user %s, source %s, appTime: %s, msgTime: %s. Skipping update.",
+						appStateMsg.Name, appStateMsg.User, appStateMsg.OpID, statusTime.String(), createTime.String())
+					shouldUpdate = false
+					return
+				}
+			} else {
+				glog.Errorf("Failed to parse timestamps for comparison: StatusTime=%s, CreateTime=%s, err1=%v, err2=%v",
+					appState.Status.StatusTime, appStateMsg.CreateTime, err1, err2)
+			}
+		}
+	}
+
+	dw.cacheManager.CompareAppStateMsg(appStateMsg.User, appStateMsg.MarketSource, appStateMsg.Name, checker)
+	return shouldUpdate
+}
+
 // processDelayedMessages processes delayed messages in the background
 func (dw *DataWatcherState) processDelayedMessages() {
 	ticker := time.NewTicker(1 * time.Second)
@@ -1167,60 +1160,73 @@ func (dw *DataWatcherState) processDelayedMessages() {
 	}
 }
 
-// processDelayedMessagesBatch processes a batch of delayed messages that are ready to be retried
+// processDelayedMessagesBatch processes delayed messages using a two-phase
+// approach: phase 1 snapshots the queue under the lock, phase 2 processes
+// messages without holding the lock. This avoids nested lock acquisition
+// (delayedMessagesMutex → tm.mu / cm.mutex).
 func (dw *DataWatcherState) processDelayedMessagesBatch() {
-	dw.delayedMessagesMutex.Lock()
-	defer dw.delayedMessagesMutex.Unlock()
-
 	now := time.Now()
-	var remaining []*DelayedMessage
-	maxRetries := 10 // Maximum 10 retries (about 20 seconds total)
+	maxRetries := 10
 
+	// Phase 1: snapshot ready messages, keep unready ones in the queue.
+	dw.delayedMessagesMutex.Lock()
+	var remaining []*DelayedMessage
+	var ready []*DelayedMessage
 	for _, delayedMsg := range dw.delayedMessages {
 		if now.Before(delayedMsg.nextRetry) {
-			// Not ready to retry yet
 			remaining = append(remaining, delayedMsg)
-			continue
+		} else {
+			ready = append(ready, delayedMsg)
 		}
+	}
+	dw.delayedMessages = remaining
+	dw.delayedMessagesMutex.Unlock()
 
-		if delayedMsg.retryCount >= maxRetries {
-			// Max retries reached, process anyway
-			glog.Warningf("Max retries reached for delayed message: app=%s, user=%s, opID=%s, processing anyway",
-				delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID)
-			dw.processMessageInternal(delayedMsg.msg, delayedMsg.appStateMsg)
-			continue
-		}
-
-		// Check if there are still pending/running install tasks
-		if dw.taskModule != nil {
-			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User)
-			if !lockAcquired {
-				// If we can't acquire the lock, retry later
-				delayedMsg.retryCount++
-				delayedMsg.nextRetry = now.Add(2 * time.Second)
-				remaining = append(remaining, delayedMsg)
-				glog.Warningf("Retrying delayed message later (lock not acquired): app=%s, user=%s, opID=%s, retry_count=%d",
-					delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
-				continue
-			}
-			if hasPendingTask {
-				// Still has pending tasks, retry later
-				delayedMsg.retryCount++
-				delayedMsg.nextRetry = now.Add(2 * time.Second)
-				remaining = append(remaining, delayedMsg)
-				glog.Warningf("Retrying delayed message later: app=%s, user=%s, opID=%s, retry_count=%d",
-					delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
-				continue
-			}
-		}
-
-		// No pending tasks, process the message
-		glog.V(2).Infof("Processing delayed message: app=%s, user=%s, opID=%s, retry_count=%d",
-			delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
-		dw.processMessageInternal(delayedMsg.msg, delayedMsg.appStateMsg)
+	if len(ready) == 0 {
+		return
 	}
 
-	dw.delayedMessages = remaining
+	// Phase 2: process each ready message without holding delayedMessagesMutex.
+	for _, delayedMsg := range ready {
+		if delayedMsg.retryCount >= maxRetries {
+			glog.Warningf("Max retries reached for delayed message: app=%s, user=%s, opID=%s, processing anyway",
+				delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID)
+			if dw.shouldProcessStateMessage(delayedMsg.appStateMsg) {
+				dw.processMessageInternal(delayedMsg.msg, delayedMsg.appStateMsg)
+			}
+			continue
+		}
+
+		if dw.taskModule != nil {
+			hasPendingTask, lockAcquired := dw.taskModule.HasPendingOrRunningInstallTask(delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User)
+			if !lockAcquired || hasPendingTask {
+				delayedMsg.retryCount++
+				delayedMsg.nextRetry = now.Add(2 * time.Second)
+				dw.requeueDelayedMessage(delayedMsg)
+				if !lockAcquired {
+					glog.Warningf("Retrying delayed message later (lock not acquired): app=%s, user=%s, opID=%s, retry_count=%d",
+						delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
+				} else {
+					glog.Warningf("Retrying delayed message later: app=%s, user=%s, opID=%s, retry_count=%d",
+						delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
+				}
+				continue
+			}
+		}
+
+		glog.V(2).Infof("Processing delayed message: app=%s, user=%s, opID=%s, retry_count=%d",
+			delayedMsg.appStateMsg.Name, delayedMsg.appStateMsg.User, delayedMsg.appStateMsg.OpID, delayedMsg.retryCount)
+		if dw.shouldProcessStateMessage(delayedMsg.appStateMsg) {
+			dw.processMessageInternal(delayedMsg.msg, delayedMsg.appStateMsg)
+		}
+	}
+}
+
+// requeueDelayedMessage puts a message back into the delayed queue for later retry.
+func (dw *DataWatcherState) requeueDelayedMessage(msg *DelayedMessage) {
+	dw.delayedMessagesMutex.Lock()
+	dw.delayedMessages = append(dw.delayedMessages, msg)
+	dw.delayedMessagesMutex.Unlock()
 }
 
 // processMessageInternal processes a message (extracted from handleMessage for reuse)
