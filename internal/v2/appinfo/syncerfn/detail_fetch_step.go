@@ -18,6 +18,12 @@ const (
 	SuspendLabel = "suspend"
 )
 
+// appRemovalEntry holds an app that should be removed from cache after releasing the mutex.
+type appRemovalEntry struct {
+	appID      string
+	appInfoMap map[string]interface{}
+}
+
 // DetailFetchStep implements the third step: fetch detailed info for each app
 type DetailFetchStep struct {
 	DetailEndpointPath string                    // Relative path like "/api/v1/applications/info"
@@ -263,14 +269,12 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 			sourceID = marketSource.ID
 		}
 
+		appsToRemove := func() []appRemovalEntry {
 		data.mutex.Lock()
+		defer data.mutex.Unlock()
 		glog.V(3).Infof("Acquired mutex lock for batch processing")
 
-		// Collect apps that need to be removed from cache to avoid nested locks
-		appsToRemove := make([]struct {
-			appID      string
-			appInfoMap map[string]interface{}
-		}, 0)
+		appsToRemove := make([]appRemovalEntry, 0)
 
 		// Extract apps from raw response
 		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
@@ -306,10 +310,7 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 
 										if shouldRemoveFromCache {
 											// Collect app for removal instead of calling directly to avoid nested locks
-											appsToRemove = append(appsToRemove, struct {
-												appID      string
-												appInfoMap map[string]interface{}
-											}{appID: appID, appInfoMap: appInfoMap})
+											appsToRemove = append(appsToRemove, appRemovalEntry{appID: appID, appInfoMap: appInfoMap})
 										}
 										break
 									}
@@ -482,9 +483,8 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 			glog.V(3).Info("WARNING: No apps data found in response")
 		}
 
-		glog.V(3).Info("Releasing mutex lock for batch processing")
-		data.mutex.Unlock()
-		glog.V(3).Info("Mutex lock released successfully")
+		return appsToRemove
+		}()
 
 		// Now remove apps from cache after releasing the main lock to avoid nested locks
 		var source = data.GetMarketSource()
@@ -601,10 +601,7 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 	sourceID = marketSource.ID
 
 	// Collect apps to remove
-	appsToRemove := make([]struct {
-		appID      string
-		appInfoMap map[string]interface{}
-	}, 0)
+	appsToRemove := make([]appRemovalEntry, 0)
 
 	// Check each app in LatestData.Data.Apps
 	for appID, appDataInterface := range data.LatestData.Data.Apps {
@@ -637,10 +634,7 @@ func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) 
 				}
 
 				if shouldRemoveFromCache {
-					appsToRemove = append(appsToRemove, struct {
-						appID      string
-						appInfoMap map[string]interface{}
-					}{appID: appID, appInfoMap: appInfoMap})
+					appsToRemove = append(appsToRemove, appRemovalEntry{appID: appID, appInfoMap: appInfoMap})
 				}
 			}
 		}

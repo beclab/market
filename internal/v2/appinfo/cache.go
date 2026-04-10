@@ -85,12 +85,16 @@ func (cm *CacheManager) GetUserIDs() []string {
 
 // GetOrCreateUserIDs returns all user IDs; if none exist, creates a default user first.
 func (cm *CacheManager) GetOrCreateUserIDs(defaultUserID string) []string {
-	cm.mutex.RLock()
-	ids := make([]string, 0, len(cm.cache.Users))
-	for id := range cm.cache.Users {
-		ids = append(ids, id)
-	}
-	cm.mutex.RUnlock()
+	ids := func() []string {
+		cm.mutex.RLock()
+		defer cm.mutex.RUnlock()
+
+		result := make([]string, 0, len(cm.cache.Users))
+		for id := range cm.cache.Users {
+			result = append(result, id)
+		}
+		return result
+	}()
 
 	if len(ids) > 0 {
 		return ids
