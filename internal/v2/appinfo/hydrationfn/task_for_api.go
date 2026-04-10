@@ -194,47 +194,16 @@ func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interf
 	)
 }
 
-// findPendingDataFromCache finds AppInfoLatestPendingData from cache based on task information
+// findPendingDataFromCache finds AppInfoLatestPendingData from cache based on task information.
+// Uses CacheManager.FindPendingDataForApp (which holds the global cache lock) instead of
+// accessing the shared CacheData directly, preventing concurrent map read/write races.
 func (s *TaskForApiStep) findPendingDataFromCache(task *HydrationTask) *types.AppInfoLatestPendingData {
-	if task == nil || task.Cache == nil {
+	if task == nil {
 		return nil
 	}
 
-	// Get user data from cache
-	userData := task.Cache.Users[task.UserID]
-	if userData == nil {
-		return nil
-	}
-
-	// Get source data from user data
-	sourceData := userData.Sources[task.SourceID]
-	if sourceData == nil {
-		return nil
-	}
-
-	// Find matching AppInfoLatestPendingData by app ID
-	for _, pendingData := range sourceData.AppInfoLatestPending {
-		if pendingData == nil {
-			continue
-		}
-
-		// Check RawData first
-		if pendingData.RawData != nil {
-			if pendingData.RawData.ID == task.AppID ||
-				pendingData.RawData.AppID == task.AppID ||
-				pendingData.RawData.Name == task.AppID {
-				return pendingData
-			}
-		}
-
-		// Check AppInfo.AppEntry
-		if pendingData.AppInfo != nil && pendingData.AppInfo.AppEntry != nil {
-			if pendingData.AppInfo.AppEntry.ID == task.AppID ||
-				pendingData.AppInfo.AppEntry.AppID == task.AppID ||
-				pendingData.AppInfo.AppEntry.Name == task.AppID {
-				return pendingData
-			}
-		}
+	if task.CacheManager != nil {
+		return task.CacheManager.FindPendingDataForApp(task.UserID, task.SourceID, task.AppID)
 	}
 
 	return nil
