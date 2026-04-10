@@ -30,6 +30,7 @@ type CacheManager struct {
 	stateMonitor    *utils.StateMonitor // State monitor for change detection
 	dataSender      *DataSender         // Direct data sender for bypassing state monitor
 	mutex           sync.RWMutex
+	userSnapshots   sync.Map // map[string]*userEntry — lock-free read snapshots
 	syncChannel     chan SyncRequest
 	stopChannel     chan bool
 	isRunning       bool
@@ -112,6 +113,7 @@ func (cm *CacheManager) GetOrCreateUserIDs(defaultUserID string) []string {
 	}
 
 	cm.cache.Users[defaultUserID] = NewUserDataEx(defaultUserID)
+	cm.publishUserSnapshotLocked(defaultUserID)
 	glog.V(3).Infof("No existing users found, created user %s as fallback", defaultUserID)
 	return []string{defaultUserID}
 }
@@ -132,6 +134,28 @@ func (cm *CacheManager) IsLocalSource(userID, sourceID string) bool {
 	return sourceData.Type == types.SourceDataTypeLocal
 }
 
+// WithMutableUsers passes the mutable user data map to a callback under write
+// lock. The callback may modify the data freely; snapshots are published
+// automatically when the callback returns. Use sparingly — prefer dedicated
+// setter methods for simple mutations.
+func (cm *CacheManager) WithMutableUsers(fn func(users map[string]*UserData)) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+	fn(cm.cache.Users)
+	cm.publishAllSnapshotsLocked()
+}
+
+// SetUserExists sets the Exists flag on a user's UserInfo under write lock.
+func (cm *CacheManager) SetUserExists(userID string, exists bool) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	if userData, ok := cm.cache.Users[userID]; ok && userData.UserInfo != nil {
+		userData.UserInfo.Exists = exists
+		cm.publishUserSnapshotLocked(userID)
+	}
+}
+
 // SetUserHash atomically sets the hash for a user.
 func (cm *CacheManager) SetUserHash(userID, hash string) {
 	cm.mutex.Lock()
@@ -139,6 +163,7 @@ func (cm *CacheManager) SetUserHash(userID, hash string) {
 
 	if userData, exists := cm.cache.Users[userID]; exists {
 		userData.Hash = hash
+		cm.publishUserSnapshotLocked(userID)
 	}
 }
 
@@ -165,6 +190,7 @@ func (cm *CacheManager) RemoveFromPendingList(userID, sourceID, appID string) {
 		newSlice = append(newSlice, p)
 	}
 	sourceData.AppInfoLatestPending = newSlice
+	cm.publishUserSnapshotLocked(userID)
 }
 
 // UpsertLatestAndRemovePending inserts or replaces an app in AppInfoLatest and removes
@@ -254,6 +280,7 @@ func (cm *CacheManager) UpsertLatestAndRemovePending(
 	}
 	sourceData.AppRenderFailed = newFailed
 
+	cm.publishUserSnapshotLocked(userID)
 	return oldVersion, replaced, true
 }
 
@@ -277,6 +304,7 @@ func (cm *CacheManager) UpdateSourceOthers(sourceID string, others *types.Others
 			userData.Sources[sourceID] = NewSourceData()
 		}
 		userData.Sources[sourceID].Others = others
+		cm.publishUserSnapshotLocked(userID)
 		glog.V(3).Infof("Updated Others data in cache for user %s, source %s", userID, sourceID)
 	}
 }
@@ -289,7 +317,7 @@ func (cm *CacheManager) RemoveAppFromAllSources(appName, sourceID string) int {
 	defer cm.mutex.Unlock()
 
 	affected := 0
-	for _, userData := range cm.cache.Users {
+	for userID, userData := range cm.cache.Users {
 		sourceData, exists := userData.Sources[sourceID]
 		if !exists {
 			continue
@@ -315,6 +343,7 @@ func (cm *CacheManager) RemoveAppFromAllSources(appName, sourceID string) int {
 		if len(newLatest) != origLatest || len(newPending) != origPending {
 			sourceData.AppInfoLatest = newLatest
 			sourceData.AppInfoLatestPending = newPending
+			cm.publishUserSnapshotLocked(userID)
 			affected++
 		}
 	}
@@ -351,6 +380,7 @@ func (cm *CacheManager) RemoveDelistedApps(delistedAppIDs map[string]bool) int {
 			}
 			sourceData.AppInfoLatest = newLatest
 		}
+		cm.publishUserSnapshotLocked(userID)
 	}
 	return removedCount
 }
@@ -415,6 +445,7 @@ func (cm *CacheManager) CopyPendingVersionHistory(
 	pendingData.RenderedPackage = latestData.RenderedPackage
 	pendingData.AppSimpleInfo = latestData.AppSimpleInfo
 
+	cm.publishUserSnapshotLocked(userID)
 	return nil
 }
 
@@ -652,6 +683,7 @@ func (cm *CacheManager) RestoreRetryableFailedToPending(limit int) int {
 		}
 	}
 	if restored > 0 {
+		cm.publishAllSnapshotsLocked()
 		glog.V(2).Infof("RestoreRetryableFailedToPending: restored %d failed apps to pending queue", restored)
 	}
 	return restored
@@ -798,6 +830,7 @@ func (cm *CacheManager) Start() error {
 	glog.V(4).Infof("[LOCK] cm.mutex.Lock() @114 Success (wait=%v)", time.Since(lockStart))
 	_wd := cm.startLockWatchdog("@114:setRunning")
 	cm.isRunning = true
+	cm.publishAllSnapshotsLocked()
 	cm.mutex.Unlock()
 	_wd()
 
@@ -874,12 +907,13 @@ func (cm *CacheManager) processSyncRequest(req SyncRequest) {
 	}
 }
 
-// GetUserData retrieves user data from cache
+// GetUserData returns an immutable snapshot of the user's data.
+// The returned pointer is safe to use without holding any lock.
 func (cm *CacheManager) GetUserData(userID string) *UserData {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
-
-	return cm.cache.Users[userID]
+	if v, ok := cm.userSnapshots.Load(userID); ok {
+		return v.(*userEntry).snapshot.Load()
+	}
+	return nil
 }
 
 // getUserData internal method to get user data without external locking
@@ -887,15 +921,14 @@ func (cm *CacheManager) getUserData(userID string) *UserData {
 	return cm.cache.Users[userID]
 }
 
-// GetSourceData retrieves source data from cache
+// GetSourceData returns an immutable snapshot of the source's data.
+// The returned pointer is safe to use without holding any lock.
 func (cm *CacheManager) GetSourceData(userID, sourceID string) *SourceData {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
-
-	if userData, exists := cm.cache.Users[userID]; exists {
-		return userData.Sources[sourceID]
+	userData := cm.GetUserData(userID)
+	if userData == nil {
+		return nil
 	}
-	return nil
+	return userData.Sources[sourceID]
 }
 
 // GetAppVersionFromState retrieves app version from AppStateLatest in the specified source
@@ -1099,6 +1132,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 	pendingNotifications := make([]pendingNotify, 0, 8)
 
 	defer func() {
+		cm.publishUserSnapshotLocked(userID)
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
 		glog.V(4).Infof("[LOCK] cm.mutex.Unlock() @269 End")
@@ -1677,9 +1711,9 @@ func (cm *CacheManager) setLocalAppDataInternal(userID, sourceID string, dataTyp
 	_wd := cm.startLockWatchdog("@SetLocalAppData")
 
 	defer func() {
+		cm.publishUserSnapshotLocked(userID)
 		cm.mutex.Unlock()
 		cm.updateLockStats("unlock")
-		glog.V(4).Infof("[LOCK] cm.mutex.Unlock() @SetLocalAppData End")
 		_wd()
 	}()
 
@@ -1782,6 +1816,7 @@ func (cm *CacheManager) removeUserDataInternal(userID string) error {
 
 	// Remove from cache
 	delete(cm.cache.Users, userID)
+	cm.removeUserSnapshot(userID)
 
 	// Trigger async deletion from Redis
 	cm.requestSync(SyncRequest{
@@ -1833,6 +1868,7 @@ func (cm *CacheManager) addUserInternal(userID string) error {
 	}
 
 	cm.cache.Users[userID] = userData
+	cm.publishUserSnapshotLocked(userID)
 	glog.V(2).Infof("User %s added to cache with %d sources", userID, len(userData.Sources))
 
 	if cm.isRunning {
@@ -1929,26 +1965,16 @@ func (cm *CacheManager) ForceSync() error {
 	}
 }
 
-// GetAllUsersData returns all users data from cache using single global lock
+// GetAllUsersData returns immutable snapshots of all users' data.
+// Each returned *UserData is safe to use without holding any lock.
 func (cm *CacheManager) GetAllUsersData() map[string]*UserData {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
-
-	if cm.cache == nil {
-		return make(map[string]*UserData)
-	}
-
 	result := make(map[string]*UserData)
-	for userID, userData := range cm.cache.Users {
-		userDataCopy := &UserData{
-			Sources: make(map[string]*SourceData),
-			Hash:    userData.Hash,
+	cm.userSnapshots.Range(func(key, value any) bool {
+		if snapshot := value.(*userEntry).snapshot.Load(); snapshot != nil {
+			result[key.(string)] = snapshot
 		}
-		for sourceID, sourceData := range userData.Sources {
-			userDataCopy.Sources[sourceID] = sourceData
-		}
-		result[userID] = userDataCopy
-	}
+		return true
+	})
 	return result
 }
 
@@ -1998,6 +2024,7 @@ func (cm *CacheManager) updateUserConfigInternal(newUserConfig *UserConfig) erro
 				glog.V(3).Infof("Creating data structure for newly configured user: %s", userID)
 				userData := NewUserDataEx(userID) // NewUserData()
 				cm.cache.Users[userID] = userData
+				cm.publishUserSnapshotLocked(userID)
 
 				// Trigger sync to Redis for the new user
 				if cm.isRunning {
@@ -2066,6 +2093,7 @@ func (cm *CacheManager) syncUserListToCacheInternal() error {
 			glog.V(4).Infof("Adding missing user to cache: %s", userID)
 			userData := NewUserDataEx(userID) // NewUserData()
 			cm.cache.Users[userID] = userData
+			cm.publishUserSnapshotLocked(userID)
 			newUsersCount++
 			newUsersList = append(newUsersList, userID)
 
@@ -2160,6 +2188,7 @@ func (cm *CacheManager) cleanupInvalidPendingDataInternal() int {
 	}
 
 	if totalCleaned > 0 {
+		cm.publishAllSnapshotsLocked()
 		glog.V(2).Infof("Cleanup completed: removed %d invalid pending data entries across all users", totalCleaned)
 	}
 
@@ -2412,6 +2441,7 @@ func (cm *CacheManager) removeAppStateDataInternal(userID, sourceID, appName str
 		glog.V(3).Infof("App %s not found in AppStateLatest for user=%s, source=%s", appName, userID, sourceID)
 	}
 
+	cm.publishUserSnapshotLocked(userID)
 	return nil
 }
 
@@ -2489,6 +2519,7 @@ func (cm *CacheManager) removeAppInfoLatestDataInternal(userID, sourceID, appNam
 		glog.V(3).Infof("App %s not found in AppInfoLatest for user=%s, source=%s", appName, userID, sourceID)
 	}
 
+	cm.publishUserSnapshotLocked(userID)
 	return nil
 }
 
@@ -2518,8 +2549,8 @@ func (cm *CacheManager) syncMarketSourcesToCacheInternal(sources []*settings.Mar
 	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@SyncMarketSourcesToCache")
 	defer func() {
+		cm.publishAllSnapshotsLocked()
 		cm.mutex.Unlock()
-		glog.Infof("[LOCK] cm.mutex.Unlock() @SyncMarketSourcesToCache End")
 		_wd()
 	}()
 
@@ -2590,7 +2621,11 @@ func (cm *CacheManager) SyncMarketSourcesToCache(sources []*settings.MarketSourc
 func (cm *CacheManager) resynceUserInternal() error {
 	cm.mutex.Lock()
 	_wd := cm.startLockWatchdog("@resynceUserInternal")
-	defer func() { cm.mutex.Unlock(); _wd() }()
+	defer func() {
+		cm.publishAllSnapshotsLocked()
+		cm.mutex.Unlock()
+		_wd()
+	}()
 
 	if cm.cache == nil {
 		return fmt.Errorf("cache is not initialized")
@@ -2605,8 +2640,7 @@ func (cm *CacheManager) resynceUserInternal() error {
 		extractedUsers := utils.GetExtractedUsers()
 		for _, userID := range extractedUsers {
 			if _, exists := cm.cache.Users[userID]; !exists {
-				// Add user directly without calling AddUserToCache to avoid deadlock
-				userData := types.NewUserDataExt(userID) //types.NewUserData()
+				userData := types.NewUserDataExt(userID)
 				activeSources := cm.settingsManager.GetActiveMarketSources()
 				for _, source := range activeSources {
 					userData.Sources[source.ID] = types.NewSourceDataWithType(types.SourceDataType(source.Type))
@@ -2676,6 +2710,7 @@ func (cm *CacheManager) ClearAppRenderFailedData() {
 	}
 
 	if count > 0 {
+		cm.publishAllSnapshotsLocked()
 		glog.Infof("INFO: [Cleanup] Cleared %d AppRenderFailed entries in %v, apps: %v", count, time.Since(start), failedAppNames)
 	}
 }
@@ -2747,12 +2782,9 @@ func (cm *CacheManager) ListUsers(opType string) {
 		}
 		u.UserInfo.Id = id
 		u.UserInfo.Role = role
-		if find {
-			u.UserInfo.Exists = true
-		} else {
-			u.UserInfo.Exists = false
-		}
+		u.UserInfo.Exists = find
 	}
+	cm.publishAllSnapshotsLocked()
 }
 
 func (cm *CacheManager) RemoveDeletedUser() {
@@ -2776,6 +2808,7 @@ func (cm *CacheManager) RemoveDeletedUser() {
 	glog.Infof("[Cache] Remove deleted users: %v", users)
 	for _, u := range users {
 		delete(cm.cache.Users, u)
+		cm.removeUserSnapshot(u)
 	}
 }
 

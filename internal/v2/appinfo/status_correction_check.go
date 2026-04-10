@@ -180,23 +180,12 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 			changesByUser[change.UserID] = &change
 		}
 		for userID, cs := range changesByUser {
-			userData := scc.cacheManager.GetUserData(userID)
-			if userData == nil {
-				glog.Warningf("StatusCorrectionChecker: userData not found for user %s", userID)
-				continue
+			glog.V(2).Infof("[UserChanged] userId: %s, appName: %s, changeType: %s, newState: %s", cs.UserID, cs.AppName, cs.ChangeType, cs.NewState)
+			if cs.AppName == "olares-app" && cs.ChangeType == "app_disappeared" && cs.NewState == "unknown" {
+				scc.cacheManager.SetUserExists(userID, false)
+			} else if cs.AppName == "olares-app" && cs.ChangeType == "app_appeared" && cs.NewState == "running" {
+				scc.cacheManager.SetUserExists(userID, true)
 			}
-
-			if userData.UserInfo != nil {
-				glog.V(2).Infof("[UserChanged] userId: %s, appName: %s, changeType: %s, newState: %s", cs.UserID, cs.AppName, cs.ChangeType, cs.NewState)
-				if cs.AppName == "olares-app" && cs.ChangeType == "app_disappeared" && cs.NewState == "unknown" {
-					userData.UserInfo.Exists = false
-				} else if cs.AppName == "olares-app" && cs.ChangeType == "app_appeared" && cs.NewState == "running" {
-					userData.UserInfo.Exists = true
-				}
-			} else {
-				glog.V(2).Infof("[UserChanged] userId: %s, userInfo is null", cs.UserID)
-			}
-
 			result[userID] = true
 		}
 

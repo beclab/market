@@ -782,32 +782,38 @@ func (dwr *DataWatcherRepo) fetchImageInfoFromAPI(imageName string) (map[string]
 func (dwr *DataWatcherRepo) updateImageInfoInCache(imageName string, updatedImageInfo map[string]interface{}) int {
 	updatedCount := 0
 
-	// Get all users data from cache
-	allUsersData := dwr.cacheManager.GetAllUsersData()
-	if len(allUsersData) == 0 {
-		glog.V(3).Infof("No users found in cache, skipping image info update")
-		return 0
-	}
+	// Collect user IDs so we can send notifications after releasing the lock.
+	var notifyUsers []string
 
-	// Iterate through all users and sources
-	for userID, userData := range allUsersData {
-		if userData == nil {
-			continue
+	dwr.cacheManager.WithMutableUsers(func(users map[string]*types.UserData) {
+		if len(users) == 0 {
+			glog.V(3).Infof("No users found in cache, skipping image info update")
+			return
 		}
 
-		for sourceID, sourceData := range userData.Sources {
-			if sourceData == nil {
+		for userID, userData := range users {
+			if userData == nil {
 				continue
 			}
-
-			// Update image info in AppInfoLatest
-			updatedCount += dwr.updateImageInfoInAppInfoLatest(userID, sourceID, sourceData, imageName, updatedImageInfo)
-
-			// Update image info in AppInfoLatestPending
-			updatedCount += dwr.updateImageInfoInAppInfoLatestPending(userID, sourceID, sourceData, imageName, updatedImageInfo)
+			userUpdated := false
+			for sourceID, sourceData := range userData.Sources {
+				if sourceData == nil {
+					continue
+				}
+				c1 := dwr.updateImageInfoInAppInfoLatest(userID, sourceID, sourceData, imageName, updatedImageInfo)
+				c2 := dwr.updateImageInfoInAppInfoLatestPending(userID, sourceID, sourceData, imageName, updatedImageInfo)
+				updatedCount += c1 + c2
+				if c1+c2 > 0 {
+					userUpdated = true
+				}
+			}
+			if userUpdated {
+				notifyUsers = append(notifyUsers, userID)
+			}
 		}
+	})
 
-		// Send ImageInfoUpdate message to this user if DataSender is available
+	for _, userID := range notifyUsers {
 		if dwr.dataSender != nil {
 			dwr.sendImageStateChangeToUser(userID, imageName, updatedImageInfo)
 		}
