@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/gorilla/mux"
@@ -17,6 +20,56 @@ import (
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 )
+
+const syncTaskHardTimeout = 30 * time.Minute
+
+type syncTaskResult struct {
+	result string
+	err    error
+}
+
+// waitForSyncTask blocks until the task completes, the request context is
+// cancelled (client disconnect), or the hard timeout fires. It returns the
+// task result/error and whether the task actually completed. The returned
+// callback is safe for late invocation — it will never panic even if called
+// after this function has returned.
+func waitForSyncTask(ctx context.Context) (callback task.TaskCallback, wait func() (string, error, bool)) {
+	done := make(chan struct{})
+	var res syncTaskResult
+	var once sync.Once
+
+	callback = func(result string, err error) {
+		once.Do(func() {
+			res.result = result
+			res.err = err
+			close(done)
+		})
+	}
+
+	wait = func() (string, error, bool) {
+		select {
+		case <-done:
+			return res.result, res.err, true
+		case <-ctx.Done():
+			// Prefer completed result if both channels are ready.
+			select {
+			case <-done:
+				return res.result, res.err, true
+			default:
+			}
+			return "", nil, false
+		case <-time.After(syncTaskHardTimeout):
+			select {
+			case <-done:
+				return res.result, res.err, true
+			default:
+			}
+			return "", nil, false
+		}
+	}
+
+	return callback, wait
+}
 
 // InstallAppRequest represents the request body for app installation
 type InstallAppRequest struct {
@@ -291,36 +344,29 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
-		// Create channel to wait for task completion
-		done := make(chan struct{})
-		var taskResult string
-		var taskError error
+		callback, wait := waitForSyncTask(r.Context())
 
-		// Create callback function that will be called when task completes
-		callback := func(result string, err error) {
-			taskResult = result
-			taskError = err
-			close(done)
-		}
-
-		// Start the task
-		task, err := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
+		t, err := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
 		if err != nil {
 			glog.Errorf("Failed to create installation task for app: %s, error: %v", request.AppName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create installation task", nil)
 			return
 		}
 
-		glog.V(2).Infof("Created synchronous installation task: ID=%s for app: %s, version: %s", task.ID, request.AppName, request.Version)
+		glog.V(2).Infof("Created synchronous installation task: ID=%s for app: %s, version: %s", t.ID, request.AppName, request.Version)
 
-		// Wait for task completion
-		<-done
+		taskResult, taskError, completed := wait()
+		if !completed {
+			glog.Warningf("Synchronous installation wait ended before completion for app: %s, task: %s", request.AppName, t.ID)
+			s.sendResponse(w, http.StatusAccepted, true, "Task is still running, query task status for result", map[string]interface{}{
+				"task_id": t.ID,
+			})
+			return
+		}
 
-		// Parse taskResult to avoid nested JSON strings
 		var resultData map[string]interface{}
 		if taskResult != "" {
 			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				// If parsing fails, return raw result
 				glog.Errorf("Failed to parse task result as JSON: %v", err)
 				resultData = map[string]interface{}{
 					"raw_result": taskResult,
@@ -328,7 +374,6 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Send response based on task result
 		if taskError != nil {
 			glog.Errorf("Synchronous installation failed for app: %s, error: %v", request.AppName, taskError)
 			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Installation failed: %v", taskError), resultData)
@@ -511,36 +556,29 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
-		// Create channel to wait for task completion
-		done := make(chan struct{})
-		var taskResult string
-		var taskError error
+		callback, wait := waitForSyncTask(r.Context())
 
-		// Create callback function that will be called when task completes
-		callback := func(result string, err error) {
-			taskResult = result
-			taskError = err
-			close(done)
-		}
-
-		// Start the task with CloneApp type, using newAppName (rawAppName+requestHash) as appName
-		task, err := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
+		t, err := s.taskModule.AddTask(task.CloneApp, newAppName, userID, taskMetadata, callback)
 		if err != nil {
 			glog.Errorf("Failed to create clone installation task for app: %s, error: %v", newAppName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create clone installation task", nil)
 			return
 		}
 
-		glog.V(2).Infof("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, requestHash=%s, title=%s)", task.ID, newAppName, rawAppName, requestHash, request.Title)
+		glog.V(2).Infof("Created synchronous clone installation task: ID=%s for app: %s (rawAppName=%s, requestHash=%s, title=%s)", t.ID, newAppName, rawAppName, requestHash, request.Title)
 
-		// Wait for task completion
-		<-done
+		taskResult, taskError, completed := wait()
+		if !completed {
+			glog.Warningf("Synchronous clone installation wait ended before completion for app: %s, task: %s", newAppName, t.ID)
+			s.sendResponse(w, http.StatusAccepted, true, "Task is still running, query task status for result", map[string]interface{}{
+				"task_id": t.ID,
+			})
+			return
+		}
 
-		// Parse taskResult to avoid nested JSON strings
 		var resultData map[string]interface{}
 		if taskResult != "" {
 			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				// If parsing fails, return raw result
 				glog.Errorf("Failed to parse task result as JSON: %v", err)
 				resultData = map[string]interface{}{
 					"raw_result": taskResult,
@@ -548,7 +586,6 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Send response based on task result
 		if taskError != nil {
 			glog.Errorf("Synchronous clone installation failed for app: %s, error: %v", newAppName, taskError)
 			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Clone installation failed: %v", taskError), resultData)
@@ -660,36 +697,29 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 
 	// Handle synchronous requests with proper blocking
 	if sync {
-		// Create channel to wait for task completion
-		done := make(chan struct{})
-		var taskResult string
-		var taskError error
+		callback, wait := waitForSyncTask(r.Context())
 
-		// Create callback function that will be called when task completes
-		callback := func(result string, err error) {
-			taskResult = result
-			taskError = err
-			close(done)
-		}
-
-		// Start the task
-		task, err := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
+		t, err := s.taskModule.AddTask(task.CancelAppInstall, appName, userID, taskMetadata, callback)
 		if err != nil {
 			glog.Errorf("Failed to create cancel installation task for app: %s, error: %v", appName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create cancel installation task", nil)
 			return
 		}
 
-		glog.V(2).Infof("Created synchronous cancel installation task: ID=%s for app: %s", task.ID, appName)
+		glog.V(2).Infof("Created synchronous cancel installation task: ID=%s for app: %s", t.ID, appName)
 
-		// Wait for task completion
-		<-done
+		taskResult, taskError, completed := wait()
+		if !completed {
+			glog.Warningf("Synchronous cancel installation wait ended before completion for app: %s, task: %s", appName, t.ID)
+			s.sendResponse(w, http.StatusAccepted, true, "Task is still running, query task status for result", map[string]interface{}{
+				"task_id": t.ID,
+			})
+			return
+		}
 
-		// Parse taskResult to avoid nested JSON strings
 		var resultData map[string]interface{}
 		if taskResult != "" {
 			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				// If parsing fails, return raw result
 				glog.Errorf("Failed to parse task result as JSON: %v", err)
 				resultData = map[string]interface{}{
 					"raw_result": taskResult,
@@ -697,7 +727,6 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Send response based on task result
 		if taskError != nil {
 			glog.Errorf("Synchronous cancel installation failed for app: %s, error: %v", appName, taskError)
 			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Cancel installation failed: %v", taskError), resultData)
@@ -821,36 +850,29 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 
 	// Handle synchronous requests with proper blocking
 	if sync {
-		// Create channel to wait for task completion
-		done := make(chan struct{})
-		var taskResult string
-		var taskError error
+		callback, wait := waitForSyncTask(r.Context())
 
-		// Create callback function that will be called when task completes
-		callback := func(result string, err error) {
-			taskResult = result
-			taskError = err
-			close(done)
-		}
-
-		// Start the task
-		task, err := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
+		t, err := s.taskModule.AddTask(task.UninstallApp, appName, userID, taskMetadata, callback)
 		if err != nil {
 			glog.Errorf("Failed to create uninstallation task for app: %s, error: %v", appName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create uninstallation task", nil)
 			return
 		}
 
-		glog.V(2).Infof("Created synchronous uninstallation task: ID=%s for app: %s", task.ID, appName)
+		glog.V(2).Infof("Created synchronous uninstallation task: ID=%s for app: %s", t.ID, appName)
 
-		// Wait for task completion
-		<-done
+		taskResult, taskError, completed := wait()
+		if !completed {
+			glog.Warningf("Synchronous uninstallation wait ended before completion for app: %s, task: %s", appName, t.ID)
+			s.sendResponse(w, http.StatusAccepted, true, "Task is still running, query task status for result", map[string]interface{}{
+				"task_id": t.ID,
+			})
+			return
+		}
 
-		// Parse taskResult to avoid nested JSON strings
 		var resultData map[string]interface{}
 		if taskResult != "" {
 			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				// If parsing fails, return raw result
 				glog.Errorf("Failed to parse task result as JSON: %v", err)
 				resultData = map[string]interface{}{
 					"raw_result": taskResult,
@@ -858,7 +880,6 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Send response based on task result
 		if taskError != nil {
 			glog.Errorf("Synchronous uninstallation failed for app: %s, error: %v", appName, taskError)
 			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Uninstallation failed: %v", taskError), resultData)
@@ -1066,36 +1087,29 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
-		// Create channel to wait for task completion
-		done := make(chan struct{})
-		var taskResult string
-		var taskError error
+		callback, wait := waitForSyncTask(r.Context())
 
-		// Create callback function that will be called when task completes
-		callback := func(result string, err error) {
-			taskResult = result
-			taskError = err
-			close(done)
-		}
-
-		// Start the task
-		task, err := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
+		t, err := s.taskModule.AddTask(task.UpgradeApp, request.AppName, userID, taskMetadata, callback)
 		if err != nil {
 			glog.Errorf("Failed to create upgrade task for app: %s, error: %v", request.AppName, err)
 			s.sendResponse(w, http.StatusInternalServerError, false, "Failed to create upgrade task", nil)
 			return
 		}
 
-		glog.V(2).Infof("Created synchronous upgrade task: ID=%s for app: %s version: %s", task.ID, request.AppName, request.Version)
+		glog.V(2).Infof("Created synchronous upgrade task: ID=%s for app: %s version: %s", t.ID, request.AppName, request.Version)
 
-		// Wait for task completion
-		<-done
+		taskResult, taskError, completed := wait()
+		if !completed {
+			glog.Warningf("Synchronous upgrade wait ended before completion for app: %s, task: %s", request.AppName, t.ID)
+			s.sendResponse(w, http.StatusAccepted, true, "Task is still running, query task status for result", map[string]interface{}{
+				"task_id": t.ID,
+			})
+			return
+		}
 
-		// Parse taskResult to avoid nested JSON strings
 		var resultData map[string]interface{}
 		if taskResult != "" {
 			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				// If parsing fails, return raw result
 				glog.Errorf("Failed to parse task result as JSON: %v", err)
 				resultData = map[string]interface{}{
 					"raw_result": taskResult,
@@ -1103,7 +1117,6 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Send response based on task result
 		if taskError != nil {
 			glog.Errorf("Synchronous upgrade failed for app: %s, error: %v", request.AppName, taskError)
 			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Upgrade failed: %v", taskError), resultData)
