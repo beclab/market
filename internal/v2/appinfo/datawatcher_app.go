@@ -69,13 +69,12 @@ func (dw *DataWatcher) StartWithOptions(ctx context.Context) error {
 
 // Stop stops the data watching process
 func (dw *DataWatcher) Stop() {
-	if atomic.LoadInt32(&dw.isRunning) == 0 {
+	if !atomic.CompareAndSwapInt32(&dw.isRunning, 1, 0) {
 		return
 	}
 
 	glog.Infof("Stopping DataWatcher...")
 	close(dw.stopChan)
-	atomic.StoreInt32(&dw.isRunning, 0)
 }
 
 // IsRunning returns whether the DataWatcher is currently running
