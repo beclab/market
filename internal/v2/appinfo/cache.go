@@ -2817,32 +2817,24 @@ func (cm *CacheManager) GetCachedData() string {
 }
 
 func (cm *CacheManager) CompareAppStateMsg(userID string, sourceID string, appName string, checker CompareAppStateMsgFunc) {
-	// Find the matching app state under read lock, then release before calling
-	// the external callback. This prevents deadlock if the callback ever needs
-	// to acquire cm.mutex (RLock→Lock on the same goroutine is a deadlock in Go).
-	var matched *types.AppStateLatestData
-	func() {
-		cm.mutex.RLock()
-		defer cm.mutex.RUnlock()
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
 
-		userData := cm.cache.Users[userID]
-		if userData == nil {
-			return
-		}
-		sourceData := userData.Sources[sourceID]
-		if sourceData == nil {
-			return
-		}
-		for _, appState := range sourceData.AppStateLatest {
-			if appState.Status.Name == appName {
-				copied := *appState
-				matched = &copied
-				return
-			}
-		}
-	}()
+	userData := cm.cache.Users[userID]
+	if userData == nil {
+		return
+	}
 
-	if matched != nil {
-		checker(matched)
+	sourceData := userData.Sources[sourceID]
+	if sourceData == nil {
+		return
+	}
+
+	for _, appState := range sourceData.AppStateLatest {
+		if appState.Status.Name != appName {
+			continue
+		}
+		checker(appState)
+		return
 	}
 }
