@@ -127,8 +127,11 @@ func AddToWatchers[R any](w *Watchers, gvr schema.GroupVersionResource, handler 
 
 	if handler != nil {
 		convert := func(obj interface{}, newObj *R) error {
-			err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.(*unstructured.Unstructured).Object, newObj)
-			if err != nil {
+			u, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				return fmt.Errorf("expected *unstructured.Unstructured but got %T", obj)
+			}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, newObj); err != nil {
 				glog.Error("convert obj error, ", err)
 				return err
 			}
@@ -161,7 +164,9 @@ func AddToWatchers[R any](w *Watchers, gvr schema.GroupVersionResource, handler 
 					var f func(obj interface{})
 					switch h := handler.(type) {
 					case cache.FilteringResourceEventHandler:
-						f = h.Handler.(cache.ResourceEventHandlerFuncs).AddFunc
+						if funcs, ok := h.Handler.(cache.ResourceEventHandlerFuncs); ok {
+							f = funcs.AddFunc
+						}
 					case cache.ResourceEventHandlerFuncs:
 						f = h.AddFunc
 					}
@@ -184,7 +189,9 @@ func AddToWatchers[R any](w *Watchers, gvr schema.GroupVersionResource, handler 
 					var f func(oldObj, newObj interface{})
 					switch h := handler.(type) {
 					case cache.FilteringResourceEventHandler:
-						f = h.Handler.(cache.ResourceEventHandlerFuncs).UpdateFunc
+						if funcs, ok := h.Handler.(cache.ResourceEventHandlerFuncs); ok {
+							f = funcs.UpdateFunc
+						}
 					case cache.ResourceEventHandlerFuncs:
 						f = h.UpdateFunc
 					}
@@ -203,7 +210,9 @@ func AddToWatchers[R any](w *Watchers, gvr schema.GroupVersionResource, handler 
 					var f func(obj interface{})
 					switch h := handler.(type) {
 					case cache.FilteringResourceEventHandler:
-						f = h.Handler.(cache.ResourceEventHandlerFuncs).DeleteFunc
+						if funcs, ok := h.Handler.(cache.ResourceEventHandlerFuncs); ok {
+							f = funcs.DeleteFunc
+						}
 					case cache.ResourceEventHandlerFuncs:
 						f = h.DeleteFunc
 					}
