@@ -131,13 +131,8 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	throttled := !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval
 
 	if !configChanged && throttled {
-		if s.hasAnyRemoteHashChanged(ctx) {
-			glog.V(2).Info("SyncOnce: remote data hash changed, forcing sync cycle")
-		} else {
-			glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)",
-				time.Since(s.lastSyncExecuted), s.syncInterval)
-			return
-		}
+		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)",time.Since(s.lastSyncExecuted), s.syncInterval)
+		return
 	}
 	if configChanged {
 		glog.V(2).Infof("SyncOnce: %s, forcing sync cycle", reason)
@@ -548,25 +543,15 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 		glog.V(3).Infof("Using source ID: %s for data storage", sourceID)
 
 		// Get all existing user IDs, creating a system user if none exist
-		var userIDs []string
-		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
-			userIDs = cacheManager.GetOrCreateUserIDs("system")
+		cacheManager := s.cacheManager.Load()
+		if cacheManager == nil {
+			glog.Warning("CacheManager not available, skipping data storage for source: " + sourceID)
 		} else {
-			glog.V(3).Info("Warning: CacheManager not available, using direct cache access")
-			for userID := range s.cache.Users {
-				userIDs = append(userIDs, userID)
-			}
-		}
+			userIDs := cacheManager.GetOrCreateUserIDs("system")
+			glog.V(3).Infof("Storing data for %d users: %v", len(userIDs), userIDs)
 
-		glog.V(3).Infof("Storing data for %d users: %v", len(userIDs), userIDs)
-
-		// Determine storage method based on CacheManager availability
-		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			glog.V(3).Info("Using CacheManager for data storage with hydration notifications")
 			s.storeDataViaCacheManager(userIDs, sourceID, completeData)
-		} else {
-			glog.Warning("CacheManager not available, using direct cache storage")
-			s.storeDataDirectlyBatch(userIDs, sourceID, completeData)
 		}
 	} else {
 		glog.V(3).Info("WARNING: No LatestData available in sync context, skipping data storage")
