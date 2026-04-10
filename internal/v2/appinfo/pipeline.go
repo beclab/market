@@ -77,11 +77,10 @@ func (p *Pipeline) Start(ctx context.Context) error {
 }
 
 func (p *Pipeline) Stop() {
-	if !p.isRunning.Load() {
+	if !p.isRunning.CompareAndSwap(true, false) {
 		return
 	}
 	close(p.stopChan)
-	p.isRunning.Store(false)
 	glog.Info("Pipeline stopped")
 }
 

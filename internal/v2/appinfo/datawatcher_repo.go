@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -65,6 +66,7 @@ type DataWatcherRepo struct {
 	ticker          *time.Ticker
 	stopChannel     chan bool
 	isRunning       bool
+	stopOnce        sync.Once
 }
 
 // NewDataWatcherRepo creates a new data watcher repository instance
@@ -172,8 +174,10 @@ func (dwr *DataWatcherRepo) Stop() error {
 		dwr.ticker.Stop()
 	}
 
-	// Signal the monitoring goroutine to stop
-	close(dwr.stopChannel)
+	// Use sync.Once to guarantee the channel is closed exactly once
+	dwr.stopOnce.Do(func() {
+		close(dwr.stopChannel)
+	})
 	dwr.isRunning = false
 
 	glog.V(3).Info("Data watcher stopped")

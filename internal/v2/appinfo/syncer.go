@@ -251,13 +251,12 @@ func (s *Syncer) hasSyncRelevantConfigChanged() (changed bool, reason string) {
 
 // Stop stops the synchronization process
 func (s *Syncer) Stop() {
-	if !s.isRunning.Load() {
+	if !s.isRunning.CompareAndSwap(true, false) {
 		return
 	}
 
 	glog.V(2).Info("Stopping syncer...")
 	close(s.stopChan)
-	s.isRunning.Store(false)
 }
 
 // IsRunning returns whether the syncer is currently running
