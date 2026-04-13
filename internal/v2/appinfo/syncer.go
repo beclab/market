@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,9 +47,8 @@ type Syncer struct {
 	lastSyncDuration    atomic.Value // time.Duration
 	currentSource       atomic.Value // string
 	lastSyncedAppCount  atomic.Int64
-	lastSyncDetails     atomic.Value // *SyncDetails
-	statusMutex         sync.RWMutex // Mutex for complex status updates
-	tryOnce atomic.Bool
+	lastSyncDetails atomic.Value // *SyncDetails
+	tryOnce         atomic.Bool
 }
 
 // NewSyncer creates a new syncer with the given steps
@@ -374,9 +372,6 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 
 // updateSyncSuccess updates status after a successful sync
 func (s *Syncer) updateSyncSuccess(duration time.Duration, startTime time.Time) {
-	s.statusMutex.Lock()
-	defer s.statusMutex.Unlock()
-
 	s.lastSyncSuccess.Store(time.Now())
 	s.lastSyncDuration.Store(duration)
 	s.lastSyncError.Store("")
@@ -389,9 +384,6 @@ func (s *Syncer) updateSyncSuccess(duration time.Duration, startTime time.Time) 
 
 // updateSyncFailure updates status after a failed sync
 func (s *Syncer) updateSyncFailure(err error, startTime time.Time) {
-	s.statusMutex.Lock()
-	defer s.statusMutex.Unlock()
-
 	duration := time.Since(startTime)
 	s.lastSyncDuration.Store(duration)
 	if err != nil {
