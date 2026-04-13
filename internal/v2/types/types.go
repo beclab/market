@@ -177,6 +177,12 @@ type AppStateLatestData struct {
 			Reason     string `json:"reason"`
 			Url        string `json:"url"`
 			Invisible  bool   `json:"invisible"`
+			Host       string `json:"host,omitempty"`
+			Port       int32  `json:"port"`
+			Title      string `json:"title,omitempty"`
+			Icon       string `json:"icon,omitempty"`
+			AuthLevel  string `json:"authLevel,omitempty"`
+			OpenMethod string `json:"openMethod,omitempty"`
 		} `json:"entranceStatuses"`
 		SharedEntrances []struct {
 			Name            string `json:"name"`
@@ -688,6 +694,12 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		Reason     string `json:"reason"`
 		Url        string `json:"url"`
 		Invisible  bool   `json:"invisible"`
+		Host       string `json:"host,omitempty"`
+		Port       int32  `json:"port"`
+		Title      string `json:"title,omitempty"`
+		Icon       string `json:"icon,omitempty"`
+		AuthLevel  string `json:"authLevel,omitempty"`
+		OpenMethod string `json:"openMethod,omitempty"`
 	}
 
 	var statusReason = ""
@@ -777,6 +789,12 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				Reason     string `json:"reason"`
 				Url        string `json:"url"`
 				Invisible  bool   `json:"invisible"`
+				Host       string `json:"host,omitempty"`
+				Port       int32  `json:"port"`
+				Title      string `json:"title,omitempty"`
+				Icon       string `json:"icon,omitempty"`
+				AuthLevel  string `json:"authLevel,omitempty"`
+				OpenMethod string `json:"openMethod,omitempty"`
 			}, len(v))
 
 			for i, entrance := range v {
@@ -796,7 +814,6 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 					}
 					if url, ok := entranceMap["url"].(string); ok {
 						entranceStatuses[i].Url = url
-						// Extract ID from URL: split by "." and take the first segment
 						if url != "" {
 							segments := strings.Split(url, ".")
 							if len(segments) > 0 {
@@ -806,6 +823,24 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 					}
 					if invisible, ok := entranceMap["invisible"].(bool); ok {
 						entranceStatuses[i].Invisible = invisible
+					}
+					if host, ok := entranceMap["host"].(string); ok {
+						entranceStatuses[i].Host = host
+					}
+					if port, ok := entranceMap["port"].(float64); ok {
+						entranceStatuses[i].Port = int32(port)
+					}
+					if title, ok := entranceMap["title"].(string); ok {
+						entranceStatuses[i].Title = title
+					}
+					if icon, ok := entranceMap["icon"].(string); ok {
+						entranceStatuses[i].Icon = icon
+					}
+					if authLevel, ok := entranceMap["authLevel"].(string); ok {
+						entranceStatuses[i].AuthLevel = authLevel
+					}
+					if openMethod, ok := entranceMap["openMethod"].(string); ok {
+						entranceStatuses[i].OpenMethod = openMethod
 					}
 					glog.V(3).Infof("NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
 						i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
@@ -824,6 +859,12 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				Reason     string `json:"reason"`
 				Url        string `json:"url"`
 				Invisible  bool   `json:"invisible"`
+				Host       string `json:"host,omitempty"`
+				Port       int32  `json:"port"`
+				Title      string `json:"title,omitempty"`
+				Icon       string `json:"icon,omitempty"`
+				AuthLevel  string `json:"authLevel,omitempty"`
+				OpenMethod string `json:"openMethod,omitempty"`
 			}, len(v))
 
 			for i, entranceMap := range v {
@@ -842,7 +883,6 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				}
 				if url, ok := entranceMap["url"].(string); ok {
 					entranceStatuses[i].Url = url
-					// Extract ID from URL: split by "." and take the first segment
 					if url != "" {
 						segments := strings.Split(url, ".")
 						if len(segments) > 0 {
@@ -852,6 +892,24 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				}
 				if invisible, ok := entranceMap["invisible"].(bool); ok {
 					entranceStatuses[i].Invisible = invisible
+				}
+				if host, ok := entranceMap["host"].(string); ok {
+					entranceStatuses[i].Host = host
+				}
+				if port, ok := entranceMap["port"].(float64); ok {
+					entranceStatuses[i].Port = int32(port)
+				}
+				if title, ok := entranceMap["title"].(string); ok {
+					entranceStatuses[i].Title = title
+				}
+				if icon, ok := entranceMap["icon"].(string); ok {
+					entranceStatuses[i].Icon = icon
+				}
+				if authLevel, ok := entranceMap["authLevel"].(string); ok {
+					entranceStatuses[i].AuthLevel = authLevel
+				}
+				if openMethod, ok := entranceMap["openMethod"].(string); ok {
+					entranceStatuses[i].OpenMethod = openMethod
 				}
 				glog.V(3).Infof("NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
 					i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
@@ -1031,6 +1089,12 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 				Reason     string `json:"reason"`
 				Url        string `json:"url"`
 				Invisible  bool   `json:"invisible"`
+				Host       string `json:"host,omitempty"`
+				Port       int32  `json:"port"`
+				Title      string `json:"title,omitempty"`
+				Icon       string `json:"icon,omitempty"`
+				AuthLevel  string `json:"authLevel,omitempty"`
+				OpenMethod string `json:"openMethod,omitempty"`
 			} `json:"entranceStatuses"`
 			SharedEntrances []struct {
 				Name            string `json:"name"`
