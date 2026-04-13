@@ -135,6 +135,12 @@ func (sm *StateMonitor) compareEntranceStatuses(
 		Reason     string `json:"reason"`
 		Url        string `json:"url"`
 		Invisible  bool   `json:"invisible"`
+		Host       string `json:"host,omitempty"`
+		Port       int32  `json:"port"`
+		Title      string `json:"title,omitempty"`
+		Icon       string `json:"icon,omitempty"`
+		AuthLevel  string `json:"authLevel,omitempty"`
+		OpenMethod string `json:"openMethod,omitempty"`
 	},
 	existingStatuses []struct {
 		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
@@ -144,6 +150,12 @@ func (sm *StateMonitor) compareEntranceStatuses(
 		Reason     string `json:"reason"`
 		Url        string `json:"url"`
 		Invisible  bool   `json:"invisible"`
+		Host       string `json:"host,omitempty"`
+		Port       int32  `json:"port"`
+		Title      string `json:"title,omitempty"`
+		Icon       string `json:"icon,omitempty"`
+		AuthLevel  string `json:"authLevel,omitempty"`
+		OpenMethod string `json:"openMethod,omitempty"`
 	},
 ) bool {
 	// If lengths are different, statuses have changed

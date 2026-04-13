@@ -75,6 +75,82 @@ func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
 
 }
 
+// enrichCacheEntranceStatuses fills in missing spec.entrances fields (host, port, title,
+// icon, authLevel, openMethod) for apps already in cache (e.g. loaded from Redis).
+func enrichCacheEntranceStatuses(cacheManager *appinfo.CacheManager) {
+	apps := utils.GetAppServiceResponses()
+	if len(apps) == 0 {
+		return
+	}
+
+	// Build lookup: (owner, appName, entranceName) → spec fields
+	type specFields struct {
+		Host       string
+		Port       int32
+		Title      string
+		Icon       string
+		AuthLevel  string
+		OpenMethod string
+	}
+	type appKey struct{ owner, name string }
+	specMap := make(map[appKey]map[string]specFields)
+	for _, app := range apps {
+		key := appKey{app.Spec.Owner, app.Spec.Name}
+		if specMap[key] == nil {
+			specMap[key] = make(map[string]specFields)
+		}
+		for _, se := range app.Spec.Entrances {
+			specMap[key][se.Name] = specFields{
+				Host:       se.Host,
+				Port:       se.Port,
+				Title:      se.Title,
+				Icon:       se.Icon,
+				AuthLevel:  se.AuthLevel,
+				OpenMethod: se.OpenMethod,
+			}
+		}
+	}
+
+	allUsers := cacheManager.GetAllUsersData()
+	enriched := 0
+	for userID, userData := range allUsers {
+		for _, sourceData := range userData.Sources {
+			if sourceData == nil {
+				continue
+			}
+			for _, appState := range sourceData.AppStateLatest {
+				if appState == nil || len(appState.Status.EntranceStatuses) == 0 {
+					continue
+				}
+				key := appKey{userID, appState.Status.Name}
+				entranceSpecs, exists := specMap[key]
+				if !exists {
+					continue
+				}
+				changed := false
+				for i := range appState.Status.EntranceStatuses {
+					es := &appState.Status.EntranceStatuses[i]
+					if spec, ok := entranceSpecs[es.Name]; ok && es.Host == "" {
+						es.Host = spec.Host
+						es.Port = spec.Port
+						es.Title = spec.Title
+						es.Icon = spec.Icon
+						es.AuthLevel = spec.AuthLevel
+						es.OpenMethod = spec.OpenMethod
+						changed = true
+					}
+				}
+				if changed {
+					enriched++
+				}
+			}
+		}
+	}
+	if enriched > 0 {
+		glog.Infof("Enriched entrance spec fields for %d apps from app-service data", enriched)
+	}
+}
+
 func main() {
 	log.Printf("Starting market application...")
 
@@ -229,6 +305,10 @@ func main() {
 	// Get cacheManager for HTTP server
 	glog.V(2).Info("Getting cache manager for HTTP server...")
 	cacheManager := appInfoModule.GetCacheManager()
+
+	// Enrich cached entrance statuses with spec.entrances fields (for Redis-loaded historical data)
+	enrichCacheEntranceStatuses(cacheManager)
+
 	cacheManager.SetSettingsManager(settingsManager)
 	settingsManager.SetCacheManager(cacheManager)
 	glog.V(2).Infof("Cache manager obtained successfully: %v", cacheManager != nil)

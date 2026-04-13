@@ -36,9 +36,15 @@ type AppServiceResponse struct {
 		Title      string `json:"title"`
 		Source     string `json:"source"`
 		Entrances  []struct {
-			Name      string `json:"name"`
-			Url       string `json:"url"`
-			Invisible bool   `json:"invisible"`
+			Name       string `json:"name"`
+			Host       string `json:"host"`
+			Port       int32  `json:"port"`
+			Icon       string `json:"icon,omitempty"`
+			Title      string `json:"title,omitempty"`
+			AuthLevel  string `json:"authLevel,omitempty"`
+			Url        string `json:"url"`
+			Invisible  bool   `json:"invisible"`
+			OpenMethod string `json:"openMethod,omitempty"`
 		} `json:"entrances"`
 		Settings struct {
 			ClusterScoped   string `json:"clusterScoped"`
@@ -114,11 +120,25 @@ type AppInfo struct {
 	} `json:"status"`
 }
 
+type specInfo struct {
+	Url        string
+	Invisible  bool
+	Host       string
+	Port       int32
+	Title      string
+	Icon       string
+	AuthLevel  string
+	OpenMethod string
+}
+
 // Global variable to store extracted users
 var extractedUsers []string
 
 // Global variable to store app state data for each user
 var userAppStateData map[string]map[string][]*types.AppStateLatestData
+
+// Global variable to store raw app-service responses for enrichment
+var appServiceResponses []AppServiceResponse
 
 // SetupAppServiceData fetches app data from app-service or reads from local file in development
 func SetupAppServiceData() error {
@@ -252,6 +272,8 @@ func fetchAppsFromAppService() error {
 // processAppData processes the app data and prints the extracted information
 func processAppData(apps []AppServiceResponse) error {
 	glog.Infof("Processing app data...Found %d applications", len(apps))
+
+	appServiceResponses = apps
 
 	var appInfos []AppInfo
 	userSet := make(map[string]bool) // Use map to avoid duplicates
@@ -617,11 +639,18 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	}
 
 	// Create a map of entrance URLs and invisible flags from spec.entrances
-	entranceUrls := make(map[string]string)
-	entranceInvisible := make(map[string]bool)
+	specEntrances := make(map[string]specInfo)
 	for _, entrance := range app.Spec.Entrances {
-		entranceUrls[entrance.Name] = entrance.Url
-		entranceInvisible[entrance.Name] = entrance.Invisible
+		specEntrances[entrance.Name] = specInfo{
+			Url:        entrance.Url,
+			Invisible:  entrance.Invisible,
+			Host:       entrance.Host,
+			Port:       entrance.Port,
+			Title:      entrance.Title,
+			Icon:       entrance.Icon,
+			AuthLevel:  entrance.AuthLevel,
+			OpenMethod: entrance.OpenMethod,
+		}
 	}
 
 	// Check if any entrance status has empty URL
@@ -629,13 +658,13 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	hasEmptyUrl := false
 	if !isStartupProcess {
 		for _, entranceStatus := range app.Status.EntranceStatuses {
-			if url, exists := entranceUrls[entranceStatus.Name]; !exists || url == "" {
+			spec, exists := specEntrances[entranceStatus.Name]
+			if !exists || spec.Url == "" {
 				hasEmptyUrl = true
 				break
 			}
 		}
 
-		// If any entrance has empty URL, ignore the entire app state data
 		if hasEmptyUrl {
 			glog.Infof("Skipping app %s due to empty URL in entrance statuses", app.Spec.Name)
 			return nil, ""
@@ -647,37 +676,35 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	// Combine entrance statuses with URLs from spec.entrances
 	entrances := make([]interface{}, 0, len(app.Status.EntranceStatuses))
 	for _, entranceStatus := range app.Status.EntranceStatuses {
-		url, exists := entranceUrls[entranceStatus.Name]
+		spec, exists := specEntrances[entranceStatus.Name]
 
-		// In startup process, allow empty URLs; otherwise, skip entrances without URLs
-		if !isStartupProcess && (!exists || url == "") {
+		if !isStartupProcess && (!exists || spec.Url == "") {
 			glog.Infof("Skipping entrance %s for app %s due to missing URL", entranceStatus.Name, app.Spec.Name)
 			continue
 		}
 
-		// Extract ID from URL: split by "." and take the first segment
 		id := ""
-		if url != "" {
-			segments := strings.Split(url, ".")
+		if spec.Url != "" {
+			segments := strings.Split(spec.Url, ".")
 			if len(segments) > 0 {
 				id = segments[0]
 			}
 		}
 
-		// Get invisible flag, default to false if not found
-		invisible := false
-		if invisibleFlag, exists := entranceInvisible[entranceStatus.Name]; exists {
-			invisible = invisibleFlag
-		}
-
 		entrances = append(entrances, map[string]interface{}{
-			"id":         id, // ID extracted from URL's first segment after splitting by "."
+			"id":         id,
 			"name":       entranceStatus.Name,
 			"state":      entranceStatus.State,
 			"statusTime": entranceStatus.StatusTime,
 			"reason":     entranceStatus.Reason,
-			"url":        url,
-			"invisible":  invisible,
+			"url":        spec.Url,
+			"invisible":  spec.Invisible,
+			"host":       spec.Host,
+			"port":       spec.Port,
+			"title":      spec.Title,
+			"icon":       spec.Icon,
+			"authLevel":  spec.AuthLevel,
+			"openMethod": spec.OpenMethod,
 		})
 	}
 	data["entranceStatuses"] = entrances
@@ -848,4 +875,9 @@ func WaitForDependencyService() {
 		break
 	}
 	glog.Info("=== End dependency service check ===")
+}
+
+// GetAppServiceResponses returns the raw app-service responses from startup
+func GetAppServiceResponses() []AppServiceResponse {
+	return appServiceResponses
 }

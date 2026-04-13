@@ -351,9 +351,15 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 				Title      string `json:"title"`
 				Source     string `json:"source"`
 				Entrances  []struct {
-					Name      string `json:"name"`
-					Url       string `json:"url"`
-					Invisible bool   `json:"invisible"`
+					Name       string `json:"name"`
+					Host       string `json:"host"`
+					Port       int32  `json:"port"`
+					Icon       string `json:"icon,omitempty"`
+					Title      string `json:"title,omitempty"`
+					AuthLevel  string `json:"authLevel,omitempty"`
+					Url        string `json:"url"`
+					Invisible  bool   `json:"invisible"`
+					OpenMethod string `json:"openMethod,omitempty"`
 				} `json:"entrances"`
 				Settings struct {
 					ClusterScoped   string `json:"clusterScoped"`
@@ -374,9 +380,15 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 				Title:  middleware.Title,
 				Source: "middleware",
 				Entrances: []struct {
-					Name      string `json:"name"`
-					Url       string `json:"url"`
-					Invisible bool   `json:"invisible"`
+					Name       string `json:"name"`
+					Host       string `json:"host"`
+					Port       int32  `json:"port"`
+					Icon       string `json:"icon,omitempty"`
+					Title      string `json:"title,omitempty"`
+					AuthLevel  string `json:"authLevel,omitempty"`
+					Url        string `json:"url"`
+					Invisible  bool   `json:"invisible"`
+					OpenMethod string `json:"openMethod,omitempty"`
 				}{},
 			},
 			Status: struct {
@@ -734,6 +746,12 @@ func (scc *StatusCorrectionChecker) compareEntranceStatuses(cachedEntrances []st
 	Reason     string `json:"reason"`
 	Url        string `json:"url"`
 	Invisible  bool   `json:"invisible"`
+	Host       string `json:"host,omitempty"`
+	Port       int32  `json:"port"`
+	Title      string `json:"title,omitempty"`
+	Icon       string `json:"icon,omitempty"`
+	AuthLevel  string `json:"authLevel,omitempty"`
+	OpenMethod string `json:"openMethod,omitempty"`
 }, latestEntrances []struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -983,6 +1001,36 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 	// Get existing invisible flags from cache to preserve them when spec.entrances doesn't have the value
 	existingInvisible := scc.getExistingEntranceInvisibleMap(userID, app.Spec.Name)
 
+	// Build a lookup map from spec.entrances by name
+	specEntranceMap := make(map[string]struct {
+		Invisible  bool
+		Host       string
+		Port       int32
+		Title      string
+		Icon       string
+		AuthLevel  string
+		OpenMethod string
+	}, len(app.Spec.Entrances))
+	for _, se := range app.Spec.Entrances {
+		specEntranceMap[se.Name] = struct {
+			Invisible  bool
+			Host       string
+			Port       int32
+			Title      string
+			Icon       string
+			AuthLevel  string
+			OpenMethod string
+		}{
+			Invisible:  se.Invisible,
+			Host:       se.Host,
+			Port:       se.Port,
+			Title:      se.Title,
+			Icon:       se.Icon,
+			AuthLevel:  se.AuthLevel,
+			OpenMethod: se.OpenMethod,
+		}
+	}
+
 	// Create entrance statuses
 	entranceStatuses := make([]struct {
 		ID         string `json:"id"`
@@ -992,32 +1040,34 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 		Reason     string `json:"reason"`
 		Url        string `json:"url"`
 		Invisible  bool   `json:"invisible"`
+		Host       string `json:"host,omitempty"`
+		Port       int32  `json:"port"`
+		Title      string `json:"title,omitempty"`
+		Icon       string `json:"icon,omitempty"`
+		AuthLevel  string `json:"authLevel,omitempty"`
+		OpenMethod string `json:"openMethod,omitempty"`
 	}, len(app.Status.EntranceStatuses))
 
 	for i, entrance := range app.Status.EntranceStatuses {
-		// Default to false, but will be updated from spec.entrances or cache
 		invisible := false
+		var host, title, icon, authLevel, openMethod string
+		var port int32
 
-		// Try to get invisible flag from spec.entrances first
-		foundInSpec := false
-		for _, specEntrance := range app.Spec.Entrances {
-			if specEntrance.Name == entrance.Name {
-				invisible = specEntrance.Invisible
-				foundInSpec = true
-				break
-			}
-		}
-
-		// If not found in spec.entrances, try to get from cache
-		if !foundInSpec {
-			if cachedInvisible, ok := existingInvisible[entrance.Name]; ok {
-				invisible = cachedInvisible
-				glog.Infof("StatusCorrectionChecker: Using cached invisible=%t for entrance %s (app=%s, user=%s) - not found in spec.entrances",
-					invisible, entrance.Name, app.Spec.Name, userID)
-			} else {
-				glog.Infof("StatusCorrectionChecker: Using default invisible=false for entrance %s (app=%s, user=%s) - not found in spec.entrances or cache",
-					entrance.Name, app.Spec.Name, userID)
-			}
+		if specInfo, found := specEntranceMap[entrance.Name]; found {
+			invisible = specInfo.Invisible
+			host = specInfo.Host
+			port = specInfo.Port
+			title = specInfo.Title
+			icon = specInfo.Icon
+			authLevel = specInfo.AuthLevel
+			openMethod = specInfo.OpenMethod
+		} else if cachedInvisible, ok := existingInvisible[entrance.Name]; ok {
+			invisible = cachedInvisible
+			glog.Infof("StatusCorrectionChecker: Using cached invisible=%t for entrance %s (app=%s, user=%s) - not found in spec.entrances",
+				invisible, entrance.Name, app.Spec.Name, userID)
+		} else {
+			glog.Infof("StatusCorrectionChecker: Using default invisible=false for entrance %s (app=%s, user=%s) - not found in spec.entrances or cache",
+				entrance.Name, app.Spec.Name, userID)
 		}
 
 		entranceStatuses[i] = struct {
@@ -1028,6 +1078,12 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			Reason     string `json:"reason"`
 			Url        string `json:"url"`
 			Invisible  bool   `json:"invisible"`
+			Host       string `json:"host,omitempty"`
+			Port       int32  `json:"port"`
+			Title      string `json:"title,omitempty"`
+			Icon       string `json:"icon,omitempty"`
+			AuthLevel  string `json:"authLevel,omitempty"`
+			OpenMethod string `json:"openMethod,omitempty"`
 		}{
 			ID:         entrance.ID,
 			Name:       entrance.Name,
@@ -1036,6 +1092,12 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			Reason:     entrance.Reason,
 			Url:        entrance.Url,
 			Invisible:  invisible,
+			Host:       host,
+			Port:       port,
+			Title:      title,
+			Icon:       icon,
+			AuthLevel:  authLevel,
+			OpenMethod: openMethod,
 		}
 	}
 
@@ -1123,6 +1185,12 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 				Reason     string `json:"reason"`
 				Url        string `json:"url"`
 				Invisible  bool   `json:"invisible"`
+				Host       string `json:"host,omitempty"`
+				Port       int32  `json:"port"`
+				Title      string `json:"title,omitempty"`
+				Icon       string `json:"icon,omitempty"`
+				AuthLevel  string `json:"authLevel,omitempty"`
+				OpenMethod string `json:"openMethod,omitempty"`
 			} `json:"entranceStatuses"`
 			SharedEntrances []struct {
 				Name            string `json:"name"`
@@ -1192,6 +1260,12 @@ func (scc *StatusCorrectionChecker) createStateDataFromAppStateData(appStateData
 			"reason":     entrance.Reason,
 			"url":        entrance.Url,
 			"invisible":  entrance.Invisible,
+			"host":       entrance.Host,
+			"port":       entrance.Port,
+			"title":      entrance.Title,
+			"icon":       entrance.Icon,
+			"authLevel":  entrance.AuthLevel,
+			"openMethod": entrance.OpenMethod,
 		}
 	}
 	stateData["entranceStatuses"] = entranceStatuses
