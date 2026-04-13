@@ -31,9 +31,15 @@ type AppServiceResponse struct {
 		Title      string `json:"title"`
 		Source     string `json:"source"`
 		Entrances  []struct {
-			Name      string `json:"name"`
-			Url       string `json:"url"`
-			Invisible bool   `json:"invisible"`
+			Name       string `json:"name"`
+			Host       string `json:"host"`
+			Port       int32  `json:"port"`
+			Icon       string `json:"icon,omitempty"`
+			Title      string `json:"title,omitempty"`
+			AuthLevel  string `json:"authLevel,omitempty"`
+			Url        string `json:"url"`
+			Invisible  bool   `json:"invisible"`
+			OpenMethod string `json:"openMethod,omitempty"`
 		} `json:"entrances"`
 		Settings struct {
 			ClusterScoped   string `json:"clusterScoped"`
