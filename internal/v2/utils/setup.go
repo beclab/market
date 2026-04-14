@@ -30,17 +30,27 @@ type AppServiceResponse struct {
 		Icon       string `json:"icon"`
 		Title      string `json:"title"`
 		Source     string `json:"source"`
-		Entrances  []struct {
+		Entrances []struct {
 			Name       string `json:"name"`
 			Host       string `json:"host"`
 			Port       int32  `json:"port"`
 			Icon       string `json:"icon,omitempty"`
 			Title      string `json:"title,omitempty"`
 			AuthLevel  string `json:"authLevel,omitempty"`
-			Url        string `json:"url"`
-			Invisible  bool   `json:"invisible"`
+			Invisible  bool   `json:"invisible,omitempty"`
+			Url        string `json:"url,omitempty"`
 			OpenMethod string `json:"openMethod,omitempty"`
 		} `json:"entrances"`
+		SharedEntrances []struct {
+			Name      string `json:"name"`
+			Host      string `json:"host"`
+			Port      int32  `json:"port"`
+			Icon      string `json:"icon,omitempty"`
+			Title     string `json:"title,omitempty"`
+			AuthLevel string `json:"authLevel,omitempty"`
+			Invisible bool   `json:"invisible,omitempty"`
+			URL       string `json:"url,omitempty"`
+		} `json:"sharedEntrances,omitempty"`
 		Settings struct {
 			ClusterScoped   string `json:"clusterScoped"`
 			MobileSupported string `json:"mobileSupported"`
