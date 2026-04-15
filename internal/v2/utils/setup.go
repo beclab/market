@@ -26,108 +26,15 @@ type AppServiceResponse struct {
 		UID       string `json:"uid"`
 		Namespace string `json:"namespace"`
 	} `json:"metadata"`
-	Spec struct {
-		Name       string `json:"name"`
-		RawAppName string `json:"rawAppName"`
-		AppID      string `json:"appid"`
-		IsSysApp   bool   `json:"isSysApp"`
-		Owner      string `json:"owner"`
-		Icon       string `json:"icon"`
-		Title      string `json:"title"`
-		Source     string `json:"source"`
-		Entrances  []struct {
-			Name       string `json:"name"`
-			Host       string `json:"host"`
-			Port       int32  `json:"port"`
-			Icon       string `json:"icon,omitempty"`
-			Title      string `json:"title,omitempty"`
-			AuthLevel  string `json:"authLevel,omitempty"`
-			Invisible  bool   `json:"invisible,omitempty"`
-			Url        string `json:"url,omitempty"`
-			OpenMethod string `json:"openMethod,omitempty"`
-		} `json:"entrances"`
-		SharedEntrances []struct {
-			Name      string `json:"name"`
-			Host      string `json:"host"`
-			Port      int32  `json:"port"`
-			Icon      string `json:"icon,omitempty"`
-			Title     string `json:"title,omitempty"`
-			AuthLevel string `json:"authLevel,omitempty"`
-			Invisible bool   `json:"invisible,omitempty"`
-			URL       string `json:"url,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-		Settings struct {
-			ClusterScoped   string `json:"clusterScoped"`
-			MobileSupported string `json:"mobileSupported"`
-			Policy          string `json:"policy"`
-			RequiredGPU     string `json:"requiredGPU"`
-			Source          string `json:"source"`
-			MarketSource    string `json:"market_source"`
-			Target          string `json:"target"`
-			Title           string `json:"title"`
-			Version         string `json:"version"`
-		} `json:"settings"`
-	} `json:"spec"`
-	Status struct {
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	Spec   types.AppStateLatestDataSpec   `json:"spec"`
+	Status types.AppStateLatestDataStatus `json:"status"`
 }
 
 // AppInfo represents the extracted app information
 type AppInfo struct {
-	User   string `json:"user"`
-	App    string `json:"app"`
-	Status struct {
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	User   string                         `json:"user"`
+	App    string                         `json:"app"`
+	Status types.AppStateLatestDataStatus `json:"status"`
 }
 
 // Global variable to store extracted users
@@ -538,14 +445,17 @@ func createMiddlewareStateLatestData(middleware struct {
 	Version string `json:"version"`
 	Title   string `json:"title"`
 }, isStartupProcess bool) (*types.AppStateLatestData, string) {
-	data := map[string]interface{}{
-		"name":               middleware.Metadata.Name,
-		"state":              middleware.ResourceStatus,
-		"updateTime":         middleware.UpdateTime,
-		"statusTime":         middleware.UpdateTime, // Use UpdateTime as StatusTime for middlewares
-		"lastTransitionTime": middleware.UpdateTime, // Use UpdateTime as LastTransitionTime for middlewares
-		"version":            middleware.Version,
-	}
+	// data := map[string]interface{}{
+	// 	"name":               middleware.Metadata.Name,
+	// 	"state":              middleware.ResourceStatus,
+	// 	"updateTime":         middleware.UpdateTime,
+	// 	"statusTime":         middleware.UpdateTime, // Use UpdateTime as StatusTime for middlewares
+	// 	"lastTransitionTime": middleware.UpdateTime, // Use UpdateTime as LastTransitionTime for middlewares
+	// 	"version":            middleware.Version,
+	// }
+
+	// todo
+	var data = types.AppStateLatestDataSpec{}
 
 	// // Create entrance statuses for middleware (simplified structure)
 	// entrances := make([]interface{}, 0, 1)
@@ -606,7 +516,7 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 	entranceUrls := make(map[string]string)
 	for _, app := range apps {
 		if app.Spec.Name == appName && app.Spec.Owner == user {
-			for _, entrance := range app.Spec.Entrances {
+			for _, entrance := range app.Spec.EntranceStatuses {
 				if entrance.Url != "" {
 					entranceUrls[entrance.Name] = entrance.Url
 				}
@@ -622,20 +532,29 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 // createAppStateLatestData creates AppStateLatestData from AppServiceResponse
 // isStartupProcess indicates whether this is called during startup process
 func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*types.AppStateLatestData, string) {
-	data := map[string]interface{}{
-		"name":               app.Spec.Name,
-		"rawAppName":         app.Spec.RawAppName,
-		"title":              app.Spec.Settings.Title,
-		"state":              app.Status.State,
-		"updateTime":         app.Status.UpdateTime,
-		"statusTime":         app.Status.StatusTime,
-		"lastTransitionTime": app.Status.LastTransitionTime,
+	// data := map[string]interface{}{
+	// 	"name":               app.Spec.Name,
+	// 	"rawAppName":         app.Spec.RawAppName,
+	// 	"title":              app.Spec.Settings.Title,
+	// 	"state":              app.Status.State,
+	// 	"updateTime":         app.Status.UpdateTime,
+	// 	"statusTime":         app.Status.StatusTime,
+	// 	"lastTransitionTime": app.Status.LastTransitionTime,
+	// }
+	data := types.AppStateLatestDataSpec{
+		Name:               app.Spec.Name,
+		RawAppName:         app.Spec.RawAppName,
+		Title:              app.Spec.Settings.Title,
+		Source:             app.Status.State,
+		UpdateTime:         app.Status.UpdateTime,
+		StatusTime:         app.Status.StatusTime,
+		LastTransitionTime: app.Status.LastTransitionTime,
 	}
 
 	// Create a map of entrance URLs and invisible flags from spec.entrances
 	entranceUrls := make(map[string]string)
 	entranceInvisible := make(map[string]bool)
-	for _, entrance := range app.Spec.Entrances {
+	for _, entrance := range app.Spec.EntranceStatuses {
 		entranceUrls[entrance.Name] = entrance.Url
 		entranceInvisible[entrance.Name] = entrance.Invisible
 	}
@@ -661,7 +580,9 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	}
 
 	// Combine entrance statuses with URLs from spec.entrances
-	entrances := make([]interface{}, 0, len(app.Status.EntranceStatuses))
+	// entrances := make([]interface{}, 0, len(app.Status.EntranceStatuses))
+	// entrances := make(types.AppStateLatestDataEntrances, len(app.Status.EntranceStatuses))
+	var entrances = make([]types.AppStateLatestDataEntrances, len(app.Status.EntranceStatuses))
 	for _, entranceStatus := range app.Status.EntranceStatuses {
 		url, exists := entranceUrls[entranceStatus.Name]
 
@@ -686,37 +607,27 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 			invisible = invisibleFlag
 		}
 
-		entrances = append(entrances, map[string]interface{}{
-			"id":         id, // ID extracted from URL's first segment after splitting by "."
-			"name":       entranceStatus.Name,
-			"state":      entranceStatus.State,
-			"statusTime": entranceStatus.StatusTime,
-			"reason":     entranceStatus.Reason,
-			"url":        url,
-			"invisible":  invisible,
-		})
+		var es = types.AppStateLatestDataEntrances{
+			ID:         id,
+			Name:       entranceStatus.Name,
+			State:      entranceStatus.State,
+			StatusTime: entranceStatus.StatusTime,
+			Reason:     entranceStatus.Reason,
+			Url:        url,
+			Invisible:  invisible,
+		}
+
+		entrances = append(entrances, es)
 	}
-	data["entranceStatuses"] = entrances
+	data.EntranceStatuses = entrances
 
 	// Carry SharedEntrances if backend status provides them
 	if len(app.Status.SharedEntrances) > 0 {
-		sharedEntrances := make([]interface{}, 0, len(app.Status.SharedEntrances))
+		sharedEntrances := make([]types.AppStateLatestDataEntrances, 0, len(app.Status.SharedEntrances))
 		for _, se := range app.Status.SharedEntrances {
-			sharedEntrances = append(sharedEntrances, map[string]interface{}{
-				"name":            se.Name,
-				"host":            se.Host,
-				"port":            se.Port,
-				"icon":            se.Icon,
-				"title":           se.Title,
-				"authLevel":       se.AuthLevel,
-				"invisible":       se.Invisible,
-				"url":             se.URL,
-				"openMethod":      se.OpenMethod,
-				"windowPushState": se.WindowPushState,
-				"skip":            se.Skip,
-			})
+			sharedEntrances = append(sharedEntrances, se)
 		}
-		data["sharedEntrances"] = sharedEntrances
+		data.SharedEntrances = sharedEntrances
 	}
 
 	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppInfoLastInstalled)

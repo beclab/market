@@ -155,43 +155,75 @@ type AppInfoHistoryData struct {
 
 // AppStateLatestData contains latest app state data
 type AppStateLatestData struct {
-	Type    AppDataType `json:"type"`
-	Version string      `json:"version"` // Version field, cannot be empty
-	Status  struct {
-		Name               string `json:"name"`
-		RawAppName         string `json:"rawAppName"`
-		Title              string `json:"title"`
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		Progress           string `json:"progress"`
-		OpType             string `json:"opType,omitempty"` // Operation type: install, upgrade, uninstall, etc.
-		Message            string `json:"message"`
-		Reason             string `json:"reason"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-			Invisible  bool   `json:"invisible"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	Type    AppDataType            `json:"type"`
+	Version string                 `json:"version"` // Version field, cannot be empty
+	Status  AppStateLatestDataSpec `json:"status"`
+	Admin   struct {
+		App interface{} `json:"app,omitempty"`
+	} `json:"admin,omitempty"`
+}
+
+type AppStateLatestDataSpec struct {
+	AppID              string                        `json:"appid,omitempty"`
+	Name               string                        `json:"name"`
+	RawAppName         string                        `json:"rawAppName"`
+	IsSysApp           bool                          `json:"isSysApp"`
+	Title              string                        `json:"title"`
+	Icon               string                        `json:"icon"`
+	Source             string                        `json:"source"`
+	State              string                        `json:"state"`
+	Owner              string                        `json:"owner,omitempty"`
+	Namespace          string                        `json:"namespace,omitempty"`
+	UpdateTime         string                        `json:"updateTime"`
+	StatusTime         string                        `json:"statusTime"`
+	LastTransitionTime string                        `json:"lastTransitionTime"`
+	Progress           string                        `json:"progress"`
+	OpType             string                        `json:"opType,omitempty"` // Operation type: install, upgrade, uninstall, etc.
+	Message            string                        `json:"message"`
+	Reason             string                        `json:"reason"`
+	EntranceStatuses   []AppStateLatestDataEntrances `json:"entranceStatuses"`
+	SharedEntrances    []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
+	Settings           AppStateLatestDataSettings    `json:"settings"`
+}
+
+type AppStateLatestDataStatus struct {
+	State              string                        `json:"state"`
+	UpdateTime         string                        `json:"updateTime"`
+	StatusTime         string                        `json:"statusTime"`
+	LastTransitionTime string                        `json:"lastTransitionTime"`
+	EntranceStatuses   []AppStateLatestDataEntrances `json:"entranceStatuses"`
+	SharedEntrances    []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
+}
+
+type AppStateLatestDataEntrances struct {
+	ID              string `json:"id,omitempty"` // ID extracted from URL's first segment after splitting by "."
+	Name            string `json:"name"`
+	Host            string `json:"host"`
+	Port            int32  `json:"port"`
+	Icon            string `json:"icon"`
+	Title           string `json:"title"`
+	AuthLevel       string `json:"authLevel"`
+	Invisible       bool   `json:"invisible"`
+	Url             string `json:"url"`
+	OpenMethod      string `json:"openMethod"`
+	WindowPushState bool   `json:"windowPushState,omitempty"`
+	Skip            bool   `json:"skip,omitempty"`
+	State           string `json:"state"`
+	StatusTime      string `json:"statusTime"`
+	Reason          string `json:"reason"`
+}
+
+type AppStateLatestDataSettings struct {
+	ClusterAppRef   string `json:"clusterAppRef"`
+	ClusterScoped   string `json:"clusterScoped"`
+	MarketSource    string `json:"market_source"`
+	MobileSupported string `json:"mobileSupported"`
+	Policy          string `json:"policy"`
+	RequiredGPU     string `json:"requiredGPU"`
+	Source          string `json:"source"`
+	Target          string `json:"target"`
+	Title           string `json:"title"`
+	Version         string `json:"version"`
 }
 
 // AppInfoLatestData contains latest app info data
@@ -677,323 +709,35 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 }
 
 // NewAppStateLatestData creates a new app state latest data structure
-func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
+func NewAppStateLatestData(data AppStateLatestDataSpec, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
 	// Extract status information from data
-	var name, rawAppName, title, state, updateTime, statusTime, lastTransitionTime, progress, opType string
-	var entranceStatuses []struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		State      string `json:"state"`
-		StatusTime string `json:"statusTime"`
-		Reason     string `json:"reason"`
-		Url        string `json:"url"`
-		Invisible  bool   `json:"invisible"`
-	}
+	// var name, rawAppName, title, state, updateTime, statusTime, lastTransitionTime, progress, opType string
+	// var entranceStatuses []AppStateLatestDataEntrances
 
-	var statusReason = ""
-	var statusMessage = ""
+	// var statusReason = ""
+	// var statusMessage = ""
 
-	// Extract name from various possible fields
-	if nameVal, ok := data["name"].(string); ok && nameVal != "" {
-		name = nameVal
-	} else if appNameVal, ok := data["appName"].(string); ok && appNameVal != "" {
-		name = appNameVal
-	} else if appIDVal, ok := data["appID"].(string); ok && appIDVal != "" {
-		name = appIDVal
-	} else if idVal, ok := data["id"].(string); ok && idVal != "" {
-		name = idVal
-	}
-
-	// If no valid name found, return nil
-	if name == "" {
-		glog.Error("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field, Available fields in data: %v", getMapKeys(data))
+	if data.Name == "" || data.RawAppName == "" {
+		glog.Error("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field, Available fields in data: %v", nil)
 		return nil, ""
 	}
 
-	if stateVal, ok := data["state"].(string); ok {
-		state = stateVal
-	}
-	if updateTimeVal, ok := data["updateTime"].(string); ok {
-		updateTime = updateTimeVal
-	}
-	if statusTimeVal, ok := data["statusTime"].(string); ok {
-		statusTime = statusTimeVal
-	}
-	if lastTransitionTimeVal, ok := data["lastTransitionTime"].(string); ok {
-		lastTransitionTime = lastTransitionTimeVal
-	}
-	if progressVal, ok := data["progress"].(string); ok {
-		progress = progressVal
-	}
-	// Extract rawAppName from data
-	if rawAppNameVal, ok := data["rawAppName"].(string); ok {
-		rawAppName = rawAppNameVal
-	}
-	// Extract title from data
-	if titleVal, ok := data["title"].(string); ok {
-		title = titleVal
-	}
-	// Extract opType from data
-	if opTypeVal, ok := data["opType"].(string); ok {
-		opType = opTypeVal
-	}
-	// Extract reason from data
-	if reasonVal, ok := data["reason"]; ok && reasonVal != nil {
-		statusReason = reasonVal.(string)
-	}
-	// Extract message from data
-	if messageVal, ok := data["message"]; ok && messageVal != nil {
-		statusMessage = messageVal.(string)
-	}
-
-	// Extract SharedEntrances
-	var sharedEntrances []struct {
-		Name            string `json:"name"`
-		Host            string `json:"host"`
-		Port            int32  `json:"port"`
-		Icon            string `json:"icon,omitempty"`
-		Title           string `json:"title,omitempty"`
-		AuthLevel       string `json:"authLevel,omitempty"`
-		Invisible       bool   `json:"invisible,omitempty"`
-		URL             string `json:"url,omitempty"`
-		OpenMethod      string `json:"openMethod,omitempty"`
-		WindowPushState bool   `json:"windowPushState,omitempty"`
-		Skip            bool   `json:"skip,omitempty"`
-	}
-
-	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
-	if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
-		glog.V(3).Infof("NewAppStateLatestData - found entranceStatuses, type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
-
-		switch v := entranceStatusesVal.(type) {
-		case []interface{}:
-			glog.V(3).Infof("NewAppStateLatestData - handling []interface{} case, length: %d", len(v))
-			// Handle []interface{} case (from map[string]interface{})
-			entranceStatuses = make([]struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			}, len(v))
-
-			for i, entrance := range v {
-				glog.V(3).Infof("NewAppStateLatestData - processing entrance[%d], type: %T, value: %+v", i, entrance, entrance)
-				if entranceMap, ok := entrance.(map[string]interface{}); ok {
-					if name, ok := entranceMap["name"].(string); ok {
-						entranceStatuses[i].Name = name
-					}
-					if entranceState, ok := entranceMap["state"].(string); ok {
-						entranceStatuses[i].State = entranceState
-					}
-					if entranceStatusTime, ok := entranceMap["statusTime"].(string); ok {
-						entranceStatuses[i].StatusTime = entranceStatusTime
-					}
-					if reason, ok := entranceMap["reason"].(string); ok {
-						entranceStatuses[i].Reason = reason
-					}
-					if url, ok := entranceMap["url"].(string); ok {
-						entranceStatuses[i].Url = url
-						// Extract ID from URL: split by "." and take the first segment
-						if url != "" {
-							segments := strings.Split(url, ".")
-							if len(segments) > 0 {
-								entranceStatuses[i].ID = segments[0]
-							}
-						}
-					}
-					if invisible, ok := entranceMap["invisible"].(bool); ok {
-						entranceStatuses[i].Invisible = invisible
-					}
-					glog.V(3).Infof("NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
-						i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
-				} else {
-					glog.V(3).Infof("NewAppStateLatestData - entrance[%d] is not map[string]interface{}, type: %T", i, entrance)
+	if len(data.EntranceStatuses) > 0 {
+		for idx, es := range data.EntranceStatuses {
+			if es.Url != "" {
+				segments := strings.Split(es.Url, ".")
+				if len(segments) > 0 {
+					es.ID = segments[0]
 				}
+				data.EntranceStatuses[idx] = es
 			}
-		case []map[string]interface{}:
-			glog.V(3).Infof("NewAppStateLatestData - handling []map[string]interface{} case, length: %d", len(v))
-			// Handle []map[string]interface{} case (direct conversion)
-			entranceStatuses = make([]struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			}, len(v))
-
-			for i, entranceMap := range v {
-				glog.V(3).Infof("NewAppStateLatestData - processing entranceMap[%d]: %+v", i, entranceMap)
-				if name, ok := entranceMap["name"].(string); ok {
-					entranceStatuses[i].Name = name
-				}
-				if entranceState, ok := entranceMap["state"].(string); ok {
-					entranceStatuses[i].State = entranceState
-				}
-				if entranceStatusTime, ok := entranceMap["statusTime"].(string); ok {
-					entranceStatuses[i].StatusTime = entranceStatusTime
-				}
-				if reason, ok := entranceMap["reason"].(string); ok {
-					entranceStatuses[i].Reason = reason
-				}
-				if url, ok := entranceMap["url"].(string); ok {
-					entranceStatuses[i].Url = url
-					// Extract ID from URL: split by "." and take the first segment
-					if url != "" {
-						segments := strings.Split(url, ".")
-						if len(segments) > 0 {
-							entranceStatuses[i].ID = segments[0]
-						}
-					}
-				}
-				if invisible, ok := entranceMap["invisible"].(bool); ok {
-					entranceStatuses[i].Invisible = invisible
-				}
-				glog.V(3).Infof("NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
-					i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
-			}
-		default:
-			// Try to handle other cases by converting to JSON and back
-			glog.V(3).Infof("NewAppStateLatestData - entranceStatuses type: %T, value: %+v", v, v)
 		}
-	} else {
-		glog.V(3).Info("NewAppStateLatestData - no entranceStatuses found in data")
 	}
+	var version, source string
+	version = data.Settings.Version
 
-	glog.V(3).Infof("NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
-
-	// Handle SharedEntrances - support both []interface{} and []map[string]interface{}
-	if sharedEntrancesVal, ok := data["sharedEntrances"]; ok && sharedEntrancesVal != nil {
-		glog.V(3).Infof("NewAppStateLatestData - found sharedEntrances, type: %T", sharedEntrancesVal)
-
-		switch v := sharedEntrancesVal.(type) {
-		case []interface{}:
-			glog.V(3).Infof("NewAppStateLatestData - handling sharedEntrances []interface{} case, length: %d", len(v))
-			sharedEntrances = make([]struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			}, len(v))
-
-			for i, entrance := range v {
-				if entranceMap, ok := entrance.(map[string]interface{}); ok {
-					if name, ok := entranceMap["name"].(string); ok {
-						sharedEntrances[i].Name = name
-					}
-					if host, ok := entranceMap["host"].(string); ok {
-						sharedEntrances[i].Host = host
-					}
-					if port, ok := entranceMap["port"].(float64); ok {
-						sharedEntrances[i].Port = int32(port)
-					}
-					if icon, ok := entranceMap["icon"].(string); ok {
-						sharedEntrances[i].Icon = icon
-					}
-					if title, ok := entranceMap["title"].(string); ok {
-						sharedEntrances[i].Title = title
-					}
-					if authLevel, ok := entranceMap["authLevel"].(string); ok {
-						sharedEntrances[i].AuthLevel = authLevel
-					}
-					if invisible, ok := entranceMap["invisible"].(bool); ok {
-						sharedEntrances[i].Invisible = invisible
-					}
-					if url, ok := entranceMap["url"].(string); ok {
-						sharedEntrances[i].URL = url
-					}
-					if openMethod, ok := entranceMap["openMethod"].(string); ok {
-						sharedEntrances[i].OpenMethod = openMethod
-					}
-					if windowPushState, ok := entranceMap["windowPushState"].(bool); ok {
-						sharedEntrances[i].WindowPushState = windowPushState
-					}
-					if skip, ok := entranceMap["skip"].(bool); ok {
-						sharedEntrances[i].Skip = skip
-					}
-				}
-			}
-		case []map[string]interface{}:
-			glog.V(3).Infof("NewAppStateLatestData - handling sharedEntrances []map[string]interface{} case, length: %d", len(v))
-			sharedEntrances = make([]struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			}, len(v))
-
-			for i, entranceMap := range v {
-				if name, ok := entranceMap["name"].(string); ok {
-					sharedEntrances[i].Name = name
-				}
-				if host, ok := entranceMap["host"].(string); ok {
-					sharedEntrances[i].Host = host
-				}
-				if port, ok := entranceMap["port"].(float64); ok {
-					sharedEntrances[i].Port = int32(port)
-				}
-				if icon, ok := entranceMap["icon"].(string); ok {
-					sharedEntrances[i].Icon = icon
-				}
-				if title, ok := entranceMap["title"].(string); ok {
-					sharedEntrances[i].Title = title
-				}
-				if authLevel, ok := entranceMap["authLevel"].(string); ok {
-					sharedEntrances[i].AuthLevel = authLevel
-				}
-				if invisible, ok := entranceMap["invisible"].(bool); ok {
-					sharedEntrances[i].Invisible = invisible
-				}
-				if url, ok := entranceMap["url"].(string); ok {
-					sharedEntrances[i].URL = url
-				}
-				if openMethod, ok := entranceMap["openMethod"].(string); ok {
-					sharedEntrances[i].OpenMethod = openMethod
-				}
-				if windowPushState, ok := entranceMap["windowPushState"].(bool); ok {
-					sharedEntrances[i].WindowPushState = windowPushState
-				}
-				if skip, ok := entranceMap["skip"].(bool); ok {
-					sharedEntrances[i].Skip = skip
-				}
-			}
-		default:
-			glog.V(3).Infof("NewAppStateLatestData - sharedEntrances type: %T, value: %+v", v, v)
-		}
-	} else {
-		glog.V(3).Info("NewAppStateLatestData - no sharedEntrances found in data")
-	}
-
-	glog.V(3).Infof("NewAppStateLatestData - final sharedEntrances count: %d", len(sharedEntrances))
-
-	// Version assignment logic
-	version := ""
-	source := ""
-	if versionVal, ok := data["version"].(string); ok && versionVal != "" {
-		version = versionVal
-		glog.V(3).Infof("NewAppStateLatestData - using version from data: %s", version)
-	}
-	// If version is still empty, and getInfoFunc is available, and userID/name are not empty, try to get from record
-	if version == "" && getInfoFunc != nil && userID != "" && name != "" {
-		versionFromRecord, sourceFromRecord, err := getInfoFunc(userID, name)
+	if version == "" && getInfoFunc != nil && userID != "" && data.Name != "" {
+		versionFromRecord, sourceFromRecord, err := getInfoFunc(userID, data.Name)
 		if err != nil {
 			glog.V(3).Infof("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
 		} else if versionFromRecord != "" {
@@ -1002,65 +746,291 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			glog.V(3).Infof("NewAppStateLatestData - using version from download record: %s, source: %s", version, source)
 		}
 	}
-	// If version is still empty, log error and return nil
-	// if version == "" {
-	// 	glog.Error("ERROR: NewAppStateLatestData - version is empty, cannot create AppStateLatestData")
-	// 	return nil
-	// }
 
 	return &AppStateLatestData{
 		Type:    AppStateLatest,
 		Version: version,
-		Status: struct {
-			Name               string `json:"name"`
-			RawAppName         string `json:"rawAppName"`
-			Title              string `json:"title"`
-			State              string `json:"state"`
-			UpdateTime         string `json:"updateTime"`
-			StatusTime         string `json:"statusTime"`
-			LastTransitionTime string `json:"lastTransitionTime"`
-			Progress           string `json:"progress"`
-			OpType             string `json:"opType,omitempty"`
-			Message            string `json:"message"`
-			Reason             string `json:"reason"`
-			EntranceStatuses   []struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			} `json:"entranceStatuses"`
-			SharedEntrances []struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			} `json:"sharedEntrances,omitempty"`
-		}{
-			Name:               name,
-			RawAppName:         rawAppName,
-			Title:              title,
-			State:              state,
-			UpdateTime:         updateTime,
-			StatusTime:         statusTime,
-			LastTransitionTime: lastTransitionTime,
-			Progress:           progress,
-			OpType:             opType,
-			Message:            statusMessage,
-			Reason:             statusReason,
-			EntranceStatuses:   entranceStatuses,
-			SharedEntrances:    sharedEntrances,
-		},
-	}, source
+		Status:  data}, source
+
+	// + old  data["name|appName|appID|id"]
+	// // Extract name from various possible fields
+	// if nameVal, ok := data["name"].(string); ok && nameVal != "" {
+	// 	name = nameVal
+	// } else if appNameVal, ok := data["appName"].(string); ok && appNameVal != "" {
+	// 	name = appNameVal
+	// } else if appIDVal, ok := data["appID"].(string); ok && appIDVal != "" {
+	// 	name = appIDVal
+	// } else if idVal, ok := data["id"].(string); ok && idVal != "" {
+	// 	name = idVal
+	// }
+
+	// // If no valid name found, return nil
+	// if name == "" {
+	// 	glog.Error("ERROR: NewAppStateLatestData failed to extract name from data - missing required name field, Available fields in data: %v", getMapKeys(data))
+	// 	return nil, ""
+	// }
+
+	// if stateVal, ok := data["state"].(string); ok {
+	// 	state = stateVal
+	// }
+	// if updateTimeVal, ok := data["updateTime"].(string); ok {
+	// 	updateTime = updateTimeVal
+	// }
+	// if statusTimeVal, ok := data["statusTime"].(string); ok {
+	// 	statusTime = statusTimeVal
+	// }
+	// if lastTransitionTimeVal, ok := data["lastTransitionTime"].(string); ok {
+	// 	lastTransitionTime = lastTransitionTimeVal
+	// }
+	// if progressVal, ok := data["progress"].(string); ok {
+	// 	progress = progressVal
+	// }
+	// // Extract rawAppName from data
+	// if rawAppNameVal, ok := data["rawAppName"].(string); ok {
+	// 	rawAppName = rawAppNameVal
+	// }
+	// // Extract title from data
+	// if titleVal, ok := data["title"].(string); ok {
+	// 	title = titleVal
+	// }
+	// // Extract opType from data
+	// if opTypeVal, ok := data["opType"].(string); ok {
+	// 	opType = opTypeVal
+	// }
+	// // Extract reason from data
+	// if reasonVal, ok := data["reason"]; ok && reasonVal != nil {
+	// 	statusReason = reasonVal.(string)
+	// }
+	// // Extract message from data
+	// if messageVal, ok := data["message"]; ok && messageVal != nil {
+	// 	statusMessage = messageVal.(string)
+	// }
+
+	// // Extract SharedEntrances
+	// var sharedEntrances []AppStateLatestDataEntrances
+
+	// // Handle entranceStatuses - support both []interface{} and []EntranceStatus
+	// if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
+	// 	glog.V(3).Infof("NewAppStateLatestData - found entranceStatuses, type: %T, value: %+v", entranceStatusesVal, entranceStatusesVal)
+
+	// 	switch v := entranceStatusesVal.(type) {
+	// 	case []interface{}:
+	// 		glog.V(3).Infof("NewAppStateLatestData - handling []interface{} case, length: %d", len(v))
+	// 		// Handle []interface{} case (from map[string]interface{})
+	// 		entranceStatuses = make([]AppStateLatestDataEntrances, len(v))
+
+	// 		for i, entrance := range v {
+	// 			glog.V(3).Infof("NewAppStateLatestData - processing entrance[%d], type: %T, value: %+v", i, entrance, entrance)
+	// 			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+	// 				if name, ok := entranceMap["name"].(string); ok {
+	// 					entranceStatuses[i].Name = name
+	// 				}
+	// 				if entranceState, ok := entranceMap["state"].(string); ok {
+	// 					entranceStatuses[i].State = entranceState
+	// 				}
+	// 				if entranceStatusTime, ok := entranceMap["statusTime"].(string); ok {
+	// 					entranceStatuses[i].StatusTime = entranceStatusTime
+	// 				}
+	// 				if reason, ok := entranceMap["reason"].(string); ok {
+	// 					entranceStatuses[i].Reason = reason
+	// 				}
+	// 				if url, ok := entranceMap["url"].(string); ok {
+	// 					entranceStatuses[i].Url = url
+	// 					// Extract ID from URL: split by "." and take the first segment
+	// 					if url != "" {
+	// 						segments := strings.Split(url, ".")
+	// 						if len(segments) > 0 {
+	// 							entranceStatuses[i].ID = segments[0]
+	// 						}
+	// 					}
+	// 				}
+	// 				if invisible, ok := entranceMap["invisible"].(bool); ok {
+	// 					entranceStatuses[i].Invisible = invisible
+	// 				}
+	// 				glog.V(3).Infof("NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
+	// 					i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
+	// 			} else {
+	// 				glog.V(3).Infof("NewAppStateLatestData - entrance[%d] is not map[string]interface{}, type: %T", i, entrance)
+	// 			}
+	// 		}
+	// 	case []map[string]interface{}:
+	// 		glog.V(3).Infof("NewAppStateLatestData - handling []map[string]interface{} case, length: %d", len(v))
+	// 		// Handle []map[string]interface{} case (direct conversion)
+	// 		entranceStatuses = make([]AppStateLatestDataEntrances, len(v))
+
+	// 		for i, entranceMap := range v {
+	// 			glog.V(3).Infof("NewAppStateLatestData - processing entranceMap[%d]: %+v", i, entranceMap)
+	// 			if name, ok := entranceMap["name"].(string); ok {
+	// 				entranceStatuses[i].Name = name
+	// 			}
+	// 			if entranceState, ok := entranceMap["state"].(string); ok {
+	// 				entranceStatuses[i].State = entranceState
+	// 			}
+	// 			if entranceStatusTime, ok := entranceMap["statusTime"].(string); ok {
+	// 				entranceStatuses[i].StatusTime = entranceStatusTime
+	// 			}
+	// 			if reason, ok := entranceMap["reason"].(string); ok {
+	// 				entranceStatuses[i].Reason = reason
+	// 			}
+	// 			if url, ok := entranceMap["url"].(string); ok {
+	// 				entranceStatuses[i].Url = url
+	// 				// Extract ID from URL: split by "." and take the first segment
+	// 				if url != "" {
+	// 					segments := strings.Split(url, ".")
+	// 					if len(segments) > 0 {
+	// 						entranceStatuses[i].ID = segments[0]
+	// 					}
+	// 				}
+	// 			}
+	// 			if invisible, ok := entranceMap["invisible"].(bool); ok {
+	// 				entranceStatuses[i].Invisible = invisible
+	// 			}
+	// 			glog.V(3).Infof("NewAppStateLatestData - processed entrance[%d]: ID=%s, Name=%s, State=%s, URL=%s",
+	// 				i, entranceStatuses[i].ID, entranceStatuses[i].Name, entranceStatuses[i].State, entranceStatuses[i].Url)
+	// 		}
+	// 	default:
+	// 		// Try to handle other cases by converting to JSON and back
+	// 		glog.V(3).Infof("NewAppStateLatestData - entranceStatuses type: %T, value: %+v", v, v)
+	// 	}
+	// } else {
+	// 	glog.V(3).Info("NewAppStateLatestData - no entranceStatuses found in data")
+	// }
+
+	// glog.V(3).Infof("NewAppStateLatestData - final entranceStatuses count: %d", len(entranceStatuses))
+
+	// // Handle SharedEntrances - support both []interface{} and []map[string]interface{}
+	// if sharedEntrancesVal, ok := data["sharedEntrances"]; ok && sharedEntrancesVal != nil {
+	// 	glog.V(3).Infof("NewAppStateLatestData - found sharedEntrances, type: %T", sharedEntrancesVal)
+
+	// 	switch v := sharedEntrancesVal.(type) {
+	// 	case []interface{}:
+	// 		glog.V(3).Infof("NewAppStateLatestData - handling sharedEntrances []interface{} case, length: %d", len(v))
+	// 		sharedEntrances = make([]AppStateLatestDataEntrances, len(v))
+
+	// 		for i, entrance := range v {
+	// 			if entranceMap, ok := entrance.(map[string]interface{}); ok {
+	// 				if name, ok := entranceMap["name"].(string); ok {
+	// 					sharedEntrances[i].Name = name
+	// 				}
+	// 				if host, ok := entranceMap["host"].(string); ok {
+	// 					sharedEntrances[i].Host = host
+	// 				}
+	// 				if port, ok := entranceMap["port"].(float64); ok {
+	// 					sharedEntrances[i].Port = int32(port)
+	// 				}
+	// 				if icon, ok := entranceMap["icon"].(string); ok {
+	// 					sharedEntrances[i].Icon = icon
+	// 				}
+	// 				if title, ok := entranceMap["title"].(string); ok {
+	// 					sharedEntrances[i].Title = title
+	// 				}
+	// 				if authLevel, ok := entranceMap["authLevel"].(string); ok {
+	// 					sharedEntrances[i].AuthLevel = authLevel
+	// 				}
+	// 				if invisible, ok := entranceMap["invisible"].(bool); ok {
+	// 					sharedEntrances[i].Invisible = invisible
+	// 				}
+	// 				if url, ok := entranceMap["url"].(string); ok {
+	// 					sharedEntrances[i].Url = url
+	// 				}
+	// 				if openMethod, ok := entranceMap["openMethod"].(string); ok {
+	// 					sharedEntrances[i].OpenMethod = openMethod
+	// 				}
+	// 				if windowPushState, ok := entranceMap["windowPushState"].(bool); ok {
+	// 					sharedEntrances[i].WindowPushState = windowPushState
+	// 				}
+	// 				if skip, ok := entranceMap["skip"].(bool); ok {
+	// 					sharedEntrances[i].Skip = skip
+	// 				}
+	// 			}
+	// 		}
+	// 	case []map[string]interface{}:
+	// 		glog.V(3).Infof("NewAppStateLatestData - handling sharedEntrances []map[string]interface{} case, length: %d", len(v))
+	// 		sharedEntrances = make([]AppStateLatestDataEntrances, len(v))
+
+	// 		for i, entranceMap := range v {
+	// 			if name, ok := entranceMap["name"].(string); ok {
+	// 				sharedEntrances[i].Name = name
+	// 			}
+	// 			if host, ok := entranceMap["host"].(string); ok {
+	// 				sharedEntrances[i].Host = host
+	// 			}
+	// 			if port, ok := entranceMap["port"].(float64); ok {
+	// 				sharedEntrances[i].Port = int32(port)
+	// 			}
+	// 			if icon, ok := entranceMap["icon"].(string); ok {
+	// 				sharedEntrances[i].Icon = icon
+	// 			}
+	// 			if title, ok := entranceMap["title"].(string); ok {
+	// 				sharedEntrances[i].Title = title
+	// 			}
+	// 			if authLevel, ok := entranceMap["authLevel"].(string); ok {
+	// 				sharedEntrances[i].AuthLevel = authLevel
+	// 			}
+	// 			if invisible, ok := entranceMap["invisible"].(bool); ok {
+	// 				sharedEntrances[i].Invisible = invisible
+	// 			}
+	// 			if url, ok := entranceMap["url"].(string); ok {
+	// 				sharedEntrances[i].Url = url
+	// 			}
+	// 			if openMethod, ok := entranceMap["openMethod"].(string); ok {
+	// 				sharedEntrances[i].OpenMethod = openMethod
+	// 			}
+	// 			if windowPushState, ok := entranceMap["windowPushState"].(bool); ok {
+	// 				sharedEntrances[i].WindowPushState = windowPushState
+	// 			}
+	// 			if skip, ok := entranceMap["skip"].(bool); ok {
+	// 				sharedEntrances[i].Skip = skip
+	// 			}
+	// 		}
+	// 	default:
+	// 		glog.V(3).Infof("NewAppStateLatestData - sharedEntrances type: %T, value: %+v", v, v)
+	// 	}
+	// } else {
+	// 	glog.V(3).Info("NewAppStateLatestData - no sharedEntrances found in data")
+	// }
+
+	// glog.V(3).Infof("NewAppStateLatestData - final sharedEntrances count: %d", len(sharedEntrances))
+
+	// // Version assignment logic
+	// version := ""
+	// source := ""
+	// if versionVal, ok := data["version"].(string); ok && versionVal != "" {
+	// 	version = versionVal
+	// 	glog.V(3).Infof("NewAppStateLatestData - using version from data: %s", version)
+	// }
+	// // If version is still empty, and getInfoFunc is available, and userID/name are not empty, try to get from record
+	// if version == "" && getInfoFunc != nil && userID != "" && name != "" {
+	// 	versionFromRecord, sourceFromRecord, err := getInfoFunc(userID, name)
+	// 	if err != nil {
+	// 		glog.V(3).Infof("WARNING: NewAppStateLatestData - failed to get version from download record: %v", err)
+	// 	} else if versionFromRecord != "" {
+	// 		version = versionFromRecord
+	// 		source = sourceFromRecord
+	// 		glog.V(3).Infof("NewAppStateLatestData - using version from download record: %s, source: %s", version, source)
+	// 	}
+	// }
+
+	// var status = AppStateLatestDataSpec{
+	// 	Name:               name,
+	// 	RawAppName:         rawAppName,
+	// 	Title:              title,
+	// 	State:              state,
+	// 	UpdateTime:         updateTime,
+	// 	StatusTime:         statusTime,
+	// 	LastTransitionTime: lastTransitionTime,
+	// 	Progress:           progress,
+	// 	OpType:             opType,
+	// 	Message:            statusMessage,
+	// 	Reason:             statusReason,
+	// 	EntranceStatuses:   data.EntranceStatuses, //entranceStatuses,
+	// 	SharedEntrances:    data.SharedEntrances,  // sharedEntrances,
+	// }
+
+	// return &AppStateLatestData{
+	// 	Type:    AppStateLatest,
+	// 	Version: version,
+	// 	Status:  status}, source
 }
 
 // NewAppInfoLatestData creates a new app info latest data structure

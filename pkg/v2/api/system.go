@@ -7,8 +7,8 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
-	"strings"
 	"os"
+	"strings"
 	"time"
 
 	"market/internal/v2/appinfo"
@@ -1119,8 +1119,8 @@ func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
 
 		entranceUrls := make(map[string]string)
 		entranceInvisible := make(map[string]bool)
-		for _, entrance := range app.Spec.Entrances {
-			entranceUrls[entrance.Name] = entrance.Url
+		for _, entrance := range app.Spec.EntranceStatuses {
+			entranceUrls[entrance.Name] = entrance.URL
 			entranceInvisible[entrance.Name] = entrance.Invisible
 		}
 
@@ -1144,55 +1144,14 @@ func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			invisible := entranceInvisible[es.Name]
-
-			stateData.Status.EntranceStatuses = append(stateData.Status.EntranceStatuses, struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-				Host       string `json:"host,omitempty"`
-				Port       int32  `json:"port"`
-				Title      string `json:"title,omitempty"`
-				Icon       string `json:"icon,omitempty"`
-				AuthLevel  string `json:"authLevel,omitempty"`
-				OpenMethod string `json:"openMethod,omitempty"`
-			}{
-				ID:         id,
-				Name:       es.Name,
-				State:      es.State,
-				StatusTime: es.StatusTime,
-				Reason:     es.Reason,
-				Url:        url,
-				Invisible:  invisible,
-			})
+			es.ID = id
+			es.Url = url
+			es.Invisible = invisible
+			stateData.Status.EntranceStatuses = append(stateData.Status.EntranceStatuses, es)
 		}
 
 		for _, se := range app.Spec.SharedEntrances {
-			stateData.Status.SharedEntrances = append(stateData.Status.SharedEntrances, struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			}{
-				Name:      se.Name,
-				Host:      se.Host,
-				Port:      se.Port,
-				Icon:      se.Icon,
-				Title:     se.Title,
-				AuthLevel: se.AuthLevel,
-				Invisible: se.Invisible,
-				URL:       se.URL,
-			})
+			stateData.Status.SharedEntrances = append(stateData.Status.SharedEntrances, se)
 		}
 
 		sourceID := app.Spec.Settings.MarketSource
