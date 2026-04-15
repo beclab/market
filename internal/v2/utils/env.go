@@ -9,3 +9,7 @@ func GetEnvOrDefault(key, defaultValue string) string {
 	}
 	return defaultValue
 }
+
+func GetEnv(key string) string {
+	return os.Getenv(key)
+}

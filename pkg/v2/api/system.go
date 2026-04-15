@@ -8,11 +8,13 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
+	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
 	"github.com/emicklei/go-restful/v3"
@@ -227,10 +229,10 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 
 	appServiceHost := "127.0.0.1"
 	appServicePort := "8080"
-	if host := getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+	if host := utils.GetEnv("APP_SERVICE_SERVICE_HOST"); host != "" {
 		appServiceHost = host
 	}
-	if port := getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+	if port := utils.GetEnv("APP_SERVICE_SERVICE_PORT"); port != "" {
 		appServicePort = port
 	}
 
@@ -410,10 +412,6 @@ func doGetUsers(cm *appinfo.CacheManager) ([]map[string]string, error) {
 	return cm.ListActiveUsers(), nil
 }
 
-func getenv(key string) string {
-	return os.Getenv(key)
-}
-
 // openApp handles POST /api/v2/apps/open
 func (s *Server) openApp(w http.ResponseWriter, r *http.Request) {
 	glog.V(2).Info("POST /api/v2/apps/open - Opening application")
@@ -555,10 +553,10 @@ func getAppVersionHistory(appName string) ([]*VersionInfo, error) {
 	// Use appService address like getSystemStatus
 	appServiceHost := "127.0.0.1"
 	appServicePort := "8080"
-	if host := getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+	if host := utils.GetEnv("APP_SERVICE_SERVICE_HOST"); host != "" {
 		appServiceHost = host
 	}
-	if port := getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+	if port := utils.GetEnv("APP_SERVICE_SERVICE_PORT"); port != "" {
 		appServicePort = port
 	}
 
@@ -1071,4 +1069,128 @@ func processSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 
 	// Call payment module function for business logic processing
 	return paymentnew.ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)
+}
+
+// getAppClones handles GET /api/v2/apps/clones?appName=xxx
+func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
+	glog.V(2).Info("GET /api/v2/apps/clones - Getting app clones")
+
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		glog.Errorf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+
+	appName := r.URL.Query().Get("appName")
+	if appName == "" {
+		s.sendResponse(w, http.StatusBadRequest, false, "appName parameter is required", nil)
+		return
+	}
+	glog.V(2).Infof("Querying clones for appName: %s, excluding user: %s", appName, userID)
+
+	apps, err := utils.FetchAllAppsFromAppService()
+	if err != nil {
+		glog.Errorf("Failed to fetch apps from app-service: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to fetch apps from app-service", nil)
+		return
+	}
+
+	sourcesMap := make(map[string]*FilteredSourceDataForState)
+
+	for _, app := range apps {
+		if app.Spec.Owner == userID {
+			continue
+		}
+		if app.Spec.Settings.Source != "market" {
+			continue
+		}
+		if app.Spec.RawAppName != appName {
+			continue
+		}
+		if app.Spec.Name == app.Spec.RawAppName {
+			continue
+		}
+
+		entranceUrls := make(map[string]string)
+		entranceInvisible := make(map[string]bool)
+		specEntrance := make(map[string]types.AppStateLatestDataEntrances)
+		for _, entrance := range app.Spec.EntranceStatuses {
+			entranceUrls[entrance.Name] = entrance.Url
+			entranceInvisible[entrance.Name] = entrance.Invisible
+			specEntrance[entrance.Name] = entrance
+		}
+
+		stateData := &types.AppStateLatestData{
+			Status: &types.AppStateLatestDataSpec{},
+		}
+		stateData.Type = types.AppStateLatest
+		stateData.Version = app.Spec.Settings.Version
+		stateData.Status.Name = app.Spec.Name
+		stateData.Status.RawAppName = app.Spec.RawAppName
+		stateData.Status.Title = app.Spec.Settings.Title
+		stateData.Status.State = app.Status.State
+		stateData.Status.UpdateTime = app.Status.UpdateTime
+		stateData.Status.StatusTime = app.Status.StatusTime
+		stateData.Status.LastTransitionTime = app.Status.LastTransitionTime
+
+		if len(app.Status.EntranceStatuses) > 0 {
+			for _, es := range app.Status.EntranceStatuses {
+				specEs := specEntrance[es.Name]
+				url := specEs.Url
+				id := ""
+				if url != "" {
+					if parts := strings.Split(url, "."); len(parts) > 0 {
+						id = parts[0]
+					}
+				}
+
+				stateData.Status.EntranceStatuses = append(stateData.Status.EntranceStatuses, types.AppStateLatestDataEntrances{
+					ID:         id,
+					Name:       es.Name,
+					Host:       specEs.Host,
+					Port:       specEs.Port,
+					Icon:       specEs.Icon,
+					Title:      specEs.Title,
+					AuthLevel:  specEs.AuthLevel,
+					State:      es.State,
+					StatusTime: es.StatusTime,
+					Reason:     es.Reason,
+					Url:        url,
+					Invisible:  specEs.Invisible,
+				})
+			}
+		}
+
+		if len(app.Spec.SharedEntrances) > 0 {
+			for _, se := range app.Spec.SharedEntrances {
+				stateData.Status.SharedEntrances = append(stateData.Status.SharedEntrances, se)
+			}
+		}
+
+		sourceID := app.Spec.Settings.MarketSource
+		if sourceID == "" {
+			sourceID = "market"
+		}
+
+		if sourcesMap[sourceID] == nil {
+			sourcesMap[sourceID] = &FilteredSourceDataForState{
+				Type:           types.SourceDataTypeRemote,
+				AppStateLatest: make([]*types.AppStateLatestData, 0),
+			}
+		}
+		sourcesMap[sourceID].AppStateLatest = append(sourcesMap[sourceID].AppStateLatest, stateData)
+	}
+
+	responseData := MarketStateResponse{
+		UserData: &FilteredUserDataForState{
+			Sources: sourcesMap,
+		},
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
+	}
+
+	glog.V(2).Infof("App clones retrieved for user: %s, appName: %s, sources: %d", userID, appName, len(sourcesMap))
+	s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", responseData)
 }
