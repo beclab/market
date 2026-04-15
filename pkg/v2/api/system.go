@@ -7,12 +7,14 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"strings"
 	"os"
 	"time"
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
+	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
 	"github.com/emicklei/go-restful/v3"
@@ -1071,4 +1073,188 @@ func processSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 
 	// Call payment module function for business logic processing
 	return paymentnew.ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)
+}
+
+// getAppClones handles GET /api/v2/apps/clones?appName=xxx
+func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
+	glog.V(2).Info("GET /api/v2/apps/clones - Getting app clones")
+
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		glog.Errorf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+
+	appName := r.URL.Query().Get("appName")
+	if appName == "" {
+		s.sendResponse(w, http.StatusBadRequest, false, "appName parameter is required", nil)
+		return
+	}
+	glog.V(2).Infof("Querying clones for appName: %s, excluding user: %s", appName, userID)
+
+	apps, err := fetchAllAppsFromAppService()
+	if err != nil {
+		glog.Errorf("Failed to fetch apps from app-service: %v", err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to fetch apps from app-service", nil)
+		return
+	}
+
+	sourcesMap := make(map[string]*FilteredSourceDataForState)
+
+	for _, app := range apps {
+		if app.Spec.Owner == userID {
+			continue
+		}
+		if app.Spec.Settings.Source != "market" {
+			continue
+		}
+		if app.Spec.RawAppName != appName {
+			continue
+		}
+		if app.Spec.Name == app.Spec.RawAppName {
+			continue
+		}
+
+		entranceUrls := make(map[string]string)
+		entranceInvisible := make(map[string]bool)
+		for _, entrance := range app.Spec.Entrances {
+			entranceUrls[entrance.Name] = entrance.Url
+			entranceInvisible[entrance.Name] = entrance.Invisible
+		}
+
+		stateData := &types.AppStateLatestData{}
+		stateData.Type = types.AppStateLatest
+		stateData.Version = app.Spec.Settings.Version
+		stateData.Status.Name = app.Spec.Name
+		stateData.Status.RawAppName = app.Spec.RawAppName
+		stateData.Status.Title = app.Spec.Settings.Title
+		stateData.Status.State = app.Status.State
+		stateData.Status.UpdateTime = app.Status.UpdateTime
+		stateData.Status.StatusTime = app.Status.StatusTime
+		stateData.Status.LastTransitionTime = app.Status.LastTransitionTime
+
+		for _, es := range app.Status.EntranceStatuses {
+			url := entranceUrls[es.Name]
+			id := ""
+			if url != "" {
+				if parts := strings.Split(url, "."); len(parts) > 0 {
+					id = parts[0]
+				}
+			}
+			invisible := entranceInvisible[es.Name]
+
+			stateData.Status.EntranceStatuses = append(stateData.Status.EntranceStatuses, struct {
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				State      string `json:"state"`
+				StatusTime string `json:"statusTime"`
+				Reason     string `json:"reason"`
+				Url        string `json:"url"`
+				Invisible  bool   `json:"invisible"`
+				Host       string `json:"host,omitempty"`
+				Port       int32  `json:"port"`
+				Title      string `json:"title,omitempty"`
+				Icon       string `json:"icon,omitempty"`
+				AuthLevel  string `json:"authLevel,omitempty"`
+				OpenMethod string `json:"openMethod,omitempty"`
+			}{
+				ID:         id,
+				Name:       es.Name,
+				State:      es.State,
+				StatusTime: es.StatusTime,
+				Reason:     es.Reason,
+				Url:        url,
+				Invisible:  invisible,
+			})
+		}
+
+		for _, se := range app.Spec.SharedEntrances {
+			stateData.Status.SharedEntrances = append(stateData.Status.SharedEntrances, struct {
+				Name            string `json:"name"`
+				Host            string `json:"host"`
+				Port            int32  `json:"port"`
+				Icon            string `json:"icon,omitempty"`
+				Title           string `json:"title,omitempty"`
+				AuthLevel       string `json:"authLevel,omitempty"`
+				Invisible       bool   `json:"invisible,omitempty"`
+				URL             string `json:"url,omitempty"`
+				OpenMethod      string `json:"openMethod,omitempty"`
+				WindowPushState bool   `json:"windowPushState,omitempty"`
+				Skip            bool   `json:"skip,omitempty"`
+			}{
+				Name:      se.Name,
+				Host:      se.Host,
+				Port:      se.Port,
+				Icon:      se.Icon,
+				Title:     se.Title,
+				AuthLevel: se.AuthLevel,
+				Invisible: se.Invisible,
+				URL:       se.URL,
+			})
+		}
+
+		sourceID := app.Spec.Settings.MarketSource
+		if sourceID == "" {
+			sourceID = "market"
+		}
+
+		if sourcesMap[sourceID] == nil {
+			sourcesMap[sourceID] = &FilteredSourceDataForState{
+				Type:           types.SourceDataTypeRemote,
+				AppStateLatest: make([]*types.AppStateLatestData, 0),
+			}
+		}
+		sourcesMap[sourceID].AppStateLatest = append(sourcesMap[sourceID].AppStateLatest, stateData)
+	}
+
+	responseData := MarketStateResponse{
+		UserData: &FilteredUserDataForState{
+			Sources: sourcesMap,
+		},
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
+	}
+
+	glog.V(2).Infof("App clones retrieved for user: %s, appName: %s, sources: %d", userID, appName, len(sourcesMap))
+	s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", responseData)
+}
+
+// fetchAllAppsFromAppService fetches all apps from app-service /app-service/v1/all/apps
+func fetchAllAppsFromAppService() ([]utils.AppServiceResponse, error) {
+	appServiceHost := "127.0.0.1"
+	appServicePort := "8080"
+	if host := getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+		appServiceHost = host
+	}
+	if port := getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+		appServicePort = port
+	}
+
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", appServiceHost, appServicePort)
+	glog.V(2).Infof("Fetching all apps from: %s", url)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from app-service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("app-service returned status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var apps []utils.AppServiceResponse
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return nil, fmt.Errorf("failed to parse app-service response: %v", err)
+	}
+
+	return apps, nil
 }

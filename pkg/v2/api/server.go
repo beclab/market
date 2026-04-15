@@ -93,6 +93,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps", s.getAppsInfo).Methods("POST")
 	glog.V(3).Info("Route configured: POST /app-store/api/v2/apps")
 
+	// 2.1 Get clone apps installed by other admins
+	api.HandleFunc("/apps/clones", s.getAppClones).Methods("GET")
+	glog.V(3).Info("Route configured: GET /app-store/api/v2/apps/clones")
+
 	// 3. Get rendered installation package for specific application (single app only)
 	api.HandleFunc("/apps/{id}/package", s.getAppPackage).Methods("GET")
 	glog.V(3).Info("Route configured: GET /app-store/api/v2/apps/{id}/package")

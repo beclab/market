@@ -330,109 +330,19 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 	var convertedResponses []utils.AppServiceResponse
 
 	for _, middleware := range middlewareResp.Data {
-		// Convert middleware to AppServiceResponse format
-		converted := utils.AppServiceResponse{
-			Metadata: struct {
-				Name      string `json:"name"`
-				UID       string `json:"uid"`
-				Namespace string `json:"namespace"`
-			}{
-				Name:      middleware.Metadata.Name,
-				UID:       middleware.UUID,
-				Namespace: middleware.Namespace,
-			},
-			Spec: struct {
-				Name       string `json:"name"`
-				RawAppName string `json:"rawAppName"`
-				AppID      string `json:"appid"`
-				IsSysApp   bool   `json:"isSysApp"`
-				Owner      string `json:"owner"`
-				Icon       string `json:"icon"`
-				Title      string `json:"title"`
-				Source     string `json:"source"`
-				Entrances  []struct {
-					Name      string `json:"name"`
-					Url       string `json:"url"`
-					Invisible bool   `json:"invisible"`
-				} `json:"entrances"`
-				Settings struct {
-					ClusterScoped   string `json:"clusterScoped"`
-					MobileSupported string `json:"mobileSupported"`
-					Policy          string `json:"policy"`
-					RequiredGPU     string `json:"requiredGPU"`
-					Source          string `json:"source"`
-					MarketSource    string `json:"market_source"`
-					Target          string `json:"target"`
-					Title           string `json:"title"`
-					Version         string `json:"version"`
-				} `json:"settings"`
-			}{
-				Name:   middleware.Metadata.Name,
-				AppID:  middleware.Metadata.Name,
-				Owner:  middleware.User,
-				Icon:   "",
-				Title:  middleware.Title,
-				Source: "middleware",
-				Entrances: []struct {
-					Name      string `json:"name"`
-					Url       string `json:"url"`
-					Invisible bool   `json:"invisible"`
-				}{},
-			},
-			Status: struct {
-				State              string `json:"state"`
-				UpdateTime         string `json:"updateTime"`
-				StatusTime         string `json:"statusTime"`
-				LastTransitionTime string `json:"lastTransitionTime"`
-				EntranceStatuses   []struct {
-					ID         string `json:"id"`
-					Name       string `json:"name"`
-					State      string `json:"state"`
-					StatusTime string `json:"statusTime"`
-					Reason     string `json:"reason"`
-					Url        string `json:"url"`
-				} `json:"entranceStatuses"`
-				SharedEntrances []struct {
-					Name            string `json:"name"`
-					Host            string `json:"host"`
-					Port            int32  `json:"port"`
-					Icon            string `json:"icon,omitempty"`
-					Title           string `json:"title,omitempty"`
-					AuthLevel       string `json:"authLevel,omitempty"`
-					Invisible       bool   `json:"invisible,omitempty"`
-					URL             string `json:"url,omitempty"`
-					OpenMethod      string `json:"openMethod,omitempty"`
-					WindowPushState bool   `json:"windowPushState,omitempty"`
-					Skip            bool   `json:"skip,omitempty"`
-				} `json:"sharedEntrances,omitempty"`
-			}{
-				State:              middleware.ResourceStatus,
-				UpdateTime:         middleware.UpdateTime,
-				StatusTime:         middleware.UpdateTime, // Use UpdateTime as StatusTime for middlewares
-				LastTransitionTime: middleware.UpdateTime, // Use UpdateTime as LastTransitionTime for middlewares
-				EntranceStatuses: []struct {
-					ID         string `json:"id"`
-					Name       string `json:"name"`
-					State      string `json:"state"`
-					StatusTime string `json:"statusTime"`
-					Reason     string `json:"reason"`
-					Url        string `json:"url"`
-				}{},
-				SharedEntrances: []struct {
-					Name            string `json:"name"`
-					Host            string `json:"host"`
-					Port            int32  `json:"port"`
-					Icon            string `json:"icon,omitempty"`
-					Title           string `json:"title,omitempty"`
-					AuthLevel       string `json:"authLevel,omitempty"`
-					Invisible       bool   `json:"invisible,omitempty"`
-					URL             string `json:"url,omitempty"`
-					OpenMethod      string `json:"openMethod,omitempty"`
-					WindowPushState bool   `json:"windowPushState,omitempty"`
-					Skip            bool   `json:"skip,omitempty"`
-				}{},
-			},
-		}
+		var converted utils.AppServiceResponse
+		converted.Metadata.Name = middleware.Metadata.Name
+		converted.Metadata.UID = middleware.UUID
+		converted.Metadata.Namespace = middleware.Namespace
+		converted.Spec.Name = middleware.Metadata.Name
+		converted.Spec.AppID = middleware.Metadata.Name
+		converted.Spec.Owner = middleware.User
+		converted.Spec.Title = middleware.Title
+		converted.Spec.Source = "middleware"
+		converted.Status.State = middleware.ResourceStatus
+		converted.Status.UpdateTime = middleware.UpdateTime
+		converted.Status.StatusTime = middleware.UpdateTime
+		converted.Status.LastTransitionTime = middleware.UpdateTime
 
 		convertedResponses = append(convertedResponses, converted)
 	}
