@@ -1183,13 +1183,10 @@ func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
 		sourcesMap[sourceID].AppStateLatest = append(sourcesMap[sourceID].AppStateLatest, stateData)
 	}
 
-	responseData := MarketStateResponse{
-		UserData: &FilteredUserDataForState{
-			Sources: sourcesMap,
-		},
-		UserID:    userID,
-		Timestamp: time.Now().Unix(),
-	}
+	responseData := BuildCrossUserClonesStateResponse(CrossUserClonesStateView{
+		ViewerUserID: userID,
+		Sources:      sourcesMap,
+	})
 
 	glog.V(2).Infof("App clones retrieved for user: %s, appName: %s, sources: %d", userID, appName, len(sourcesMap))
 	s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", responseData)
