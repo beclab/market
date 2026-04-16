@@ -50,19 +50,10 @@ func buildCrossUserClonesStateResult(input StateResultInput) MarketStateResponse
 	sources := make(map[string]*FilteredSourceDataForState)
 
 	for _, app := range input.CloneApps {
-		if app == nil || app.Spec == nil || app.Status == nil || app.Spec.Settings == nil {
+		if app == nil || app.Status == nil {
 			continue
 		}
-		if app.Spec.Owner == input.ViewerUserID {
-			continue
-		}
-		if app.Spec.Settings.Source != types.AppSourceMarket {
-			continue
-		}
-		if app.Spec.RawAppName != input.CloneAppName {
-			continue
-		}
-		if app.Spec.Name == app.Spec.RawAppName {
+		if !isOtherAdminCloneApp(app, input.ViewerUserID, input.CloneAppName) {
 			continue
 		}
 
@@ -83,6 +74,31 @@ func buildCrossUserClonesStateResult(input StateResultInput) MarketStateResponse
 
 	// Keep current business semantics: clones response does not expose hash.
 	return buildStateResultBase(input.ViewerUserID, sources, "", input.Timestamp)
+}
+
+// isOtherAdminCloneApp checks whether the app is a clone instance
+// owned by another admin for the given target raw app name.
+func isOtherAdminCloneApp(
+	app *utils.AppServiceResponse,
+	viewerUserID string,
+	targetRawAppName string,
+) bool {
+	if app == nil || app.Spec == nil || app.Spec.Settings == nil {
+		return false
+	}
+	if app.Spec.Owner == viewerUserID {
+		return false
+	}
+	if app.Spec.Settings.Source != types.AppSourceMarket {
+		return false
+	}
+	if app.Spec.RawAppName != targetRawAppName {
+		return false
+	}
+	if app.Spec.Name == app.Spec.RawAppName {
+		return false
+	}
+	return true
 }
 
 func buildCloneAppStateData(app *utils.AppServiceResponse) *types.AppStateLatestData {
