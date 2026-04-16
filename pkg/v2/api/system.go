@@ -8,13 +8,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
-	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
 	"github.com/emicklei/go-restful/v3"
@@ -1097,98 +1095,13 @@ func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sourcesMap := make(map[string]*FilteredSourceDataForState)
-
-	for _, app := range apps {
-		if app.Spec.Owner == userID {
-			continue
-		}
-		if app.Spec.Settings.Source != "market" {
-			continue
-		}
-		if app.Spec.RawAppName != appName {
-			continue
-		}
-		if app.Spec.Name == app.Spec.RawAppName {
-			continue
-		}
-
-		entranceUrls := make(map[string]string)
-		entranceInvisible := make(map[string]bool)
-		specEntrance := make(map[string]types.AppStateLatestDataEntrances)
-		for _, entrance := range app.Spec.EntranceStatuses {
-			entranceUrls[entrance.Name] = entrance.Url
-			entranceInvisible[entrance.Name] = entrance.Invisible
-			specEntrance[entrance.Name] = entrance
-		}
-
-		stateData := &types.AppStateLatestData{
-			Status: &types.AppStateLatestDataSpec{},
-		}
-		stateData.Type = types.AppStateLatest
-		stateData.Version = app.Spec.Settings.Version
-		stateData.Status.Name = app.Spec.Name
-		stateData.Status.RawAppName = app.Spec.RawAppName
-		stateData.Status.Title = app.Spec.Settings.Title
-		stateData.Status.State = app.Status.State
-		stateData.Status.UpdateTime = app.Status.UpdateTime
-		stateData.Status.StatusTime = app.Status.StatusTime
-		stateData.Status.LastTransitionTime = app.Status.LastTransitionTime
-
-		if len(app.Status.EntranceStatuses) > 0 {
-			for _, es := range app.Status.EntranceStatuses {
-				specEs := specEntrance[es.Name]
-				url := specEs.Url
-				id := ""
-				if url != "" {
-					if parts := strings.Split(url, "."); len(parts) > 0 {
-						id = parts[0]
-					}
-				}
-
-				stateData.Status.EntranceStatuses = append(stateData.Status.EntranceStatuses, types.AppStateLatestDataEntrances{
-					ID:         id,
-					Name:       es.Name,
-					Host:       specEs.Host,
-					Port:       specEs.Port,
-					Icon:       specEs.Icon,
-					Title:      specEs.Title,
-					AuthLevel:  specEs.AuthLevel,
-					State:      es.State,
-					StatusTime: es.StatusTime,
-					Reason:     es.Reason,
-					Url:        url,
-					Invisible:  specEs.Invisible,
-				})
-			}
-		}
-
-		if len(app.Spec.SharedEntrances) > 0 {
-			for _, se := range app.Spec.SharedEntrances {
-				stateData.Status.SharedEntrances = append(stateData.Status.SharedEntrances, se)
-			}
-		}
-
-		sourceID := app.Spec.Settings.MarketSource
-		if sourceID == "" {
-			sourceID = "market"
-		}
-
-		if sourcesMap[sourceID] == nil {
-			sourcesMap[sourceID] = &FilteredSourceDataForState{
-				Type:           types.SourceDataTypeRemote,
-				AppStateLatest: make([]*types.AppStateLatestData, 0),
-			}
-		}
-		sourcesMap[sourceID].AppStateLatest = append(sourcesMap[sourceID].AppStateLatest, stateData)
-	}
-
 	responseData := BuildStateResult(StateResultInput{
 		Scene:        StateResultSceneCrossUserClones,
 		ViewerUserID: userID,
-		Sources:      sourcesMap,
+		CloneAppName: appName,
+		CloneApps:    apps,
 	})
 
-	glog.V(2).Infof("App clones retrieved for user: %s, appName: %s, sources: %d", userID, appName, len(sourcesMap))
+	glog.V(2).Infof("App clones retrieved for user: %s, appName: %s, sources: %d", userID, appName, len(responseData.UserData.Sources))
 	s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", responseData)
 }

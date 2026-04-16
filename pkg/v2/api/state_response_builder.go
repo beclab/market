@@ -1,6 +1,12 @@
 package api
 
-import "time"
+import (
+	"strings"
+	"time"
+
+	"market/internal/v2/types"
+	"market/internal/v2/utils"
+)
 
 // StateResultScene represents the business scene of state response.
 type StateResultScene string
@@ -18,6 +24,8 @@ type StateResultInput struct {
 	ViewerUserID string
 	Sources      map[string]*FilteredSourceDataForState
 	Hash         string
+	CloneAppName string
+	CloneApps    []*utils.AppServiceResponse
 	Timestamp    int64
 }
 
@@ -39,8 +47,97 @@ func buildCurrentAppsStateResult(input StateResultInput) MarketStateResponse {
 }
 
 func buildCrossUserClonesStateResult(input StateResultInput) MarketStateResponse {
+	sources := make(map[string]*FilteredSourceDataForState)
+
+	for _, app := range input.CloneApps {
+		if app == nil || app.Spec == nil || app.Status == nil || app.Spec.Settings == nil {
+			continue
+		}
+		if app.Spec.Owner == input.ViewerUserID {
+			continue
+		}
+		if app.Spec.Settings.Source != "market" {
+			continue
+		}
+		if app.Spec.RawAppName != input.CloneAppName {
+			continue
+		}
+		if app.Spec.Name == app.Spec.RawAppName {
+			continue
+		}
+
+		stateData := buildCloneAppStateData(app)
+		sourceID := app.Spec.Settings.MarketSource
+		if sourceID == "" {
+			sourceID = "market"
+		}
+
+		if sources[sourceID] == nil {
+			sources[sourceID] = &FilteredSourceDataForState{
+				Type:           types.SourceDataTypeRemote,
+				AppStateLatest: make([]*types.AppStateLatestData, 0),
+			}
+		}
+		sources[sourceID].AppStateLatest = append(sources[sourceID].AppStateLatest, stateData)
+	}
+
 	// Keep current business semantics: clones response does not expose hash.
-	return buildStateResultBase(input.ViewerUserID, input.Sources, "", input.Timestamp)
+	return buildStateResultBase(input.ViewerUserID, sources, "", input.Timestamp)
+}
+
+func buildCloneAppStateData(app *utils.AppServiceResponse) *types.AppStateLatestData {
+	specEntrance := make(map[string]types.AppStateLatestDataEntrances)
+	for _, entrance := range app.Spec.EntranceStatuses {
+		specEntrance[entrance.Name] = entrance
+	}
+
+	stateData := &types.AppStateLatestData{
+		Type:    types.AppStateLatest,
+		Version: app.Spec.Settings.Version,
+		Status: &types.AppStateLatestDataSpec{
+			AppStateLatestDataSpecMetadata: types.AppStateLatestDataSpecMetadata{
+				Name:               app.Spec.Name,
+				RawAppName:         app.Spec.RawAppName,
+				Title:              app.Spec.Settings.Title,
+				State:              app.Status.State,
+				UpdateTime:         app.Status.UpdateTime,
+				StatusTime:         app.Status.StatusTime,
+				LastTransitionTime: app.Status.LastTransitionTime,
+			},
+		},
+	}
+
+	for _, es := range app.Status.EntranceStatuses {
+		specEs := specEntrance[es.Name]
+		url := specEs.Url
+		id := ""
+		if url != "" {
+			if parts := strings.Split(url, "."); len(parts) > 0 {
+				id = parts[0]
+			}
+		}
+
+		stateData.Status.EntranceStatuses = append(stateData.Status.EntranceStatuses, types.AppStateLatestDataEntrances{
+			ID:         id,
+			Name:       es.Name,
+			Host:       specEs.Host,
+			Port:       specEs.Port,
+			Icon:       specEs.Icon,
+			Title:      specEs.Title,
+			AuthLevel:  specEs.AuthLevel,
+			State:      es.State,
+			StatusTime: es.StatusTime,
+			Reason:     es.Reason,
+			Url:        url,
+			Invisible:  specEs.Invisible,
+		})
+	}
+
+	if len(app.Spec.SharedEntrances) > 0 {
+		stateData.Status.SharedEntrances = append(stateData.Status.SharedEntrances, app.Spec.SharedEntrances...)
+	}
+
+	return stateData
 }
 
 func buildStateResultBase(
