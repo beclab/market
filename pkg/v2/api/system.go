@@ -1183,7 +1183,8 @@ func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
 		sourcesMap[sourceID].AppStateLatest = append(sourcesMap[sourceID].AppStateLatest, stateData)
 	}
 
-	responseData := BuildCrossUserClonesStateResponse(CrossUserClonesStateView{
+	responseData := BuildStateResult(StateResultInput{
+		Scene:        StateResultSceneCrossUserClones,
 		ViewerUserID: userID,
 		Sources:      sourcesMap,
 	})

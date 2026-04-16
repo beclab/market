@@ -763,7 +763,8 @@ func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
 		}
 		glog.V(3).Infof("Data filtering took %v for user: %s", time.Since(filterStart), userID)
 
-		responseData := BuildCurrentAppsStateResponse(CurrentAppsStateView{
+		responseData := BuildStateResult(StateResultInput{
+			Scene:        StateResultSceneCurrentApps,
 			ViewerUserID: userID,
 			Hash:         filteredUserData.Hash,
 			Sources:      filteredUserData.Sources,
@@ -868,7 +869,8 @@ func (s *Server) getMarketStateSimple(w http.ResponseWriter, r *http.Request) {
 		}
 		glog.V(3).Infof("Data filtering took %v for user: %s", time.Since(filterStart), userID)
 
-		responseData := BuildCurrentAppsStateResponse(CurrentAppsStateView{
+		responseData := BuildStateResult(StateResultInput{
+			Scene:        StateResultSceneCurrentApps,
 			ViewerUserID: userID,
 			Hash:         filteredUserData.Hash,
 			Sources:      filteredUserData.Sources,
