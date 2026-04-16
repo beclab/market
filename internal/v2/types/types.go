@@ -44,6 +44,13 @@ const (
 	SourceDataTypeRemote SourceDataType = "remote" // Remote source data
 )
 
+// App source constants used by AppStateLatestDataSettings.Source and similar fields.
+const (
+	AppSourceMarket = "market"
+	AppSourceLocal  = "local"
+	AppSourceSystem = "system"
+)
+
 // RecommendData represents data configuration for recommend
 type RecommendData struct {
 	Title       map[string]string `json:"title,omitempty"`

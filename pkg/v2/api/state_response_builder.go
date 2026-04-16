@@ -56,7 +56,7 @@ func buildCrossUserClonesStateResult(input StateResultInput) MarketStateResponse
 		if app.Spec.Owner == input.ViewerUserID {
 			continue
 		}
-		if app.Spec.Settings.Source != "market" {
+		if app.Spec.Settings.Source != types.AppSourceMarket {
 			continue
 		}
 		if app.Spec.RawAppName != input.CloneAppName {
@@ -69,7 +69,7 @@ func buildCrossUserClonesStateResult(input StateResultInput) MarketStateResponse
 		stateData := buildCloneAppStateData(app)
 		sourceID := app.Spec.Settings.MarketSource
 		if sourceID == "" {
-			sourceID = "market"
+			sourceID = types.AppSourceMarket
 		}
 
 		if sources[sourceID] == nil {
