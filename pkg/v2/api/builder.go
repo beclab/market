@@ -50,9 +50,6 @@ func buildCrossUserCloneSources(
 
 		stateData := buildCloneAppStateData(app)
 		sourceID := app.Spec.Settings.MarketSource
-		if sourceID == "" {
-			sourceID = types.AppSourceMarket
-		}
 
 		if sources[sourceID] == nil {
 			sources[sourceID] = &FilteredSourceDataForState{
@@ -73,13 +70,13 @@ func isOtherAdminCloneApp(
 	viewerUserID string,
 	targetRawAppName string,
 ) bool {
-	if app == nil || app.Spec == nil || app.Spec.Settings == nil {
+	if app == nil || app.Spec == nil {
 		return false
 	}
 	if app.Spec.Owner == viewerUserID {
 		return false
 	}
-	if app.Spec.Settings.Source != types.AppSourceMarket {
+	if !strings.HasPrefix(strings.TrimSpace(app.Spec.Settings.MarketSource), types.AppMarketSourcePrefix) {
 		return false
 	}
 	if app.Spec.RawAppName != targetRawAppName {
@@ -134,7 +131,7 @@ func buildCloneAppStateData(app *utils.AppServiceResponse) *types.AppStateLatest
 			State:      es.State,
 			StatusTime: es.StatusTime,
 			Reason:     es.Reason,
-			Url:        url,
+			Url:        specEs.Url,
 			Invisible:  specEs.Invisible,
 		})
 	}

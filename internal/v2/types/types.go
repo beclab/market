@@ -47,8 +47,8 @@ const (
 // App source constants used by AppStateLatestDataSettings.Source and similar fields.
 const (
 	AppSourceMarket = "market"
-	AppSourceLocal  = "local"
-	AppSourceSystem = "system"
+	// AppMarketSourcePrefix is the expected market source prefix, e.g. market.xxx
+	AppMarketSourcePrefix = AppSourceMarket + "."
 )
 
 // RecommendData represents data configuration for recommend
