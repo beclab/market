@@ -8,52 +8,43 @@ import (
 	"market/internal/v2/utils"
 )
 
-// StateResultScene represents the business scene of state response.
-type StateResultScene string
-
-const (
-	// StateResultSceneCurrentApps means state for current user's apps.
-	StateResultSceneCurrentApps StateResultScene = "current_apps"
-	// StateResultSceneCrossUserClones means state for clones owned by other users.
-	StateResultSceneCrossUserClones StateResultScene = "cross_user_clones"
-)
-
-// StateResultInput is the unified input for building state response payloads.
-type StateResultInput struct {
-	Scene        StateResultScene
+type CurrentAppsStateInput struct {
 	ViewerUserID string
 	Sources      map[string]*FilteredSourceDataForState
 	Hash         string
+	Timestamp    int64
+}
+
+type CrossUserClonesStateInput struct {
+	ViewerUserID string
 	CloneAppName string
 	CloneApps    []*utils.AppServiceResponse
 	Timestamp    int64
 }
 
-// BuildStateResult is the single wrapper entry to build state result payload.
-func BuildStateResult(input StateResultInput) MarketStateResponse {
-	switch input.Scene {
-	case StateResultSceneCurrentApps:
-		return buildCurrentAppsStateResult(input)
-	case StateResultSceneCrossUserClones:
-		return buildCrossUserClonesStateResult(input)
-	default:
-		// Defensive fallback to preserve compatibility for unknown scenes.
-		return buildCurrentAppsStateResult(input)
-	}
-}
-
-func buildCurrentAppsStateResult(input StateResultInput) MarketStateResponse {
+func BuildCurrentAppsStateResult(input CurrentAppsStateInput) MarketStateResponse {
 	return buildStateResultBase(input.ViewerUserID, input.Sources, input.Hash, input.Timestamp)
 }
 
-func buildCrossUserClonesStateResult(input StateResultInput) MarketStateResponse {
+func BuildCrossUserClonesStateResult(input CrossUserClonesStateInput) MarketStateResponse {
+	sources := buildCrossUserCloneSources(input.ViewerUserID, input.CloneAppName, input.CloneApps)
+
+	// Keep current business semantics: clones response does not expose hash.
+	return buildStateResultBase(input.ViewerUserID, sources, "", input.Timestamp)
+}
+
+func buildCrossUserCloneSources(
+	viewerUserID string,
+	targetRawAppName string,
+	cloneApps []*utils.AppServiceResponse,
+) map[string]*FilteredSourceDataForState {
 	sources := make(map[string]*FilteredSourceDataForState)
 
-	for _, app := range input.CloneApps {
+	for _, app := range cloneApps {
 		if app == nil || app.Status == nil {
 			continue
 		}
-		if !isOtherAdminCloneApp(app, input.ViewerUserID, input.CloneAppName) {
+		if !isOtherAdminCloneApp(app, viewerUserID, targetRawAppName) {
 			continue
 		}
 
@@ -72,8 +63,7 @@ func buildCrossUserClonesStateResult(input StateResultInput) MarketStateResponse
 		sources[sourceID].AppStateLatest = append(sources[sourceID].AppStateLatest, stateData)
 	}
 
-	// Keep current business semantics: clones response does not expose hash.
-	return buildStateResultBase(input.ViewerUserID, sources, "", input.Timestamp)
+	return sources
 }
 
 // isOtherAdminCloneApp checks whether the app is a clone instance

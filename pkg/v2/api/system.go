@@ -1095,8 +1095,7 @@ func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	responseData := BuildStateResult(StateResultInput{
-		Scene:        StateResultSceneCrossUserClones,
+	responseData := BuildCrossUserClonesStateResult(CrossUserClonesStateInput{
 		ViewerUserID: userID,
 		CloneAppName: appName,
 		CloneApps:    apps,
