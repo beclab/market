@@ -1088,7 +1088,7 @@ func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
 	}
 	glog.V(2).Infof("Querying clones for appName: %s, excluding user: %s", appName, userID)
 
-	apps, err := utils.FetchAllAppsFromAppService()
+	apps, err := utils.ListAllAppStatesFromAppService()
 	if err != nil {
 		glog.Errorf("Failed to fetch apps from app-service: %v", err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to fetch apps from app-service", nil)

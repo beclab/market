@@ -128,7 +128,7 @@ func FindAppInUserDataWithSource(userData *types.UserData, appID string, source 
 	return FindAppInUserData(userData, appID)
 }
 
-func FetchAllAppsFromAppService() ([]*AppServiceResponse, error) {
+func ListAllAppStatesFromAppService() ([]*AppServiceResponse, error) {
 	appServiceHost := "127.0.0.1"
 	appServicePort := "80"
 	if host := GetEnv("APP_SERVICE_SERVICE_HOST"); host != "" {

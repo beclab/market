@@ -139,7 +139,7 @@ func fetchFromAppService() error {
 
 // fetchAppsFromAppService fetches app data from the app-service
 func fetchAppsFromAppService() error {
-	apps, err := FetchAllAppsFromAppService()
+	apps, err := ListAllAppStatesFromAppService()
 	if err != nil {
 		return fmt.Errorf("failed to parse app-service response: %v", err)
 	}
@@ -447,7 +447,7 @@ func createMiddlewareStateLatestData(middleware struct {
 
 // FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service
 func FetchAppEntranceUrls(appName string, user string) (map[string]string, error) {
-	apps, err := FetchAllAppsFromAppService()
+	apps, err := ListAllAppStatesFromAppService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse app-service response: %v", err)
 	}

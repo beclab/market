@@ -90,7 +90,7 @@ type DataWatcherState struct {
 	historyModule atomic.Pointer[history.HistoryModule]
 	cacheManager  *CacheManager
 	taskModule    atomic.Pointer[task.TaskModule]
-	dataWatcher   *DataWatcher           // Add data watcher reference for hash calculation
+	dataWatcher   *DataWatcher // Add data watcher reference for hash calculation
 	// Cache for app-service API responses to avoid repeated calls
 	appServiceCache      map[string]map[string]bool // key: "userID:appName", value: map[entranceName]invisible
 	appServiceCacheMutex sync.RWMutex
@@ -175,9 +175,9 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 	dw.appServiceCacheMutex.RUnlock()
 
 	// Fetch from API (no lock held)
-	apps ,err := utils.FetchAllAppsFromAppService()
+	apps, err := utils.ListAllAppStatesFromAppService()
 	if err != nil {
-			return false, fmt.Errorf("failed to fetch from app-service: %v", err)
+		return false, fmt.Errorf("failed to fetch from app-service: %v", err)
 	}
 
 	for _, app := range apps {

@@ -247,7 +247,7 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]*utils.AppServiceResp
 
 // fetchLatestAppsStatus fetches the latest apps status from app-service
 func (scc *StatusCorrectionChecker) fetchLatestAppsStatus() ([]*utils.AppServiceResponse, error) {
-	return utils.FetchAllAppsFromAppService()
+	return utils.ListAllAppStatesFromAppService()
 }
 
 // MiddlewareStatusResponse represents the response structure from middleware status endpoint
