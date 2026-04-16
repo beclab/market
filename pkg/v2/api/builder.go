@@ -76,16 +76,33 @@ func isOtherAdminCloneApp(
 	if app.Spec.Owner == viewerUserID {
 		return false
 	}
-	if !strings.HasPrefix(strings.TrimSpace(app.Spec.Settings.MarketSource), types.AppMarketSourcePrefix) {
+	if !isMarketSourcePrefixed(app.Spec.Settings.MarketSource) {
 		return false
 	}
 	if app.Spec.RawAppName != targetRawAppName {
 		return false
 	}
-	if app.Spec.Name == app.Spec.RawAppName {
+	if !isCloneInstanceName(app.Spec.Name, app.Spec.RawAppName) {
 		return false
 	}
 	return true
+}
+
+// isMarketSourcePrefixed checks whether source uses the market.xxx format.
+func isMarketSourcePrefixed(source string) bool {
+	return strings.HasPrefix(strings.TrimSpace(source), types.AppMarketSourcePrefix)
+}
+
+// isCloneInstanceName checks whether clone instance name follows
+// rawAppName + suffix naming rule.
+func isCloneInstanceName(name string, rawAppName string) bool {
+	if rawAppName == "" || name == "" {
+		return false
+	}
+	if !strings.HasPrefix(name, rawAppName) {
+		return false
+	}
+	return len(name) > len(rawAppName)
 }
 
 func buildCloneAppStateData(app *utils.AppServiceResponse) *types.AppStateLatestData {
