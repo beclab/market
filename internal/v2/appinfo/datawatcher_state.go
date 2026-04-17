@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -92,7 +90,7 @@ type DataWatcherState struct {
 	historyModule atomic.Pointer[history.HistoryModule]
 	cacheManager  *CacheManager
 	taskModule    atomic.Pointer[task.TaskModule]
-	dataWatcher   *DataWatcher           // Add data watcher reference for hash calculation
+	dataWatcher   *DataWatcher // Add data watcher reference for hash calculation
 	// Cache for app-service API responses to avoid repeated calls
 	appServiceCache      map[string]map[string]bool // key: "userID:appName", value: map[entranceName]invisible
 	appServiceCacheMutex sync.RWMutex
@@ -177,39 +175,16 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 	dw.appServiceCacheMutex.RUnlock()
 
 	// Fetch from API (no lock held)
-	host := getEnvOrDefault("APP_SERVICE_SERVICE_HOST", "localhost")
-	port := getEnvOrDefault("APP_SERVICE_SERVICE_PORT", "80")
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
-
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
-	resp, err := client.Get(url)
+	apps, err := utils.ListAllAppStatesFromAppService()
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch from app-service: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("app-service returned status: %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	var apps []utils.AppServiceResponse
-	if err := json.Unmarshal(data, &apps); err != nil {
-		return false, fmt.Errorf("failed to parse app-service response: %v", err)
 	}
 
 	for _, app := range apps {
 		if app.Spec.Name == appName && app.Spec.Owner == userID {
 			var foundInvisible bool
 			var invisibleValue bool
-			for _, specEntrance := range app.Spec.Entrances {
+			for _, specEntrance := range app.Spec.EntranceStatuses {
 				if specEntrance.Name == entranceName {
 					foundInvisible = true
 					invisibleValue = specEntrance.Invisible
@@ -226,7 +201,7 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 			if dw.appServiceCache[cacheKey] == nil {
 				dw.appServiceCache[cacheKey] = make(map[string]bool)
 			}
-			for _, specEntrance := range app.Spec.Entrances {
+			for _, specEntrance := range app.Spec.EntranceStatuses {
 				dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
 			}
 			dw.appServiceCacheMutex.Unlock()

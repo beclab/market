@@ -1,7 +1,12 @@
 package utils
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"market/internal/v2/types"
+	"net/http"
+	"time"
 
 	"github.com/golang/glog"
 )
@@ -121,4 +126,41 @@ func FindAppInUserDataWithSource(userData *types.UserData, appID string, source 
 
 	// If source is not specified, search all sources (fallback to original behavior)
 	return FindAppInUserData(userData, appID)
+}
+
+func ListAllAppStatesFromAppService() ([]*AppServiceResponse, error) {
+	appServiceHost := "127.0.0.1"
+	appServicePort := "80"
+	if host := GetEnv("APP_SERVICE_SERVICE_HOST"); host != "" {
+		appServiceHost = host
+	}
+	if port := GetEnv("APP_SERVICE_SERVICE_PORT"); port != "" {
+		appServicePort = port
+	}
+
+	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", appServiceHost, appServicePort)
+	glog.V(2).Infof("Fetching all apps from: %s", url)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from app-service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("app-service returned status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var apps []*AppServiceResponse
+	if err := json.Unmarshal(data, &apps); err != nil {
+		return nil, fmt.Errorf("failed to parse app-service response: %v", err)
+	}
+
+	return apps, nil
 }

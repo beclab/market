@@ -26,92 +26,22 @@ type AppServiceResponse struct {
 		UID       string `json:"uid"`
 		Namespace string `json:"namespace"`
 	} `json:"metadata"`
-	Spec struct {
-		Name       string `json:"name"`
-		RawAppName string `json:"rawAppName"`
-		AppID      string `json:"appid"`
-		IsSysApp   bool   `json:"isSysApp"`
-		Owner      string `json:"owner"`
-		Icon       string `json:"icon"`
-		Title      string `json:"title"`
-		Source     string `json:"source"`
-		Entrances  []struct {
-			Name      string `json:"name"`
-			Url       string `json:"url"`
-			Invisible bool   `json:"invisible"`
-		} `json:"entrances"`
-		Settings struct {
-			ClusterScoped   string `json:"clusterScoped"`
-			MobileSupported string `json:"mobileSupported"`
-			Policy          string `json:"policy"`
-			RequiredGPU     string `json:"requiredGPU"`
-			Source          string `json:"source"`
-			MarketSource    string `json:"market_source"`
-			Target          string `json:"target"`
-			Title           string `json:"title"`
-			Version         string `json:"version"`
-		} `json:"settings"`
-	} `json:"spec"`
-	Status struct {
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	Spec   *AppServiceResponseSpec         `json:"spec"`
+	Status *types.AppStateLatestDataStatus `json:"status"`
+}
+
+type AppServiceResponseSpec struct {
+	types.AppStateLatestDataSpecMetadata
+	EntranceStatuses []types.AppStateLatestDataEntrances `json:"entrances"`
+	SharedEntrances  []types.AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
+	Settings         *types.AppStateLatestDataSettings   `json:"settings,omitempty"`
 }
 
 // AppInfo represents the extracted app information
 type AppInfo struct {
-	User   string `json:"user"`
-	App    string `json:"app"`
-	Status struct {
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	User   string                          `json:"user"`
+	App    string                          `json:"app"`
+	Status *types.AppStateLatestDataStatus `json:"status"`
 }
 
 // Global variable to store extracted users
@@ -184,7 +114,7 @@ func readLocalAppState() error {
 		return fmt.Errorf("failed to read app-state.json: %v", err)
 	}
 
-	var apps []AppServiceResponse
+	var apps []*AppServiceResponse
 	if err := json.Unmarshal(data, &apps); err != nil {
 		return fmt.Errorf("failed to parse app-state.json: %v", err)
 	}
@@ -209,40 +139,8 @@ func fetchFromAppService() error {
 
 // fetchAppsFromAppService fetches app data from the app-service
 func fetchAppsFromAppService() error {
-	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	if host == "" {
-		host = "localhost" // Default fallback
-	}
-	if port == "" {
-		port = "80" // Default fallback
-	}
-
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
-	glog.Infof("Fetching app data from: %s", url)
-
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Get(url)
+	apps, err := ListAllAppStatesFromAppService()
 	if err != nil {
-		return fmt.Errorf("failed to fetch from app-service: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("app-service returned status: %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	var apps []AppServiceResponse
-	if err := json.Unmarshal(data, &apps); err != nil {
 		return fmt.Errorf("failed to parse app-service response: %v", err)
 	}
 
@@ -250,7 +148,7 @@ func fetchAppsFromAppService() error {
 }
 
 // processAppData processes the app data and prints the extracted information
-func processAppData(apps []AppServiceResponse) error {
+func processAppData(apps []*AppServiceResponse) error {
 	glog.Infof("Processing app data...Found %d applications", len(apps))
 
 	var appInfos []AppInfo
@@ -549,40 +447,8 @@ func createMiddlewareStateLatestData(middleware struct {
 
 // FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service
 func FetchAppEntranceUrls(appName string, user string) (map[string]string, error) {
-	host := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	port := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	if host == "" {
-		host = "localhost" // Default fallback
-	}
-	if port == "" {
-		port = "80" // Default fallback
-	}
-
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", host, port)
-	glog.Infof("Fetching app entrance URLs from: %s for app: %s", url, appName)
-
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Get(url)
+	apps, err := ListAllAppStatesFromAppService()
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch from app-service: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("app-service returned status: %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	var apps []AppServiceResponse
-	if err := json.Unmarshal(data, &apps); err != nil {
 		return nil, fmt.Errorf("failed to parse app-service response: %v", err)
 	}
 
@@ -590,7 +456,7 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 	entranceUrls := make(map[string]string)
 	for _, app := range apps {
 		if app.Spec.Name == appName && app.Spec.Owner == user {
-			for _, entrance := range app.Spec.Entrances {
+			for _, entrance := range app.Spec.EntranceStatuses {
 				if entrance.Url != "" {
 					entranceUrls[entrance.Name] = entrance.Url
 				}
@@ -605,7 +471,7 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 
 // createAppStateLatestData creates AppStateLatestData from AppServiceResponse
 // isStartupProcess indicates whether this is called during startup process
-func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*types.AppStateLatestData, string) {
+func createAppStateLatestData(app *AppServiceResponse, isStartupProcess bool) (*types.AppStateLatestData, string) {
 	data := map[string]interface{}{
 		"name":               app.Spec.Name,
 		"rawAppName":         app.Spec.RawAppName,
@@ -619,7 +485,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	// Create a map of entrance URLs and invisible flags from spec.entrances
 	entranceUrls := make(map[string]string)
 	entranceInvisible := make(map[string]bool)
-	for _, entrance := range app.Spec.Entrances {
+	for _, entrance := range app.Spec.EntranceStatuses {
 		entranceUrls[entrance.Name] = entrance.Url
 		entranceInvisible[entrance.Name] = entrance.Invisible
 	}
@@ -694,7 +560,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 				"title":           se.Title,
 				"authLevel":       se.AuthLevel,
 				"invisible":       se.Invisible,
-				"url":             se.URL,
+				"url":             se.Url,
 				"openMethod":      se.OpenMethod,
 				"windowPushState": se.WindowPushState,
 				"skip":            se.Skip,

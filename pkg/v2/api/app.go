@@ -135,6 +135,12 @@ type MarketStateResponse struct {
 	Timestamp int64                     `json:"timestamp"`
 }
 
+type ClonedAppStateResponse struct {
+	UserData  *FilteredUserDataForState `json:"user_data"`
+	UserID    string                    `json:"user_id"`
+	Timestamp int64                     `json:"timestamp"`
+}
+
 // 1. Get market information
 func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 	glog.V(2).Info("GET /api/v2/market - Getting market information")
@@ -386,6 +392,74 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 
 		s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", res.response)
 	}
+}
+
+// getAppClones handles GET /api/v2/apps/clones?appName=xxx
+func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
+	glog.V(2).Info("GET /api/v2/apps/clones - Getting app clones")
+
+	restfulReq := s.httpToRestfulRequest(r)
+	userID, err := utils.GetUserInfoFromRequest(restfulReq)
+	if err != nil {
+		glog.Errorf("Failed to get user from request: %v", err)
+		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
+		return
+	}
+
+	appName := r.URL.Query().Get("appName")
+	if appName == "" {
+		s.sendResponse(w, http.StatusBadRequest, false, "appName parameter is required", nil)
+		return
+	}
+	glog.V(2).Infof("Querying clones for appName: %s, excluding user: %s", appName, userID)
+
+	userData := s.cacheManager.GetAllUsersData()
+	if userData == nil {
+		s.sendResponse(w, http.StatusBadRequest, false, "cloneApp state not found", nil)
+		return
+	}
+
+	sources := make(map[string]*FilteredSourceDataForState)
+	states := make(map[string][]*types.AppStateLatestData)
+
+	for user, userData := range userData {
+		if user == userID {
+			continue
+		}
+
+		for source, sourceData := range userData.Sources {
+			if isNonMarketSource(source) {
+				continue
+			}
+
+			for _, state := range sourceData.AppStateLatest {
+				if state.Status.RawAppName != appName {
+					continue
+				}
+
+				if isNotCloneInstance(state.Status.Name, state.Status.RawAppName) {
+					continue
+				}
+				state.Status.Owner = user
+				states[source] = append(states[source], state)
+			}
+		}
+	}
+
+	for source, states := range states {
+		sources[source] = &FilteredSourceDataForState{
+			Type:           types.SourceDataTypeRemote,
+			AppStateLatest: states,
+		}
+	}
+
+	s.sendResponse(w, http.StatusOK, true, "Cloned app states retrieved successfully", ClonedAppStateResponse{
+		UserData: &FilteredUserDataForState{
+			Sources: sources,
+		},
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
+	})
 }
 
 // 3. Get rendered installation package for specific application (single app only)

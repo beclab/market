@@ -227,10 +227,10 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 
 	appServiceHost := "127.0.0.1"
 	appServicePort := "8080"
-	if host := getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+	if host := utils.GetEnv("APP_SERVICE_SERVICE_HOST"); host != "" {
 		appServiceHost = host
 	}
-	if port := getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+	if port := utils.GetEnv("APP_SERVICE_SERVICE_PORT"); port != "" {
 		appServicePort = port
 	}
 
@@ -410,10 +410,6 @@ func doGetUsers(cm *appinfo.CacheManager) ([]map[string]string, error) {
 	return cm.ListActiveUsers(), nil
 }
 
-func getenv(key string) string {
-	return os.Getenv(key)
-}
-
 // openApp handles POST /api/v2/apps/open
 func (s *Server) openApp(w http.ResponseWriter, r *http.Request) {
 	glog.V(2).Info("POST /api/v2/apps/open - Opening application")
@@ -555,10 +551,10 @@ func getAppVersionHistory(appName string) ([]*VersionInfo, error) {
 	// Use appService address like getSystemStatus
 	appServiceHost := "127.0.0.1"
 	appServicePort := "8080"
-	if host := getenv("APP_SERVICE_SERVICE_HOST"); host != "" {
+	if host := utils.GetEnv("APP_SERVICE_SERVICE_HOST"); host != "" {
 		appServiceHost = host
 	}
-	if port := getenv("APP_SERVICE_SERVICE_PORT"); port != "" {
+	if port := utils.GetEnv("APP_SERVICE_SERVICE_PORT"); port != "" {
 		appServicePort = port
 	}
 

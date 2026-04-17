@@ -44,6 +44,13 @@ const (
 	SourceDataTypeRemote SourceDataType = "remote" // Remote source data
 )
 
+// App source constants used by AppStateLatestDataSettings.Source and similar fields.
+const (
+	AppSourceMarket = "market"
+	// AppMarketSourcePrefix is the expected market source prefix, e.g. market.xxx
+	AppMarketSourcePrefix = AppSourceMarket + "."
+)
+
 // RecommendData represents data configuration for recommend
 type RecommendData struct {
 	Title       map[string]string `json:"title,omitempty"`
@@ -155,43 +162,74 @@ type AppInfoHistoryData struct {
 
 // AppStateLatestData contains latest app state data
 type AppStateLatestData struct {
-	Type    AppDataType `json:"type"`
-	Version string      `json:"version"` // Version field, cannot be empty
-	Status  struct {
-		Name               string `json:"name"`
-		RawAppName         string `json:"rawAppName"`
-		Title              string `json:"title"`
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		Progress           string `json:"progress"`
-		OpType             string `json:"opType,omitempty"` // Operation type: install, upgrade, uninstall, etc.
-		Message            string `json:"message"`
-		Reason             string `json:"reason"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-			Invisible  bool   `json:"invisible"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	Type    AppDataType             `json:"type"`
+	Version string                  `json:"version"` // Version field, cannot be empty
+	Status  *AppStateLatestDataSpec `json:"status"`
+}
+
+type AppStateLatestDataSpec struct {
+	AppStateLatestDataSpecMetadata
+	EntranceStatuses []AppStateLatestDataEntrances `json:"entranceStatuses"`
+	SharedEntrances  []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
+	Settings         *AppStateLatestDataSettings   `json:"settings,omitempty"`
+}
+
+type AppStateLatestDataSpecMetadata struct {
+	Name               string `json:"name"`
+	RawAppName         string `json:"rawAppName"`
+	AppID              string `json:"appid,omitempty"`
+	IsSysApp           bool   `json:"isSysApp"`
+	Owner              string `json:"owner,omitempty"`
+	Icon               string `json:"icon,omitempty"`
+	Source             string `json:"source,omitempty"`
+	Title              string `json:"title"`
+	State              string `json:"state"`
+	UpdateTime         string `json:"updateTime"`
+	StatusTime         string `json:"statusTime"`
+	LastTransitionTime string `json:"lastTransitionTime"`
+	Progress           string `json:"progress,omitempty"`
+	OpType             string `json:"opType,omitempty"` // Operation type: install, upgrade, uninstall, etc.
+	Message            string `json:"message,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+}
+
+type AppStateLatestDataEntrances struct {
+	ID              string `json:"id,omitempty"` // ID extracted from URL's first segment after splitting by "."
+	Name            string `json:"name"`
+	Host            string `json:"host,omitempty"`
+	Port            int32  `json:"port"`
+	Icon            string `json:"icon,omitempty"`
+	Title           string `json:"title,omitempty"`
+	AuthLevel       string `json:"authLevel,omitempty"`
+	Invisible       bool   `json:"invisible"`
+	Url             string `json:"url,omitempty"`
+	OpenMethod      string `json:"openMethod,omitempty"`
+	WindowPushState bool   `json:"windowPushState,omitempty"`
+	Skip            bool   `json:"skip,omitempty"`
+	State           string `json:"state,omitempty"`
+	StatusTime      string `json:"statusTime,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+type AppStateLatestDataSettings struct {
+	ClusterScoped   string `json:"clusterScoped"`
+	MobileSupported string `json:"mobileSupported"`
+	Policy          string `json:"policy"`
+	RequiredGPU     string `json:"requiredGPU"`
+	Source          string `json:"source"`
+	MarketSource    string `json:"market_source"`
+	Target          string `json:"target"`
+	Title           string `json:"title"`
+	Version         string `json:"version"`
+}
+
+type AppStateLatestDataStatus struct {
+	State              string                        `json:"state"`
+	UpdateTime         string                        `json:"updateTime"`
+	StatusTime         string                        `json:"statusTime"`
+	LastTransitionTime string                        `json:"lastTransitionTime"`
+	EntranceStatuses   []AppStateLatestDataEntrances `json:"entranceStatuses"`
+	SharedEntrances    []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
 }
 
 // AppInfoLatestData contains latest app info data
@@ -680,15 +718,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
 	// Extract status information from data
 	var name, rawAppName, title, state, updateTime, statusTime, lastTransitionTime, progress, opType string
-	var entranceStatuses []struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		State      string `json:"state"`
-		StatusTime string `json:"statusTime"`
-		Reason     string `json:"reason"`
-		Url        string `json:"url"`
-		Invisible  bool   `json:"invisible"`
-	}
+	var entranceStatuses []AppStateLatestDataEntrances
 
 	var statusReason = ""
 	var statusMessage = ""
@@ -747,19 +777,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	}
 
 	// Extract SharedEntrances
-	var sharedEntrances []struct {
-		Name            string `json:"name"`
-		Host            string `json:"host"`
-		Port            int32  `json:"port"`
-		Icon            string `json:"icon,omitempty"`
-		Title           string `json:"title,omitempty"`
-		AuthLevel       string `json:"authLevel,omitempty"`
-		Invisible       bool   `json:"invisible,omitempty"`
-		URL             string `json:"url,omitempty"`
-		OpenMethod      string `json:"openMethod,omitempty"`
-		WindowPushState bool   `json:"windowPushState,omitempty"`
-		Skip            bool   `json:"skip,omitempty"`
-	}
+	var sharedEntrances []AppStateLatestDataEntrances
 
 	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
 	if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
@@ -769,15 +787,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		case []interface{}:
 			glog.V(3).Infof("NewAppStateLatestData - handling []interface{} case, length: %d", len(v))
 			// Handle []interface{} case (from map[string]interface{})
-			entranceStatuses = make([]struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			}, len(v))
+			entranceStatuses = make([]AppStateLatestDataEntrances, len(v))
 
 			for i, entrance := range v {
 				glog.V(3).Infof("NewAppStateLatestData - processing entrance[%d], type: %T, value: %+v", i, entrance, entrance)
@@ -816,15 +826,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		case []map[string]interface{}:
 			glog.V(3).Infof("NewAppStateLatestData - handling []map[string]interface{} case, length: %d", len(v))
 			// Handle []map[string]interface{} case (direct conversion)
-			entranceStatuses = make([]struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			}, len(v))
+			entranceStatuses = make([]AppStateLatestDataEntrances, len(v))
 
 			for i, entranceMap := range v {
 				glog.V(3).Infof("NewAppStateLatestData - processing entranceMap[%d]: %+v", i, entranceMap)
@@ -873,19 +875,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		switch v := sharedEntrancesVal.(type) {
 		case []interface{}:
 			glog.V(3).Infof("NewAppStateLatestData - handling sharedEntrances []interface{} case, length: %d", len(v))
-			sharedEntrances = make([]struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			}, len(v))
+			sharedEntrances = make([]AppStateLatestDataEntrances, len(v))
 
 			for i, entrance := range v {
 				if entranceMap, ok := entrance.(map[string]interface{}); ok {
@@ -911,7 +901,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 						sharedEntrances[i].Invisible = invisible
 					}
 					if url, ok := entranceMap["url"].(string); ok {
-						sharedEntrances[i].URL = url
+						sharedEntrances[i].Url = url
 					}
 					if openMethod, ok := entranceMap["openMethod"].(string); ok {
 						sharedEntrances[i].OpenMethod = openMethod
@@ -926,19 +916,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			}
 		case []map[string]interface{}:
 			glog.V(3).Infof("NewAppStateLatestData - handling sharedEntrances []map[string]interface{} case, length: %d", len(v))
-			sharedEntrances = make([]struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			}, len(v))
+			sharedEntrances = make([]AppStateLatestDataEntrances, len(v))
 
 			for i, entranceMap := range v {
 				if name, ok := entranceMap["name"].(string); ok {
@@ -963,7 +941,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 					sharedEntrances[i].Invisible = invisible
 				}
 				if url, ok := entranceMap["url"].(string); ok {
-					sharedEntrances[i].URL = url
+					sharedEntrances[i].Url = url
 				}
 				if openMethod, ok := entranceMap["openMethod"].(string); ok {
 					sharedEntrances[i].OpenMethod = openMethod
@@ -1008,58 +986,25 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	// 	return nil
 	// }
 
+	var specData = &AppStateLatestDataSpec{}
+	specData.Name = name
+	specData.RawAppName = rawAppName
+	specData.Title = title
+	specData.State = state
+	specData.UpdateTime = updateTime
+	specData.StatusTime = statusTime
+	specData.LastTransitionTime = lastTransitionTime
+	specData.Progress = progress
+	specData.OpType = opType
+	specData.Message = statusMessage
+	specData.Reason = statusReason
+	specData.EntranceStatuses = entranceStatuses
+	specData.SharedEntrances = sharedEntrances
+
 	return &AppStateLatestData{
 		Type:    AppStateLatest,
 		Version: version,
-		Status: struct {
-			Name               string `json:"name"`
-			RawAppName         string `json:"rawAppName"`
-			Title              string `json:"title"`
-			State              string `json:"state"`
-			UpdateTime         string `json:"updateTime"`
-			StatusTime         string `json:"statusTime"`
-			LastTransitionTime string `json:"lastTransitionTime"`
-			Progress           string `json:"progress"`
-			OpType             string `json:"opType,omitempty"`
-			Message            string `json:"message"`
-			Reason             string `json:"reason"`
-			EntranceStatuses   []struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			} `json:"entranceStatuses"`
-			SharedEntrances []struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			} `json:"sharedEntrances,omitempty"`
-		}{
-			Name:               name,
-			RawAppName:         rawAppName,
-			Title:              title,
-			State:              state,
-			UpdateTime:         updateTime,
-			StatusTime:         statusTime,
-			LastTransitionTime: lastTransitionTime,
-			Progress:           progress,
-			OpType:             opType,
-			Message:            statusMessage,
-			Reason:             statusReason,
-			EntranceStatuses:   entranceStatuses,
-			SharedEntrances:    sharedEntrances,
-		},
+		Status:  specData,
 	}, source
 }
 
