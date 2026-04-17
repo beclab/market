@@ -136,7 +136,9 @@ type MarketStateResponse struct {
 }
 
 type ClonedAppStateResponse struct {
-	UserData *FilteredUserDataForState `json:"user_data"`
+	UserData  *FilteredUserDataForState `json:"user_data"`
+	UserID    string                    `json:"user_id"`
+	Timestamp int64                     `json:"timestamp"`
 }
 
 // 1. Get market information
@@ -455,6 +457,8 @@ func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
 		UserData: &FilteredUserDataForState{
 			Sources: sources,
 		},
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
 	})
 }
 
