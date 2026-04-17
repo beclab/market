@@ -1068,39 +1068,3 @@ func processSignatureSubmission(jws, signBody, user, xForwardedHost string) erro
 	// Call payment module function for business logic processing
 	return paymentnew.ProcessSignatureSubmission(jws, signBody, user, xForwardedHost)
 }
-
-// getAppClones handles GET /api/v2/apps/clones?appName=xxx
-func (s *Server) getAppClones(w http.ResponseWriter, r *http.Request) {
-	glog.V(2).Info("GET /api/v2/apps/clones - Getting app clones")
-
-	restfulReq := s.httpToRestfulRequest(r)
-	userID, err := utils.GetUserInfoFromRequest(restfulReq)
-	if err != nil {
-		glog.Errorf("Failed to get user from request: %v", err)
-		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
-		return
-	}
-
-	appName := r.URL.Query().Get("appName")
-	if appName == "" {
-		s.sendResponse(w, http.StatusBadRequest, false, "appName parameter is required", nil)
-		return
-	}
-	glog.V(2).Infof("Querying clones for appName: %s, excluding user: %s", appName, userID)
-
-	apps, err := utils.ListAllAppStatesFromAppService()
-	if err != nil {
-		glog.Errorf("Failed to fetch apps from app-service: %v", err)
-		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to fetch apps from app-service", nil)
-		return
-	}
-
-	responseData := BuildCrossUserClonesStateResult(CrossUserClonesStateInput{
-		ViewerUserID: userID,
-		CloneAppName: appName,
-		CloneApps:    apps,
-	})
-
-	glog.V(2).Infof("App clones retrieved for user: %s, appName: %s, sources: %d", userID, appName, len(responseData.UserData.Sources))
-	s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", responseData)
-}
