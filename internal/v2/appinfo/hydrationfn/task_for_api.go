@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"market/internal/v2/types"
@@ -71,12 +72,19 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		UserName:                 task.UserID,
 	}
 
-	// 4. Send POST request to chart repo with 3 second timeout
+	// 4. Send POST request to chart repo
 	url := "http://" + host + "/chart-repo/api/v2/dcr/sync-app"
 	startTime := time.Now()
 
-	// Set timeout on the client
-	s.client.SetTimeout(3 * time.Second)
+	// Set timeout on the client. Default is 30 seconds because chart-repo's
+	// sync-app endpoint runs the full hydration pipeline synchronously
+	// (chart download, render, image analysis, db update) and can take a
+	// few seconds when the chart is new — even longer when chart-repo is
+	// busy hydrating other sources in the background. The previous 3s
+	// timeout caused first-time installs of new charts to silently fail
+	// even though chart-repo itself completed the work successfully.
+	// Override via MARKET_CHART_REPO_TIMEOUT_SECONDS if needed.
+	s.client.SetTimeout(getChartRepoTimeout())
 
 	resp, err := s.client.R().
 		SetContext(ctx).
@@ -212,4 +220,26 @@ func (s *TaskForApiStep) findPendingDataFromCache(task *HydrationTask) *types.Ap
 // getenv is a helper to get env variable (for testability)
 func getenv(key string) string {
 	return os.Getenv(key)
+}
+
+// defaultChartRepoTimeout is the default timeout for the chart-repo
+// sync-app HTTP call. The endpoint runs the full hydration pipeline
+// synchronously and can take several seconds for new charts.
+const defaultChartRepoTimeout = 30 * time.Second
+
+// getChartRepoTimeout returns the timeout for the chart-repo sync-app
+// HTTP client. Configurable via MARKET_CHART_REPO_TIMEOUT_SECONDS
+// (positive integer in seconds). Falls back to defaultChartRepoTimeout
+// if the env var is unset, empty, or invalid.
+func getChartRepoTimeout() time.Duration {
+	v := getenv("MARKET_CHART_REPO_TIMEOUT_SECONDS")
+	if v == "" {
+		return defaultChartRepoTimeout
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		glog.Warningf("invalid MARKET_CHART_REPO_TIMEOUT_SECONDS=%q, falling back to %s", v, defaultChartRepoTimeout)
+		return defaultChartRepoTimeout
+	}
+	return time.Duration(n) * time.Second
 }
