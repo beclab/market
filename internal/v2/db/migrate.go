@@ -203,10 +203,17 @@ func releaseAdvisoryLock(conn *sql.Conn) {
 
 // gooseLogger adapts goose log output to glog so migration progress shows up
 // alongside the rest of the application logs.
+//
+// Goose's logger.Logger interface only exposes Fatalf and Printf. We map
+// Fatalf to glog.Errorf rather than glog.Fatalf: any unrecoverable issue is
+// already surfaced as an error from goose.UpContext / goose.StatusContext
+// and propagated up to main.go, which decides whether to glog.Exitf. Letting
+// the logger terminate the process here would bypass the graceful-shutdown
+// path in main.
 type gooseLogger struct{}
 
 func (gooseLogger) Fatalf(format string, v ...interface{}) {
-	glog.Fatalf("[goose] "+format, v...)
+	glog.Errorf("[goose] "+format, v...)
 }
 func (gooseLogger) Printf(format string, v ...interface{}) {
 	glog.Infof("[goose] "+format, v...)

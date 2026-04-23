@@ -2,6 +2,7 @@ package utils
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -9,6 +10,18 @@ import (
 func GetEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+// GetEnvIntOrDefault parses an environment variable as an int (using
+// strconv.Atoi). It returns the default when the variable is unset or fails
+// to parse.
+func GetEnvIntOrDefault(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if n, err := strconv.Atoi(value); err == nil {
+			return n
+		}
 	}
 	return defaultValue
 }

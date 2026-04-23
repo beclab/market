@@ -3,8 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 	"time"
 
 	"market/internal/v2/utils"
@@ -53,8 +51,8 @@ func LoadConfigFromEnv() Config {
 		SSLMode:  utils.GetEnvOrDefault("POSTGRES_SSLMODE", "disable"),
 		TimeZone: utils.GetEnvOrDefault("POSTGRES_TIMEZONE", "UTC"),
 
-		MaxOpenConns:    getEnvInt("POSTGRES_MAX_OPEN_CONNS", 25),
-		MaxIdleConns:    getEnvInt("POSTGRES_MAX_IDLE_CONNS", 5),
+		MaxOpenConns:    utils.GetEnvIntOrDefault("POSTGRES_MAX_OPEN_CONNS", 25),
+		MaxIdleConns:    utils.GetEnvIntOrDefault("POSTGRES_MAX_IDLE_CONNS", 5),
 		ConnMaxLifetime: utils.GetEnvDurationOrDefault("POSTGRES_CONN_MAX_LIFETIME", 30*time.Minute),
 		ConnectTimeout:  utils.GetEnvDurationOrDefault("POSTGRES_CONNECT_TIMEOUT", 10*time.Second),
 
@@ -147,12 +145,3 @@ func SetGlobal(db *gorm.DB) { globalDB = db }
 
 // Global returns the singleton *gorm.DB previously installed via SetGlobal.
 func Global() *gorm.DB { return globalDB }
-
-func getEnvInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
-}
