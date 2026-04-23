@@ -17,6 +17,3 @@ type UserAppStateSpec struct{}
 
 // UserAppStateStatus backs user_application_states.status.
 type UserAppStateStatus struct{}
-
-// MarketSourceOthers backs market_sources.others.
-type MarketSourceOthers struct{}

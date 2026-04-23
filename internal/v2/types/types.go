@@ -137,6 +137,15 @@ type Others struct {
 	Tags       []*Tag             `json:"tags"`
 }
 
+// MarketSourceData backs market_sources.data. Embeds Others so the
+// curated lists (topics / pages / tops / ...) sit alongside the
+// per-source mutable bits (apps catalogue snapshot, last-updated stamp).
+type MarketSourceData struct {
+	Apps        []string `json:"apps"`
+	LastUpdated string   `json:"last_updated"`
+	Others
+}
+
 // AppData contains the actual data and metadata
 type AppData struct {
 	Type      AppDataType            `json:"type"`

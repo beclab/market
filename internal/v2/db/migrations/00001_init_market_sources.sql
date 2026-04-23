@@ -21,12 +21,12 @@ CREATE TABLE IF NOT EXISTS market_sources (
     source_type  VARCHAR(16)  NOT NULL CHECK (source_type IN ('local', 'remote')),
     description  TEXT         NOT NULL DEFAULT '',
     priority     INTEGER      NOT NULL DEFAULT 100 CHECK (priority >= 0),
-    others       JSONB,
+    data         JSONB,
     created_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_market_sources_source_id UNIQUE (source_id),
-    CONSTRAINT ck_market_sources_others_object
-        CHECK (others IS NULL OR jsonb_typeof(others) = 'object')
+    CONSTRAINT ck_market_sources_data_object
+        CHECK (data IS NULL OR jsonb_typeof(data) = 'object')
 );
 -- +goose StatementEnd
 
