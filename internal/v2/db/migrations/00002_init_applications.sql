@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS applications (
     app_type           VARCHAR(32)   NOT NULL,
     app_entry          JSONB,
     app_image_analysis JSONB,
+    price              JSONB,
     -- installed_type captures install mode: full / server / client.
     installed_type     VARCHAR(10)   NOT NULL,
     created_at         TIMESTAMP     NOT NULL DEFAULT NOW(),
@@ -32,7 +33,9 @@ CREATE TABLE IF NOT EXISTS applications (
     CONSTRAINT ck_applications_app_entry_object
         CHECK (app_entry IS NULL OR jsonb_typeof(app_entry) = 'object'),
     CONSTRAINT ck_applications_app_image_analysis_object
-        CHECK (app_image_analysis IS NULL OR jsonb_typeof(app_image_analysis) = 'object')
+        CHECK (app_image_analysis IS NULL OR jsonb_typeof(app_image_analysis) = 'object'),
+    CONSTRAINT ck_applications_price_object
+        CHECK (price IS NULL OR jsonb_typeof(price) = 'object')
 );
 -- +goose StatementEnd
 
