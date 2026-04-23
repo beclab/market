@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"market/internal/v2/db"
 )
 
 // downloadRecordLookup is the optional fallback used when the task lookup
@@ -28,7 +30,7 @@ func SetDownloadRecordLookup(fn downloadRecordLookup) { downloadRecordProvider =
 // Returns ("", "", nil) when nothing is known about the app; returns an
 // error only for unexpected failures (database errors other than "no rows").
 func LookupAppInfoLastInstalled(userID, appName string) (string, string, error) {
-	if db := GlobalSqlxDB(); db != nil {
+	if sqlDB := db.GlobalSqlxDB(); sqlDB != nil {
 		const query = `
         SELECT metadata, type
         FROM task_records
@@ -42,7 +44,7 @@ func LookupAppInfoLastInstalled(userID, appName string) (string, string, error) 
 
 		var metadataStr string
 		var taskType int
-		err := db.QueryRow(query, appName, userID,
+		err := sqlDB.QueryRow(query, appName, userID,
 			int(Completed), int(InstallApp), int(UpgradeApp), int(CloneApp),
 		).Scan(&metadataStr, &taskType)
 		switch {

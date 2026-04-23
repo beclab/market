@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"market/internal/v2/db"
@@ -18,41 +17,10 @@ type TaskStore struct {
 	db *sqlx.DB
 }
 
-// globalSqlxOnce / globalSqlx memoise the *sqlx.DB wrapper around the shared
-// pool exposed by package db. Wrapping is cheap (no extra connections), but
-// caching the wrapper keeps a single instance around for the entire process
-// lifetime so callers can compare pointers if they ever need to.
-var (
-	globalSqlxOnce sync.Once
-	globalSqlx     *sqlx.DB
-)
-
-// GlobalSqlxDB returns a *sqlx.DB backed by the shared *gorm.DB connection
-// pool installed at startup via db.SetGlobal. It exists for callers that want
-// to issue raw SQL queries against task-related tables (e.g. appinfo's
-// runtime state inspector) without each opening their own pool.
-//
-// db.Open + db.SetGlobal MUST run before this function; otherwise it returns
-// nil. Callers must NOT close the returned handle.
-func GlobalSqlxDB() *sqlx.DB {
-	globalSqlxOnce.Do(func() {
-		gormDB := db.Global()
-		if gormDB == nil {
-			return
-		}
-		sqlDB, err := gormDB.DB()
-		if err != nil {
-			return
-		}
-		globalSqlx = sqlx.NewDb(sqlDB, "postgres")
-	})
-	return globalSqlx
-}
-
 // NewTaskStore returns a TaskStore that runs against the shared PostgreSQL
 // pool managed by package db. It does NOT open a new connection: the
-// underlying *sql.DB is borrowed from db.Global() and wrapped in sqlx so the
-// existing CRUD code paths continue to work unchanged.
+// underlying *sql.DB is borrowed from db.GlobalSqlxDB() so the existing CRUD
+// code paths continue to work unchanged.
 //
 // Schema (table + indexes) is owned by internal/v2/db migrations (see
 // migrations/00006_init_task_records.sql) and is applied during application
@@ -61,7 +29,7 @@ func NewTaskStore() (*TaskStore, error) {
 	if helper.IsPublicEnvironment() {
 		return nil, fmt.Errorf("task store is disabled in public environment")
 	}
-	xdb := GlobalSqlxDB()
+	xdb := db.GlobalSqlxDB()
 	if xdb == nil {
 		return nil, fmt.Errorf("postgres not initialised; db.Open must run before NewTaskStore")
 	}
