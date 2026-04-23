@@ -12,8 +12,13 @@ import (
 	"github.com/golang/glog"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	gormlogger "gorm.io/gorm/logger"
 )
+
+// defaultGormLogLevel is the gorm logger threshold baked into the binary.
+// Errors and warnings (including slow queries) are always emitted; Info and
+// per-query Trace lines are gated by glog -v levels inside glogGormLogger.
+const defaultGormLogLevel = gormlogger.Warn
 
 // Config holds PostgreSQL connection and pool settings.
 type Config struct {
@@ -31,7 +36,6 @@ type Config struct {
 	ConnectTimeout  time.Duration
 
 	SlowThreshold time.Duration
-	LogLevel      logger.LogLevel
 }
 
 // LoadConfigFromEnv reads PostgreSQL configuration from environment variables,
@@ -51,11 +55,10 @@ func LoadConfigFromEnv() Config {
 
 		MaxOpenConns:    getEnvInt("POSTGRES_MAX_OPEN_CONNS", 25),
 		MaxIdleConns:    getEnvInt("POSTGRES_MAX_IDLE_CONNS", 5),
-		ConnMaxLifetime: getEnvDuration("POSTGRES_CONN_MAX_LIFETIME", 30*time.Minute),
-		ConnectTimeout:  getEnvDuration("POSTGRES_CONNECT_TIMEOUT", 10*time.Second),
+		ConnMaxLifetime: utils.GetEnvDurationOrDefault("POSTGRES_CONN_MAX_LIFETIME", 30*time.Minute),
+		ConnectTimeout:  utils.GetEnvDurationOrDefault("POSTGRES_CONNECT_TIMEOUT", 10*time.Second),
 
-		SlowThreshold: getEnvDuration("POSTGRES_SLOW_THRESHOLD", 200*time.Millisecond),
-		LogLevel:      parseLogLevel(utils.GetEnvOrDefault("POSTGRES_LOG_LEVEL", "warn")),
+		SlowThreshold: utils.GetEnvDurationOrDefault("POSTGRES_SLOW_THRESHOLD", 200*time.Millisecond),
 	}
 }
 
@@ -75,12 +78,7 @@ func (c Config) DSN() string {
 // the default naming strategy in place and rely on the per-model overrides.
 func Open(ctx context.Context, cfg Config) (*gorm.DB, error) {
 	gormCfg := &gorm.Config{
-		Logger: logger.New(&glogWriter{}, logger.Config{
-			SlowThreshold:             cfg.SlowThreshold,
-			LogLevel:                  cfg.LogLevel,
-			IgnoreRecordNotFoundError: true,
-			Colorful:                  false,
-		}),
+		Logger:  newGlogGormLogger(defaultGormLogLevel, cfg.SlowThreshold),
 		NowFunc: func() time.Time { return time.Now().UTC() },
 	}
 
@@ -150,13 +148,6 @@ func SetGlobal(db *gorm.DB) { globalDB = db }
 // Global returns the singleton *gorm.DB previously installed via SetGlobal.
 func Global() *gorm.DB { return globalDB }
 
-// glogWriter adapts gorm logger output to glog.
-type glogWriter struct{}
-
-func (glogWriter) Printf(format string, args ...interface{}) {
-	glog.InfoDepth(1, fmt.Sprintf(format, args...))
-}
-
 func getEnvInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -164,28 +155,4 @@ func getEnvInt(key string, def int) int {
 		}
 	}
 	return def
-}
-
-func getEnvDuration(key string, def time.Duration) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-	}
-	return def
-}
-
-func parseLogLevel(s string) logger.LogLevel {
-	switch s {
-	case "silent":
-		return logger.Silent
-	case "error":
-		return logger.Error
-	case "warn":
-		return logger.Warn
-	case "info":
-		return logger.Info
-	default:
-		return logger.Warn
-	}
 }
