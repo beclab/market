@@ -20,7 +20,6 @@ type Application struct {
 	AppImageAnalysis *JSONB[types.ImageAnalysisResult]  `gorm:"column:app_image_analysis;type:jsonb"`
 	Price            *JSONB[types.PriceConfig]          `gorm:"column:price;type:jsonb"`
 	InstalledType    string                             `gorm:"column:installed_type;size:10;not null"` // full | server | client
-	IsCloned         bool                               `gorm:"column:is_cloned;not null;default:false"`
 	CreatedAt        time.Time                          `gorm:"column:created_at;not null;default:now()"`
 	UpdatedAt        time.Time                          `gorm:"column:updated_at;not null;default:now()"`
 }

@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS applications (
     app_image_analysis JSONB,
     -- installed_type captures install mode: full / server / client.
     installed_type     VARCHAR(10)   NOT NULL,
-    is_cloned          BOOLEAN       NOT NULL DEFAULT FALSE,
     created_at         TIMESTAMP     NOT NULL DEFAULT NOW(),
     updated_at         TIMESTAMP     NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_applications_source_app_version
