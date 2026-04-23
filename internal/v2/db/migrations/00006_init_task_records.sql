@@ -15,10 +15,10 @@ CREATE TABLE IF NOT EXISTS task_records (
     metadata     TEXT         NOT NULL DEFAULT '{}',
     result       TEXT         NOT NULL DEFAULT '',
     error_msg    TEXT         NOT NULL DEFAULT '',
-    created_at   TIMESTAMP    NOT NULL,
-    started_at   TIMESTAMP    NULL,
-    completed_at TIMESTAMP    NULL,
-    updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at   TIMESTAMPTZ    NOT NULL,
+    started_at   TIMESTAMPTZ    NULL,
+    completed_at TIMESTAMPTZ    NULL,
+    updated_at   TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 -- +goose StatementEnd
 

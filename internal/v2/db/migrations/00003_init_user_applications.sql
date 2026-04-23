@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS user_applications (
     -- it is reset to 0 whenever render_status becomes 'success'.
     render_consecutive_failures INTEGER       NOT NULL DEFAULT 0,
     is_upgrade                  BOOLEAN       NOT NULL DEFAULT FALSE,
-    created_at                  TIMESTAMP     NOT NULL DEFAULT NOW(),
-    updated_at                  TIMESTAMP     NOT NULL DEFAULT NOW(),
+    created_at                  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_user_applications_user_app
         UNIQUE (user_id, application_id),
     CONSTRAINT ck_user_applications_app_raw_object

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS history_records (
     app        VARCHAR(255) NOT NULL,
     account    VARCHAR(255) NOT NULL DEFAULT '',
     extended   TEXT                  DEFAULT '',
-    created_at TIMESTAMP             DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ             DEFAULT CURRENT_TIMESTAMP
 );
 -- +goose StatementEnd
 

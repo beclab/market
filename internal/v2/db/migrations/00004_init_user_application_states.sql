@@ -13,8 +13,8 @@ CREATE TABLE IF NOT EXISTS user_application_states (
     progress            VARCHAR(10)   NOT NULL DEFAULT '',
     spec                JSONB,
     status              JSONB,
-    created_at          TIMESTAMP     NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMP     NOT NULL DEFAULT NOW(),
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_user_application_states_ua
         UNIQUE (user_application_id),
     CONSTRAINT ck_user_application_states_spec_object

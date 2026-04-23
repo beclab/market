@@ -15,7 +15,7 @@ import "time"
 //  3. this file
 //
 // Field types intentionally match the legacy schema verbatim:
-//   - Time is a Unix-second BIGINT (not TIMESTAMP).
+//   - Time is a Unix-second BIGINT (not a TIMESTAMPTZ column).
 //   - Type is stored as VARCHAR(100); the typed history.HistoryType alias
 //     lives in the history package and is not used here to avoid an import
 //     cycle (history → db/models → history).

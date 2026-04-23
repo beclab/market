@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS applications (
     price              JSONB,
     -- installed_type captures install mode: full / server / client.
     installed_type     VARCHAR(10)   NOT NULL,
-    created_at         TIMESTAMP     NOT NULL DEFAULT NOW(),
-    updated_at         TIMESTAMP     NOT NULL DEFAULT NOW(),
+    created_at         TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_applications_source_app_version
         UNIQUE (source_id, app_id, app_version),
     CONSTRAINT ck_applications_app_entry_object
