@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"sync"
 	"time"
+
+	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
 	"gorm.io/driver/postgres"
@@ -35,15 +36,18 @@ type Config struct {
 
 // LoadConfigFromEnv reads PostgreSQL configuration from environment variables,
 // falling back to sensible defaults for local development.
+//
+// The defaults match the legacy task / history modules so that all callers
+// hit the same database when POSTGRES_DB is left unset.
 func LoadConfigFromEnv() Config {
 	return Config{
-		Host:     getEnv("POSTGRES_HOST", "localhost"),
-		Port:     getEnv("POSTGRES_PORT", "5432"),
-		User:     getEnv("POSTGRES_USER", "postgres"),
-		Password: getEnv("POSTGRES_PASSWORD", "password"),
-		DBName:   getEnv("POSTGRES_DB", "market"),
-		SSLMode:  getEnv("POSTGRES_SSLMODE", "disable"),
-		TimeZone: getEnv("POSTGRES_TIMEZONE", "UTC"),
+		Host:     utils.GetEnvOrDefault("POSTGRES_HOST", "localhost"),
+		Port:     utils.GetEnvOrDefault("POSTGRES_PORT", "5432"),
+		User:     utils.GetEnvOrDefault("POSTGRES_USER", "postgres"),
+		Password: utils.GetEnvOrDefault("POSTGRES_PASSWORD", "password"),
+		DBName:   utils.GetEnvOrDefault("POSTGRES_DB", "history"),
+		SSLMode:  utils.GetEnvOrDefault("POSTGRES_SSLMODE", "disable"),
+		TimeZone: utils.GetEnvOrDefault("POSTGRES_TIMEZONE", "UTC"),
 
 		MaxOpenConns:    getEnvInt("POSTGRES_MAX_OPEN_CONNS", 25),
 		MaxIdleConns:    getEnvInt("POSTGRES_MAX_IDLE_CONNS", 5),
@@ -51,7 +55,7 @@ func LoadConfigFromEnv() Config {
 		ConnectTimeout:  getEnvDuration("POSTGRES_CONNECT_TIMEOUT", 10*time.Second),
 
 		SlowThreshold: getEnvDuration("POSTGRES_SLOW_THRESHOLD", 200*time.Millisecond),
-		LogLevel:      parseLogLevel(getEnv("POSTGRES_LOG_LEVEL", "warn")),
+		LogLevel:      parseLogLevel(utils.GetEnvOrDefault("POSTGRES_LOG_LEVEL", "warn")),
 	}
 }
 
@@ -130,39 +134,27 @@ func Ping(ctx context.Context, db *gorm.DB) error {
 	return sqlDB.PingContext(ctx)
 }
 
-var (
-	globalMu sync.RWMutex
-	globalDB *gorm.DB
-)
+// globalDB holds the package-level singleton. It is written exactly once at
+// startup (from main.go via SetGlobal) and read concurrently by the rest of
+// the application after that. No synchronisation is required because the
+// write happens-before any goroutine that subsequently reads it: SetGlobal
+// is invoked synchronously in main before history / task / appinfo modules
+// are constructed.
+var globalDB *gorm.DB
 
 // SetGlobal stores the *gorm.DB as the package-level singleton.
 // Intended as a transitional convenience until callers move to dependency
 // injection.
-func SetGlobal(db *gorm.DB) {
-	globalMu.Lock()
-	defer globalMu.Unlock()
-	globalDB = db
-}
+func SetGlobal(db *gorm.DB) { globalDB = db }
 
 // Global returns the singleton *gorm.DB previously installed via SetGlobal.
-func Global() *gorm.DB {
-	globalMu.RLock()
-	defer globalMu.RUnlock()
-	return globalDB
-}
+func Global() *gorm.DB { return globalDB }
 
 // glogWriter adapts gorm logger output to glog.
 type glogWriter struct{}
 
 func (glogWriter) Printf(format string, args ...interface{}) {
 	glog.InfoDepth(1, fmt.Sprintf(format, args...))
-}
-
-func getEnv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }
 
 func getEnvInt(key string, def int) int {
