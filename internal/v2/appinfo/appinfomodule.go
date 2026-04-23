@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"market/internal/v2/helper"
 	"market/internal/v2/history"
 	"market/internal/v2/task"
-	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
 )
@@ -148,7 +148,7 @@ func (m *AppInfoModule) Start() error {
 
 	// Initialize Redis client if enabled
 	if m.config.EnableCache {
-		if !utils.IsPublicEnvironment() {
+		if !helper.IsPublicEnvironment() {
 			if err := m.initRedisClient(); err != nil {
 				return fmt.Errorf("failed to initialize Redis client: %w", err)
 			}
@@ -203,7 +203,7 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		// Initialize DataWatcherRepo if enabled (after DataWatcher is initialized)
 		if m.config.EnableDataWatcherRepo {
 			if err := m.initDataWatcherRepo(); err != nil {
@@ -477,7 +477,7 @@ func (m *AppInfoModule) initRedisClient() error {
 func (m *AppInfoModule) initCacheManager() error {
 	glog.V(3).Info("Initializing cache manager...")
 
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		if m.redisClient == nil {
 			return fmt.Errorf("Redis client is required for cache manager")
 		}

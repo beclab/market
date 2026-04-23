@@ -3,7 +3,7 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
-	"market/internal/v2/utils"
+	"market/internal/v2/helper"
 	"os"
 	"strings"
 	"time"
@@ -630,7 +630,7 @@ func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) err
 // loadMarketSourcesFromRedis loads market sources from Redis
 func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, error) {
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil, fmt.Errorf("in public environment, no need to load market sources from Redis")
 	}
 
@@ -654,7 +654,7 @@ func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, e
 // saveMarketSourcesToRedis saves market sources to Redis
 func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig) error {
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil
 	}
 
@@ -669,7 +669,7 @@ func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig)
 // loadAPIEndpointsFromRedis loads API endpoints from Redis
 func (sm *SettingsManager) loadAPIEndpointsFromRedis() (*APIEndpointsConfig, error) {
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil, fmt.Errorf("in public environment, no need to load API endpoints from Redis")
 	}
 
@@ -693,7 +693,7 @@ func (sm *SettingsManager) loadAPIEndpointsFromRedis() (*APIEndpointsConfig, err
 // saveAPIEndpointsToRedis saves API endpoints to Redis
 func (sm *SettingsManager) saveAPIEndpointsToRedis(config *APIEndpointsConfig) error {
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil
 	}
 

@@ -9,6 +9,8 @@ import (
 
 	"context"
 
+	"market/internal/v2/helper"
+
 	"github.com/go-redis/redis/v8"
 	"github.com/golang/glog"
 )
@@ -71,7 +73,7 @@ func UpgradeFlow() error {
 func checkAndUpdateMarketSourceConfig() error {
 	glog.Info("Checking and updating market source configuration...")
 
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		glog.Info("Public environment detected, skipping market source config update")
 		return nil
 	}
@@ -144,7 +146,7 @@ func checkAndUpdateMarketSourceConfig() error {
 func checkAndUpdateCacheData() error {
 	glog.Info("Checking and updating cache data...")
 
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		glog.Info("Public environment detected, skipping cache data update")
 		return nil
 	}
@@ -486,10 +488,10 @@ func removeDefaultSourceInConfig(redisClient RedisClient) error {
 // createRedisClient 创建Redis客户端
 func createRedisClient() (RedisClient, error) {
 	// 获取Redis连接参数
-	redisHost := GetEnvOrDefault("REDIS_HOST", "localhost")
-	redisPort := GetEnvOrDefault("REDIS_PORT", "6379")
-	redisPassword := GetEnvOrDefault("REDIS_PASSWORD", "")
-	redisDBStr := GetEnvOrDefault("REDIS_DB", "0")
+	redisHost := helper.GetEnvOrDefault("REDIS_HOST", "localhost")
+	redisPort := helper.GetEnvOrDefault("REDIS_PORT", "6379")
+	redisPassword := helper.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDBStr := helper.GetEnvOrDefault("REDIS_DB", "0")
 	redisDB, err := strconv.Atoi(redisDBStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid REDIS_DB value: %w", err)

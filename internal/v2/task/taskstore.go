@@ -4,67 +4,68 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"market/internal/v2/utils"
-	"os"
+	"sync"
 	"time"
 
+	"market/internal/v2/db"
+	"market/internal/v2/helper"
+
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
 )
 
-// TaskStore manages persistence for task records
+// TaskStore manages persistence for task records.
 type TaskStore struct {
 	db *sqlx.DB
 }
 
-// NewTaskStore initializes a new TaskStore instance with PostgreSQL backend
+// globalSqlxOnce / globalSqlx memoise the *sqlx.DB wrapper around the shared
+// pool exposed by package db. Wrapping is cheap (no extra connections), but
+// caching the wrapper keeps a single instance around for the entire process
+// lifetime so callers can compare pointers if they ever need to.
+var (
+	globalSqlxOnce sync.Once
+	globalSqlx     *sqlx.DB
+)
+
+// GlobalSqlxDB returns a *sqlx.DB backed by the shared *gorm.DB connection
+// pool installed at startup via db.SetGlobal. It exists for callers that want
+// to issue raw SQL queries against task-related tables (e.g. appinfo's
+// runtime state inspector) without each opening their own pool.
+//
+// db.Open + db.SetGlobal MUST run before this function; otherwise it returns
+// nil. Callers must NOT close the returned handle.
+func GlobalSqlxDB() *sqlx.DB {
+	globalSqlxOnce.Do(func() {
+		gormDB := db.Global()
+		if gormDB == nil {
+			return
+		}
+		sqlDB, err := gormDB.DB()
+		if err != nil {
+			return
+		}
+		globalSqlx = sqlx.NewDb(sqlDB, "postgres")
+	})
+	return globalSqlx
+}
+
+// NewTaskStore returns a TaskStore that runs against the shared PostgreSQL
+// pool managed by package db. It does NOT open a new connection: the
+// underlying *sql.DB is borrowed from db.Global() and wrapped in sqlx so the
+// existing CRUD code paths continue to work unchanged.
+//
+// Schema (table + indexes) is owned by internal/v2/db migrations (see
+// migrations/00006_init_task_records.sql) and is applied during application
+// startup before this constructor runs.
 func NewTaskStore() (*TaskStore, error) {
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil, fmt.Errorf("task store is disabled in public environment")
 	}
-
-	dbHost := os.Getenv("POSTGRES_HOST")
-	if dbHost == "" {
-		dbHost = "localhost"
+	xdb := GlobalSqlxDB()
+	if xdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before NewTaskStore")
 	}
-
-	dbPort := os.Getenv("POSTGRES_PORT")
-	if dbPort == "" {
-		dbPort = "5432"
-	}
-
-	dbName := os.Getenv("POSTGRES_DB")
-	if dbName == "" {
-		dbName = "history"
-	}
-
-	dbUser := os.Getenv("POSTGRES_USER")
-	if dbUser == "" {
-		dbUser = "postgres"
-	}
-
-	dbPassword := os.Getenv("POSTGRES_PASSWORD")
-	if dbPassword == "" {
-		dbPassword = "password"
-	}
-
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
-
-	db, err := sqlx.Connect("postgres", connStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to PostgreSQL: %w", err)
-	}
-
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping PostgreSQL: %w", err)
-	}
-
-	// Schema (table + indexes) is owned by internal/v2/db migrations
-	// (see migrations/00006_init_task_records.sql) and is applied during
-	// application startup before this constructor runs. We assume the
-	// table is already in the expected shape here.
-	return &TaskStore{db: db}, nil
+	return &TaskStore{db: xdb}, nil
 }
 
 // UpsertTask stores or updates a task record in the database
@@ -402,10 +403,7 @@ func (ts *TaskStore) GetLatestCompletedTaskByAppNameAndUser(appName, user string
 	return "", "", false, nil
 }
 
-// Close releases the underlying database connection
-func (ts *TaskStore) Close() error {
-	if ts == nil || ts.db == nil {
-		return nil
-	}
-	return ts.db.Close()
-}
+// Close is a no-op: the underlying *sql.DB is owned by package db and
+// closed once during graceful shutdown in main.go. Closing it here would
+// tear down the pool shared with history and any other consumer.
+func (ts *TaskStore) Close() error { return nil }

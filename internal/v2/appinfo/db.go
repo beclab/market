@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"market/internal/v2/helper"
 	"market/internal/v2/types"
-	"market/internal/v2/utils"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/golang/glog"
@@ -315,7 +315,7 @@ func (r *RedisClient) loadSourceData(userID, sourceID string) (*SourceData, erro
 // SaveUserDataToRedis saves user data to Redis with optimized performance
 func (r *RedisClient) SaveUserDataToRedis(userID string, userData *types.UserData) error {
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil
 	}
 

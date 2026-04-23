@@ -14,6 +14,7 @@ import (
 	"market/internal/v2/appinfo"
 	"market/internal/v2/client"
 	"market/internal/v2/db"
+	"market/internal/v2/helper"
 	"market/internal/v2/history"
 	"market/internal/v2/paymentnew"
 	runtimestate "market/internal/v2/runtime"
@@ -121,17 +122,17 @@ func main() {
 	glog.V(2).Info("=== End pre-execution upgrade flow ===")
 
 	// 0. Initialize Settings Module (Required for API)
-	redisHost := utils.GetEnvOrDefault("REDIS_HOST", "localhost")
-	redisPort := utils.GetEnvOrDefault("REDIS_PORT", "6379")
-	redisPassword := utils.GetEnvOrDefault("REDIS_PASSWORD", "")
-	redisDBStr := utils.GetEnvOrDefault("REDIS_DB", "0")
+	redisHost := helper.GetEnvOrDefault("REDIS_HOST", "localhost")
+	redisPort := helper.GetEnvOrDefault("REDIS_PORT", "6379")
+	redisPassword := helper.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDBStr := helper.GetEnvOrDefault("REDIS_DB", "0")
 	redisDB, err := strconv.Atoi(redisDBStr)
 	if err != nil {
 		glog.Exitf("Invalid REDIS_DB value: %v", err)
 	}
 
 	var redisClient settings.RedisClient
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		redisClient, err = settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
 		if err != nil {
 			glog.Exitf("Failed to create Redis client: %v", err)
@@ -143,7 +144,7 @@ func main() {
 	// Initialize PostgreSQL connection and apply pending schema migrations.
 	// History / Task modules below assume their tables already exist.
 	var gormDB *gorm.DB
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		dbCtx := context.Background()
 		gormDB, err = db.Open(dbCtx, db.LoadConfigFromEnv())
 		if err != nil {
@@ -157,6 +158,12 @@ func main() {
 			glog.Exitf("PostgreSQL migration failed: %v", err)
 		}
 		glog.V(2).Info("PostgreSQL schema is up to date")
+		// Wire the chart-repo download fallback used by
+		// task.LookupAppInfoLastInstalled. Injecting the function here
+		// (instead of importing utils from the task package) keeps the
+		// task -> utils dependency edge gone, so utils can freely import
+		// task without forming a cycle.
+		task.SetDownloadRecordLookup(utils.GetAppInfoFromDownloadRecord)
 	}
 
 	// Pre-startup step: Setup app service data with retry mechanism
@@ -172,7 +179,7 @@ func main() {
 		extractedUsers := utils.GetExtractedUsers()
 		allUserAppStateData := utils.GetAllUserAppStateData()
 
-		if !utils.IsPublicEnvironment() {
+		if !helper.IsPublicEnvironment() {
 
 			userCount := len(extractedUsers)
 			appCount := 0
@@ -265,7 +272,7 @@ func main() {
 
 	var taskModule *task.TaskModule
 	var historyModule *history.HistoryModule
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		// 1. Init user watch
 		var w = watchers.NewWatchers(context.Background(), client.Factory.Config())
 		watchers.AddToWatchers[client.User](w, client.UserGVR, cacheManager.HandlerEvent())
@@ -325,7 +332,7 @@ func main() {
 
 	// Initialize Runtime State Service
 	var runtimeStateService *runtimestate.RuntimeStateService
-	// if !utils.IsPublicEnvironment() {
+	// if !helper.IsPublicEnvironment() {
 	glog.V(2).Info("=== Initializing Runtime State Service ===")
 	stateStore := runtimestate.NewStateStore()
 	stateCollector := runtimestate.NewStateCollector(stateStore)
@@ -401,11 +408,11 @@ func main() {
 	glog.V(3).Info("  POST   /api/v2/apps/upload               - Upload application installation package")
 	glog.V(3).Info("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	glog.V(3).Info("  PUT    /api/v2/settings/market-source    - Set market source configuration")
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		glog.V(3).Info("  GET    /api/v2/runtime/state            - Get runtime state (apps, tasks, components)")
 	}
 
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		// Add history record for successful market setup
 		glog.V(3).Info("Recording market setup completion in history...")
 		historyRecord := &history.HistoryRecord{

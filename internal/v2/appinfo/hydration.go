@@ -199,7 +199,7 @@ func (h *Hydrator) cleanupTaskResources(task *hydrationfn.HydrationTask) {
 // isAppHydrationComplete checks if an app has completed all hydration steps
 func (h *Hydrator) isAppHydrationComplete(pendingData *types.AppInfoLatestPendingData) bool {
 
-	// if utils.IsPublicEnvironment() {
+	// if helper.IsPublicEnvironment() {
 	// 	return true
 	// }
 

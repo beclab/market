@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"market/internal/v2/utils"
+	"market/internal/v2/helper"
 
 	"github.com/golang/glog"
 	"gorm.io/driver/postgres"
@@ -36,27 +36,45 @@ type Config struct {
 	SlowThreshold time.Duration
 }
 
-// LoadConfigFromEnv reads PostgreSQL configuration from environment variables,
-// falling back to sensible defaults for local development.
+// LoadConfigFromEnv reads PostgreSQL configuration from the environment.
 //
-// The defaults match the legacy task / history modules so that all callers
-// hit the same database when POSTGRES_DB is left unset.
+// Only the five connection-target fields are sourced from env (POSTGRES_HOST,
+// POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB). The
+// remaining fields are deliberately hardcoded to values vetted against our
+// PostgreSQL instance (max_connections=1000, modest server footprint):
+//
+//   - SSLMode "disable":        PG runs inside the cluster network.
+//   - TimeZone "UTC":           UTC in the database, conversion at the edge.
+//   - MaxOpenConns 50:          ~5% of the server's max_connections, gives
+//                               2-3x headroom over expected concurrency.
+//   - MaxIdleConns 10:          1/5 of MaxOpen, the conventional ratio.
+//   - ConnMaxLifetime 30m:      well below the server's 2h tcp_keepalives_idle,
+//                               so connections rotate before they go stale and
+//                               the pool recovers cleanly from PG restarts.
+//   - ConnectTimeout 10s:       intra-cluster connects take <1s, this is just
+//                               a startup-jitter buffer.
+//   - SlowThreshold 200ms:      the gorm standard; emitted with [gorm-slow].
+//
+// The defaults for the env-backed fields match the legacy task / history
+// modules so that all callers hit the same database when POSTGRES_DB is left
+// unset.
 func LoadConfigFromEnv() Config {
 	return Config{
-		Host:     utils.GetEnvOrDefault("POSTGRES_HOST", "localhost"),
-		Port:     utils.GetEnvOrDefault("POSTGRES_PORT", "5432"),
-		User:     utils.GetEnvOrDefault("POSTGRES_USER", "postgres"),
-		Password: utils.GetEnvOrDefault("POSTGRES_PASSWORD", "password"),
-		DBName:   utils.GetEnvOrDefault("POSTGRES_DB", "history"),
-		SSLMode:  utils.GetEnvOrDefault("POSTGRES_SSLMODE", "disable"),
-		TimeZone: utils.GetEnvOrDefault("POSTGRES_TIMEZONE", "UTC"),
+		Host:     helper.GetEnvOrDefault("POSTGRES_HOST", "localhost"),
+		Port:     helper.GetEnvOrDefault("POSTGRES_PORT", "5432"),
+		User:     helper.GetEnvOrDefault("POSTGRES_USER", "postgres"),
+		Password: helper.GetEnvOrDefault("POSTGRES_PASSWORD", "password"),
+		DBName:   helper.GetEnvOrDefault("POSTGRES_DB", "history"),
 
-		MaxOpenConns:    utils.GetEnvIntOrDefault("POSTGRES_MAX_OPEN_CONNS", 25),
-		MaxIdleConns:    utils.GetEnvIntOrDefault("POSTGRES_MAX_IDLE_CONNS", 5),
-		ConnMaxLifetime: utils.GetEnvDurationOrDefault("POSTGRES_CONN_MAX_LIFETIME", 30*time.Minute),
-		ConnectTimeout:  utils.GetEnvDurationOrDefault("POSTGRES_CONNECT_TIMEOUT", 10*time.Second),
+		SSLMode:  "disable",
+		TimeZone: "UTC",
 
-		SlowThreshold: utils.GetEnvDurationOrDefault("POSTGRES_SLOW_THRESHOLD", 200*time.Millisecond),
+		MaxOpenConns:    50,
+		MaxIdleConns:    10,
+		ConnMaxLifetime: 30 * time.Minute,
+		ConnectTimeout:  10 * time.Second,
+
+		SlowThreshold: 200 * time.Millisecond,
 	}
 }
 

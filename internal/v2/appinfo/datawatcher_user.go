@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"market/internal/v2/helper"
 	"market/internal/v2/history"
-	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
 	"github.com/nats-io/nats.go"
@@ -51,7 +51,7 @@ func (dw *DataWatcherUser) SetHistoryModule(historyModule *history.HistoryModule
 
 // Start initializes and starts the data watcher
 func (dw *DataWatcherUser) Start(ctx context.Context) error {
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		glog.V(3).Infof("Public environment detected, DataWatcherUser disabled")
 		return nil
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"market/internal/v2/appinfo"
+	"market/internal/v2/helper"
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
 	"market/internal/v2/utils"
@@ -249,7 +250,7 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 	var err1, err2, err3, err4 error
 
 	// Check if account is from header
-	if utils.IsAccountFromHeader() {
+	if helper.IsAccountFromHeader() {
 		glog.V(2).Infof("Account from header detected, using bflUser: %s", bflUser)
 
 		allUsers, err1 = doGetUsers(s.cacheManager)
@@ -648,7 +649,7 @@ func resumeByType(name, token, bflUser string) (string, error) {
 
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/resume", appServiceHost, appServicePort, name)
 
-	if utils.IsAccountFromHeader() {
+	if helper.IsAccountFromHeader() {
 		return doPostWithBflUser(url, bflUser)
 	} else {
 		return doPostWithToken(url, token)
@@ -815,7 +816,7 @@ func stopByType(name, token, bflUser string, all bool) (string, error) {
 	}
 	requestBodyBytes, _ := json.Marshal(requestBody)
 
-	if utils.IsAccountFromHeader() {
+	if helper.IsAccountFromHeader() {
 		return doPostWithBflUserAndBody(url, bflUser, requestBodyBytes)
 	} else {
 		return doPostWithTokenAndBody(url, token, requestBodyBytes)

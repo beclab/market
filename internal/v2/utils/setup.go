@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"market/internal/v2/helper"
+	"market/internal/v2/task"
 	"market/internal/v2/types"
 
 	"github.com/Masterminds/semver/v3"
@@ -123,7 +125,7 @@ var userAppStateData map[string]map[string][]*types.AppStateLatestData
 // SetupAppServiceData fetches app data from app-service or reads from local file in development
 func SetupAppServiceData() error {
 
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil
 	}
 
@@ -145,7 +147,7 @@ func SetupAppServiceData() error {
 
 // GetExtractedUsers returns the list of users extracted from app service data
 func GetExtractedUsers() []string {
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return []string{"admin"}
 	}
 	return extractedUsers
@@ -153,7 +155,7 @@ func GetExtractedUsers() []string {
 
 // GetAllUserAppStateData returns all user app state data
 func GetAllUserAppStateData() map[string]map[string][]*types.AppStateLatestData {
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return map[string]map[string][]*types.AppStateLatestData{
 			"admin": {
 				"app": {},
@@ -544,7 +546,7 @@ func createMiddlewareStateLatestData(middleware struct {
 	// })
 	// data["entranceStatuses"] = entrances
 
-	return types.NewAppStateLatestData(data, middleware.User, GetAppInfoLastInstalled)
+	return types.NewAppStateLatestData(data, middleware.User, task.LookupAppInfoLastInstalled)
 }
 
 // FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service
@@ -703,7 +705,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 		data["sharedEntrances"] = sharedEntrances
 	}
 
-	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppInfoLastInstalled)
+	return types.NewAppStateLatestData(data, app.Spec.Owner, task.LookupAppInfoLastInstalled)
 }
 
 // DependencyServiceResponse represents the response structure from dependency service

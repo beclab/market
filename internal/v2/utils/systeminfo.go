@@ -6,8 +6,9 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
+
+	"market/internal/v2/helper"
 
 	"github.com/golang/glog"
 )
@@ -20,7 +21,7 @@ type VersionInfo struct {
 // GetTerminusVersionValue returns the parsed version string
 func GetTerminusVersionValue() (string, error) {
 	// Check public environment first
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		version := os.Getenv("PUBLIC_VERSION")
 		if version != "" {
 			return version, nil
@@ -28,7 +29,7 @@ func GetTerminusVersionValue() (string, error) {
 	}
 
 	// Check development environment
-	if IsDevelopmentEnvironment() {
+	if helper.IsDevelopmentEnvironment() {
 		glog.Infof("Development environment detected, returning version: 1.12.3")
 		return "1.12.3", nil
 	}
@@ -50,23 +51,6 @@ func GetTerminusVersionValue() (string, error) {
 	}
 
 	return versionInfo.Version, nil
-}
-
-// IsDevelopmentEnvironment checks if the application is running in development mode
-func IsDevelopmentEnvironment() bool {
-	env := strings.ToLower(os.Getenv("GO_ENV"))
-	return env == "dev" || env == "development" || env == ""
-}
-
-// isPublicEnvironment checks if the application is running in public mode
-func IsPublicEnvironment() bool {
-	isPublic := os.Getenv("isPublic")
-	return isPublic == "true"
-}
-
-func IsAccountFromHeader() bool {
-	accountFromHeader := os.Getenv("IS_ACCOUNT_FROM_HEADER")
-	return accountFromHeader == "true"
 }
 
 // getTerminusVersionFromService retrieves version from the app service

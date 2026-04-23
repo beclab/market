@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"market/internal/v2/helper"
 	"market/internal/v2/history"
 	"market/internal/v2/task"
 	"market/internal/v2/types"
@@ -149,7 +150,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 		return result
 	}
 
-	glog.V(3).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), utils.ParseJson(latestStatus))
+	glog.V(3).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), helper.ParseJson(latestStatus))
 
 	cachedStatus := scc.getCachedStatus()
 	if len(cachedStatus) == 0 {
@@ -157,14 +158,14 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 		return result
 	}
 
-	glog.V(3).Infof("[UserChanged] Found cached status for %d applications and middlewares: %s", len(cachedStatus), utils.ParseJson(cachedStatus))
+	glog.V(3).Infof("[UserChanged] Found cached status for %d applications and middlewares: %s", len(cachedStatus), helper.ParseJson(cachedStatus))
 
 	changes := scc.compareStatus(latestStatus, cachedStatus)
 
 	glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v, app: %d, middlewares: %d", changes, len(latestStatus), len(cachedStatus))
 
 	if len(changes) > 0 {
-		glog.V(2).Infof("[UserChanged] Detected %d status changes, applying corrections, changes: %s", len(changes), utils.ParseJson(changes))
+		glog.V(2).Infof("[UserChanged] Detected %d status changes, applying corrections, changes: %s", len(changes), helper.ParseJson(changes))
 		scc.applyCorrections(changes, latestStatus)
 
 		// Apply UserInfo changes and collect affected users.
@@ -229,7 +230,7 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceRespo
 		}
 	}
 
-	glog.Infof("[SCC] fetch latest appStatus: %s", utils.ParseJson(printf))
+	glog.Infof("[SCC] fetch latest appStatus: %s", helper.ParseJson(printf))
 
 	// Combine apps and middlewares status
 	// Convert middlewares to AppServiceResponse format and merge with apps
@@ -466,7 +467,7 @@ func (scc *StatusCorrectionChecker) getCachedStatus() map[string]*types.AppState
 		}
 	}
 
-	glog.Infof("[SCC] fetch cached appStatus: %s", utils.ParseJson(printf))
+	glog.Infof("[SCC] fetch cached appStatus: %s", helper.ParseJson(printf))
 
 	return cachedStatus
 }
@@ -658,7 +659,7 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 
 	// 	// Prefer the source recorded by GetAppInfoLastInstalled as latest-installed
 	// 	preferredSource := ""
-	// 	if _, src, err := utils.GetAppInfoLastInstalled(userID, appName); err == nil && src != "" {
+	// 	if _, src, err := task.LookupAppInfoLastInstalled(userID, appName); err == nil && src != "" {
 	// 		preferredSource = src
 	// 	}
 
@@ -1043,7 +1044,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 	version := ""
 	source := ""
 	if userID != "" && app.Spec.Name != "" {
-		if versionFromRecord, sourceFromRecord, err := utils.GetAppInfoLastInstalled(userID, app.Spec.Name); err == nil && versionFromRecord != "" {
+		if versionFromRecord, sourceFromRecord, err := task.LookupAppInfoLastInstalled(userID, app.Spec.Name); err == nil && versionFromRecord != "" {
 			version = versionFromRecord
 			source = sourceFromRecord
 		}

@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"market/internal/v2/utils"
 	"os"
 	"strconv"
 	"time"
 
+	"market/internal/v2/db"
+	"market/internal/v2/helper"
+
 	"github.com/golang/glog"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
 )
 
 // HistoryType represents the type of history record
@@ -63,74 +64,36 @@ type HistoryModule struct {
 	cancel        context.CancelFunc
 }
 
-// NewHistoryModule creates a new history module instance
+// NewHistoryModule creates a new history module instance backed by the
+// shared PostgreSQL pool managed by package db. It does NOT open a new
+// connection: the underlying *sql.DB is borrowed from db.Global() and
+// wrapped in sqlx so the existing CRUD code paths continue to work
+// unchanged.
+//
+// Schema (table + indexes) is owned by internal/v2/db migrations (see
+// migrations/00005_init_history_records.sql) and is applied during
+// application startup before this constructor runs.
 func NewHistoryModule() (*HistoryModule, error) {
-
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil, fmt.Errorf("in public environment, no need to load history module")
 	}
 
-	// Get database configuration from environment variables
-	dbHost := os.Getenv("POSTGRES_HOST")
-	if dbHost == "" {
-		dbHost = "localhost"
+	gormDB := db.Global()
+	if gormDB == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before NewHistoryModule")
 	}
-
-	dbPort := os.Getenv("POSTGRES_PORT")
-	if dbPort == "" {
-		dbPort = "5432"
-	}
-
-	dbName := os.Getenv("POSTGRES_DB")
-	if dbName == "" {
-		dbName = "history"
-	}
-
-	dbUser := os.Getenv("POSTGRES_USER")
-	if dbUser == "" {
-		dbUser = "postgres"
-	}
-
-	dbPassword := os.Getenv("POSTGRES_PASSWORD")
-	if dbPassword == "" {
-		dbPassword = "password"
-	}
-
-	// Build connection string
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
-
-	// Connect to database
-	db, err := sqlx.Connect("postgres", connStr)
+	sqlDB, err := gormDB.DB()
 	if err != nil {
-		glog.Errorf("Failed to connect to PostgreSQL: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("acquire underlying *sql.DB: %w", err)
 	}
-
-	// Test connection
-	if err := db.Ping(); err != nil {
-		glog.Errorf("Failed to ping PostgreSQL: %v", err)
-		return nil, err
-	}
-
-	glog.Infof("Connected to PostgreSQL successfully")
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	module := &HistoryModule{
-		db:     db,
+		db:     sqlx.NewDb(sqlDB, "postgres"),
 		ctx:    ctx,
 		cancel: cancel,
 	}
-
-	// Schema (table + indexes) is owned by internal/v2/db migrations
-	// (see migrations/00005_init_history_records.sql) and is applied during
-	// application startup before this constructor runs. We assume the
-	// table is already in the expected shape here.
-
-	// Start cleanup routine
 	module.startCleanupRoutine()
-
 	return module, nil
 }
 
@@ -367,25 +330,19 @@ func (hm *HistoryModule) GetRecordCount(condition *QueryCondition) (int64, error
 	return count, nil
 }
 
-// Close closes the database connection and stops cleanup routine
+// Close stops the cleanup goroutine and tears down the module's local state.
+//
+// It deliberately does NOT close hm.db: the underlying *sql.DB is owned by
+// package db and closed once during graceful shutdown in main.go. Closing
+// it here would tear down the pool shared with task and any other consumer.
 func (hm *HistoryModule) Close() error {
 	glog.Infof("Closing history module")
-
-	// Stop cleanup routine
 	if hm.cleanupTicker != nil {
 		hm.cleanupTicker.Stop()
 	}
-
-	// Cancel context
 	if hm.cancel != nil {
 		hm.cancel()
 	}
-
-	// Close database connection
-	if hm.db != nil {
-		return hm.db.Close()
-	}
-
 	return nil
 }
 

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"market/internal/v2/helper"
 	"market/internal/v2/history" // Import history module with correct path
 	"market/internal/v2/task"
 	"market/internal/v2/utils"
@@ -293,7 +294,7 @@ func (dw *DataWatcherState) getHistoryModule() *history.HistoryModule {
 // Start starts the data watcher
 func (dw *DataWatcherState) Start() error {
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		glog.V(3).Info("Public environment detected, DataWatcherState disabled")
 		return nil
 	}
@@ -527,8 +528,8 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 		// If we have OpID but no pending/running tasks, check if task exists in database
 		// This handles the case where task completed very quickly before pending message arrived
 		if appStateMsg.OpID != "" {
-			db, err := utils.GetTaskStoreForQuery()
-			if err == nil && db != nil {
+			db := task.GlobalSqlxDB()
+			if db != nil {
 				query := `
 				SELECT metadata, type, status, created_at
 				FROM task_records
@@ -543,7 +544,7 @@ func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
 				var taskType int
 				var taskStatus int
 				var taskCreatedAt time.Time
-				err = db.QueryRow(query, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
+				err := db.QueryRow(query, appStateMsg.OpID, appStateMsg.Name, appStateMsg.User, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
 				if err != nil {
 					// Task not found in database, delay to wait for task to be persisted
 					glog.Errorf("Delaying pending state message for app=%s, user=%s, opID=%s - task not found in DB, waiting for persistence",
@@ -742,8 +743,8 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 					src, msg.OpID, msg.Name, userID)
 			} else {
 				// Task not found in memory, try to query from database (task might be completed)
-				db, err := utils.GetTaskStoreForQuery()
-				if err == nil && db != nil {
+				db := task.GlobalSqlxDB()
+				if db != nil {
 					query := `
 					SELECT metadata, type, status, created_at
 					FROM task_records
@@ -758,7 +759,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 					var taskType int
 					var taskStatus int
 					var taskCreatedAt time.Time
-					err = db.QueryRow(query, msg.OpID, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
+					err := db.QueryRow(query, msg.OpID, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
 					if err == nil && metadataStr != "" {
 						var metadataMap map[string]interface{}
 						if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
@@ -857,8 +858,8 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 				glog.V(3).Infof("Found task with source=%s by OpID=%s for app=%s, user=%s", src, msg.OpID, msg.Name, userID)
 			} else {
 				// Task not found in memory, try to query from database (task might be completed)
-				db, err := utils.GetTaskStoreForQuery()
-				if err == nil && db != nil {
+				db := task.GlobalSqlxDB()
+				if db != nil {
 					query := `
 					SELECT metadata, type, status, created_at
 					FROM task_records
@@ -873,7 +874,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 					var taskType int
 					var taskStatus int
 					var taskCreatedAt time.Time
-					err = db.QueryRow(query, msg.OpID, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
+					err := db.QueryRow(query, msg.OpID, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
 					if err == nil && metadataStr != "" {
 						var metadataMap map[string]interface{}
 						if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {
@@ -899,8 +900,8 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 
 	// If still not found, try to query from task store database (all statuses, ordered by time)
 	if sourceID == "" {
-		db, err := utils.GetTaskStoreForQuery()
-		if err == nil && db != nil {
+		db := task.GlobalSqlxDB()
+		if db != nil {
 			// Query for latest task (InstallApp or CloneApp) with all statuses
 			// Priority: Running (2) > Pending (1) > Completed (3) > Failed (4) > Canceled (5)
 			// Within same priority, order by created_at descending (newest first)
@@ -927,7 +928,7 @@ func (dw *DataWatcherState) storeStateToCache(msg AppStateMessage) {
 			var taskType int
 			var taskStatus int
 			var taskCreatedAt time.Time
-			err = db.QueryRow(query, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
+			err := db.QueryRow(query, msg.Name, userID, 1, 5).Scan(&metadataStr, &taskType, &taskStatus, &taskCreatedAt)
 			if err == nil && metadataStr != "" {
 				var metadataMap map[string]interface{}
 				if err := json.Unmarshal([]byte(metadataStr), &metadataMap); err == nil {

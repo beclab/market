@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/helper"
 	"market/internal/v2/settings"
+	"market/internal/v2/task"
 	"market/internal/v2/utils"
 
 	"runtime/debug"
@@ -721,7 +723,7 @@ func (cm *CacheManager) Start() error {
 
 	// Load cache data from Redis if ClearCache is false
 	if !cm.userConfig.ClearCache {
-		if !utils.IsPublicEnvironment() {
+		if !helper.IsPublicEnvironment() {
 			cache, err := cm.redisClient.LoadCacheFromRedis()
 			if err != nil {
 				glog.Errorf("Failed to load cache from Redis: %v", err)
@@ -740,7 +742,7 @@ func (cm *CacheManager) Start() error {
 	} else {
 		glog.V(3).Infof("ClearCache is enabled, clearing Redis data and starting with empty cache")
 
-		if !utils.IsPublicEnvironment() {
+		if !helper.IsPublicEnvironment() {
 			// Clear all Redis data
 			if err := cm.redisClient.ClearAllData(); err != nil {
 				glog.Errorf("Failed to clear Redis data: %v", err)
@@ -839,7 +841,7 @@ func (cm *CacheManager) syncWorker() {
 // processSyncRequest handles individual sync requests
 func (cm *CacheManager) processSyncRequest(req SyncRequest) {
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return
 	}
 
@@ -1312,7 +1314,7 @@ func (cm *CacheManager) setAppDataInternal(userID, sourceID string, dataType App
 			// Use pre-enhanced data computed before the lock was acquired
 			enhancedData := preEnhancedData
 
-			appData, sourceIDFromRecord := types.NewAppStateLatestData(enhancedData, userID, utils.GetAppInfoLastInstalled)
+			appData, sourceIDFromRecord := types.NewAppStateLatestData(enhancedData, userID, task.LookupAppInfoLastInstalled)
 
 			// Validate that the created app state has a name field
 			if appData == nil {

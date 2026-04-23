@@ -3,8 +3,8 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
+	"market/internal/v2/helper"
 	"market/internal/v2/types"
-	"market/internal/v2/utils"
 )
 
 type MarketSettings = types.MarketSettings
@@ -18,7 +18,7 @@ func getMarketSettings(redisClient RedisClient, userID string) (*MarketSettings,
 	// Create user-specific Redis key
 	userRedisKey := fmt.Sprintf("%s:%s", RedisKeyMarketSettings, userID)
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return &MarketSettings{
 			SelectedSource: "market.olares", // Default selected source
 		}, nil
