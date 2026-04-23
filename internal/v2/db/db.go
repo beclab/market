@@ -12,7 +12,6 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
 )
 
 // Config holds PostgreSQL connection and pool settings.
@@ -67,9 +66,11 @@ func (c Config) DSN() string {
 
 // Open establishes a *gorm.DB, configures the underlying connection pool and
 // verifies connectivity with a Ping. It does NOT run migrations.
+//
+// All models in db/models declare their TableName() explicitly, so we leave
+// the default naming strategy in place and rely on the per-model overrides.
 func Open(ctx context.Context, cfg Config) (*gorm.DB, error) {
 	gormCfg := &gorm.Config{
-		NamingStrategy: schema.NamingStrategy{SingularTable: true},
 		Logger: logger.New(&glogWriter{}, logger.Config{
 			SlowThreshold:             cfg.SlowThreshold,
 			LogLevel:                  cfg.LogLevel,

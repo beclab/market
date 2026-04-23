@@ -13,7 +13,7 @@ $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE TABLE IF NOT EXISTS market_source (
+CREATE TABLE IF NOT EXISTS market_sources (
     id           BIGSERIAL    PRIMARY KEY,
     source_id    VARCHAR(50)  NOT NULL,
     source_title VARCHAR(50)  NOT NULL,
@@ -22,29 +22,29 @@ CREATE TABLE IF NOT EXISTS market_source (
     description  TEXT         NOT NULL DEFAULT '',
     priority     INTEGER      NOT NULL DEFAULT 100 CHECK (priority >= 0),
     others       JSONB,
-    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_market_source_source_id UNIQUE (source_id),
-    CONSTRAINT ck_market_source_others_object
+    created_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_market_sources_source_id UNIQUE (source_id),
+    CONSTRAINT ck_market_sources_others_object
         CHECK (others IS NULL OR jsonb_typeof(others) = 'object')
 );
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE INDEX IF NOT EXISTS idx_market_source_source_id ON market_source (source_id);
+CREATE INDEX IF NOT EXISTS idx_market_sources_source_id ON market_sources (source_id);
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-DROP TRIGGER IF EXISTS trg_market_source_set_updated_at ON market_source;
-CREATE TRIGGER trg_market_source_set_updated_at
-BEFORE UPDATE ON market_source
+DROP TRIGGER IF EXISTS trg_market_sources_set_updated_at ON market_sources;
+CREATE TRIGGER trg_market_sources_set_updated_at
+BEFORE UPDATE ON market_sources
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TRIGGER IF EXISTS trg_market_source_set_updated_at ON market_source;
-DROP TABLE IF EXISTS market_source;
+DROP TRIGGER IF EXISTS trg_market_sources_set_updated_at ON market_sources;
+DROP TABLE IF EXISTS market_sources;
 DROP FUNCTION IF EXISTS set_updated_at();
 -- +goose StatementEnd

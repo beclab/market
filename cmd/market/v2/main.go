@@ -13,6 +13,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/client"
+	"market/internal/v2/db"
 	"market/internal/v2/history"
 	"market/internal/v2/paymentnew"
 	runtimestate "market/internal/v2/runtime"
@@ -24,6 +25,7 @@ import (
 	"market/pkg/v2/api"
 
 	"github.com/golang/glog"
+	"gorm.io/gorm"
 )
 
 // createAppInfoConfigWithUsers creates AppInfo module configuration with extracted users
@@ -137,6 +139,25 @@ func main() {
 	}
 
 	// utils.SetRedisClient(redisClient.GetRawClient())
+
+	// Initialize PostgreSQL connection and apply pending schema migrations.
+	// History / Task modules below assume their tables already exist.
+	var gormDB *gorm.DB
+	if !utils.IsPublicEnvironment() {
+		dbCtx := context.Background()
+		gormDB, err = db.Open(dbCtx, db.LoadConfigFromEnv())
+		if err != nil {
+			glog.Exitf("Failed to open PostgreSQL: %v", err)
+		}
+		db.SetGlobal(gormDB)
+		if err := db.Migrate(dbCtx, gormDB, db.MigrateOptions{
+			Direction:   db.MigrateUp,
+			LockTimeout: 30 * time.Second,
+		}); err != nil {
+			glog.Exitf("PostgreSQL migration failed: %v", err)
+		}
+		glog.V(2).Info("PostgreSQL schema is up to date")
+	}
 
 	// Pre-startup step: Setup app service data with retry mechanism
 	glog.V(2).Info("=== Pre-startup: Setting up app service data ===")
@@ -477,6 +498,13 @@ func main() {
 				if err := closer.Close(); err != nil {
 					glog.Errorf("Error stopping Redis client: %v", err)
 				}
+			}
+		}
+
+		if gormDB != nil {
+			glog.V(3).Info("Closing PostgreSQL connection...")
+			if err := db.Close(gormDB); err != nil {
+				glog.Errorf("Error closing PostgreSQL connection: %v", err)
 			}
 		}
 

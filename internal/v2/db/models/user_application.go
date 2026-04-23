@@ -6,11 +6,11 @@ import (
 	"market/internal/v2/db/models/payload"
 )
 
-// UserApplication mirrors the user_application table.
+// UserApplication mirrors the user_applications table.
 type UserApplication struct {
 	ID               int64                            `gorm:"column:id;primaryKey;autoIncrement"`
-	UserID           string                           `gorm:"column:user_id;size:120;not null;uniqueIndex:uq_user_application_user_app,priority:1;index:idx_user_application_user_id"`
-	ApplicationID    int64                            `gorm:"column:application_id;not null;uniqueIndex:uq_user_application_user_app,priority:2;index:idx_user_application_application_id"`
+	UserID           string                           `gorm:"column:user_id;size:120;not null;uniqueIndex:uq_user_applications_user_app,priority:1;index:idx_user_applications_user_id"`
+	ApplicationID    int64                            `gorm:"column:application_id;not null;uniqueIndex:uq_user_applications_user_app,priority:2;index:idx_user_applications_application_id"`
 	AppRawData       *JSONB[payload.UserAppRawData]   `gorm:"column:app_raw_data;type:jsonb"`
 	AppImageAnalysis *JSONB[payload.AppImageAnalysis] `gorm:"column:app_image_analysis;type:jsonb"`
 	IsUpgrade        bool                             `gorm:"column:is_upgrade;not null;default:false"`
@@ -20,5 +20,5 @@ type UserApplication struct {
 	Application *Application `gorm:"foreignKey:ApplicationID;references:ID;constraint:OnDelete:CASCADE"`
 }
 
-// TableName pins the table name; we use singular naming.
-func (UserApplication) TableName() string { return "user_application" }
+// TableName pins the table name; we use plural naming for all tables.
+func (UserApplication) TableName() string { return "user_applications" }

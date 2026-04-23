@@ -7,21 +7,21 @@
 // transparently handled by db/models.JSONB[T].
 package payload
 
-// AppEntry backs application.app_entry.
+// AppEntry backs applications.app_entry.
 type AppEntry struct{}
 
-// AppImageAnalysis backs application.app_image_analysis and
-// user_application.app_image_analysis.
+// AppImageAnalysis backs applications.app_image_analysis and
+// user_applications.app_image_analysis.
 type AppImageAnalysis struct{}
 
-// UserAppRawData backs user_application.app_raw_data.
+// UserAppRawData backs user_applications.app_raw_data.
 type UserAppRawData struct{}
 
-// UserAppStateSpec backs user_application_state.spec.
+// UserAppStateSpec backs user_application_states.spec.
 type UserAppStateSpec struct{}
 
-// UserAppStateStatus backs user_application_state.status.
+// UserAppStateStatus backs user_application_states.status.
 type UserAppStateStatus struct{}
 
-// MarketSourceOthers backs market_source.others.
+// MarketSourceOthers backs market_sources.others.
 type MarketSourceOthers struct{}

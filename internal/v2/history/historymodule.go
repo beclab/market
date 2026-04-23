@@ -123,82 +123,15 @@ func NewHistoryModule() (*HistoryModule, error) {
 		cancel: cancel,
 	}
 
-	// Initialize database schema
-	if err := module.initSchema(); err != nil {
-		glog.Errorf("Failed to initialize database schema: %v", err)
-		return nil, err
-	}
+	// Schema (table + indexes) is owned by internal/v2/db migrations
+	// (see migrations/00005_init_history_records.sql) and is applied during
+	// application startup before this constructor runs. We assume the
+	// table is already in the expected shape here.
 
 	// Start cleanup routine
 	module.startCleanupRoutine()
 
 	return module, nil
-}
-
-// initSchema creates the history_records table if it doesn't exist
-func (hm *HistoryModule) initSchema() error {
-	// First, create the table if it doesn't exist
-	createTableSchema := `
-	CREATE TABLE IF NOT EXISTS history_records (
-		id BIGSERIAL PRIMARY KEY,
-		type VARCHAR(100) NOT NULL,
-		message TEXT NOT NULL,
-		time BIGINT NOT NULL,
-		app VARCHAR(255) NOT NULL,
-		extended TEXT DEFAULT '',
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);`
-
-	_, err := hm.db.Exec(createTableSchema)
-	if err != nil {
-		glog.Errorf("Failed to create base table: %v", err)
-		return err
-	}
-
-	// Check if account column exists, if not add it
-	var columnExists bool
-	checkColumnQuery := `
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns 
-			WHERE table_name = 'history_records' 
-			AND column_name = 'account'
-		);`
-
-	err = hm.db.QueryRow(checkColumnQuery).Scan(&columnExists)
-	if err != nil {
-		glog.Errorf("Failed to check if account column exists: %v", err)
-		return err
-	}
-
-	// Add account column if it doesn't exist
-	if !columnExists {
-		glog.Infof("Account column does not exist, adding it...")
-		addColumnQuery := `ALTER TABLE history_records ADD COLUMN account VARCHAR(255) NOT NULL DEFAULT '';`
-		_, err = hm.db.Exec(addColumnQuery)
-		if err != nil {
-			glog.Errorf("Failed to add account column: %v", err)
-			return err
-		}
-		glog.Infof("Account column added successfully")
-	}
-
-	// Create indexes
-	indexSchema := `
-	CREATE INDEX IF NOT EXISTS idx_history_type ON history_records(type);
-	CREATE INDEX IF NOT EXISTS idx_history_app ON history_records(app);
-	CREATE INDEX IF NOT EXISTS idx_history_account ON history_records(account);
-	CREATE INDEX IF NOT EXISTS idx_history_time ON history_records(time);
-	CREATE INDEX IF NOT EXISTS idx_history_created_at ON history_records(created_at);
-	`
-
-	_, err = hm.db.Exec(indexSchema)
-	if err != nil {
-		glog.Errorf("Failed to create indexes: %v", err)
-		return err
-	}
-
-	glog.Infof("Database schema initialized successfully")
-	return nil
 }
 
 // StoreRecord stores a new history record

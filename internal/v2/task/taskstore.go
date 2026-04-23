@@ -60,49 +60,11 @@ func NewTaskStore() (*TaskStore, error) {
 		return nil, fmt.Errorf("failed to ping PostgreSQL: %w", err)
 	}
 
-	store := &TaskStore{db: db}
-	if err := store.initSchema(); err != nil {
-		return nil, err
-	}
-
-	return store, nil
-}
-
-// initSchema ensures the task_records table exists with required indexes
-func (ts *TaskStore) initSchema() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS task_records (
-		id BIGSERIAL PRIMARY KEY,
-		task_id VARCHAR(128) UNIQUE NOT NULL,
-		type INTEGER NOT NULL,
-		status INTEGER NOT NULL,
-		app_name VARCHAR(255) NOT NULL,
-		user_account VARCHAR(255) NOT NULL DEFAULT '',
-		op_id VARCHAR(255) NOT NULL DEFAULT '',
-		metadata TEXT NOT NULL DEFAULT '{}',
-		result TEXT NOT NULL DEFAULT '',
-		error_msg TEXT NOT NULL DEFAULT '',
-		created_at TIMESTAMP NOT NULL,
-		started_at TIMESTAMP NULL,
-		completed_at TIMESTAMP NULL,
-		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	);`
-
-	if _, err := ts.db.Exec(schema); err != nil {
-		return fmt.Errorf("failed to create task_records table: %w", err)
-	}
-
-	indexes := `
-	CREATE INDEX IF NOT EXISTS idx_task_records_status ON task_records(status);
-	CREATE INDEX IF NOT EXISTS idx_task_records_created_at ON task_records(created_at);
-	CREATE INDEX IF NOT EXISTS idx_task_records_completed_at ON task_records(completed_at);
-	`
-
-	if _, err := ts.db.Exec(indexes); err != nil {
-		return fmt.Errorf("failed to create task_records indexes: %w", err)
-	}
-
-	return nil
+	// Schema (table + indexes) is owned by internal/v2/db migrations
+	// (see migrations/00006_init_task_records.sql) and is applied during
+	// application startup before this constructor runs. We assume the
+	// table is already in the expected shape here.
+	return &TaskStore{db: db}, nil
 }
 
 // UpsertTask stores or updates a task record in the database
