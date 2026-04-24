@@ -211,7 +211,7 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 		if app.Spec.Name == appName && app.Spec.Owner == userID {
 			var foundInvisible bool
 			var invisibleValue bool
-			for _, specEntrance := range app.Spec.Entrances {
+			for _, specEntrance := range app.Spec.EntranceStatuses {
 				if specEntrance.Name == entranceName {
 					foundInvisible = true
 					invisibleValue = specEntrance.Invisible
@@ -228,7 +228,7 @@ func (dw *DataWatcherState) fetchInvisibleFromAppService(appName, userID, entran
 			if dw.appServiceCache[cacheKey] == nil {
 				dw.appServiceCache[cacheKey] = make(map[string]bool)
 			}
-			for _, specEntrance := range app.Spec.Entrances {
+			for _, specEntrance := range app.Spec.EntranceStatuses {
 				dw.appServiceCache[cacheKey][specEntrance.Name] = specEntrance.Invisible
 			}
 			dw.appServiceCacheMutex.Unlock()

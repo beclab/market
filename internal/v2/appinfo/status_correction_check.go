@@ -207,7 +207,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 }
 
 // fetchLatestStatus fetches the latest status from app-service
-func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceResponse, error) {
+func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]*utils.AppServiceResponse, error) {
 	// Fetch apps status
 	appsStatus, err := scc.fetchLatestAppsStatus()
 	if err != nil {
@@ -234,7 +234,7 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceRespo
 
 	// Combine apps and middlewares status
 	// Convert middlewares to AppServiceResponse format and merge with apps
-	allStatus := make([]utils.AppServiceResponse, 0, len(appsStatus)+len(middlewaresStatus))
+	allStatus := make([]*utils.AppServiceResponse, 0, len(appsStatus)+len(middlewaresStatus))
 
 	// Add apps status
 	allStatus = append(allStatus, appsStatus...)
@@ -249,7 +249,7 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]utils.AppServiceRespo
 }
 
 // fetchLatestAppsStatus fetches the latest apps status from app-service
-func (scc *StatusCorrectionChecker) fetchLatestAppsStatus() ([]utils.AppServiceResponse, error) {
+func (scc *StatusCorrectionChecker) fetchLatestAppsStatus() ([]*utils.AppServiceResponse, error) {
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort)
 
 	client := &http.Client{
@@ -271,7 +271,7 @@ func (scc *StatusCorrectionChecker) fetchLatestAppsStatus() ([]utils.AppServiceR
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	var apps []utils.AppServiceResponse
+	var apps []*utils.AppServiceResponse
 	if err := json.Unmarshal(data, &apps); err != nil {
 		return nil, fmt.Errorf("failed to parse app-service response: %v", err)
 	}
@@ -299,7 +299,7 @@ type MiddlewareStatusResponse struct {
 }
 
 // fetchLatestMiddlewaresStatus fetches the latest middlewares status from app-service
-func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppServiceResponse, error) {
+func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]*utils.AppServiceResponse, error) {
 	url := fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort)
 
 	client := &http.Client{
@@ -328,112 +328,26 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]utils.AppS
 
 	// Convert middleware response to AppServiceResponse format for compatibility
 	// This allows us to reuse existing comparison logic
-	var convertedResponses []utils.AppServiceResponse
+	var convertedResponses []*utils.AppServiceResponse
 
 	for _, middleware := range middlewareResp.Data {
 		// Convert middleware to AppServiceResponse format
-		converted := utils.AppServiceResponse{
-			Metadata: struct {
-				Name      string `json:"name"`
-				UID       string `json:"uid"`
-				Namespace string `json:"namespace"`
-			}{
-				Name:      middleware.Metadata.Name,
-				UID:       middleware.UUID,
-				Namespace: middleware.Namespace,
-			},
-			Spec: struct {
-				Name       string `json:"name"`
-				RawAppName string `json:"rawAppName"`
-				AppID      string `json:"appid"`
-				IsSysApp   bool   `json:"isSysApp"`
-				Owner      string `json:"owner"`
-				Icon       string `json:"icon"`
-				Title      string `json:"title"`
-				Source     string `json:"source"`
-				Entrances  []struct {
-					Name      string `json:"name"`
-					Url       string `json:"url"`
-					Invisible bool   `json:"invisible"`
-				} `json:"entrances"`
-				Settings struct {
-					ClusterScoped   string `json:"clusterScoped"`
-					MobileSupported string `json:"mobileSupported"`
-					Policy          string `json:"policy"`
-					RequiredGPU     string `json:"requiredGPU"`
-					Source          string `json:"source"`
-					MarketSource    string `json:"market_source"`
-					Target          string `json:"target"`
-					Title           string `json:"title"`
-					Version         string `json:"version"`
-				} `json:"settings"`
-			}{
-				Name:   middleware.Metadata.Name,
-				AppID:  middleware.Metadata.Name,
-				Owner:  middleware.User,
-				Icon:   "",
-				Title:  middleware.Title,
-				Source: "middleware",
-				Entrances: []struct {
-					Name      string `json:"name"`
-					Url       string `json:"url"`
-					Invisible bool   `json:"invisible"`
-				}{},
-			},
-			Status: struct {
-				State              string `json:"state"`
-				UpdateTime         string `json:"updateTime"`
-				StatusTime         string `json:"statusTime"`
-				LastTransitionTime string `json:"lastTransitionTime"`
-				EntranceStatuses   []struct {
-					ID         string `json:"id"`
-					Name       string `json:"name"`
-					State      string `json:"state"`
-					StatusTime string `json:"statusTime"`
-					Reason     string `json:"reason"`
-					Url        string `json:"url"`
-				} `json:"entranceStatuses"`
-				SharedEntrances []struct {
-					Name            string `json:"name"`
-					Host            string `json:"host"`
-					Port            int32  `json:"port"`
-					Icon            string `json:"icon,omitempty"`
-					Title           string `json:"title,omitempty"`
-					AuthLevel       string `json:"authLevel,omitempty"`
-					Invisible       bool   `json:"invisible,omitempty"`
-					URL             string `json:"url,omitempty"`
-					OpenMethod      string `json:"openMethod,omitempty"`
-					WindowPushState bool   `json:"windowPushState,omitempty"`
-					Skip            bool   `json:"skip,omitempty"`
-				} `json:"sharedEntrances,omitempty"`
-			}{
-				State:              middleware.ResourceStatus,
-				UpdateTime:         middleware.UpdateTime,
-				StatusTime:         middleware.UpdateTime, // Use UpdateTime as StatusTime for middlewares
-				LastTransitionTime: middleware.UpdateTime, // Use UpdateTime as LastTransitionTime for middlewares
-				EntranceStatuses: []struct {
-					ID         string `json:"id"`
-					Name       string `json:"name"`
-					State      string `json:"state"`
-					StatusTime string `json:"statusTime"`
-					Reason     string `json:"reason"`
-					Url        string `json:"url"`
-				}{},
-				SharedEntrances: []struct {
-					Name            string `json:"name"`
-					Host            string `json:"host"`
-					Port            int32  `json:"port"`
-					Icon            string `json:"icon,omitempty"`
-					Title           string `json:"title,omitempty"`
-					AuthLevel       string `json:"authLevel,omitempty"`
-					Invisible       bool   `json:"invisible,omitempty"`
-					URL             string `json:"url,omitempty"`
-					OpenMethod      string `json:"openMethod,omitempty"`
-					WindowPushState bool   `json:"windowPushState,omitempty"`
-					Skip            bool   `json:"skip,omitempty"`
-				}{},
-			},
+		var converted = &utils.AppServiceResponse{
+			Spec:   &utils.AppServiceResponseSpec{},
+			Status: &types.AppStateLatestDataStatus{},
 		}
+		converted.Metadata.Name = middleware.Metadata.Name
+		converted.Metadata.UID = middleware.UUID
+		converted.Metadata.Namespace = middleware.Namespace
+		converted.Spec.Name = middleware.Metadata.Name
+		converted.Spec.AppID = middleware.Metadata.Name
+		converted.Spec.Owner = middleware.User
+		converted.Spec.Title = middleware.Title
+		converted.Spec.Source = "middleware"
+		converted.Status.State = middleware.ResourceStatus
+		converted.Status.UpdateTime = middleware.UpdateTime
+		converted.Status.StatusTime = middleware.UpdateTime
+		converted.Status.LastTransitionTime = middleware.UpdateTime
 
 		convertedResponses = append(convertedResponses, converted)
 	}
@@ -505,7 +419,7 @@ func (scc *StatusCorrectionChecker) getExistingEntranceInvisibleMap(userID, appN
 }
 
 // compareStatus compares latest status with cached status and returns changes
-func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServiceResponse, cachedStatus map[string]*types.AppStateLatestData) []StatusChange {
+func (scc *StatusCorrectionChecker) compareStatus(latestStatus []*utils.AppServiceResponse, cachedStatus map[string]*types.AppStateLatestData) []StatusChange {
 	var changes []StatusChange
 
 	// Create maps for easier lookup
@@ -517,7 +431,7 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 
 	latestApps := make(map[string]*utils.AppServiceResponse)
 	for i := range latestStatus {
-		app := &latestStatus[i]
+		app := latestStatus[i]
 		key := fmt.Sprintf("%s:%s", app.Spec.Owner, app.Spec.Name)
 		latestApps[key] = app
 	}
@@ -727,22 +641,7 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []utils.AppServic
 }
 
 // compareEntranceStatuses compares entrance statuses and returns changes
-func (scc *StatusCorrectionChecker) compareEntranceStatuses(cachedEntrances []struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	StatusTime string `json:"statusTime"`
-	Reason     string `json:"reason"`
-	Url        string `json:"url"`
-	Invisible  bool   `json:"invisible"`
-}, latestEntrances []struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	StatusTime string `json:"statusTime"`
-	Reason     string `json:"reason"`
-	Url        string `json:"url"`
-}) []EntranceStatusChange {
+func (scc *StatusCorrectionChecker) compareEntranceStatuses(cachedEntrances, latestEntrances []types.AppStateLatestDataEntrances) []EntranceStatusChange {
 
 	var changes []EntranceStatusChange
 
@@ -772,7 +671,7 @@ func (scc *StatusCorrectionChecker) compareEntranceStatuses(cachedEntrances []st
 }
 
 // applyCorrections applies the detected status changes to the cache
-func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, latestStatus []utils.AppServiceResponse) {
+func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, latestStatus []*utils.AppServiceResponse) {
 	for _, change := range changes {
 		switch change.ChangeType {
 		case "app_disappeared":
@@ -808,7 +707,7 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 			var appToUpdate *utils.AppServiceResponse
 			for _, app := range latestStatus {
 				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
-					appToUpdate = &app
+					appToUpdate = app
 					break
 				}
 			}
@@ -878,7 +777,7 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 			var appToUpdate *utils.AppServiceResponse
 			for _, app := range latestStatus {
 				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
-					appToUpdate = &app
+					appToUpdate = app
 					break
 				}
 			}
@@ -934,7 +833,7 @@ func (scc *StatusCorrectionChecker) applyCorrections(changes []StatusChange, lat
 			var appToUpdate *utils.AppServiceResponse
 			for _, app := range latestStatus {
 				if app.Spec.Owner == change.UserID && app.Spec.Name == change.AppName {
-					appToUpdate = &app
+					appToUpdate = app
 					break
 				}
 			}
@@ -985,15 +884,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 	existingInvisible := scc.getExistingEntranceInvisibleMap(userID, app.Spec.Name)
 
 	// Create entrance statuses
-	entranceStatuses := make([]struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		State      string `json:"state"`
-		StatusTime string `json:"statusTime"`
-		Reason     string `json:"reason"`
-		Url        string `json:"url"`
-		Invisible  bool   `json:"invisible"`
-	}, len(app.Status.EntranceStatuses))
+	entranceStatuses := make([]types.AppStateLatestDataEntrances, len(app.Status.EntranceStatuses))
 
 	for i, entrance := range app.Status.EntranceStatuses {
 		// Default to false, but will be updated from spec.entrances or cache
@@ -1001,7 +892,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 
 		// Try to get invisible flag from spec.entrances first
 		foundInSpec := false
-		for _, specEntrance := range app.Spec.Entrances {
+		for _, specEntrance := range app.Spec.EntranceStatuses {
 			if specEntrance.Name == entrance.Name {
 				invisible = specEntrance.Invisible
 				foundInSpec = true
@@ -1021,15 +912,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 			}
 		}
 
-		entranceStatuses[i] = struct {
-			ID         string `json:"id"`
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-			Invisible  bool   `json:"invisible"`
-		}{
+		entranceStatuses[i] = types.AppStateLatestDataEntrances{
 			ID:         entrance.ID,
 			Name:       entrance.Name,
 			State:      entrance.State,
@@ -1053,19 +936,7 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 	// Try to get rawAppName and SharedEntrances from cache if available
 	rawAppName := ""
 	title := app.Spec.Title
-	var sharedEntrances []struct {
-		Name            string `json:"name"`
-		Host            string `json:"host"`
-		Port            int32  `json:"port"`
-		Icon            string `json:"icon,omitempty"`
-		Title           string `json:"title,omitempty"`
-		AuthLevel       string `json:"authLevel,omitempty"`
-		Invisible       bool   `json:"invisible,omitempty"`
-		URL             string `json:"url,omitempty"`
-		OpenMethod      string `json:"openMethod,omitempty"`
-		WindowPushState bool   `json:"windowPushState,omitempty"`
-		Skip            bool   `json:"skip,omitempty"`
-	}
+	var sharedEntrances []types.AppStateLatestDataEntrances
 
 	if scc.cacheManager != nil && userID != "" && app.Spec.Name != "" {
 		userData := scc.cacheManager.GetUserData(userID)
@@ -1101,56 +972,23 @@ func (scc *StatusCorrectionChecker) createAppStateDataFromResponse(app utils.App
 		sharedEntrances = app.Status.SharedEntrances
 	}
 
+	var status = &types.AppStateLatestDataSpec{}
+	status.Name = app.Spec.Name
+	status.RawAppName = rawAppName
+	status.Title = title
+	status.State = app.Status.State
+	status.UpdateTime = app.Status.UpdateTime
+	status.StatusTime = app.Status.StatusTime
+	status.LastTransitionTime = app.Status.LastTransitionTime
+	status.Progress = ""
+	status.OpType = "" // AppServiceResponse doesn't have opType, will be set from NATS messages
+	status.EntranceStatuses = entranceStatuses
+	status.SharedEntrances = sharedEntrances
+
 	return &types.AppStateLatestData{
 		Type:    types.AppStateLatest,
 		Version: version,
-		Status: struct {
-			Name               string `json:"name"`
-			RawAppName         string `json:"rawAppName"`
-			Title              string `json:"title"`
-			State              string `json:"state"`
-			UpdateTime         string `json:"updateTime"`
-			StatusTime         string `json:"statusTime"`
-			LastTransitionTime string `json:"lastTransitionTime"`
-			Progress           string `json:"progress"`
-			OpType             string `json:"opType,omitempty"`
-			Message            string `json:"message"`
-			Reason             string `json:"reason"`
-			EntranceStatuses   []struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			} `json:"entranceStatuses"`
-			SharedEntrances []struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			} `json:"sharedEntrances,omitempty"`
-		}{
-			Name:               app.Spec.Name,
-			RawAppName:         rawAppName,
-			Title:              title,
-			State:              app.Status.State,
-			UpdateTime:         app.Status.UpdateTime,
-			StatusTime:         app.Status.StatusTime,
-			LastTransitionTime: app.Status.LastTransitionTime,
-			Progress:           "",
-			OpType:             "", // AppServiceResponse doesn't have opType, will be set from NATS messages
-			EntranceStatuses:   entranceStatuses,
-			SharedEntrances:    sharedEntrances,
-		},
+		Status:  status,
 	}, source
 }
 
@@ -1209,7 +1047,7 @@ func (scc *StatusCorrectionChecker) createStateDataFromAppStateData(appStateData
 				"title":           entrance.Title,
 				"authLevel":       entrance.AuthLevel,
 				"invisible":       entrance.Invisible,
-				"url":             entrance.URL,
+				"url":             entrance.Url,
 				"openMethod":      entrance.OpenMethod,
 				"windowPushState": entrance.WindowPushState,
 				"skip":            entrance.Skip,
@@ -1232,7 +1070,7 @@ func (scc *StatusCorrectionChecker) SetTaskModule(tm *task.TaskModule) {
 }
 
 // checkAndCorrectTaskStatuses checks running tasks and corrects their status based on actual app state
-func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []utils.AppServiceResponse) {
+func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []*utils.AppServiceResponse) {
 	if scc.taskModule == nil {
 		return
 	}
@@ -1248,7 +1086,7 @@ func (scc *StatusCorrectionChecker) checkAndCorrectTaskStatuses(latestStatus []u
 	// Create a map of app statuses for quick lookup: user:appName -> app status
 	appStatusMap := make(map[string]*utils.AppServiceResponse)
 	for i := range latestStatus {
-		app := &latestStatus[i]
+		app := latestStatus[i]
 		key := fmt.Sprintf("%s:%s", app.Spec.Owner, app.Spec.Name)
 		appStatusMap[key] = app
 	}
