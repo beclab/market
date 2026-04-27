@@ -3,10 +3,12 @@ package syncerfn
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"market/internal/v2/settings"
+	"market/internal/v2/store"
 	"market/internal/v2/types"
 
 	"github.com/golang/glog"
@@ -18,12 +20,6 @@ const (
 	SuspendLabel = "suspend"
 )
 
-// appRemovalEntry holds an app that should be removed from cache after releasing the mutex.
-type appRemovalEntry struct {
-	appID      string
-	appInfoMap map[string]interface{}
-}
-
 // DetailFetchStep implements the third step: fetch detailed info for each app
 type DetailFetchStep struct {
 	DetailEndpointPath string                    // Relative path like "/api/v1/applications/info"
@@ -31,6 +27,10 @@ type DetailFetchStep struct {
 	Version            string                    // Version parameter for API requests
 	SettingsManager    *settings.SettingsManager // Settings manager to build complete URLs
 }
+
+// TODO(syncer): installed/uninstalling + delisted filtering is intentionally
+// skipped in this step while cache is being removed from the pipeline.
+// A later hydration/consistency stage should own that decision.
 
 // NewDetailFetchStep creates a new detail fetch step
 func NewDetailFetchStep(detailEndpointPath string, version string, settingsManager *settings.SettingsManager) *DetailFetchStep {
@@ -64,19 +64,11 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 		return fmt.Errorf("no market source available in sync context")
 	}
 
-	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
+	detailURL := d.SettingsManager.BuildAPIURL(marketSource.SourceURL, d.DetailEndpointPath)
 
 	if strings.HasPrefix(detailURL, "file://") {
 		return nil
 	}
-
-	// Add panic recovery
-	defer func() {
-		if r := recover(); r != nil {
-			glog.Errorf("PANIC in DetailFetchStep.Execute: %v", r)
-			data.AddError(fmt.Errorf("panic in DetailFetchStep.Execute: %v", r))
-		}
-	}()
 
 	glog.V(2).Infof("Executing %s for %d apps in batches of %d", d.GetStepName(), len(data.AppIDs), d.BatchSize)
 
@@ -171,12 +163,7 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 	glog.V(2).Infof("Completed detail fetch in %v: %d successful, %d errors, total %d apps",
 		overallDuration, successCount, errorCount, len(data.AppIDs))
 
-	// Final cleanup: Check all remaining apps in LatestData.Data.Apps for suspend/remove labels
-	// This handles cases where apps might have suspend/remove labels in the initial data fetch
-	// but were not returned in the detail API response
-	if data.LatestData != nil && data.LatestData.Data.Apps != nil {
-		d.cleanupSuspendedAppsFromLatestData(data)
-	}
+	// TODO(syncer): cache-based suspended/remove cleanup will be removed with cache deprecation.
 
 	return nil
 }
@@ -184,29 +171,21 @@ func (d *DetailFetchStep) Execute(ctx context.Context, data *SyncContext) error 
 // CanSkip determines if this step can be skipped
 func (d *DetailFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 	// Skip if hashes match or no app IDs
-	if data.HashMatches {
-		glog.V(3).Infof("Skipping %s - hashes match, no sync required", d.GetStepName())
-		return true
-	}
+	// if data.HashMatches {
+	// 	glog.V(3).Infof("Skipping %s - hashes match, no sync required", d.GetStepName())
+	// 	return true
+	// }
 
-	if len(data.AppIDs) == 0 {
-		glog.V(3).Infof("Skipping %s - no app IDs to fetch details for", d.GetStepName())
-		return true
-	}
+	// if len(data.AppIDs) == 0 {
+	// 	glog.V(3).Infof("Skipping %s - no app IDs to fetch details for", d.GetStepName())
+	// 	return true
+	// }
 
 	return false
 }
 
 // fetchAppsBatch fetches detailed information for a batch of apps
 func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, data *SyncContext) (int, int) {
-	// Add panic recovery
-	defer func() {
-		if r := recover(); r != nil {
-			glog.Errorf("PANIC in fetchAppsBatch: %v", r)
-			data.AddError(fmt.Errorf("panic in fetchAppsBatch: %v", r))
-		}
-	}()
-
 	// Get current market source from context
 	marketSource := data.GetMarketSource()
 	if marketSource == nil {
@@ -217,8 +196,8 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	}
 
 	// Build complete URL from market source base URL and endpoint path
-	detailURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DetailEndpointPath)
-	glog.V(2).Infof("Fetching details for batch from: %s, Source: %s", detailURL, marketSource.ID)
+	detailURL := d.SettingsManager.BuildAPIURL(marketSource.SourceURL, d.DetailEndpointPath)
+	glog.V(3).Infof("Fetching details for batch from: %s, Source: %s", detailURL, marketSource.SourceID)
 
 	request := types.AppsInfoRequest{
 		AppIds:  appIDs,
@@ -254,549 +233,178 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 	glog.V(3).Infof("Batch request completed with status: %d for apps: %v (request took %v)",
 		resp.StatusCode(), appIDs, requestDuration)
 
-	// Handle different status codes
-	switch resp.StatusCode() {
-	case 200:
-		// Success - process the apps and replace simplified data with detailed data
-		glog.V(3).Infof("Processing successful response for batch with %d apps", len(appIDs))
-
-		// CRITICAL: Get sourceID BEFORE acquiring mutex lock to avoid deadlock
-		// GetMarketSource() uses RLock() internally, and calling it while holding Lock()
-		// would cause permanent deadlock in the same goroutine
-		// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
-		sourceID := ""
-		if marketSource := data.GetMarketSource(); marketSource != nil {
-			sourceID = marketSource.ID
-		}
-
-		appsToRemove := func() []appRemovalEntry {
-		data.mutex.Lock()
-		defer data.mutex.Unlock()
-		glog.V(3).Infof("Acquired mutex lock for batch processing")
-
-		appsToRemove := make([]appRemovalEntry, 0)
-
-		// Extract apps from raw response
-		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
-			glog.V(3).Infof("Found %d apps in response data", len(appsData))
-			// Update the original LatestData with detailed information
-			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
-				glog.V(3).Infof("Processing %d apps in LatestData", len(appsData))
-
-				for appID, appData := range appsData {
-					glog.V(3).Infof("Processing app %s in batch", appID)
-					if appInfoMap, ok := appData.(map[string]interface{}); ok {
-						// Check for Suspend or Remove labels before processing the app
-						shouldSkip := false
-						shouldRemoveFromCache := false
-						appInstalled := false
-						var appName string
-						if name, ok := appInfoMap["name"].(string); ok {
-							appName = name
-						}
-
-						if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
-							for _, labelInterface := range appLabels {
-								if label, ok := labelInterface.(string); ok {
-									if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
-										shouldSkip = true
-
-										shouldRemoveFromCache = true
-										if d.isAppInstalled(appName, sourceID, data) {
-											shouldRemoveFromCache = false
-											appInstalled = true
-											glog.V(3).Infof("App %s is suspended but still installed, keeping cache entry", appName)
-										}
-
-										if shouldRemoveFromCache {
-											// Collect app for removal instead of calling directly to avoid nested locks
-											appsToRemove = append(appsToRemove, appRemovalEntry{appID: appID, appInfoMap: appInfoMap})
-										}
-										break
-									}
-								}
-							}
-						}
-
-						// Skip processing if app should be removed
-						if shouldSkip {
-							if shouldRemoveFromCache {
-								// Remove from LatestData immediately when no installation is active
-								delete(data.LatestData.Data.Apps, appID)
-
-								// Also remove ALL versions of this app from LatestData.Data.Apps (by name)
-								if appName != "" {
-									for otherAppID, otherAppData := range data.LatestData.Data.Apps {
-										if otherAppInfoMap, ok := otherAppData.(map[string]interface{}); ok {
-											if otherAppName, ok := otherAppInfoMap["name"].(string); ok && otherAppName == appName {
-												delete(data.LatestData.Data.Apps, otherAppID)
-											}
-										}
-									}
-								}
-							} else if appInstalled {
-								// For installed delisted apps, use chartrepo's complete data as base
-								// and merge with original data only when chartrepo fields are empty/null
-								// This ensures chartrepo's rendered data is preserved
-								originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
-
-								// Use mergeAppData to intelligently merge chartrepo data with original data
-								// This will use chartrepo data when available, and fall back to original when chartrepo is empty/null
-								mergedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
-
-								// Ensure appLabels contains suspend/remove label from chartrepo response
-								if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
-									mergedAppData["appLabels"] = chartrepoLabels
-								} else if hasOriginal {
-									// If chartrepo doesn't return labels, check if original has suspend/remove labels
-									if originalMap, ok := originalAppData.(map[string]interface{}); ok {
-										if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
-											hasSuspendOrRemove := false
-											for _, labelInterface := range originalLabels {
-												if label, ok := labelInterface.(string); ok {
-													if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
-														hasSuspendOrRemove = true
-														break
-													}
-												}
-											}
-											if hasSuspendOrRemove {
-												mergedAppData["appLabels"] = originalLabels
-											}
-										}
-									}
-								}
-
-								// Update LatestData with merged data (chartrepo data as base, original as fallback)
-								data.LatestData.Data.Apps[appID] = mergedAppData
-								data.DetailedApps[appID] = mergedAppData
-							}
-							continue
-						}
-
-						glog.V(3).Infof("Processing app %s data replacement", appID)
-
-						// Preserve appLabels from original data if detail API doesn't return it
-						// This handles the case where DataFetchStep has suspend/remove labels
-						// but detail API returns old version without labels
-						originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
-						var preservedAppLabels interface{}
-						var preservedCategories interface{}
-						var preservedSupportArch interface{}
-						if hasOriginal {
-							if originalMap, ok := originalAppData.(map[string]interface{}); ok {
-								if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
-									// Check if original has suspend/remove labels
-									hasSuspendOrRemoveInOriginal := false
-									for _, labelInterface := range originalLabels {
-										if label, ok := labelInterface.(string); ok {
-											if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
-												hasSuspendOrRemoveInOriginal = true
-												break
-											}
-										}
-									}
-									// If original has suspend/remove labels but detail API doesn't return labels or returns empty labels
-									if hasSuspendOrRemoveInOriginal {
-										detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
-										if !hasDetailLabels || len(detailLabels) == 0 {
-											// Preserve original labels (including suspend/remove)
-											preservedAppLabels = originalLabels
-										}
-									}
-								}
-
-								// Preserve categories from original data if detail API returns null or empty
-								if originalCategories, ok := originalMap["categories"]; ok && originalCategories != nil {
-									detailCategories := appInfoMap["categories"]
-									shouldPreserveCategories := false
-									if detailCategories == nil {
-										shouldPreserveCategories = true
-									} else if detailCategoriesSlice, ok := detailCategories.([]interface{}); ok && len(detailCategoriesSlice) == 0 {
-										shouldPreserveCategories = true
-									}
-									if shouldPreserveCategories {
-										preservedCategories = originalCategories
-									}
-								}
-
-								// Preserve supportArch from original data if detail API returns null or empty
-								if originalSupportArch, ok := originalMap["supportArch"]; ok && originalSupportArch != nil {
-									detailSupportArch := appInfoMap["supportArch"]
-									shouldPreserveSupportArch := false
-									if detailSupportArch == nil {
-										shouldPreserveSupportArch = true
-									} else if detailSupportArchSlice, ok := detailSupportArch.([]interface{}); ok && len(detailSupportArchSlice) == 0 {
-										shouldPreserveSupportArch = true
-									}
-									if shouldPreserveSupportArch {
-										preservedSupportArch = originalSupportArch
-									}
-								}
-							}
-						}
-
-						// Replace the simplified app data with detailed data in LatestData
-						// Use smart merge to preserve original fields when detail API returns empty/null
-						detailedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
-
-						// Use preserved labels if available (only if detail API didn't return labels)
-						// IMPORTANT: If detail API returns appLabels (including suspend/remove), use them instead of preserved labels
-						if preservedAppLabels != nil {
-							// Only use preserved labels if detail API didn't return any labels
-							detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
-							if !hasDetailLabels || len(detailLabels) == 0 {
-								detailedAppData["appLabels"] = preservedAppLabels
-							}
-						}
-
-						// Use preserved categories if available
-						if preservedCategories != nil {
-							detailedAppData["categories"] = preservedCategories
-						}
-
-						// Use preserved supportArch if available
-						if preservedSupportArch != nil {
-							detailedAppData["supportArch"] = preservedSupportArch
-						}
-
-						data.LatestData.Data.Apps[appID] = detailedAppData
-
-						// Also store in DetailedApps for backward compatibility
-						data.DetailedApps[appID] = detailedAppData
-
-						// glog.V(3).Infof("DetailedAppData: %v", detailedAppData)
-
-						// Log the main app information with more details
-						glog.V(3).Infof("Replaced app data with details - ID: %s, Name: %s, Version: %s",
-							appInfoMap["id"], appInfoMap["name"], appInfoMap["version"])
-						glog.V(3).Infof("App %s data replacement completed", appID)
-					} else {
-						glog.V(3).Infof("Warning: App %s data is not a map", appID)
-					}
-				}
-				glog.V(3).Info("Finished processing all apps in LatestData")
-			} else {
-				glog.V(3).Info("WARNING: LatestData or LatestData.Data.Apps is nil")
-			}
-		} else {
-			glog.V(3).Info("WARNING: No apps data found in response")
-		}
-
-		return appsToRemove
-		}()
-
-		// Now remove apps from cache after releasing the main lock to avoid nested locks
-		var source = data.GetMarketSource()
-		for _, appToRemove := range appsToRemove {
-			d.removeAppFromCache(appToRemove.appID, appToRemove.appInfoMap, data, source)
-		}
-
-		// Count successful and failed apps
-		successCount := 0
-		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
-			successCount = len(appsData)
-		}
-
-		errorCount := 0
-		if notFound, ok := rawResponse["not_found"].([]interface{}); ok {
-			errorCount = len(notFound)
-		}
-
-		if errorCount > 0 {
-			glog.V(3).Infof("WARNING: Apps not found in batch: %v", rawResponse["not_found"])
-		}
-
-		glog.V(3).Infof("Successfully fetched and replaced details for %d/%d apps in batch", successCount, len(appIDs))
-		return successCount, errorCount
-
-	case 202:
-		// Accepted - data is being loaded
-		message := ""
-		if msg, ok := rawResponse["message"].(string); ok {
-			message = msg
-		}
-		errMsg := fmt.Errorf("data is being loaded for version %s, batch: %v - %s", d.Version, appIDs, message)
-		data.AddError(errMsg)
-		glog.Errorf("WARNING: %v", errMsg)
-		// Return all apps as errors for 202 status
-		return 0, len(appIDs)
-
-	case 400:
-		// Bad Request
-		errMsg := fmt.Errorf("bad request for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
-		data.AddError(errMsg)
-		glog.Errorf("ERROR: %v", errMsg)
-		return 0, len(appIDs)
-
-	case 429:
-		// Rate limit exceeded - this is a retryable error
-		errMsg := fmt.Errorf("rate limit exceeded for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
-		data.AddError(errMsg)
-		glog.Errorf("ERROR: %v", errMsg)
-		// Return all apps as errors for rate limiting - will trigger retry
-		return 0, len(appIDs)
-
-	case 500, 502, 503, 504:
-		// Server errors - these are retryable
-		errMsg := fmt.Errorf("server error for batch %v to %s: status %d", appIDs, detailURL, resp.StatusCode())
-		data.AddError(errMsg)
-		glog.Errorf("ERROR: %v", errMsg)
-		// Return all apps as errors for server errors - will trigger retry
-		return 0, len(appIDs)
-
-	default:
-		// Other errors
+	if resp.StatusCode() != 200 {
 		errMsg := fmt.Errorf("detail API for batch %v to %s returned status %d", appIDs, detailURL, resp.StatusCode())
 		data.AddError(errMsg)
 		glog.Errorf("ERROR: %v", errMsg)
 		return 0, len(appIDs)
 	}
+
+	// Sync added/version-changed apps to PG in one batch transaction.
+	if err := d.syncBatchAppsToPG(ctx, appIDs, data, rawResponse); err != nil {
+		errMsg := fmt.Errorf("sync batch apps to pg failed for source %s, batch %v: %w", marketSource.SourceID, appIDs, err)
+		data.AddError(errMsg)
+		glog.Errorf("ERROR: %v", errMsg)
+		return 0, len(appIDs)
+	}
+
+	// Count successful and failed apps
+	successCount := 0
+	if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
+		successCount = len(appsData)
+	}
+
+	errorCount := 0
+	if notFound, ok := rawResponse["not_found"].([]interface{}); ok {
+		errorCount = len(notFound)
+	}
+
+	if errorCount > 0 {
+		glog.V(3).Infof("WARNING: Apps not found in batch: %v", rawResponse["not_found"])
+	}
+
+	glog.V(3).Infof("Successfully fetched and replaced details for %d/%d apps in batch", successCount, len(appIDs))
+	return successCount, errorCount
 }
 
-// removeAppFromCache removes an app from cache for all users
-func (d *DetailFetchStep) removeAppFromCache(appID string, appInfoMap map[string]interface{}, data *SyncContext, source *settings.MarketSource) {
-	appName, ok := appInfoMap["name"].(string)
-	if !ok || appName == "" {
-		glog.V(3).Infof("Warning: Cannot remove app from cache - app name is empty for app: %s", appID)
-		return
-	}
-
-	// Add panic recovery
-	defer func() {
-		if r := recover(); r != nil {
-			glog.Errorf("PANIC in removeAppFromCache: %v, id: %s, name: %s", r, appID, appName)
-		}
-	}()
-
-	glog.V(3).Infof("Starting to remove app %s %s from cache", appID, appName)
-
-	// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
-	sourceID := source.ID
-	glog.V(2).Infof("Removing all versions of app %s(%s) from cache for source: %s [SUSPEND/REMOVE]", appID, appName, sourceID)
-
-	if data.CacheManager == nil {
-		glog.V(3).Infof("Warning: CacheManager is nil, cannot remove app from cache")
-		return
-	}
-
-	affected := data.CacheManager.RemoveAppFromAllSources(appName, sourceID)
-	glog.V(3).Infof("App removal from cache completed for app: %s %s, affected %d users", appID, appName, affected)
-}
-
-// cleanupSuspendedAppsFromLatestData checks all apps in LatestData.Data.Apps for suspend/remove labels
-// and removes them if they are not installed
-func (d *DetailFetchStep) cleanupSuspendedAppsFromLatestData(data *SyncContext) {
-	if data.LatestData == nil || data.LatestData.Data.Apps == nil {
-		return
-	}
-
-	sourceID := ""
+func (d *DetailFetchStep) syncBatchAppsToPG(ctx context.Context, appIDs []string, data *SyncContext, rawResponse map[string]interface{}) error {
 	marketSource := data.GetMarketSource()
 	if marketSource == nil {
-		glog.Error("[DetailFetchStep] MarketSource not found")
-		return
+		return fmt.Errorf("no market source available in sync context for pg sync")
 	}
 
-	sourceID = marketSource.ID
+	requestApps, ok := rawResponse["apps"].(map[string]interface{})
+	if !ok || len(requestApps) == 0 {
+		return nil
+	}
 
-	// Collect apps to remove
-	appsToRemove := make([]appRemovalEntry, 0)
+	storedApps, err := store.QueryAppsByIDs(ctx, marketSource.SourceID, appIDs)
+	if err != nil {
+		return err
+	}
 
-	// Check each app in LatestData.Data.Apps
-	for appID, appDataInterface := range data.LatestData.Data.Apps {
-		appInfoMap, ok := appDataInterface.(map[string]interface{})
+	storedIDSet := make(map[string]struct{}, len(storedApps))
+	storedVersionByID := make(map[string]string, len(storedApps))
+	for _, app := range storedApps {
+		if app == nil || app.AppID == "" {
+			continue
+		}
+		storedIDSet[app.AppID] = struct{}{}
+		storedVersionByID[app.AppID] = app.AppVersion
+	}
+
+	requestIDSet := make(map[string]struct{}, len(requestApps))
+	requestVersionByID := make(map[string]string, len(requestApps))
+	for requestAppID, requestAppData := range requestApps {
+		appMap, ok := requestAppData.(map[string]interface{})
+		if !ok || requestAppID == "" {
+			continue
+		}
+		if hasSuspendOrRemoveLabels(appMap["appLabels"]) {
+			continue
+		}
+		requestIDSet[requestAppID] = struct{}{}
+		version, _ := appMap["version"].(string)
+		requestVersionByID[requestAppID] = strings.TrimSpace(version)
+	}
+
+	storedIDs := make([]string, 0, len(storedIDSet))
+	for id := range storedIDSet {
+		storedIDs = append(storedIDs, id)
+	}
+	requestIDs := make([]string, 0, len(requestIDSet))
+	for id := range requestIDSet {
+		requestIDs = append(requestIDs, id)
+	}
+	sort.Strings(storedIDs)
+	sort.Strings(requestIDs)
+	diffAppIDs := diffAppIDs(storedIDs, requestIDs)
+
+	if len(diffAppIDs.Kept) > 0 {
+		changedAppIDs := make([]string, 0, len(diffAppIDs.Kept))
+		for _, id := range diffAppIDs.Kept {
+			oldVersion := strings.TrimSpace(storedVersionByID[id])
+			newVersion := strings.TrimSpace(requestVersionByID[id])
+			if newVersion == "" || oldVersion == newVersion {
+				continue
+			}
+			changedAppIDs = append(changedAppIDs, id)
+		}
+		diffAppIDs.Kept = changedAppIDs
+	}
+
+	glog.Infof("SyncBatchApps, source: %s, add: %d, kept: %d",
+		marketSource.SourceID, len(diffAppIDs.Added), len(diffAppIDs.Kept))
+
+	return store.SyncBatchApps(ctx, store.BatchSyncInput{
+		SourceID:      marketSource.SourceID,
+		RequestApps:   requestApps,
+		AddedAppIDs:   diffAppIDs.Added,
+		ChangedAppIDs: diffAppIDs.Kept,
+	})
+}
+
+func hasSuspendOrRemoveLabels(raw interface{}) bool {
+	labels, ok := raw.([]interface{})
+	if !ok || len(labels) == 0 {
+		return false
+	}
+	for _, item := range labels {
+		label, ok := item.(string)
 		if !ok {
 			continue
 		}
-
-		// Check for suspend/remove labels
-		if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
-			hasSuspendOrRemove := false
-			var appName string
-			if name, ok := appInfoMap["name"].(string); ok {
-				appName = name
-			}
-
-			for _, labelInterface := range appLabels {
-				if label, ok := labelInterface.(string); ok {
-					if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
-						hasSuspendOrRemove = true
-						break
-					}
-				}
-			}
-
-			if hasSuspendOrRemove {
-				shouldRemoveFromCache := true
-				if appName != "" && d.isAppInstalled(appName, sourceID, data) {
-					shouldRemoveFromCache = false
-				}
-
-				if shouldRemoveFromCache {
-					appsToRemove = append(appsToRemove, appRemovalEntry{appID: appID, appInfoMap: appInfoMap})
-				}
-			}
+		if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
+			return true
 		}
 	}
-
-	// Remove apps from LatestData.Data.Apps
-	if len(appsToRemove) > 0 {
-		// Collect app names that need to be removed (to remove all versions)
-		appNamesToRemove := make(map[string]bool)
-		for _, appToRemove := range appsToRemove {
-			if appName, ok := appToRemove.appInfoMap["name"].(string); ok && appName != "" {
-				appNamesToRemove[appName] = true
-			}
-			// Remove the specific appID from LatestData.Data.Apps
-			delete(data.LatestData.Data.Apps, appToRemove.appID)
-		}
-
-		// Remove ALL versions of suspended apps from LatestData.Data.Apps (by name)
-		for appID, appDataInterface := range data.LatestData.Data.Apps {
-			appInfoMap, ok := appDataInterface.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if appName, ok := appInfoMap["name"].(string); ok {
-				if appNamesToRemove[appName] {
-					delete(data.LatestData.Data.Apps, appID)
-				}
-			}
-		}
-
-		// Also remove from cache - remove all versions by name
-		for appName := range appNamesToRemove {
-			// Find the first appInfoMap for this app name to use for removeAppFromCache
-			var appInfoMapForRemoval map[string]interface{}
-			var appIDForRemoval string
-			for _, appToRemove := range appsToRemove {
-				if name, ok := appToRemove.appInfoMap["name"].(string); ok && name == appName {
-					appInfoMapForRemoval = appToRemove.appInfoMap
-					appIDForRemoval = appToRemove.appID
-					break
-				}
-			}
-			if appInfoMapForRemoval != nil {
-				d.removeAppFromCache(appIDForRemoval, appInfoMapForRemoval, data, marketSource)
-			}
-		}
-	}
+	return false
 }
 
-// mergeAppData merges detail API data with original data, preserving original values when detail API returns empty/null
-func (d *DetailFetchStep) mergeAppData(originalAppData interface{}, appInfoMap map[string]interface{}, appID string, hasOriginal bool) map[string]interface{} {
-	// Start with detail API data
-	detailedAppData := map[string]interface{}{
-		// Basic fields
-		"id":          appInfoMap["id"],
-		"name":        appInfoMap["name"],
-		"cfgType":     appInfoMap["cfgType"],
-		"chartName":   appInfoMap["chartName"],
-		"icon":        appInfoMap["icon"],
-		"appID":       appInfoMap["appID"],
-		"version":     appInfoMap["version"],
-		"categories":  appInfoMap["categories"],
-		"versionName": appInfoMap["versionName"],
+type appIDDiff struct {
+	Added   []string
+	Removed []string
+	Kept    []string
+}
 
-		// Extended fields
-		"promoteImage":   appInfoMap["promoteImage"],
-		"promoteVideo":   appInfoMap["promoteVideo"],
-		"subCategory":    appInfoMap["subCategory"],
-		"locale":         appInfoMap["locale"],
-		"developer":      appInfoMap["developer"],
-		"requiredMemory": appInfoMap["requiredMemory"],
-		"requiredDisk":   appInfoMap["requiredDisk"],
-		"supportClient":  appInfoMap["supportClient"],
-		"supportArch":    appInfoMap["supportArch"],
-		"requiredGPU":    appInfoMap["requiredGPU"],
-		"requiredCPU":    appInfoMap["requiredCPU"],
-		"rating":         appInfoMap["rating"],
-		"target":         appInfoMap["target"],
-		"permission":     appInfoMap["permission"],
-		"entrances":      appInfoMap["entrances"],
-		"middleware":     appInfoMap["middleware"],
-		"options":        appInfoMap["options"],
+func diffAppIDs(oldAppIDs, newAppIDs []string) appIDDiff {
+	oldSet := make(map[string]struct{}, len(oldAppIDs))
+	newSet := make(map[string]struct{}, len(newAppIDs))
 
-		// Additional metadata fields
-		"submitter":     appInfoMap["submitter"],
-		"doc":           appInfoMap["doc"],
-		"website":       appInfoMap["website"],
-		"featuredImage": appInfoMap["featuredImage"],
-		"sourceCode":    appInfoMap["sourceCode"],
-		"license":       appInfoMap["license"],
-		"legal":         appInfoMap["legal"],
-		"i18n":          appInfoMap["i18n"],
-
-		"modelSize": appInfoMap["modelSize"],
-		"namespace": appInfoMap["namespace"],
-		"onlyAdmin": appInfoMap["onlyAdmin"],
-
-		"lastCommitHash": appInfoMap["lastCommitHash"],
-		"createTime":     appInfoMap["createTime"],
-		"updateTime":     appInfoMap["updateTime"],
-		"appLabels":      appInfoMap["appLabels"],
-		"count":          appInfoMap["count"],
-		"variants":       appInfoMap["variants"],
-
-		// Version history information
-		"versionHistory": appInfoMap["versionHistory"],
-
-		// Legacy fields for backward compatibility
-		"screenshots": appInfoMap["screenshots"],
-		"tags":        appInfoMap["tags"],
-		"metadata":    appInfoMap["metadata"],
-		"updated_at":  appInfoMap["updated_at"],
+	for _, id := range oldAppIDs {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		oldSet[id] = struct{}{}
+	}
+	for _, id := range newAppIDs {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		newSet[id] = struct{}{}
 	}
 
-	// If we have original data, merge it intelligently
-	if hasOriginal {
-		if originalMap, ok := originalAppData.(map[string]interface{}); ok {
-			// List of fields to preserve if detail API returns empty/null
-			// IMPORTANT: appLabels must be preserved if detail API returns empty/null, especially for delisted apps
-			fieldsToPreserve := []string{
-				"icon", "description", "title", "developer", "promoteImage", "promoteVideo",
-				"subCategory", "locale", "requiredMemory", "requiredDisk", "supportClient",
-				"requiredGPU", "requiredCPU", "rating", "target", "permission", "entrances",
-				"middleware", "options", "submitter", "doc", "website", "featuredImage",
-				"sourceCode", "license", "legal", "i18n", "modelSize", "namespace",
-				"onlyAdmin", "lastCommitHash", "createTime", "updateTime", "count",
-				"variants", "screenshots", "tags", "metadata", "updated_at", "versionHistory",
-				"fullDescription", "upgradeDescription", "cfgType", "chartName", "versionName",
-				"id", "name", "appID", "version", "appLabels", "categories", "supportArch",
-			}
+	diff := appIDDiff{
+		Added:   make([]string, 0),
+		Removed: make([]string, 0),
+		Kept:    make([]string, 0),
+	}
 
-			for _, field := range fieldsToPreserve {
-				detailValue := detailedAppData[field]
-				originalValue, hasOriginalValue := originalMap[field]
-
-				// Check if detail API returned empty/null value
-				shouldPreserve := false
-				if detailValue == nil {
-					shouldPreserve = true
-				} else if strValue, ok := detailValue.(string); ok && strValue == "" {
-					shouldPreserve = true
-				} else if sliceValue, ok := detailValue.([]interface{}); ok && len(sliceValue) == 0 {
-					shouldPreserve = true
-				} else if mapValue, ok := detailValue.(map[string]interface{}); ok && len(mapValue) == 0 {
-					shouldPreserve = true
-				}
-
-				// Preserve original value if detail API returned empty/null and original has value
-				if shouldPreserve && hasOriginalValue && originalValue != nil {
-					detailedAppData[field] = originalValue
-				}
-			}
+	for id := range newSet {
+		if _, exists := oldSet[id]; exists {
+			diff.Kept = append(diff.Kept, id)
+		} else {
+			diff.Added = append(diff.Added, id)
+		}
+	}
+	for id := range oldSet {
+		if _, exists := newSet[id]; !exists {
+			diff.Removed = append(diff.Removed, id)
 		}
 	}
 
-	return detailedAppData
-}
-
-// isAppInstalled determines whether the given app is currently installed for the active source.
-func (d *DetailFetchStep) isAppInstalled(appName, sourceID string, data *SyncContext) bool {
-	if appName == "" || sourceID == "" || data == nil || data.CacheManager == nil {
-		return false
-	}
-	return data.CacheManager.IsAppInstalled(sourceID, appName)
+	sort.Strings(diff.Added)
+	sort.Strings(diff.Removed)
+	sort.Strings(diff.Kept)
+	return diff
 }

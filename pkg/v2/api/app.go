@@ -1930,7 +1930,7 @@ func (s *Server) createSafeRecommendCopy(recommend *types.Recommend) map[string]
 	}
 
 	// Add Source field if present
-	if recommend.Source != "" {
+	if recommend.Source != 0 {
 		copy["source"] = recommend.Source
 	}
 
@@ -1946,6 +1946,7 @@ func (s *Server) createSafePageCopy(page *types.Page) map[string]interface{} {
 	return map[string]interface{}{
 		"category":   page.Category,
 		"content":    page.Content,
+		"source":     page.Source,
 		"createdAt":  page.CreatedAt,
 		"updated_at": page.UpdatedAt,
 	}

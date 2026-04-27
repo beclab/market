@@ -407,7 +407,7 @@ func (r *RedisClient) prepareBatchSourceDataSave(userID, sourceID string, source
 		appInfoLatestPending = sourceData.AppInfoLatestPending
 	}
 
-	glog.Infof("[DB] BatchSourceDataSave, history: %d, state: %d, latest: %d, pending: %d",
+	glog.V(3).Infof("[DB] BatchSourceDataSave, history: %d, state: %d, latest: %d, pending: %d",
 		len(appInfoHistory), len(appStateLatest), len(appInfoLatest), len(appInfoLatestPending))
 
 	baseKey := fmt.Sprintf("appinfo:user:%s:source:%s", userID, sourceID)

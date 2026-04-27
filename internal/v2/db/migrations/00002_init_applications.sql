@@ -1,5 +1,5 @@
 -- +goose Up
--- applications: per-source app catalog. One row per (source_id, app_id, app_version).
+-- applications: per-source app catalog. One row per (source_id, app_id).
 -- Cloned-app semantics live in user_applications (app_id vs app_raw_id), not here.
 
 -- +goose StatementBegin
@@ -15,8 +15,8 @@ CREATE TABLE IF NOT EXISTS applications (
     price              JSONB,
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_applications_source_app_version
-        UNIQUE (source_id, app_id, app_version),
+    CONSTRAINT uq_applications_source_app
+        UNIQUE (source_id, app_id),
     CONSTRAINT ck_applications_app_entry_object
         CHECK (app_entry IS NULL OR jsonb_typeof(app_entry) = 'object'),
     CONSTRAINT ck_applications_price_object

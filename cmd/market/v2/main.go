@@ -275,7 +275,7 @@ func main() {
 	if !helper.IsPublicEnvironment() {
 		// 1. Init user watch
 		var w = watchers.NewWatchers(context.Background(), client.Factory.Config())
-		watchers.AddToWatchers[client.User](w, client.UserGVR, cacheManager.HandlerEvent())
+		watchers.AddToWatchers[client.User](w, client.UserGVR, watchers.UserHandlerEvent())
 		go w.Run(1)
 
 		// 2. Initialize History Module
@@ -388,10 +388,10 @@ func main() {
 		}
 	}()
 
-	glog.V(2).Info("HTTP server startup initiated")
-	glog.V(2).Info("Waiting for server to be ready...")
+	glog.V(3).Info("HTTP server startup initiated")
+	glog.V(3).Info("Waiting for server to be ready...")
 	time.Sleep(2 * time.Second) // Give the server a moment to start
-	glog.V(2).Info("Server startup sequence completed")
+	glog.V(3).Info("Server startup sequence completed")
 
 	glog.V(2).Info("Starting server on port 8080")
 

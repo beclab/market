@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"market/internal/v2/appinfo/syncerfn"
+	"market/internal/v2/db/models"
 	"market/internal/v2/settings"
+	"market/internal/v2/store/marketsource"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -47,8 +50,8 @@ type Syncer struct {
 	lastSyncDuration    atomic.Value // time.Duration
 	currentSource       atomic.Value // string
 	lastSyncedAppCount  atomic.Int64
-	lastSyncDetails atomic.Value // *SyncDetails
-	tryOnce         atomic.Bool
+	lastSyncDetails     atomic.Value // *SyncDetails
+	tryOnce             atomic.Bool
 }
 
 // NewSyncer creates a new syncer with the given steps
@@ -61,7 +64,7 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 		stopChan:        make(chan struct{}),
 		isRunning:       atomic.Bool{}, // Initialize with false
 		settingsManager: settingsManager,
-		tryOnce: atomic.Bool{},
+		tryOnce:         atomic.Bool{},
 	}
 	// Initialize atomic values
 	s.lastSyncTime.Store(time.Time{})
@@ -129,7 +132,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	throttled := !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval
 
 	if !configChanged && throttled {
-		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)",time.Since(s.lastSyncExecuted), s.syncInterval)
+		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)", time.Since(s.lastSyncExecuted), s.syncInterval)
 		return
 	}
 	if configChanged {
@@ -184,9 +187,14 @@ func (s *Syncer) hasAnyRemoteHashChanged(ctx context.Context) bool {
 			continue
 		}
 
-		localHash := ""
-		if cm := s.cacheManager.Load(); cm != nil {
-			localHash = cm.GetSourceOthersHash(src.ID)
+		localHash, err := marketsource.GetOthersHash(ctx, src.ID)
+		if err != nil {
+			continue
+		}
+		if localHash == "" {
+			if cm := s.cacheManager.Load(); cm != nil {
+				localHash = cm.GetSourceOthersHash(src.ID)
+			}
 		}
 
 		if hr.Hash != localHash {
@@ -257,7 +265,6 @@ func (s *Syncer) IsRunning() bool {
 	return s.isRunning.Load()
 }
 
-
 // getVersionForSync returns the version to use for sync operations with fallback
 func getVersionForSync() string {
 	if version, err := utils.GetTerminusVersionValue(); err == nil {
@@ -279,28 +286,29 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	s.syncCount.Add(1)
 
 	// Get all configured market sources (no IsActive filter - sync all configured sources)
-	config := s.settingsManager.GetMarketSources()
-	if config == nil || len(config.Sources) == 0 {
+	sources,err := marketsource.GetMarketSources()
+	if err != nil || len(sources) == 0 {
 		glog.Error("==================== SYNC CYCLE FAILED ====================")
-		err := fmt.Errorf("no market sources configured")
+		err := fmt.Errorf("no market sources configured, err: %v",err)
 		s.updateSyncFailure(err, startTime)
 		return err
 	}
 
+
 	// Log all configured sources for debugging
-	glog.V(2).Infof("Found %d configured market sources:", len(config.Sources))
-	for _, src := range config.Sources {
-		glog.V(2).Infof("  - Source ID: %s, Name: %s, Type: %s, IsActive: %v, Priority: %d, BaseURL: %s",
-			src.ID, src.Name, src.Type, src.IsActive, src.Priority, src.BaseURL)
+	glog.V(2).Infof("Found %d configured market sources:", len(sources))
+	for _, src := range sources {
+		glog.V(2).Infof("  - Source ID: %s, Name: %s, Type: %s, Priority: %d, BaseURL: %s",
+			src.SourceID, src.SourceTitle, src.SourceType, src.Priority, src.SourceURL)
 	}
 
 	// Filter to only remote sources - syncer only processes remote sources
-	var remoteSources []*settings.MarketSource
-	for _, source := range config.Sources {
-		if source.Type == "remote" {
+	var remoteSources []*models.MarketSource
+	for _, source := range sources {
+		if source.SourceType == "remote" {
 			remoteSources = append(remoteSources, source)
 		} else {
-			glog.V(3).Infof("Skipping local source: %s (type: %s)", source.ID, source.Type)
+			glog.V(3).Infof("Skipping local source: %s (type: %s)", source.SourceID, source.SourceType)
 		}
 	}
 
@@ -314,7 +322,7 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	// clears all AppRenderFailed data for all users and sources
 	s.cacheManager.Load().ClearAppRenderFailedData()
 
-	glog.V(3).Infof("Found %d configured market sources (%d remote, %d local)", len(config.Sources), len(remoteSources), len(config.Sources)-len(remoteSources))
+	glog.V(3).Infof("Found %d configured market sources (%d remote, %d local)", len(sources), len(remoteSources), len(sources)-len(remoteSources))
 
 	// Process all remote sources in priority order - each source is synced independently
 	var lastError error
@@ -324,21 +332,21 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 	var failedSources []string
 
 	for _, source := range remoteSources {
-		s.currentSource.Store(source.ID)
-		glog.V(3).Infof("Trying market source: %s (%s)", source.ID, source.BaseURL)
+		s.currentSource.Store(source.SourceID)
+		glog.V(3).Infof("Trying market source: %s (%s)", source.SourceID, source.SourceURL)
 
 		if err := s.executeSyncCycleWithSource(ctx, source); err != nil {
-			glog.Errorf("Failed to sync with source %s: %v", source.ID, err)
+			glog.Errorf("Failed to sync with source %s: %v", source.SourceID, err)
 			lastError = err
 			failureCount++
-			failedSources = append(failedSources, source.ID)
+			failedSources = append(failedSources, source.SourceID)
 			continue
 		}
 
 		// Success with this source - continue to next source
 		successCount++
-		successSources = append(successSources, source.ID)
-		glog.V(3).Infof("Sync cycle completed successfully with source %s", source.ID)
+		successSources = append(successSources, source.SourceID)
+		glog.V(3).Infof("Sync cycle completed successfully with source %s", source.SourceID)
 	}
 
 	// Summary of sync cycle
@@ -365,7 +373,7 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 
 	// All remote sources failed
 	glog.V(3).Info("==================== SYNC CYCLE FAILED ====================")
-	err := fmt.Errorf("all remote market sources failed, last error: %w", lastError)
+	err = fmt.Errorf("all remote market sources failed, last error: %w", lastError)
 	s.updateSyncFailure(err, startTime)
 	return err
 }
@@ -397,15 +405,8 @@ func (s *Syncer) updateSyncFailure(err error, startTime time.Time) {
 }
 
 // executeSyncCycleWithSource executes sync cycle with a specific market source
-func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *settings.MarketSource) error {
-	// Add panic recovery
-	defer func() {
-		if r := recover(); r != nil {
-			glog.Errorf("PANIC in executeSyncCycleWithSource: %v", r)
-		}
-	}()
-
-	glog.V(2).Infof("-------------------- SOURCE SYNC STARTED: %s --------------------", source.ID)
+func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *models.MarketSource) error {
+	glog.V(2).Infof("-------------------- SOURCE SYNC STARTED: %s --------------------", source.SourceID)
 
 	// Create sync context with CacheManager for unified lock strategy
 	var cacheManager types.CacheManagerInterface
@@ -469,13 +470,13 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			if err != nil {
 				glog.Errorf("Step %d (%s) failed: %v", i+1, step.GetStepName(), err)
 				glog.Errorf("======== SYNC STEP %d/%d FAILED: %s ========", i+1, len(steps), step.GetStepName())
-				glog.Errorf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.ID)
+				glog.Errorf("-------------------- SOURCE SYNC FAILED: %s --------------------", source.SourceID)
 				return fmt.Errorf("step %d failed: %w", i+1, err)
 			}
 		case <-stepTimer.C:
 			glog.V(4).Infof("Step %d (%s) timed out after %v", i+1, step.GetStepName(), stepTimeout)
 			glog.V(4).Infof("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())
-			glog.V(4).Infof("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.ID)
+			glog.V(4).Infof("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.SourceID)
 			return fmt.Errorf("step %d timed out after %v", i+1, stepTimeout)
 		case <-syncCtx.Done():
 			// Stop timer when context is cancelled
@@ -487,7 +488,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			}
 			glog.V(4).Infof("Step %d (%s) timed out or context cancelled", i+1, step.GetStepName())
 			glog.V(4).Infof("======== SYNC STEP %d/%d TIMEOUT: %s ========", i+1, len(steps), step.GetStepName())
-			glog.V(4).Infof("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.ID)
+			glog.V(4).Infof("-------------------- SOURCE SYNC TIMEOUT: %s --------------------", source.SourceID)
 			return fmt.Errorf("step %d timed out: %w", i+1, syncCtx.Err())
 		}
 
@@ -531,7 +532,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			},
 		}
 
-		sourceID := source.ID // Use market source name as source ID
+		sourceID := source.SourceID // Use market source name as source ID
 		glog.V(3).Infof("Using source ID: %s for data storage", sourceID)
 
 		// Get all existing user IDs, creating a system user if none exist
@@ -551,7 +552,7 @@ func (s *Syncer) executeSyncCycleWithSource(ctx context.Context, source *setting
 			syncContext.HashMatches, syncContext.RemoteHash, syncContext.LocalHash)
 	}
 
-	glog.V(2).Infof("-------------------- SOURCE SYNC COMPLETED: %s --------------------", source.ID)
+	glog.V(2).Infof("-------------------- SOURCE SYNC COMPLETED: %s --------------------", source.SourceID)
 	return nil
 }
 
@@ -634,9 +635,7 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 						}
 
 						// Handle Source field
-						if source, ok := recMap["source"].(string); ok {
-							recommend.Source = source
-						}
+						recommend.Source = parseInterfaceToInt(recMap["source"])
 
 						// Handle time fields
 						if createdAt, ok := recMap["createdAt"].(string); ok {
@@ -669,6 +668,7 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 						if content, ok := pageMap["content"].(string); ok {
 							pageObj.Content = content
 						}
+						pageObj.Source = parseInterfaceToInt(pageMap["source"])
 						others.Pages[i] = pageObj
 					}
 				}
@@ -729,9 +729,7 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 								}
 							}
 						}
-						if source, ok := topicMap["source"].(string); ok {
-							topicObj.Source = source
-						}
+						topicObj.Source = parseInterfaceToInt(topicMap["source"])
 						others.Topics[i] = topicObj
 					}
 				}
@@ -765,9 +763,7 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 								}
 							}
 						}
-						if source, ok := topicListMap["source"].(string); ok {
-							topicListObj.Source = source
-						}
+						topicListObj.Source = parseInterfaceToInt(topicListMap["source"])
 						others.TopicLists[i] = topicListObj
 					}
 				}
@@ -822,6 +818,43 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 	}
 }
 
+func parseInterfaceToInt(value interface{}) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int8:
+		return int(v)
+	case int16:
+		return int(v)
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case uint:
+		return int(v)
+	case uint8:
+		return int(v)
+	case uint16:
+		return int(v)
+	case uint32:
+		return int(v)
+	case uint64:
+		return int(v)
+	case float32:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return 0
+	}
+}
+
 // storeDataDirectlyBatch stores data directly to cache without going through CacheManager
 func (s *Syncer) storeDataDirectlyBatch(userIDs []string, sourceID string, completeData map[string]interface{}) {
 	for _, userID := range userIDs {
@@ -843,7 +876,7 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			glog.V(3).Infof("Using CacheManager to store data for user: %s, source: %s", userID, sourceID)
-			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData,"Syncer")
+			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData, "Syncer")
 			if err != nil {
 				glog.Errorf("Failed to store data via CacheManager for user: %s, source: %s, error: %v", userID, sourceID, err)
 				// Fall back to direct cache access

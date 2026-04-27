@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"market/internal/v2/settings"
+	"market/internal/v2/store/marketsource"
 
 	"github.com/golang/glog"
 )
@@ -57,8 +58,8 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	}
 
 	// Build complete URL from market source base URL and endpoint path
-	hashURL := h.SettingsManager.BuildAPIURL(marketSource.BaseURL, h.HashEndpointPath)
-	glog.V(2).Infof("Using hash, Source: %s, Version: %s, URL: %s", marketSource.ID, version, hashURL)
+	hashURL := h.SettingsManager.BuildAPIURL(marketSource.SourceURL, h.HashEndpointPath)
+	glog.V(2).Infof("Using hash, Source: %s, Version: %s, URL: %s", marketSource.SourceID, version, hashURL)
 
 	if strings.HasPrefix(hashURL, "file://") {
 		return nil
@@ -86,15 +87,22 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 
 	data.RemoteHash = hashResponse.Hash
 
-	// Calculate local hash
-	if data.CacheManager != nil {
-		data.LocalHash = data.CacheManager.GetSourceOthersHash(marketSource.ID)
-		if data.LocalHash == "" {
-			if data.Cache == nil || len(data.Cache.Users) == 0 {
-				data.LocalHash = "empty_cache_no_users"
-			} else {
-				data.LocalHash = "no_source_hash"
-			}
+	// Calculate local hash from PostgreSQL (market_sources.data.hash).
+	localHash, err := marketsource.GetOthersHash(ctx, marketSource.SourceID)
+	if err != nil {
+		return fmt.Errorf("failed to load local hash for source %s: %w", marketSource.SourceID, err)
+	}
+	data.LocalHash = localHash
+
+	// Backward compatibility: when store is unavailable, fall back to cache hash.
+	if data.LocalHash == "" && data.CacheManager != nil {
+		data.LocalHash = data.CacheManager.GetSourceOthersHash(marketSource.SourceID)
+	}
+	if data.LocalHash == "" {
+		if data.Cache == nil || len(data.Cache.Users) == 0 {
+			data.LocalHash = "empty_cache_no_users"
+		} else {
+			data.LocalHash = "no_source_hash"
 		}
 	}
 
