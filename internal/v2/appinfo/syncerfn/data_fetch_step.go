@@ -3,8 +3,6 @@ package syncerfn
 import (
 	"context"
 	"fmt"
-	"os"
-	"sort"
 	"strings"
 
 	"market/internal/v2/settings"
@@ -140,28 +138,6 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 		}
 	}
 
-	// In development environment, limit app list to 2 entries deterministically.
-	if isDevelopmentEnvironment() && len(appsMap) > 200 {
-		glog.V(2).Infof("Development environment detected, limiting original apps data to 2 (original count: %d)", len(appsMap))
-		sortedAppIDs := make([]string, 0, len(appsMap))
-		for appID := range appsMap {
-			sortedAppIDs = append(sortedAppIDs, appID)
-		}
-		sort.Strings(sortedAppIDs)
-		allowed := make(map[string]struct{}, 2)
-		for idx, appID := range sortedAppIDs {
-			if idx >= 2 {
-				break
-			}
-			allowed[appID] = struct{}{}
-		}
-		for appID := range appsMap {
-			if _, ok := allowed[appID]; !ok {
-				delete(appsMap, appID)
-			}
-		}
-	}
-
 	// Iterate through typed apps map where keys are app IDs.
 	for appID, app := range appsMap {
 		// Keep historical validation semantics: only accept entries with matching id.
@@ -181,10 +157,3 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 		glog.V(2).Infof("First %d app IDs: %v", maxLog, data.AppIDs[:maxLog])
 	}
 }
-
-// isDevelopmentEnvironment checks if the application is running in development mode
-func isDevelopmentEnvironment() bool {
-	env := strings.ToLower(os.Getenv("GO_ENV"))
-	return env == "dev" || env == "development" || env == ""
-}
-

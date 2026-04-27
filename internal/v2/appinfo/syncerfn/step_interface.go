@@ -2,7 +2,6 @@ package syncerfn
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"market/internal/v2/settings"
@@ -34,7 +33,7 @@ type AppStoreInfoResponse struct {
 
 // AppStoreDataSection represents the data section of the appstore response
 type AppStoreDataSection struct {
-	Apps       map[string]interface{} `json:"apps"`
+	Apps       map[string]interface{}     `json:"apps"`
 	Recommends map[string]RemoteRecommend `json:"recommends"`
 	Pages      map[string]RemotePage      `json:"pages"`
 	Topics     map[string]RemoteTopic     `json:"topics"`
@@ -87,12 +86,12 @@ type RemoteTopicData struct {
 
 // RemoteTopic represents one topic entry from /appstore/info.
 type RemoteTopic struct {
-	ID        string                    `json:"_id"`
-	Name      string                    `json:"name"`
+	ID        string                     `json:"_id"`
+	Name      string                     `json:"name"`
 	Data      map[string]RemoteTopicData `json:"data"`
-	Source    string                    `json:"source"`
-	UpdatedAt string                    `json:"updated_at"`
-	CreatedAt string                    `json:"createdAt"`
+	Source    string                     `json:"source"`
+	UpdatedAt string                     `json:"updated_at"`
+	CreatedAt string                     `json:"createdAt"`
 }
 
 // RemoteTopicList represents one topic list entry from /appstore/info.
@@ -141,7 +140,6 @@ type SyncContext struct {
 	DetailedApps map[string]interface{} `json:"detailed_apps"`
 	AppIDs       []string               `json:"app_ids"`
 	Errors       []error                `json:"-"`
-	mutex        sync.RWMutex           `json:"-"`
 }
 
 // NewSyncContextWithManager creates a new sync context with CacheManager
@@ -159,22 +157,16 @@ func NewSyncContextWithManager(cache *types.CacheData, cacheManager types.CacheM
 
 // AddError adds an error to the context in a thread-safe manner
 func (sc *SyncContext) AddError(err error) {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
 	sc.Errors = append(sc.Errors, err)
 }
 
 // HasErrors returns true if there are any errors in the context
 func (sc *SyncContext) HasErrors() bool {
-	sc.mutex.RLock()
-	defer sc.mutex.RUnlock()
 	return len(sc.Errors) > 0
 }
 
 // GetErrors returns a copy of all errors
 func (sc *SyncContext) GetErrors() []error {
-	sc.mutex.RLock()
-	defer sc.mutex.RUnlock()
 	errors := make([]error, len(sc.Errors))
 	copy(errors, sc.Errors)
 	return errors
@@ -182,28 +174,20 @@ func (sc *SyncContext) GetErrors() []error {
 
 // SetVersion sets the version to use for API requests
 func (sc *SyncContext) SetVersion(version string) {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
 	sc.Version = version
 }
 
 // GetVersion returns the version to use for API requests
 func (sc *SyncContext) GetVersion() string {
-	sc.mutex.RLock()
-	defer sc.mutex.RUnlock()
 	return sc.Version
 }
 
 // SetMarketSource sets the current market source for the sync context
 func (sc *SyncContext) SetMarketSource(source *settings.MarketSource) {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
 	sc.MarketSource = source
 }
 
 // GetMarketSource returns the current market source
 func (sc *SyncContext) GetMarketSource() *settings.MarketSource {
-	sc.mutex.RLock()
-	defer sc.mutex.RUnlock()
 	return sc.MarketSource
 }
