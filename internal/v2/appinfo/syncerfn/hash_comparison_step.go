@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"market/internal/v2/settings"
-	marketSourceStore "market/internal/v2/store/marketsource"
+	"market/internal/v2/store/marketsource"
 
 	"github.com/golang/glog"
 )
@@ -23,19 +23,13 @@ type HashResponse struct {
 type HashComparisonStep struct {
 	HashEndpointPath string                    // Relative path like "/api/v1/appstore/hash"
 	SettingsManager  *settings.SettingsManager // Settings manager to build complete URLs
-	MarketSourceStore marketSourceStore.Store
 }
 
 // NewHashComparisonStep creates a new hash comparison step
-func NewHashComparisonStep(
-	hashEndpointPath string,
-	settingsManager *settings.SettingsManager,
-	marketSourceStore marketSourceStore.Store,
-) *HashComparisonStep {
+func NewHashComparisonStep(hashEndpointPath string, settingsManager *settings.SettingsManager) *HashComparisonStep {
 	return &HashComparisonStep{
 		HashEndpointPath: hashEndpointPath,
 		SettingsManager:  settingsManager,
-		MarketSourceStore: marketSourceStore,
 	}
 }
 
@@ -94,13 +88,11 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 	data.RemoteHash = hashResponse.Hash
 
 	// Calculate local hash from PostgreSQL (market_sources.data.hash).
-	if h.MarketSourceStore != nil {
-		localHash, err := h.MarketSourceStore.GetOthersHash(ctx, marketSource.ID)
-		if err != nil {
-			return fmt.Errorf("failed to load local hash for source %s: %w", marketSource.ID, err)
-		}
-		data.LocalHash = localHash
+	localHash, err := marketsource.GetOthersHash(ctx, marketSource.ID)
+	if err != nil {
+		return fmt.Errorf("failed to load local hash for source %s: %w", marketSource.ID, err)
 	}
+	data.LocalHash = localHash
 
 	// Backward compatibility: when store is unavailable, fall back to cache hash.
 	if data.LocalHash == "" && data.CacheManager != nil {

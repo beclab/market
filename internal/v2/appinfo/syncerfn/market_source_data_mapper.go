@@ -2,7 +2,6 @@ package syncerfn
 
 import (
 	"sort"
-	"strconv"
 	"time"
 
 	"market/internal/v2/types"
@@ -38,14 +37,12 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 		if appID == "" {
 			continue
 		}
-		app := RemoteAppBrief{}
-		switch typed := appRaw.(type) {
-		case RemoteAppBrief:
-			app = typed
-		case map[string]interface{}:
-			app = mapToRemoteAppBrief(typed)
+		appMap, ok := appRaw.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		if app.ID != "" && app.ID != appID {
+		id, _ := appMap["id"].(string)
+		if id != "" && id != appID {
 			continue
 		}
 		result.Apps = append(result.Apps, appID)
@@ -60,7 +57,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 			ID:        topic.ID,
 			Name:      topic.Name,
 			Data:      make(map[string]*types.TopicData),
-			Source:    stringifySource(topic.Source),
+			Source:    topic.Source,
 			UpdatedAt: parseRFC3339Loose(topic.UpdatedAt),
 			CreatedAt: parseRFC3339Loose(topic.CreatedAt),
 		}
@@ -93,7 +90,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 			Description: topicList.Description,
 			Content:     topicList.Content,
 			Title:       toStringMap(topicList.Title),
-			Source:      stringifySource(topicList.Source),
+			Source:      topicList.Source,
 			UpdatedAt:   parseRFC3339Loose(topicList.UpdatedAt),
 			CreatedAt:   parseRFC3339Loose(topicList.CreatedAt),
 		})
@@ -107,7 +104,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 			Name:        recommend.Name,
 			Description: recommend.Description,
 			Content:     recommend.Content,
-			Source:      stringifySource(recommend.Source),
+			Source:      recommend.Source,
 			UpdatedAt:   parseRFC3339Loose(recommend.UpdatedAt),
 			CreatedAt:   parseRFC3339Loose(recommend.CreatedAt),
 		}
@@ -156,7 +153,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 			Title:     toStringMap(tag.Title),
 			Icon:      tag.Icon,
 			Sort:      tag.Sort,
-			Source:    stringifySource(tag.Source),
+			Source:    tag.Source,
 			UpdatedAt: parseRFC3339Loose(tag.UpdatedAt),
 			CreatedAt: parseRFC3339Loose(tag.CreatedAt),
 		})
@@ -205,56 +202,12 @@ func toStringMap(in map[string]interface{}) map[string]string {
 		switch v := value.(type) {
 		case string:
 			out[key] = v
-		default:
-			if value != nil {
-				out[key] = stringifySource(value)
-			}
 		}
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
-}
-
-func stringifySource(src interface{}) string {
-	switch value := src.(type) {
-	case nil:
-		return ""
-	case string:
-		return value
-	case int:
-		return strconv.Itoa(value)
-	case int8:
-		return strconv.FormatInt(int64(value), 10)
-	case int16:
-		return strconv.FormatInt(int64(value), 10)
-	case int32:
-		return strconv.FormatInt(int64(value), 10)
-	case int64:
-		return strconv.FormatInt(value, 10)
-	case uint:
-		return strconv.FormatUint(uint64(value), 10)
-	case uint8:
-		return strconv.FormatUint(uint64(value), 10)
-	case uint16:
-		return strconv.FormatUint(uint64(value), 10)
-	case uint32:
-		return strconv.FormatUint(uint64(value), 10)
-	case uint64:
-		return strconv.FormatUint(value, 10)
-	case float32:
-		return strconv.FormatFloat(float64(value), 'f', -1, 32)
-	case float64:
-		return strconv.FormatFloat(value, 'f', -1, 64)
-	case bool:
-		if value {
-			return "true"
-		}
-		return "false"
-	default:
-		return ""
-	}
 }
 
 func parseRFC3339Loose(raw string) time.Time {

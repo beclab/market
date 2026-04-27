@@ -2,90 +2,48 @@ package marketsource
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"market/internal/v2/db"
+	"market/internal/v2/db/models"
 	"market/internal/v2/types"
+
+	"gorm.io/gorm"
 )
 
-type pgStore struct{}
-
-// NewPGStore creates a market source store backed by PostgreSQL.
-func NewPGStore() Store {
-	return &pgStore{}
-}
-
-func (s *pgStore) SaveDataIfHashChanged(ctx context.Context, sourceID string, data *types.MarketSourceData) (bool, error) {
+func SaveData(ctx context.Context, sourceID string, data *types.MarketSourceData) error {
 	if sourceID == "" {
-		return false, fmt.Errorf("sourceID cannot be empty")
+		return fmt.Errorf("sourceID cannot be empty")
 	}
 	if data == nil {
-		return false, fmt.Errorf("market source data cannot be nil")
+		return fmt.Errorf("market source data cannot be nil")
 	}
 
-	xdb := db.GlobalSqlxDB()
-	if xdb == nil {
-		return false, fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
 	}
 
-	payload, err := json.Marshal(data)
-	if err != nil {
-		return false, fmt.Errorf("marshal market source data: %w", err)
+	payload := models.NewJSONB(*data)
+
+	result := gdb.WithContext(ctx).
+		Model(&models.MarketSource{}).
+		Where("source_id = ?", sourceID).
+		Updates(map[string]interface{}{
+			"data":       &payload,
+			"updated_at": gorm.Expr("NOW()"),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update market source data: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("market source not found: %s", sourceID)
 	}
 
-	tx, err := xdb.BeginTxx(ctx, nil)
-	if err != nil {
-		return false, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
-	var existingHash string
-	queryHash := `
-SELECT COALESCE(data->>'hash', '')
-FROM market_sources
-WHERE source_id = $1
-FOR UPDATE
-`
-	if err := tx.QueryRowxContext(ctx, queryHash, sourceID).Scan(&existingHash); err != nil {
-		return false, fmt.Errorf("query existing market source hash: %w", err)
-	}
-
-	if existingHash != "" && existingHash == data.Hash {
-		if err := tx.Commit(); err != nil {
-			return false, fmt.Errorf("commit no-op transaction: %w", err)
-		}
-		return false, nil
-	}
-
-	updateQuery := `
-UPDATE market_sources
-SET data = $2::jsonb, updated_at = NOW()
-WHERE source_id = $1
-`
-	result, err := tx.ExecContext(ctx, updateQuery, sourceID, payload)
-	if err != nil {
-		return false, fmt.Errorf("update market source data: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("read rows affected: %w", err)
-	}
-	if rowsAffected == 0 {
-		return false, fmt.Errorf("market source not found: %s", sourceID)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit market source data update: %w", err)
-	}
-
-	return true, nil
+	return nil
 }
 
-func (s *pgStore) HasData(ctx context.Context, sourceID string) (bool, error) {
+func HasData(ctx context.Context, sourceID string) (bool, error) {
 	if sourceID == "" {
 		return false, fmt.Errorf("sourceID cannot be empty")
 	}
@@ -114,7 +72,7 @@ SELECT EXISTS (
 	return exists, nil
 }
 
-func (s *pgStore) GetOthersHash(ctx context.Context, sourceID string) (string, error) {
+func GetOthersHash(ctx context.Context, sourceID string) (string, error) {
 	if sourceID == "" {
 		return "", fmt.Errorf("sourceID cannot be empty")
 	}
@@ -136,3 +94,4 @@ WHERE source_id = $1
 	}
 	return hash, nil
 }
+

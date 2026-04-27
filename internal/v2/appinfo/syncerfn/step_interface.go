@@ -44,22 +44,6 @@ type AppStoreDataSection struct {
 	Tags       map[string]RemoteTag       `json:"tags"`
 }
 
-// RemoteAppBrief is a best-effort typed projection for data.apps entries.
-// It is used by DataFetchStep/mapper via explicit conversion from interface{}.
-type RemoteAppBrief struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Version     string      `json:"version"`
-	Category    string      `json:"category"`
-	Description string      `json:"description"`
-	Icon        string      `json:"icon"`
-	Screenshots interface{} `json:"screenshots"`
-	Tags        interface{} `json:"tags"`
-	Metadata    interface{} `json:"metadata"`
-	Source      interface{} `json:"source"`
-	UpdatedAt   string      `json:"updated_at"`
-}
-
 // RemoteRecommendData represents the multilingual metadata nested in recommends.
 type RemoteRecommendData struct {
 	Title       map[string]interface{} `json:"title"`
@@ -72,18 +56,18 @@ type RemoteRecommend struct {
 	Description string               `json:"description"`
 	Content     string               `json:"content"`
 	Data        *RemoteRecommendData `json:"data"`
-	Source      interface{}          `json:"source"`
+	Source      string               `json:"source"`
 	UpdatedAt   string               `json:"updated_at"`
 	CreatedAt   string               `json:"createdAt"`
 }
 
 // RemotePage represents one page entry from /appstore/info.
 type RemotePage struct {
-	Category  string      `json:"category"`
-	Content   string      `json:"content"`
-	Source    interface{} `json:"source"`
-	UpdatedAt string      `json:"updated_at"`
-	CreatedAt string      `json:"createdAt"`
+	Category  string `json:"category"`
+	Content   string `json:"content"`
+	Source    string `json:"source"`
+	UpdatedAt string `json:"updated_at"`
+	CreatedAt string `json:"createdAt"`
 }
 
 // RemoteTopicData represents language-specific topic metadata.
@@ -106,7 +90,7 @@ type RemoteTopic struct {
 	ID        string                    `json:"_id"`
 	Name      string                    `json:"name"`
 	Data      map[string]RemoteTopicData `json:"data"`
-	Source    interface{}               `json:"source"`
+	Source    string                    `json:"source"`
 	UpdatedAt string                    `json:"updated_at"`
 	CreatedAt string                    `json:"createdAt"`
 }
@@ -118,7 +102,7 @@ type RemoteTopicList struct {
 	Description string                 `json:"description"`
 	Content     string                 `json:"content"`
 	Title       map[string]interface{} `json:"title"`
-	Source      interface{}            `json:"source"`
+	Source      string                 `json:"source"`
 	UpdatedAt   string                 `json:"updated_at"`
 	CreatedAt   string                 `json:"createdAt"`
 }
@@ -137,7 +121,7 @@ type RemoteTag struct {
 	Title     map[string]interface{} `json:"title"`
 	Icon      string                 `json:"icon"`
 	Sort      int                    `json:"sort"`
-	Source    interface{}            `json:"source"`
+	Source    string                 `json:"source"`
 	UpdatedAt string                 `json:"updated_at"`
 	CreatedAt string                 `json:"createdAt"`
 }

@@ -8,28 +8,22 @@ import (
 	"strings"
 
 	"market/internal/v2/settings"
-	marketSourceStore "market/internal/v2/store/marketsource"
+	"market/internal/v2/store/marketsource"
 
 	"github.com/golang/glog"
 )
 
 // DataFetchStep implements the second step: fetch latest data from remote
 type DataFetchStep struct {
-	DataEndpointPath  string                    // Relative path like "/api/v1/appstore/info"
-	SettingsManager   *settings.SettingsManager // Settings manager to build complete URLs
-	MarketSourceStore marketSourceStore.Store
+	DataEndpointPath string                    // Relative path like "/api/v1/appstore/info"
+	SettingsManager  *settings.SettingsManager // Settings manager to build complete URLs
 }
 
 // NewDataFetchStep creates a new data fetch step
-func NewDataFetchStep(
-	dataEndpointPath string,
-	settingsManager *settings.SettingsManager,
-	marketSourceStore marketSourceStore.Store,
-) *DataFetchStep {
+func NewDataFetchStep(dataEndpointPath string, settingsManager *settings.SettingsManager) *DataFetchStep {
 	return &DataFetchStep{
-		DataEndpointPath:  dataEndpointPath,
-		SettingsManager:   settingsManager,
-		MarketSourceStore: marketSourceStore,
+		DataEndpointPath: dataEndpointPath,
+		SettingsManager:  settingsManager,
 	}
 }
 
@@ -95,19 +89,11 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 		return fmt.Errorf("failed to build market source data for source %s", marketSource.ID)
 	}
 
-	if d.MarketSourceStore == nil {
-		return fmt.Errorf("market source store is not configured")
-	}
-	changed, err := d.MarketSourceStore.SaveDataIfHashChanged(ctx, marketSource.ID, marketData)
+	err = marketsource.SaveData(ctx, marketSource.ID, marketData)
 	if err != nil {
 		return fmt.Errorf("failed to save market source data for source %s: %w", marketSource.ID, err)
 	}
-
-	if changed {
-		glog.V(2).Infof("Updated market_sources.data for source: %s (hash=%s)", marketSource.ID, marketData.Hash)
-	} else {
-		glog.V(3).Infof("Skipped market_sources.data update for source: %s (hash unchanged)", marketSource.ID)
-	}
+	glog.V(2).Infof("Updated market_sources.data for source: %s (hash=%s)", marketSource.ID, marketData.Hash)
 
 	glog.V(2).Infof("Fetched latest data with %d app IDs, version: %s",
 		len(data.AppIDs), data.GetVersion())
@@ -127,14 +113,10 @@ func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
 	sourceID := marketSource.ID
 
 	// Check whether market_sources.data already has persisted snapshot for this source.
-	hasExistingData := false
-	if d.MarketSourceStore != nil {
-		exists, err := d.MarketSourceStore.HasData(ctx, sourceID)
-		if err != nil {
-			glog.Warningf("Failed checking persisted market source data for %s: %v", sourceID, err)
-		} else {
-			hasExistingData = exists
-		}
+	hasExistingData, err := marketsource.HasData(ctx, sourceID)
+	if err != nil {
+		glog.Warningf("Failed checking persisted market source data for %s: %v", sourceID, err)
+		hasExistingData = false
 	}
 
 	// Skip only if hashes match AND persisted data exists for this source.
@@ -174,11 +156,15 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 		return
 	}
 
-	// Convert apps to typed projection for safer field access.
-	appsMap := make(map[string]RemoteAppBrief, len(data.LatestData.Data.Apps))
+	// Convert apps to a minimal typed projection for safer field access.
+	type appBrief struct {
+		ID string
+	}
+	appsMap := make(map[string]appBrief, len(data.LatestData.Data.Apps))
 	for appID, appRaw := range data.LatestData.Data.Apps {
 		if appMap, ok := appRaw.(map[string]interface{}); ok {
-			appsMap[appID] = mapToRemoteAppBrief(appMap)
+			id, _ := appMap["id"].(string)
+			appsMap[appID] = appBrief{ID: id}
 		}
 	}
 
@@ -228,48 +214,5 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 func isDevelopmentEnvironment() bool {
 	env := strings.ToLower(os.Getenv("GO_ENV"))
 	return env == "dev" || env == "development" || env == ""
-}
-
-func mapToRemoteAppBrief(m map[string]interface{}) RemoteAppBrief {
-	app := RemoteAppBrief{}
-	if m == nil {
-		return app
-	}
-
-	if value, ok := m["id"].(string); ok {
-		app.ID = value
-	}
-	if value, ok := m["name"].(string); ok {
-		app.Name = value
-	}
-	if value, ok := m["version"].(string); ok {
-		app.Version = value
-	}
-	if value, ok := m["category"].(string); ok {
-		app.Category = value
-	}
-	if value, ok := m["description"].(string); ok {
-		app.Description = value
-	}
-	if value, ok := m["icon"].(string); ok {
-		app.Icon = value
-	}
-	if value, exists := m["screenshots"]; exists {
-		app.Screenshots = value
-	}
-	if value, exists := m["tags"]; exists {
-		app.Tags = value
-	}
-	if value, exists := m["metadata"]; exists {
-		app.Metadata = value
-	}
-	if value, exists := m["source"]; exists {
-		app.Source = value
-	}
-	if value, ok := m["updated_at"].(string); ok {
-		app.UpdatedAt = value
-	}
-
-	return app
 }
 
