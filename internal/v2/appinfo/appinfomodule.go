@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"market/internal/v2/settings"
+	marketSourceStore "market/internal/v2/store/marketsource"
 	"net/http"
 	"os"
 	"strconv"
@@ -38,6 +39,7 @@ type AppInfoModule struct {
 	isStarted               bool
 	taskModule              *task.TaskModule
 	historyModule           *history.HistoryModule
+	marketSourceStore       marketSourceStore.Store
 }
 
 // ModuleConfig holds configuration for the AppInfo module
@@ -509,7 +511,10 @@ func (m *AppInfoModule) initSyncer() error {
 	// Get the actual cache data from cache manager instead of creating a new one
 	cacheData := m.cacheManager.cache
 
-	m.syncer = CreateDefaultSyncer(cacheData, *m.config.Syncer, m.settingsManager)
+	if m.marketSourceStore == nil {
+		m.marketSourceStore = marketSourceStore.NewPGStore()
+	}
+	m.syncer = CreateDefaultSyncer(cacheData, *m.config.Syncer, m.settingsManager, m.marketSourceStore)
 
 	// Set cache manager reference for hydration notifications
 	if m.cacheManager != nil {
@@ -1289,5 +1294,8 @@ func (m *AppInfoModule) GetTaskModule() *task.TaskModule {
 // SetSettingsManager sets the settings manager for the module
 func (m *AppInfoModule) SetSettingsManager(settingsManager *settings.SettingsManager) {
 	m.settingsManager = settingsManager
+	if m.marketSourceStore == nil {
+		m.marketSourceStore = marketSourceStore.NewPGStore()
+	}
 	glog.V(2).Info("Settings manager set in AppInfo module")
 }

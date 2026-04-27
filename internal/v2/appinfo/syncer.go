@@ -11,6 +11,7 @@ import (
 
 	"market/internal/v2/appinfo/syncerfn"
 	"market/internal/v2/settings"
+	marketSourceStore "market/internal/v2/store/marketsource"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -23,6 +24,7 @@ type Syncer struct {
 	steps           []syncerfn.SyncStep
 	cache           *CacheData
 	cacheManager    atomic.Pointer[CacheManager] // Use atomic.Pointer for thread-safe pointer assignment
+	marketSourceStore marketSourceStore.Store
 	syncInterval    time.Duration
 	stopChan        chan struct{}
 	isRunning       atomic.Bool               // Use atomic.Bool for thread-safe boolean operations
@@ -52,11 +54,12 @@ type Syncer struct {
 }
 
 // NewSyncer creates a new syncer with the given steps
-func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *settings.SettingsManager) *Syncer {
+func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *settings.SettingsManager, marketSourceStore marketSourceStore.Store) *Syncer {
 	s := &Syncer{
 		steps:           make([]syncerfn.SyncStep, 0),
 		cache:           cache,
 		cacheManager:    atomic.Pointer[CacheManager]{}, // Initialize with nil
+		marketSourceStore: marketSourceStore,
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
 		isRunning:       atomic.Bool{}, // Initialize with false
@@ -185,8 +188,15 @@ func (s *Syncer) hasAnyRemoteHashChanged(ctx context.Context) bool {
 		}
 
 		localHash := ""
-		if cm := s.cacheManager.Load(); cm != nil {
-			localHash = cm.GetSourceOthersHash(src.ID)
+		if s.marketSourceStore != nil {
+			if hash, err := s.marketSourceStore.GetOthersHash(ctx, src.ID); err == nil {
+				localHash = hash
+			}
+		}
+		if localHash == "" {
+			if cm := s.cacheManager.Load(); cm != nil {
+				localHash = cm.GetSourceOthersHash(src.ID)
+			}
 		}
 
 		if hr.Hash != localHash {
@@ -859,8 +869,8 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 }
 
 // CreateDefaultSyncer creates a syncer with default steps configured
-func CreateDefaultSyncer(cache *CacheData, config SyncerConfig, settingsManager *settings.SettingsManager) *Syncer {
-	syncer := NewSyncer(cache, config.SyncInterval, settingsManager)
+func CreateDefaultSyncer(cache *CacheData, config SyncerConfig, settingsManager *settings.SettingsManager, marketSourceStore marketSourceStore.Store) *Syncer {
+	syncer := NewSyncer(cache, config.SyncInterval, settingsManager, marketSourceStore)
 
 	// Get version for API requests using utils function
 	version := getVersionForSync()
@@ -878,8 +888,8 @@ func CreateDefaultSyncer(cache *CacheData, config SyncerConfig, settingsManager 
 	}
 
 	// Add default steps with endpoint paths instead of full URLs
-	syncer.AddStep(syncerfn.NewHashComparisonStep(endpoints.HashPath, settingsManager))
-	syncer.AddStep(syncerfn.NewDataFetchStep(endpoints.DataPath, settingsManager))
+	syncer.AddStep(syncerfn.NewHashComparisonStep(endpoints.HashPath, settingsManager, marketSourceStore))
+	syncer.AddStep(syncerfn.NewDataFetchStep(endpoints.DataPath, settingsManager, marketSourceStore))
 	syncer.AddStep(syncerfn.NewDetailFetchStep(endpoints.DetailPath, version, settingsManager))
 
 	glog.V(2).Infof("Created syncer with API endpoints - Hash: %s, Data: %s, Detail: %s",

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"market/internal/v2/settings"
+	marketSourceStore "market/internal/v2/store/marketsource"
 
 	"github.com/golang/glog"
 )
@@ -22,13 +23,19 @@ type HashResponse struct {
 type HashComparisonStep struct {
 	HashEndpointPath string                    // Relative path like "/api/v1/appstore/hash"
 	SettingsManager  *settings.SettingsManager // Settings manager to build complete URLs
+	MarketSourceStore marketSourceStore.Store
 }
 
 // NewHashComparisonStep creates a new hash comparison step
-func NewHashComparisonStep(hashEndpointPath string, settingsManager *settings.SettingsManager) *HashComparisonStep {
+func NewHashComparisonStep(
+	hashEndpointPath string,
+	settingsManager *settings.SettingsManager,
+	marketSourceStore marketSourceStore.Store,
+) *HashComparisonStep {
 	return &HashComparisonStep{
 		HashEndpointPath: hashEndpointPath,
 		SettingsManager:  settingsManager,
+		MarketSourceStore: marketSourceStore,
 	}
 }
 
@@ -86,15 +93,24 @@ func (h *HashComparisonStep) Execute(ctx context.Context, data *SyncContext) err
 
 	data.RemoteHash = hashResponse.Hash
 
-	// Calculate local hash
-	if data.CacheManager != nil {
+	// Calculate local hash from PostgreSQL (market_sources.data.hash).
+	if h.MarketSourceStore != nil {
+		localHash, err := h.MarketSourceStore.GetOthersHash(ctx, marketSource.ID)
+		if err != nil {
+			return fmt.Errorf("failed to load local hash for source %s: %w", marketSource.ID, err)
+		}
+		data.LocalHash = localHash
+	}
+
+	// Backward compatibility: when store is unavailable, fall back to cache hash.
+	if data.LocalHash == "" && data.CacheManager != nil {
 		data.LocalHash = data.CacheManager.GetSourceOthersHash(marketSource.ID)
-		if data.LocalHash == "" {
-			if data.Cache == nil || len(data.Cache.Users) == 0 {
-				data.LocalHash = "empty_cache_no_users"
-			} else {
-				data.LocalHash = "no_source_hash"
-			}
+	}
+	if data.LocalHash == "" {
+		if data.Cache == nil || len(data.Cache.Users) == 0 {
+			data.LocalHash = "empty_cache_no_users"
+		} else {
+			data.LocalHash = "no_source_hash"
 		}
 	}
 
