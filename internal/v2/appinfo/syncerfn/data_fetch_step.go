@@ -102,36 +102,8 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 }
 
 // CanSkip determines if this step can be skipped
-func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
-	// Get current market source - only check data for this specific source
-	marketSource := data.GetMarketSource()
-	if marketSource == nil {
-		glog.V(3).Infof("Executing %s - no market source available in sync context", d.GetStepName())
-		return false
-	}
-
-	sourceID := marketSource.ID
-
-	// Check whether market_sources.data already has persisted snapshot for this source.
-	hasExistingData, err := marketsource.HasData(ctx, sourceID)
-	if err != nil {
-		glog.Warningf("Failed checking persisted market source data for %s: %v", sourceID, err)
-		hasExistingData = false
-	}
-
-	// Skip only if hashes match AND persisted data exists for this source.
-	if data.HashMatches && hasExistingData {
-		glog.V(3).Infof("Skipping %s for source %s - hashes match and persisted data found, no sync required", d.GetStepName(), sourceID)
-		return true
-	}
-
-	// Force execution if no persisted data for this source, even if hashes match.
-	if !hasExistingData {
-		glog.V(3).Infof("Executing %s for source %s - no persisted data found for this source, forcing data fetch", d.GetStepName(), sourceID)
-	} else if !data.HashMatches {
-		glog.V(3).Infof("Executing %s for source %s - hashes don't match, sync required", d.GetStepName(), sourceID)
-	}
-
+func (d *DataFetchStep) CanSkip(_ context.Context, _ *SyncContext) bool {
+	// TODO: change to query user_applications for checking.
 	return false
 }
 

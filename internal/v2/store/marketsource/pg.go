@@ -48,8 +48,8 @@ func HasData(ctx context.Context, sourceID string) (bool, error) {
 		return false, fmt.Errorf("sourceID cannot be empty")
 	}
 
-	xdb := db.GlobalSqlxDB()
-	if xdb == nil {
+	gdb := db.Global()
+	if gdb == nil {
 		return false, fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
 	}
 
@@ -57,7 +57,7 @@ func HasData(ctx context.Context, sourceID string) (bool, error) {
 SELECT EXISTS (
 	SELECT 1
 	FROM market_sources
-	WHERE source_id = $1
+	WHERE source_id = ?
 	  AND data IS NOT NULL
 	  AND (
 		COALESCE(data->>'hash', '') <> ''
@@ -66,7 +66,7 @@ SELECT EXISTS (
 )
 `
 	var exists bool
-	if err := xdb.QueryRowxContext(ctx, query, sourceID).Scan(&exists); err != nil {
+	if err := gdb.WithContext(ctx).Raw(query, sourceID).Scan(&exists).Error; err != nil {
 		return false, fmt.Errorf("check market source data existence: %w", err)
 	}
 	return exists, nil
@@ -77,19 +77,19 @@ func GetOthersHash(ctx context.Context, sourceID string) (string, error) {
 		return "", fmt.Errorf("sourceID cannot be empty")
 	}
 
-	xdb := db.GlobalSqlxDB()
-	if xdb == nil {
+	gdb := db.Global()
+	if gdb == nil {
 		return "", fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
 	}
 
 	query := `
 SELECT COALESCE(data->>'hash', '')
 FROM market_sources
-WHERE source_id = $1
+WHERE source_id = ?
 `
 
 	var hash string
-	if err := xdb.QueryRowxContext(ctx, query, sourceID).Scan(&hash); err != nil {
+	if err := gdb.WithContext(ctx).Raw(query, sourceID).Scan(&hash).Error; err != nil {
 		return "", nil
 	}
 	return hash, nil
