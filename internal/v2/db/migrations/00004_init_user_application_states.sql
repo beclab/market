@@ -1,31 +1,46 @@
 -- +goose Up
--- user_application_states: installed-app runtime state, queried by
--- (user_id, app_id). Updated on install/upgrade/uninstall transitions.
+-- user_application_states: per-user installation runtime.
+-- One row per user_application. installed_version reflects what is actually
+-- running; target_version is set during installing/upgrading/cancelling and
+-- cleared otherwise. The state / reason / message / progress fields mirror
+-- the NATS status messages produced by app-service verbatim; their values
+-- are not constrained at the database level (the application layer is the
+-- source of truth for valid state transitions).
 
 -- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS user_application_states (
-    id                  BIGSERIAL     PRIMARY KEY,
-    user_application_id BIGINT        NOT NULL REFERENCES user_applications(id) ON DELETE CASCADE,
-    app_version         VARCHAR(16)   NOT NULL,
-    state               VARCHAR(64)   NOT NULL DEFAULT '',
-    reason              VARCHAR(200)  NOT NULL DEFAULT '',
-    message             VARCHAR(200)  NOT NULL DEFAULT '',
-    progress            VARCHAR(10)   NOT NULL DEFAULT '',
-    spec                JSONB,
-    status              JSONB,
-    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_user_application_states_ua
-        UNIQUE (user_application_id),
-    CONSTRAINT ck_user_application_states_spec_object
-        CHECK (spec IS NULL OR jsonb_typeof(spec) = 'object'),
-    CONSTRAINT ck_user_application_states_status_object
-        CHECK (status IS NULL OR jsonb_typeof(status) = 'object')
+    id                  BIGSERIAL    PRIMARY KEY,
+    user_application_id BIGINT       NOT NULL UNIQUE
+                                     REFERENCES user_applications(id) ON DELETE CASCADE,
+
+    installed_version   VARCHAR(32),
+    target_version      VARCHAR(32),
+    is_sys_app          BOOLEAN      NOT NULL DEFAULT FALSE,
+
+    state               VARCHAR(64)  NOT NULL DEFAULT '',
+    reason              VARCHAR(200) NOT NULL DEFAULT '',
+    message             TEXT         NOT NULL DEFAULT '',
+    progress            VARCHAR(10)  NOT NULL DEFAULT '',
+
+    -- Runtime data delivered by app-service callbacks (with assigned URLs).
+    entrances           JSONB,
+    shared_entrances    JSONB,
+    -- status.entranceStatuses from app-service: per-entrance running status.
+    status_entrances    JSONB,
+
+    created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_user_application_states_entrances_array
+        CHECK (entrances IS NULL OR jsonb_typeof(entrances) = 'array'),
+    CONSTRAINT ck_user_application_states_shared_entrances_array
+        CHECK (shared_entrances IS NULL OR jsonb_typeof(shared_entrances) = 'array'),
+    CONSTRAINT ck_user_application_states_status_entrances_array
+        CHECK (status_entrances IS NULL OR jsonb_typeof(status_entrances) = 'array')
 );
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE INDEX IF NOT EXISTS idx_user_application_states_ua    ON user_application_states (user_application_id);
 CREATE INDEX IF NOT EXISTS idx_user_application_states_state ON user_application_states (state);
 -- +goose StatementEnd
 
