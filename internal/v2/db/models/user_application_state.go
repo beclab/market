@@ -31,7 +31,7 @@ type UserApplicationState struct {
 	// entrance health (status.entranceStatuses).
 	Entrances       *JSONB[[]payload.RuntimeEntrance] `gorm:"column:entrances;type:jsonb"`
 	SharedEntrances *JSONB[[]payload.RuntimeEntrance] `gorm:"column:shared_entrances;type:jsonb"`
-	StatusEntrances *JSONB[[]payload.EntranceStatus]  `gorm:"column:status_entrances;type:jsonb"`
+	StatusEntrances *JSONB[payload.StatusEntrances]   `gorm:"column:status_entrances;type:jsonb"`
 
 	CreatedAt time.Time `gorm:"column:created_at;not null;default:now()"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null;default:now()"`

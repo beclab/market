@@ -57,6 +57,8 @@ type Env struct{}
 // Entrance plus the URL assigned by the cluster after install / upgrade.
 type RuntimeEntrance struct{}
 
-// EntranceStatus backs a single element of user_application_states.status_entrances
-// (per-entrance runtime: name, state, statusTime, reason).
-type EntranceStatus struct{}
+// StatusEntrances backs user_application_states.status_entrances. Stored as
+// a JSON object (not an array) — the exact shape is defined by the
+// upstream NATS message and is left empty here until the wire format is
+// finalised.
+type StatusEntrances struct{}

@@ -56,8 +56,34 @@ CREATE TABLE IF NOT EXISTS user_applications (
     created_at                  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at                  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT uq_user_applications_user_app
-        UNIQUE (user_id, app_id),
+    -- A given user can see the same app_id from multiple sources, so the
+    -- catalog uniqueness key includes source_id. Cross-source single-install
+    -- (one running app per user_id+app_id regardless of source) is enforced
+    -- by the application layer at install time, not at the database level.
+    CONSTRAINT uq_user_applications_user_source_app
+        UNIQUE (user_id, source_id, app_id),
+    CONSTRAINT ck_user_applications_metadata_object
+        CHECK (metadata IS NULL OR jsonb_typeof(metadata) = 'object'),
+    CONSTRAINT ck_user_applications_spec_object
+        CHECK (spec IS NULL OR jsonb_typeof(spec) = 'object'),
+    CONSTRAINT ck_user_applications_resources_object
+        CHECK (resources IS NULL OR jsonb_typeof(resources) = 'object'),
+    CONSTRAINT ck_user_applications_options_object
+        CHECK (options IS NULL OR jsonb_typeof(options) = 'object'),
+    CONSTRAINT ck_user_applications_entrances_array
+        CHECK (entrances IS NULL OR jsonb_typeof(entrances) = 'array'),
+    CONSTRAINT ck_user_applications_shared_entrances_array
+        CHECK (shared_entrances IS NULL OR jsonb_typeof(shared_entrances) = 'array'),
+    CONSTRAINT ck_user_applications_ports_array
+        CHECK (ports IS NULL OR jsonb_typeof(ports) = 'array'),
+    CONSTRAINT ck_user_applications_tailscale_object
+        CHECK (tailscale IS NULL OR jsonb_typeof(tailscale) = 'object'),
+    CONSTRAINT ck_user_applications_permission_object
+        CHECK (permission IS NULL OR jsonb_typeof(permission) = 'object'),
+    CONSTRAINT ck_user_applications_middleware_object
+        CHECK (middleware IS NULL OR jsonb_typeof(middleware) = 'object'),
+    CONSTRAINT ck_user_applications_envs_array
+        CHECK (envs IS NULL OR jsonb_typeof(envs) = 'array'),
     CONSTRAINT ck_user_applications_price_object
         CHECK (price IS NULL OR jsonb_typeof(price) = 'object'),
     CONSTRAINT ck_user_applications_purchase_info_object
@@ -73,6 +99,9 @@ CREATE INDEX IF NOT EXISTS idx_user_applications_app_id       ON user_applicatio
 CREATE INDEX IF NOT EXISTS idx_user_applications_app_raw_id   ON user_applications (app_raw_id);
 CREATE INDEX IF NOT EXISTS idx_user_applications_app_raw_name ON user_applications (app_raw_name);
 CREATE INDEX IF NOT EXISTS idx_user_applications_source_id    ON user_applications (source_id);
+-- Composite (user_id, app_id) accelerates the application-level
+-- "is this app already installed from any source" lookup.
+CREATE INDEX IF NOT EXISTS idx_user_applications_user_app     ON user_applications (user_id, app_id);
 -- +goose StatementEnd
 
 -- +goose StatementBegin

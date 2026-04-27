@@ -11,9 +11,9 @@ import (
 // rendered manifest.
 type UserApplication struct {
 	ID         int64  `gorm:"column:id;primaryKey;autoIncrement"`
-	SourceID   string `gorm:"column:source_id;size:50;not null;index:idx_user_applications_source_id"`
-	UserID     string `gorm:"column:user_id;size:120;not null;uniqueIndex:uq_user_applications_user_app,priority:1;index:idx_user_applications_user_id"`
-	AppID      string `gorm:"column:app_id;size:32;not null;uniqueIndex:uq_user_applications_user_app,priority:2;index:idx_user_applications_app_id"`
+	SourceID   string `gorm:"column:source_id;size:50;not null;uniqueIndex:uq_user_applications_user_source_app,priority:2;index:idx_user_applications_source_id"`
+	UserID     string `gorm:"column:user_id;size:120;not null;uniqueIndex:uq_user_applications_user_source_app,priority:1;index:idx_user_applications_user_id;index:idx_user_applications_user_app,priority:1"`
+	AppID      string `gorm:"column:app_id;size:32;not null;uniqueIndex:uq_user_applications_user_source_app,priority:3;index:idx_user_applications_app_id;index:idx_user_applications_user_app,priority:2"`
 	AppRawID   string `gorm:"column:app_raw_id;size:32;not null;index:idx_user_applications_app_raw_id"`
 	AppName    string `gorm:"column:app_name;size:100;not null"`
 	AppRawName string `gorm:"column:app_raw_name;size:100;not null;index:idx_user_applications_app_raw_name"`

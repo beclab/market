@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS user_application_states (
         CHECK (entrances IS NULL OR jsonb_typeof(entrances) = 'array'),
     CONSTRAINT ck_user_application_states_shared_entrances_array
         CHECK (shared_entrances IS NULL OR jsonb_typeof(shared_entrances) = 'array'),
-    CONSTRAINT ck_user_application_states_status_entrances_array
-        CHECK (status_entrances IS NULL OR jsonb_typeof(status_entrances) = 'array')
+    CONSTRAINT ck_user_application_states_status_entrances_object
+        CHECK (status_entrances IS NULL OR jsonb_typeof(status_entrances) = 'object')
 );
 -- +goose StatementEnd
 
