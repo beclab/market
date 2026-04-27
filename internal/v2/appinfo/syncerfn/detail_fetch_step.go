@@ -260,9 +260,6 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		// Success - process the apps and replace simplified data with detailed data
 		glog.V(3).Infof("Processing successful response for batch with %d apps", len(appIDs))
 
-		// CRITICAL: Get sourceID BEFORE acquiring mutex lock to avoid deadlock
-		// GetMarketSource() uses RLock() internally, and calling it while holding Lock()
-		// would cause permanent deadlock in the same goroutine
 		// IMPORTANT: use MarketSource.ID as the key for Sources map (not Name)
 		sourceID := ""
 		if marketSource := data.GetMarketSource(); marketSource != nil {
@@ -270,220 +267,216 @@ func (d *DetailFetchStep) fetchAppsBatch(ctx context.Context, appIDs []string, d
 		}
 
 		appsToRemove := func() []appRemovalEntry {
-		data.mutex.Lock()
-		defer data.mutex.Unlock()
-		glog.V(3).Infof("Acquired mutex lock for batch processing")
+			appsToRemove := make([]appRemovalEntry, 0)
 
-		appsToRemove := make([]appRemovalEntry, 0)
+			// Extract apps from raw response
+			if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
+				glog.V(3).Infof("Found %d apps in response data", len(appsData))
+				// Update the original LatestData with detailed information
+				if data.LatestData != nil && data.LatestData.Data.Apps != nil {
+					glog.V(3).Infof("Processing %d apps in LatestData", len(appsData))
 
-		// Extract apps from raw response
-		if appsData, ok := rawResponse["apps"].(map[string]interface{}); ok {
-			glog.V(3).Infof("Found %d apps in response data", len(appsData))
-			// Update the original LatestData with detailed information
-			if data.LatestData != nil && data.LatestData.Data.Apps != nil {
-				glog.V(3).Infof("Processing %d apps in LatestData", len(appsData))
+					for appID, appData := range appsData {
+						glog.V(3).Infof("Processing app %s in batch", appID)
+						if appInfoMap, ok := appData.(map[string]interface{}); ok {
+							// Check for Suspend or Remove labels before processing the app
+							shouldSkip := false
+							shouldRemoveFromCache := false
+							appInstalled := false
+							var appName string
+							if name, ok := appInfoMap["name"].(string); ok {
+								appName = name
+							}
 
-				for appID, appData := range appsData {
-					glog.V(3).Infof("Processing app %s in batch", appID)
-					if appInfoMap, ok := appData.(map[string]interface{}); ok {
-						// Check for Suspend or Remove labels before processing the app
-						shouldSkip := false
-						shouldRemoveFromCache := false
-						appInstalled := false
-						var appName string
-						if name, ok := appInfoMap["name"].(string); ok {
-							appName = name
-						}
+							if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
+								for _, labelInterface := range appLabels {
+									if label, ok := labelInterface.(string); ok {
+										if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
+											shouldSkip = true
 
-						if appLabels, ok := appInfoMap["appLabels"].([]interface{}); ok {
-							for _, labelInterface := range appLabels {
-								if label, ok := labelInterface.(string); ok {
-									if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
-										shouldSkip = true
+											shouldRemoveFromCache = true
+											if d.isAppInstalled(appName, sourceID, data) {
+												shouldRemoveFromCache = false
+												appInstalled = true
+												glog.V(3).Infof("App %s is suspended but still installed, keeping cache entry", appName)
+											}
 
-										shouldRemoveFromCache = true
-										if d.isAppInstalled(appName, sourceID, data) {
-											shouldRemoveFromCache = false
-											appInstalled = true
-											glog.V(3).Infof("App %s is suspended but still installed, keeping cache entry", appName)
+											if shouldRemoveFromCache {
+												// Collect app for removal instead of calling directly to avoid nested locks
+												appsToRemove = append(appsToRemove, appRemovalEntry{appID: appID, appInfoMap: appInfoMap})
+											}
+											break
 										}
-
-										if shouldRemoveFromCache {
-											// Collect app for removal instead of calling directly to avoid nested locks
-											appsToRemove = append(appsToRemove, appRemovalEntry{appID: appID, appInfoMap: appInfoMap})
-										}
-										break
 									}
 								}
 							}
-						}
 
-						// Skip processing if app should be removed
-						if shouldSkip {
-							if shouldRemoveFromCache {
-								// Remove from LatestData immediately when no installation is active
-								delete(data.LatestData.Data.Apps, appID)
+							// Skip processing if app should be removed
+							if shouldSkip {
+								if shouldRemoveFromCache {
+									// Remove from LatestData immediately when no installation is active
+									delete(data.LatestData.Data.Apps, appID)
 
-								// Also remove ALL versions of this app from LatestData.Data.Apps (by name)
-								if appName != "" {
-									for otherAppID, otherAppData := range data.LatestData.Data.Apps {
-										if otherAppInfoMap, ok := otherAppData.(map[string]interface{}); ok {
-											if otherAppName, ok := otherAppInfoMap["name"].(string); ok && otherAppName == appName {
-												delete(data.LatestData.Data.Apps, otherAppID)
-											}
-										}
-									}
-								}
-							} else if appInstalled {
-								// For installed delisted apps, use chartrepo's complete data as base
-								// and merge with original data only when chartrepo fields are empty/null
-								// This ensures chartrepo's rendered data is preserved
-								originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
-
-								// Use mergeAppData to intelligently merge chartrepo data with original data
-								// This will use chartrepo data when available, and fall back to original when chartrepo is empty/null
-								mergedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
-
-								// Ensure appLabels contains suspend/remove label from chartrepo response
-								if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
-									mergedAppData["appLabels"] = chartrepoLabels
-								} else if hasOriginal {
-									// If chartrepo doesn't return labels, check if original has suspend/remove labels
-									if originalMap, ok := originalAppData.(map[string]interface{}); ok {
-										if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
-											hasSuspendOrRemove := false
-											for _, labelInterface := range originalLabels {
-												if label, ok := labelInterface.(string); ok {
-													if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
-														hasSuspendOrRemove = true
-														break
-													}
+									// Also remove ALL versions of this app from LatestData.Data.Apps (by name)
+									if appName != "" {
+										for otherAppID, otherAppData := range data.LatestData.Data.Apps {
+											if otherAppInfoMap, ok := otherAppData.(map[string]interface{}); ok {
+												if otherAppName, ok := otherAppInfoMap["name"].(string); ok && otherAppName == appName {
+													delete(data.LatestData.Data.Apps, otherAppID)
 												}
 											}
-											if hasSuspendOrRemove {
-												mergedAppData["appLabels"] = originalLabels
+										}
+									}
+								} else if appInstalled {
+									// For installed delisted apps, use chartrepo's complete data as base
+									// and merge with original data only when chartrepo fields are empty/null
+									// This ensures chartrepo's rendered data is preserved
+									originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
+
+									// Use mergeAppData to intelligently merge chartrepo data with original data
+									// This will use chartrepo data when available, and fall back to original when chartrepo is empty/null
+									mergedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
+
+									// Ensure appLabels contains suspend/remove label from chartrepo response
+									if chartrepoLabels, ok := appInfoMap["appLabels"].([]interface{}); ok && len(chartrepoLabels) > 0 {
+										mergedAppData["appLabels"] = chartrepoLabels
+									} else if hasOriginal {
+										// If chartrepo doesn't return labels, check if original has suspend/remove labels
+										if originalMap, ok := originalAppData.(map[string]interface{}); ok {
+											if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
+												hasSuspendOrRemove := false
+												for _, labelInterface := range originalLabels {
+													if label, ok := labelInterface.(string); ok {
+														if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
+															hasSuspendOrRemove = true
+															break
+														}
+													}
+												}
+												if hasSuspendOrRemove {
+													mergedAppData["appLabels"] = originalLabels
+												}
 											}
 										}
 									}
+
+									// Update LatestData with merged data (chartrepo data as base, original as fallback)
+									data.LatestData.Data.Apps[appID] = mergedAppData
+									data.DetailedApps[appID] = mergedAppData
 								}
-
-								// Update LatestData with merged data (chartrepo data as base, original as fallback)
-								data.LatestData.Data.Apps[appID] = mergedAppData
-								data.DetailedApps[appID] = mergedAppData
+								continue
 							}
-							continue
-						}
 
-						glog.V(3).Infof("Processing app %s data replacement", appID)
+							glog.V(3).Infof("Processing app %s data replacement", appID)
 
-						// Preserve appLabels from original data if detail API doesn't return it
-						// This handles the case where DataFetchStep has suspend/remove labels
-						// but detail API returns old version without labels
-						originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
-						var preservedAppLabels interface{}
-						var preservedCategories interface{}
-						var preservedSupportArch interface{}
-						if hasOriginal {
-							if originalMap, ok := originalAppData.(map[string]interface{}); ok {
-								if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
-									// Check if original has suspend/remove labels
-									hasSuspendOrRemoveInOriginal := false
-									for _, labelInterface := range originalLabels {
-										if label, ok := labelInterface.(string); ok {
-											if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
-												hasSuspendOrRemoveInOriginal = true
-												break
+							// Preserve appLabels from original data if detail API doesn't return it
+							// This handles the case where DataFetchStep has suspend/remove labels
+							// but detail API returns old version without labels
+							originalAppData, hasOriginal := data.LatestData.Data.Apps[appID]
+							var preservedAppLabels interface{}
+							var preservedCategories interface{}
+							var preservedSupportArch interface{}
+							if hasOriginal {
+								if originalMap, ok := originalAppData.(map[string]interface{}); ok {
+									if originalLabels, ok := originalMap["appLabels"].([]interface{}); ok && len(originalLabels) > 0 {
+										// Check if original has suspend/remove labels
+										hasSuspendOrRemoveInOriginal := false
+										for _, labelInterface := range originalLabels {
+											if label, ok := labelInterface.(string); ok {
+												if strings.EqualFold(label, SuspendLabel) || strings.EqualFold(label, RemoveLabel) {
+													hasSuspendOrRemoveInOriginal = true
+													break
+												}
+											}
+										}
+										// If original has suspend/remove labels but detail API doesn't return labels or returns empty labels
+										if hasSuspendOrRemoveInOriginal {
+											detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
+											if !hasDetailLabels || len(detailLabels) == 0 {
+												// Preserve original labels (including suspend/remove)
+												preservedAppLabels = originalLabels
 											}
 										}
 									}
-									// If original has suspend/remove labels but detail API doesn't return labels or returns empty labels
-									if hasSuspendOrRemoveInOriginal {
-										detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
-										if !hasDetailLabels || len(detailLabels) == 0 {
-											// Preserve original labels (including suspend/remove)
-											preservedAppLabels = originalLabels
+
+									// Preserve categories from original data if detail API returns null or empty
+									if originalCategories, ok := originalMap["categories"]; ok && originalCategories != nil {
+										detailCategories := appInfoMap["categories"]
+										shouldPreserveCategories := false
+										if detailCategories == nil {
+											shouldPreserveCategories = true
+										} else if detailCategoriesSlice, ok := detailCategories.([]interface{}); ok && len(detailCategoriesSlice) == 0 {
+											shouldPreserveCategories = true
+										}
+										if shouldPreserveCategories {
+											preservedCategories = originalCategories
+										}
+									}
+
+									// Preserve supportArch from original data if detail API returns null or empty
+									if originalSupportArch, ok := originalMap["supportArch"]; ok && originalSupportArch != nil {
+										detailSupportArch := appInfoMap["supportArch"]
+										shouldPreserveSupportArch := false
+										if detailSupportArch == nil {
+											shouldPreserveSupportArch = true
+										} else if detailSupportArchSlice, ok := detailSupportArch.([]interface{}); ok && len(detailSupportArchSlice) == 0 {
+											shouldPreserveSupportArch = true
+										}
+										if shouldPreserveSupportArch {
+											preservedSupportArch = originalSupportArch
 										}
 									}
 								}
+							}
 
-								// Preserve categories from original data if detail API returns null or empty
-								if originalCategories, ok := originalMap["categories"]; ok && originalCategories != nil {
-									detailCategories := appInfoMap["categories"]
-									shouldPreserveCategories := false
-									if detailCategories == nil {
-										shouldPreserveCategories = true
-									} else if detailCategoriesSlice, ok := detailCategories.([]interface{}); ok && len(detailCategoriesSlice) == 0 {
-										shouldPreserveCategories = true
-									}
-									if shouldPreserveCategories {
-										preservedCategories = originalCategories
-									}
-								}
+							// Replace the simplified app data with detailed data in LatestData
+							// Use smart merge to preserve original fields when detail API returns empty/null
+							detailedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
 
-								// Preserve supportArch from original data if detail API returns null or empty
-								if originalSupportArch, ok := originalMap["supportArch"]; ok && originalSupportArch != nil {
-									detailSupportArch := appInfoMap["supportArch"]
-									shouldPreserveSupportArch := false
-									if detailSupportArch == nil {
-										shouldPreserveSupportArch = true
-									} else if detailSupportArchSlice, ok := detailSupportArch.([]interface{}); ok && len(detailSupportArchSlice) == 0 {
-										shouldPreserveSupportArch = true
-									}
-									if shouldPreserveSupportArch {
-										preservedSupportArch = originalSupportArch
-									}
+							// Use preserved labels if available (only if detail API didn't return labels)
+							// IMPORTANT: If detail API returns appLabels (including suspend/remove), use them instead of preserved labels
+							if preservedAppLabels != nil {
+								// Only use preserved labels if detail API didn't return any labels
+								detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
+								if !hasDetailLabels || len(detailLabels) == 0 {
+									detailedAppData["appLabels"] = preservedAppLabels
 								}
 							}
-						}
 
-						// Replace the simplified app data with detailed data in LatestData
-						// Use smart merge to preserve original fields when detail API returns empty/null
-						detailedAppData := d.mergeAppData(originalAppData, appInfoMap, appID, hasOriginal)
-
-						// Use preserved labels if available (only if detail API didn't return labels)
-						// IMPORTANT: If detail API returns appLabels (including suspend/remove), use them instead of preserved labels
-						if preservedAppLabels != nil {
-							// Only use preserved labels if detail API didn't return any labels
-							detailLabels, hasDetailLabels := appInfoMap["appLabels"].([]interface{})
-							if !hasDetailLabels || len(detailLabels) == 0 {
-								detailedAppData["appLabels"] = preservedAppLabels
+							// Use preserved categories if available
+							if preservedCategories != nil {
+								detailedAppData["categories"] = preservedCategories
 							}
+
+							// Use preserved supportArch if available
+							if preservedSupportArch != nil {
+								detailedAppData["supportArch"] = preservedSupportArch
+							}
+
+							data.LatestData.Data.Apps[appID] = detailedAppData
+
+							// Also store in DetailedApps for backward compatibility
+							data.DetailedApps[appID] = detailedAppData
+
+							// glog.V(3).Infof("DetailedAppData: %v", detailedAppData)
+
+							// Log the main app information with more details
+							glog.V(3).Infof("Replaced app data with details - ID: %s, Name: %s, Version: %s",
+								appInfoMap["id"], appInfoMap["name"], appInfoMap["version"])
+							glog.V(3).Infof("App %s data replacement completed", appID)
+						} else {
+							glog.V(3).Infof("Warning: App %s data is not a map", appID)
 						}
-
-						// Use preserved categories if available
-						if preservedCategories != nil {
-							detailedAppData["categories"] = preservedCategories
-						}
-
-						// Use preserved supportArch if available
-						if preservedSupportArch != nil {
-							detailedAppData["supportArch"] = preservedSupportArch
-						}
-
-						data.LatestData.Data.Apps[appID] = detailedAppData
-
-						// Also store in DetailedApps for backward compatibility
-						data.DetailedApps[appID] = detailedAppData
-
-						// glog.V(3).Infof("DetailedAppData: %v", detailedAppData)
-
-						// Log the main app information with more details
-						glog.V(3).Infof("Replaced app data with details - ID: %s, Name: %s, Version: %s",
-							appInfoMap["id"], appInfoMap["name"], appInfoMap["version"])
-						glog.V(3).Infof("App %s data replacement completed", appID)
-					} else {
-						glog.V(3).Infof("Warning: App %s data is not a map", appID)
 					}
+					glog.V(3).Info("Finished processing all apps in LatestData")
+				} else {
+					glog.V(3).Info("WARNING: LatestData or LatestData.Data.Apps is nil")
 				}
-				glog.V(3).Info("Finished processing all apps in LatestData")
 			} else {
-				glog.V(3).Info("WARNING: LatestData or LatestData.Data.Apps is nil")
+				glog.V(3).Info("WARNING: No apps data found in response")
 			}
-		} else {
-			glog.V(3).Info("WARNING: No apps data found in response")
-		}
 
-		return appsToRemove
+			return appsToRemove
 		}()
 
 		// Now remove apps from cache after releasing the main lock to avoid nested locks

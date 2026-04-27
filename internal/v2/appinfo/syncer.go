@@ -11,6 +11,7 @@ import (
 
 	"market/internal/v2/appinfo/syncerfn"
 	"market/internal/v2/settings"
+	"market/internal/v2/store/marketsource"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -184,9 +185,14 @@ func (s *Syncer) hasAnyRemoteHashChanged(ctx context.Context) bool {
 			continue
 		}
 
-		localHash := ""
-		if cm := s.cacheManager.Load(); cm != nil {
-			localHash = cm.GetSourceOthersHash(src.ID)
+		localHash, err := marketsource.GetOthersHash(ctx, src.ID)
+		if err != nil {
+			continue
+		}
+		if localHash == "" {
+			if cm := s.cacheManager.Load(); cm != nil {
+				localHash = cm.GetSourceOthersHash(src.ID)
+			}
 		}
 
 		if hr.Hash != localHash {

@@ -2,7 +2,6 @@ package syncerfn
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"market/internal/v2/settings"
@@ -34,14 +33,96 @@ type AppStoreInfoResponse struct {
 
 // AppStoreDataSection represents the data section of the appstore response
 type AppStoreDataSection struct {
-	Apps       map[string]interface{} `json:"apps"`
-	Recommends map[string]interface{} `json:"recommends"`
-	Pages      map[string]interface{} `json:"pages"`
-	Topics     map[string]interface{} `json:"topics"`
-	TopicLists map[string]interface{} `json:"topic_lists"`
-	Tops       []interface{}          `json:"tops"`
-	Latest     []string               `json:"latest"`
-	Tags       map[string]interface{} `json:"tags"`
+	Apps       map[string]interface{}     `json:"apps"`
+	Recommends map[string]RemoteRecommend `json:"recommends"`
+	Pages      map[string]RemotePage      `json:"pages"`
+	Topics     map[string]RemoteTopic     `json:"topics"`
+	TopicLists map[string]RemoteTopicList `json:"topic_lists"`
+	Tops       []RemoteTopItem            `json:"tops"`
+	Latest     []string                   `json:"latest"`
+	Tags       map[string]RemoteTag       `json:"tags"`
+}
+
+// RemoteRecommendData represents the multilingual metadata nested in recommends.
+type RemoteRecommendData struct {
+	Title       map[string]interface{} `json:"title"`
+	Description map[string]interface{} `json:"description"`
+}
+
+// RemoteRecommend represents one recommend entry from /appstore/info.
+type RemoteRecommend struct {
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Content     string               `json:"content"`
+	Data        *RemoteRecommendData `json:"data"`
+	Source      string               `json:"source"`
+	UpdatedAt   string               `json:"updated_at"`
+	CreatedAt   string               `json:"createdAt"`
+}
+
+// RemotePage represents one page entry from /appstore/info.
+type RemotePage struct {
+	Category  string `json:"category"`
+	Content   string `json:"content"`
+	Source    string `json:"source"`
+	UpdatedAt string `json:"updated_at"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// RemoteTopicData represents language-specific topic metadata.
+type RemoteTopicData struct {
+	Group           string `json:"group"`
+	Title           string `json:"title"`
+	Des             string `json:"des"`
+	IconImg         string `json:"iconimg"`
+	DetailImg       string `json:"detailimg"`
+	RichText        string `json:"richtext"`
+	MobileDetailImg string `json:"mobileDetailImg"`
+	MobileRichText  string `json:"mobileRichtext"`
+	BackgroundColor string `json:"backgroundColor"`
+	Apps            string `json:"apps"`
+	IsDelete        bool   `json:"isdelete"`
+}
+
+// RemoteTopic represents one topic entry from /appstore/info.
+type RemoteTopic struct {
+	ID        string                     `json:"_id"`
+	Name      string                     `json:"name"`
+	Data      map[string]RemoteTopicData `json:"data"`
+	Source    string                     `json:"source"`
+	UpdatedAt string                     `json:"updated_at"`
+	CreatedAt string                     `json:"createdAt"`
+}
+
+// RemoteTopicList represents one topic list entry from /appstore/info.
+type RemoteTopicList struct {
+	Name        string                 `json:"name"`
+	Type        string                 `json:"type"`
+	Description string                 `json:"description"`
+	Content     string                 `json:"content"`
+	Title       map[string]interface{} `json:"title"`
+	Source      string                 `json:"source"`
+	UpdatedAt   string                 `json:"updated_at"`
+	CreatedAt   string                 `json:"createdAt"`
+}
+
+// RemoteTopItem represents one entry in the tops section.
+type RemoteTopItem struct {
+	AppID       string `json:"appId"`
+	LegacyAppID string `json:"appid"`
+	Rank        int    `json:"rank"`
+}
+
+// RemoteTag represents one tag entry from /appstore/info.
+type RemoteTag struct {
+	ID        string                 `json:"_id"`
+	Name      string                 `json:"name"`
+	Title     map[string]interface{} `json:"title"`
+	Icon      string                 `json:"icon"`
+	Sort      int                    `json:"sort"`
+	Source    string                 `json:"source"`
+	UpdatedAt string                 `json:"updated_at"`
+	CreatedAt string                 `json:"createdAt"`
 }
 
 // SyncContext holds the context data for the entire sync process
@@ -54,12 +135,11 @@ type SyncContext struct {
 	RemoteHash   string                      `json:"remote_hash"`
 	LocalHash    string                      `json:"local_hash"`
 	HashMatches  bool                        `json:"hash_matches"` // Indicates if remote and local hashes match
-	// Updated to use structured response instead of generic map
+	// Updated to use structured response.
 	LatestData   *AppStoreInfoResponse  `json:"latest_data"`
 	DetailedApps map[string]interface{} `json:"detailed_apps"`
 	AppIDs       []string               `json:"app_ids"`
 	Errors       []error                `json:"-"`
-	mutex        sync.RWMutex           `json:"-"`
 }
 
 // NewSyncContextWithManager creates a new sync context with CacheManager
@@ -77,22 +157,16 @@ func NewSyncContextWithManager(cache *types.CacheData, cacheManager types.CacheM
 
 // AddError adds an error to the context in a thread-safe manner
 func (sc *SyncContext) AddError(err error) {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
 	sc.Errors = append(sc.Errors, err)
 }
 
 // HasErrors returns true if there are any errors in the context
 func (sc *SyncContext) HasErrors() bool {
-	sc.mutex.RLock()
-	defer sc.mutex.RUnlock()
 	return len(sc.Errors) > 0
 }
 
 // GetErrors returns a copy of all errors
 func (sc *SyncContext) GetErrors() []error {
-	sc.mutex.RLock()
-	defer sc.mutex.RUnlock()
 	errors := make([]error, len(sc.Errors))
 	copy(errors, sc.Errors)
 	return errors
@@ -100,28 +174,20 @@ func (sc *SyncContext) GetErrors() []error {
 
 // SetVersion sets the version to use for API requests
 func (sc *SyncContext) SetVersion(version string) {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
 	sc.Version = version
 }
 
 // GetVersion returns the version to use for API requests
 func (sc *SyncContext) GetVersion() string {
-	sc.mutex.RLock()
-	defer sc.mutex.RUnlock()
 	return sc.Version
 }
 
 // SetMarketSource sets the current market source for the sync context
 func (sc *SyncContext) SetMarketSource(source *settings.MarketSource) {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
 	sc.MarketSource = source
 }
 
 // GetMarketSource returns the current market source
 func (sc *SyncContext) GetMarketSource() *settings.MarketSource {
-	sc.mutex.RLock()
-	defer sc.mutex.RUnlock()
 	return sc.MarketSource
 }
