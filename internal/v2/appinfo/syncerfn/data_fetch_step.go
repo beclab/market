@@ -73,6 +73,10 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 		return fmt.Errorf("remote data API returned status %d from %s", resp.StatusCode(), dataURL)
 	}
 
+	if response.Hash == "" || response.Version == "" {
+		return fmt.Errorf("remote data invalid, hash: %s, version: %s", response.Hash, response.Version)
+	}
+
 	// Update SyncContext with structured data
 	data.LatestData = response
 
@@ -91,10 +95,7 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 	if err != nil {
 		return fmt.Errorf("failed to save market source data for source %s: %w", marketSource.ID, err)
 	}
-	glog.V(2).Infof("Updated market_sources.data for source: %s (hash=%s)", marketSource.ID, marketData.Hash)
-
-	glog.V(2).Infof("Fetched latest data with %d app IDs, version: %s",
-		len(data.AppIDs), data.GetVersion())
+	glog.V(2).Infof("Fetched and Updated market_sources.data for source: %s (hash=%s, version=%s), apps: %d", marketSource.ID, marketData.Hash, data.GetVersion(), len(data.AppIDs))
 
 	return nil
 }
@@ -107,12 +108,7 @@ func (d *DataFetchStep) CanSkip(_ context.Context, _ *SyncContext) bool {
 
 // extractAndSetVersion extracts version from the response and updates SyncContext
 func (d *DataFetchStep) extractAndSetVersion(data *SyncContext) {
-	if data.LatestData != nil && data.LatestData.Version != "" {
-		data.SetVersion(data.LatestData.Version)
-		glog.V(2).Infof("Updated version from response: %s", data.LatestData.Version)
-	} else {
-		glog.V(3).Infof("No version found in response or version is empty")
-	}
+	data.SetVersion(data.LatestData.Version)
 }
 
 // extractAppIDs extracts app IDs from the fetched data
@@ -147,13 +143,4 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 	}
 
 	glog.V(2).Infof("Extracted %d app IDs from response", len(data.AppIDs))
-
-	// Log first few app IDs for debugging
-	if len(data.AppIDs) > 0 {
-		maxLog := 5
-		if len(data.AppIDs) < maxLog {
-			maxLog = len(data.AppIDs)
-		}
-		glog.V(2).Infof("First %d app IDs: %v", maxLog, data.AppIDs[:maxLog])
-	}
 }
