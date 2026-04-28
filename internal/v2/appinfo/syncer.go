@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -48,8 +49,8 @@ type Syncer struct {
 	lastSyncDuration    atomic.Value // time.Duration
 	currentSource       atomic.Value // string
 	lastSyncedAppCount  atomic.Int64
-	lastSyncDetails atomic.Value // *SyncDetails
-	tryOnce         atomic.Bool
+	lastSyncDetails     atomic.Value // *SyncDetails
+	tryOnce             atomic.Bool
 }
 
 // NewSyncer creates a new syncer with the given steps
@@ -62,7 +63,7 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 		stopChan:        make(chan struct{}),
 		isRunning:       atomic.Bool{}, // Initialize with false
 		settingsManager: settingsManager,
-		tryOnce: atomic.Bool{},
+		tryOnce:         atomic.Bool{},
 	}
 	// Initialize atomic values
 	s.lastSyncTime.Store(time.Time{})
@@ -130,7 +131,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	throttled := !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval
 
 	if !configChanged && throttled {
-		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)",time.Since(s.lastSyncExecuted), s.syncInterval)
+		glog.V(3).Infof("SyncOnce: skipping, last sync was %v ago (interval: %v)", time.Since(s.lastSyncExecuted), s.syncInterval)
 		return
 	}
 	if configChanged {
@@ -262,7 +263,6 @@ func (s *Syncer) Stop() {
 func (s *Syncer) IsRunning() bool {
 	return s.isRunning.Load()
 }
-
 
 // getVersionForSync returns the version to use for sync operations with fallback
 func getVersionForSync() string {
@@ -640,9 +640,7 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 						}
 
 						// Handle Source field
-						if source, ok := recMap["source"].(string); ok {
-							recommend.Source = source
-						}
+						recommend.Source = parseInterfaceToInt(recMap["source"])
 
 						// Handle time fields
 						if createdAt, ok := recMap["createdAt"].(string); ok {
@@ -675,6 +673,7 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 						if content, ok := pageMap["content"].(string); ok {
 							pageObj.Content = content
 						}
+						pageObj.Source = parseInterfaceToInt(pageMap["source"])
 						others.Pages[i] = pageObj
 					}
 				}
@@ -735,9 +734,7 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 								}
 							}
 						}
-						if source, ok := topicMap["source"].(string); ok {
-							topicObj.Source = source
-						}
+						topicObj.Source = parseInterfaceToInt(topicMap["source"])
 						others.Topics[i] = topicObj
 					}
 				}
@@ -771,9 +768,7 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 								}
 							}
 						}
-						if source, ok := topicListMap["source"].(string); ok {
-							topicListObj.Source = source
-						}
+						topicListObj.Source = parseInterfaceToInt(topicListMap["source"])
 						others.TopicLists[i] = topicListObj
 					}
 				}
@@ -828,6 +823,43 @@ func (s *Syncer) storeDataDirectly(userID, sourceID string, completeData map[str
 	}
 }
 
+func parseInterfaceToInt(value interface{}) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int8:
+		return int(v)
+	case int16:
+		return int(v)
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case uint:
+		return int(v)
+	case uint8:
+		return int(v)
+	case uint16:
+		return int(v)
+	case uint32:
+		return int(v)
+	case uint64:
+		return int(v)
+	case float32:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return 0
+	}
+}
+
 // storeDataDirectlyBatch stores data directly to cache without going through CacheManager
 func (s *Syncer) storeDataDirectlyBatch(userIDs []string, sourceID string, completeData map[string]interface{}) {
 	for _, userID := range userIDs {
@@ -849,7 +881,7 @@ func (s *Syncer) storeDataViaCacheManager(userIDs []string, sourceID string, com
 		// Use CacheManager.SetAppData to trigger hydration notifications if available
 		if cacheManager := s.cacheManager.Load(); cacheManager != nil {
 			glog.V(3).Infof("Using CacheManager to store data for user: %s, source: %s", userID, sourceID)
-			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData,"Syncer")
+			err := cacheManager.SetAppData(userID, sourceID, AppInfoLatestPending, completeData, "Syncer")
 			if err != nil {
 				glog.Errorf("Failed to store data via CacheManager for user: %s, source: %s, error: %v", userID, sourceID, err)
 				// Fall back to direct cache access

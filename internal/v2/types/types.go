@@ -56,7 +56,7 @@ type Recommend struct {
 	Description string         `json:"description"`
 	Content     string         `json:"content"` // Comma-separated app names
 	Data        *RecommendData `json:"data,omitempty"`
-	Source      string         `json:"source,omitempty"` // Data source identifier
+	Source      int            `json:"source,omitempty"` // Data source identifier
 	CreatedAt   time.Time      `json:"createdAt"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
@@ -65,6 +65,7 @@ type Recommend struct {
 type Page struct {
 	Category  string    `json:"category"`
 	Content   string    `json:"content"` // JSON string of page content
+	Source    int       `json:"source"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -89,7 +90,7 @@ type Topic struct {
 	ID        string                `json:"_id"`
 	Name      string                `json:"name"`
 	Data      map[string]*TopicData `json:"data"` // i18n data by language
-	Source    string                `json:"source"`
+	Source    int                   `json:"source"`
 	UpdatedAt time.Time             `json:"updated_at"`
 	CreatedAt time.Time             `json:"createdAt"`
 }
@@ -101,7 +102,7 @@ type TopicList struct {
 	Description string            `json:"description"`
 	Content     string            `json:"content"` // Comma-separated topic IDs
 	Title       map[string]string `json:"title"`   // i18n title mapping
-	Source      string            `json:"source"`
+	Source      int               `json:"source"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 	CreatedAt   time.Time         `json:"createdAt"`
 }
@@ -119,7 +120,7 @@ type Tag struct {
 	Title     map[string]string `json:"title"` // i18n title mapping
 	Icon      string            `json:"icon"`
 	Sort      int               `json:"sort"` // sort order for tag
-	Source    string            `json:"source"`
+	Source    int               `json:"source"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	CreatedAt time.Time         `json:"createdAt"`
 }

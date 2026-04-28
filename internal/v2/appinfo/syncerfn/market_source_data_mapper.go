@@ -2,6 +2,7 @@ package syncerfn
 
 import (
 	"sort"
+	"strconv"
 	"time"
 
 	"market/internal/v2/types"
@@ -57,7 +58,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 			ID:        topic.ID,
 			Name:      topic.Name,
 			Data:      make(map[string]*types.TopicData),
-			Source:    topic.Source,
+			Source:    parseIntSource(topic.Source),
 			UpdatedAt: parseRFC3339Loose(topic.UpdatedAt),
 			CreatedAt: parseRFC3339Loose(topic.CreatedAt),
 		}
@@ -90,7 +91,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 			Description: topicList.Description,
 			Content:     topicList.Content,
 			Title:       toStringMap(topicList.Title),
-			Source:      topicList.Source,
+			Source:      parseIntSource(topicList.Source),
 			UpdatedAt:   parseRFC3339Loose(topicList.UpdatedAt),
 			CreatedAt:   parseRFC3339Loose(topicList.CreatedAt),
 		})
@@ -104,7 +105,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 			Name:        recommend.Name,
 			Description: recommend.Description,
 			Content:     recommend.Content,
-			Source:      recommend.Source,
+			Source:      parseIntSource(recommend.Source),
 			UpdatedAt:   parseRFC3339Loose(recommend.UpdatedAt),
 			CreatedAt:   parseRFC3339Loose(recommend.CreatedAt),
 		}
@@ -124,6 +125,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 		result.Pages = append(result.Pages, &types.Page{
 			Category:  page.Category,
 			Content:   page.Content,
+			Source:    parseIntSource(page.Source),
 			UpdatedAt: parseRFC3339Loose(page.UpdatedAt),
 			CreatedAt: parseRFC3339Loose(page.CreatedAt),
 		})
@@ -153,7 +155,7 @@ func BuildMarketSourceData(resp *AppStoreInfoResponse) *types.MarketSourceData {
 			Title:     toStringMap(tag.Title),
 			Icon:      tag.Icon,
 			Sort:      tag.Sort,
-			Source:    tag.Source,
+			Source:    parseIntSource(tag.Source),
 			UpdatedAt: parseRFC3339Loose(tag.UpdatedAt),
 			CreatedAt: parseRFC3339Loose(tag.CreatedAt),
 		})
@@ -221,4 +223,15 @@ func parseRFC3339Loose(raw string) time.Time {
 		return parsed
 	}
 	return time.Time{}
+}
+
+func parseIntSource(raw string) int {
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return value
 }
