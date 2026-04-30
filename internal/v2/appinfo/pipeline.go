@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"market/internal/v2/appinfo/hydrationfn"
+	"market/internal/v2/store"
 	"market/internal/v2/types"
 
 	"github.com/golang/glog"
@@ -31,6 +33,11 @@ type Pipeline struct {
 	dataWatcher             *DataWatcher
 	dataWatcherRepo         *DataWatcherRepo
 	statusCorrectionChecker *StatusCorrectionChecker
+	// dataSender is held independently of dataWatcher so the
+	// post-hydration NATS notification keeps working when datawatcher_app
+	// is eventually retired. nil means "no NATS available", in which case
+	// notifyRenderSuccess only logs.
+	dataSender *DataSender
 
 	runGuard             atomic.Bool
 	stopChan             chan struct{}
@@ -62,6 +69,7 @@ func (p *Pipeline) SetSyncer(s *Syncer)                     { p.syncer = s }
 func (p *Pipeline) SetHydrator(h *Hydrator)                 { p.hydrator = h }
 func (p *Pipeline) SetDataWatcher(dw *DataWatcher)          { p.dataWatcher = dw }
 func (p *Pipeline) SetDataWatcherRepo(dwr *DataWatcherRepo) { p.dataWatcherRepo = dwr }
+func (p *Pipeline) SetDataSender(ds *DataSender)            { p.dataSender = ds }
 func (p *Pipeline) SetStatusCorrectionChecker(scc *StatusCorrectionChecker) {
 	p.statusCorrectionChecker = scc
 }
@@ -166,56 +174,61 @@ func (p *Pipeline) phaseSyncer(ctx context.Context) {
 	p.syncer.SyncOnce(ctx)
 }
 
-// phaseHydrateApps processes pending apps in concurrent batches through hydration + move to Latest.
-// Batch size is controlled by hydrationConcurrency (default 5, env PIPELINE_HYDRATION_CONCURRENCY).
+// hydrationCandidateLimitPerUser caps how many candidates ListRenderCandidates
+// returns per user per cycle. The PG candidate query is cheap, but we still
+// bound it to avoid letting a single user hog an entire cycle when the
+// applications table is freshly populated.
+const hydrationCandidateLimitPerUser = 200
+
+// phaseHydrateApps drives hydration off PG: for every known user it pulls
+// (source, app) candidates from store.ListRenderCandidates (rows that are
+// new, in pending/failed status, or whose manifest_version drifted away
+// from applications.app_version) and sends them through the hydration steps
+// concurrently. Per-batch concurrency is controlled by hydrationConcurrency
+// (default 5, env PIPELINE_HYDRATION_CONCURRENCY).
 func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 	affectedUsers := make(map[string]bool)
 	if p.hydrator == nil || p.cacheManager == nil {
 		return affectedUsers
 	}
 
-	count := p.cacheManager.RestoreRetryableFailedToPending(20)
-	glog.Infof("Pipeline Phase 2: restore %d Failed to Pending", count)
-
-	items := p.cacheManager.CollectAllPendingItems()
-
-	if len(items) == 0 {
-		glog.V(2).Info("Pipeline Phase 2: no pending apps to process")
+	users := p.cacheManager.GetOrCreateUserIDs("system")
+	if len(users) == 0 {
+		glog.V(2).Info("Pipeline Phase 2: no users available, skipping hydration")
 		return affectedUsers
 	}
 
-	total := len(items)
+	candidates := make([]store.RenderCandidate, 0)
+	for _, userID := range users {
+		select {
+		case <-ctx.Done():
+			return affectedUsers
+		case <-p.stopChan:
+			return affectedUsers
+		default:
+		}
+		userCandidates, err := store.ListRenderCandidates(ctx, userID, hydrationCandidateLimitPerUser)
+		if err != nil {
+			glog.Errorf("Pipeline Phase 2: list render candidates for user %s failed: %v", userID, err)
+			continue
+		}
+		if len(userCandidates) > 0 {
+			glog.V(3).Infof("Pipeline Phase 2: user=%s, %d candidate(s)", userID, len(userCandidates))
+		}
+		candidates = append(candidates, userCandidates...)
+	}
+
+	total := len(candidates)
+	if total == 0 {
+		glog.V(2).Info("Pipeline Phase 2: no render candidates to process")
+		return affectedUsers
+	}
+
 	batchSize := p.hydrationConcurrency
 	if batchSize <= 0 {
 		batchSize = defaultHydrationConcurrency
 	}
-
-	// Filter out items whose user or source has been deleted since collection.
-	// CollectAllPendingItems returns a snapshot; async deletions (RemoveUserData,
-	// SyncMarketSourcesToCache) may have removed the user/source in the meantime.
-	validItems := make([]PendingItem, 0, len(items))
-	for _, item := range items {
-		if p.cacheManager.GetSourceData(item.UserID, item.SourceID) == nil {
-			appID, appName := getAppIdentifiers(item.Pending)
-			glog.V(2).Infof("Pipeline Phase 2: skipping %s %s - user %s or source %s no longer exists",
-				appID, appName, item.UserID, item.SourceID)
-			continue
-		}
-		validItems = append(validItems, item)
-	}
-
-	if len(validItems) == 0 {
-		glog.V(2).Infof("Pipeline Phase 2: all %d pending apps filtered out (user/source deleted)", total)
-		return affectedUsers
-	}
-
-	if len(validItems) < total {
-		glog.V(2).Infof("Pipeline Phase 2: %d/%d pending apps remain after filtering deleted users/sources",
-			len(validItems), total)
-	}
-
-	total = len(validItems)
-	glog.V(2).Infof("Pipeline Phase 2: processing %d pending apps (concurrency=%d)", total, batchSize)
+	glog.V(2).Infof("Pipeline Phase 2: processing %d render candidates (concurrency=%d)", total, batchSize)
 
 	for batchStart := 0; batchStart < total; batchStart += batchSize {
 		select {
@@ -230,45 +243,118 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		if batchEnd > total {
 			batchEnd = total
 		}
-		batch := validItems[batchStart:batchEnd]
+		batch := candidates[batchStart:batchEnd]
 
-		// Log batch items
-		for i, item := range batch {
-			appID, appName := getAppIdentifiers(item.Pending)
+		for i, c := range batch {
 			glog.V(2).Infof("Pipeline Phase 2: [%d/%d] %s %s (user=%s, source=%s)",
-				batchStart+i+1, total, appID, appName, item.UserID, item.SourceID)
+				batchStart+i+1, total, c.AppID, c.AppName, c.UserID, c.SourceID)
 		}
 
-		// Process batch concurrently
-		type hydrateResult struct {
-			idx      int
-			hydrated bool
-		}
-		results := make([]hydrateResult, len(batch))
 		var wg sync.WaitGroup
-
-		for i, item := range batch {
+		for _, c := range batch {
 			wg.Add(1)
-			go func(idx int, it PendingItem) {
+			go func(c store.RenderCandidate) {
 				defer wg.Done()
-				results[idx] = hydrateResult{
-					idx:      idx,
-					hydrated: p.hydrator.HydrateSingleApp(ctx, it.UserID, it.SourceID, it.Pending),
+				task, ok := p.hydrator.HydrateSingleApp(ctx, c)
+				if !ok {
+					return
 				}
-			}(i, item)
+				p.notifyRenderSuccess(c, task)
+			}(c)
 		}
 		wg.Wait()
 
-		// Move hydrated apps to Latest (sequential — writes to the same source slice)
-		for i, item := range batch {
-			if results[i].hydrated && p.dataWatcher != nil {
-				p.dataWatcher.ProcessSingleAppToLatest(item.UserID, item.SourceID, item.Pending)
-			}
-			affectedUsers[item.UserID] = true
+		for _, c := range batch {
+			affectedUsers[c.UserID] = true
 		}
 	}
 
 	return affectedUsers
+}
+
+// notifyRenderSuccess emits the unified "new_app_ready" market system
+// update after a successful hydration, matching the cache-era semantics.
+// The first-install vs version-upgrade split exists only in the log line;
+// the NATS payload is identical so the frontend keeps its single-event
+// handler.
+//
+// The pushed app_info is composed from task.RenderedManifest (= the JSONB
+// payload that was just persisted to user_applications) via
+// types.ComposeApplicationInfoEntry, so subscribers see the per-user
+// rendered manifest rather than the source-side applications.app_entry
+// catalog snapshot. When the manifest is unexpectedly nil (would mean the
+// hydration step success-path skipped manifest assembly), we fall back to
+// the candidate's catalog entry so the notification still carries useful
+// scalar info; this branch should be unreachable as long as
+// TaskForApiStep enforces "success ⇒ raw_data" on chart-repo's response.
+//
+// Notifications are best-effort: a missing dataSender is silent, and a
+// SendMarketSystemUpdate failure is logged but does not fail hydration.
+func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate, task *hydrationfn.HydrationTask) {
+	isUpgrade := c.ExistingRenderStatus == "success" &&
+		c.ExistingManifestVersion != c.AppVersion
+	if isUpgrade {
+		glog.V(2).Infof("hydration: version upgrade user=%s app=%s %s -> %s",
+			c.UserID, c.AppID, c.ExistingManifestVersion, c.AppVersion)
+	} else {
+		glog.V(2).Infof("hydration: first install user=%s app=%s version=%s",
+			c.UserID, c.AppID, c.AppVersion)
+	}
+
+	if p.dataSender == nil {
+		return
+	}
+
+	var appInfo interface{}
+	if task != nil && task.RenderedManifest != nil {
+		// Re-inject the identity / header scalars on Compose so the
+		// pushed app_info carries non-empty id / appID / version /
+		// cfgType / apiVersion. Those keys live in scalarKeys (= they
+		// have dedicated user_applications scalar columns) and are
+		// therefore absent from the manifest's spec map; without
+		// re-injection ComposeApplicationInfoEntry would emit an entry
+		// with empty strings for all five fields.
+		scalars := types.EntryScalars{
+			ID:      task.AppID,
+			AppID:   task.AppID,
+			Version: task.AppVersion,
+			CfgType: task.AppType,
+		}
+		if task.AppEntry != nil {
+			scalars.ApiVersion = task.AppEntry.ApiVersion
+		}
+		entry, err := types.ComposeApplicationInfoEntry(task.RenderedManifest, scalars)
+		if err != nil {
+			glog.Errorf("hydration: compose app_info from rendered manifest failed for app %s (user=%s): %v; falling back to catalog entry",
+				c.AppID, c.UserID, err)
+			appInfo = c.AppEntry
+		} else {
+			appInfo = entry
+		}
+	} else {
+		glog.Warningf("hydration: rendered manifest unavailable for app %s (user=%s); falling back to catalog entry in notification",
+			c.AppID, c.UserID)
+		appInfo = c.AppEntry
+	}
+
+	update := types.MarketSystemUpdate{
+		Timestamp:  time.Now().Unix(),
+		User:       c.UserID,
+		NotifyType: "market_system_point",
+		Point:      "new_app_ready",
+		Extensions: map[string]string{
+			"app_name":    c.AppName,
+			"app_version": c.AppVersion,
+			"source":      c.SourceID,
+		},
+		ExtensionsObj: map[string]interface{}{
+			"app_info": appInfo,
+		},
+	}
+	if err := p.dataSender.SendMarketSystemUpdate(update); err != nil {
+		glog.Errorf("hydration: notify render success failed for app %s (user=%s): %v",
+			c.AppID, c.UserID, err)
+	}
 }
 
 // phaseDataWatcherRepo processes chart-repo state changes
@@ -322,71 +408,47 @@ func (p *Pipeline) phaseHashAndSync(affectedUsers map[string]bool) {
 	}
 }
 
-func getAppIdentifiers(pd *types.AppInfoLatestPendingData) (string, string) {
-	if pd == nil || pd.RawData == nil {
-		return "unknown", "unknown"
-	}
-	appID := pd.RawData.AppID
-	if appID == "" {
-		appID = pd.RawData.ID
-	}
-	return appID, pd.RawData.Name
-}
-
-// HydrateSingleApp runs hydration steps for a single app synchronously.
-// Returns true if hydration completed and data is ready for move to Latest.
-func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string, pendingData *types.AppInfoLatestPendingData) bool {
-	if pendingData == nil || pendingData.RawData == nil {
-		return false
+// HydrateSingleApp runs hydration steps for a single PG-sourced candidate.
+// On success it returns the completed task (with task.RenderedManifest set
+// by TaskForApiStep, so the caller can compose the per-user app_info for
+// notifications) plus true. On failure it returns nil, false; the (user,
+// source, app) row in user_applications has already been upserted to
+// render_status='failed' via store.MarkRenderFailed by then.
+func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate) (*hydrationfn.HydrationTask, bool) {
+	if c.AppEntry == nil || strings.TrimSpace(c.AppID) == "" {
+		return nil, false
 	}
 
-	appID := pendingData.RawData.AppID
-	if appID == "" {
-		appID = pendingData.RawData.ID
-	}
-	appName := pendingData.RawData.Name
-	if appID == "" {
-		return false
+	pending := &types.AppInfoLatestPendingData{
+		Type:    types.AppInfoLatestPending,
+		Version: c.AppVersion,
+		RawData: c.AppEntry,
 	}
 
-	version := ""
-	if pendingData.RawData != nil {
-		version = pendingData.RawData.Version
+	sourceType := ""
+	if h.settingsManager != nil {
+		for _, s := range h.settingsManager.GetActiveMarketSources() {
+			if s.ID == c.SourceID {
+				sourceType = string(s.Type)
+				break
+			}
+		}
 	}
 
-	if h.isAppInRenderFailedList(userID, sourceID, appID, appName, version) {
-		glog.V(2).Infof("HydrateSingleApp: skipping %s(%s) (user=%s, source=%s) - in render failed list, will retry after cleanup",
-			appID, appName, userID, sourceID)
-		return false
-	}
+	task := hydrationfn.NewHydrationTaskFromInput(hydrationfn.HydrationTaskInput{
+		UserID:          c.UserID,
+		SourceID:        c.SourceID,
+		SourceType:      sourceType,
+		AppID:           c.AppID,
+		AppName:         c.AppName,
+		AppVersion:      c.AppVersion,
+		AppType:         c.AppType,
+		AppEntry:        c.AppEntry,
+		PendingPayload:  pending,
+		SettingsManager: h.settingsManager,
+	})
 
-	if h.isAppHydrationComplete(pendingData) {
-		return true
-	}
-
-	if h.isAppInLatestQueue(userID, sourceID, appID, appName, version) {
-		glog.V(2).Infof("HydrateSingleApp: skipping %s(%s) (user=%s, source=%s) - already in latest queue with version %s",
-			appID, appName, userID, sourceID, version)
-		return false
-	}
-
-	appDataMap := h.convertApplicationInfoEntryToMap(pendingData.RawData)
-	if len(appDataMap) == 0 {
-		glog.V(2).Infof("HydrateSingleApp: skipping %s(%s) (user=%s, source=%s) - convertApplicationInfoEntryToMap returned empty",
-			appID, appName, userID, sourceID)
-		return false
-	}
-
-	var cacheManagerIface types.CacheManagerInterface
-	if h.cacheManager != nil {
-		cacheManagerIface = h.cacheManager
-	}
-	task := hydrationfn.NewHydrationTaskWithManager(
-		userID, sourceID, appID,
-		appDataMap, h.cache, cacheManagerIface, h.settingsManager,
-	)
-
-	glog.V(3).Infof("HydrateSingleApp: processing %s %s (user=%s, source=%s)", appID, appName, userID, sourceID)
+	glog.V(3).Infof("HydrateSingleApp: processing %s %s (user=%s, source=%s)", c.AppID, c.AppName, c.UserID, c.SourceID)
 	taskStartTime := time.Now()
 
 	for _, step := range h.steps {
@@ -396,25 +458,32 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, userID, sourceID string
 		}
 		if err := step.Execute(ctx, task); err != nil {
 			task.SetError(err)
-			failureReason := err.Error()
 			failureStep := step.GetStepName()
-			glog.Errorf("HydrateSingleApp: step %s failed for app %s(%s): %v", failureStep, appID, appName, err)
-			h.moveTaskToRenderFailed(task, failureReason, failureStep)
+			failureReason := err.Error()
+			glog.Errorf("HydrateSingleApp: step %s failed for app %s(%s): %v", failureStep, c.AppID, c.AppName, err)
+
+			if perr := store.MarkRenderFailed(ctx, store.MarkRenderFailedInput{
+				UserID:      c.UserID,
+				SourceID:    c.SourceID,
+				AppID:       c.AppID,
+				AppName:     c.AppName,
+				AppRawID:    c.AppID,
+				AppRawName:  c.AppName,
+				RenderError: failureReason,
+			}); perr != nil {
+				glog.Errorf("HydrateSingleApp: persist failure for app %s(%s) failed: %v", c.AppID, c.AppName, perr)
+			}
+
 			duration := time.Since(taskStartTime)
 			h.markTaskFailed(task, taskStartTime, duration, failureStep, failureReason)
-			return false
+			return nil, false
 		}
 		task.IncrementStep()
-	}
-
-	if !h.isAppHydrationComplete(pendingData) {
-		glog.Warningf("HydrateSingleApp: steps completed but data incomplete for app %s(%s), will retry next cycle", appID, appName)
-		return false
 	}
 
 	task.SetStatus(hydrationfn.TaskStatusCompleted)
 	duration := time.Since(taskStartTime)
 	h.markTaskCompleted(task, taskStartTime, duration)
-	glog.V(2).Infof("HydrateSingleApp: completed for app %s(%s) in %v", appID, appName, duration)
-	return true
+	glog.V(2).Infof("HydrateSingleApp: completed for app %s(%s) in %v", c.AppID, c.AppName, duration)
+	return task, true
 }

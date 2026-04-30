@@ -32,7 +32,8 @@ type HydrationTask struct {
 	AppID       string                 `json:"app_id"`       // Application ID
 	AppName     string                 `json:"app_name"`     // Application name
 	AppVersion  string                 `json:"app_version"`  // Application version
-	AppData     map[string]interface{} `json:"app_data"`     // Original app data
+	AppType     string                 `json:"app_type"`     // Application kind: "app" | "middleware"
+	AppData     map[string]interface{} `json:"app_data"`     // Original app data (legacy; nil on PG path)
 	CreatedAt   time.Time              `json:"created_at"`   // Task creation time
 	UpdatedAt   time.Time              `json:"updated_at"`   // Task last update time
 	Status      TaskStatus             `json:"status"`       // Task status
@@ -48,10 +49,37 @@ type HydrationTask struct {
 	ChartData          map[string]interface{} `json:"chart_data"`           // Chart data
 	DatabaseUpdateData map[string]interface{} `json:"database_update_data"` // Database update data
 
+	// PendingPayload is the AppInfoLatestPendingData used as the chart-repo
+	// /dcr/sync-app request body. On the PG-driven hydration path it is built
+	// from the applications row; on the legacy cache path it is left nil and
+	// steps fall back to CacheManager.FindPendingDataForApp.
+	PendingPayload *types.AppInfoLatestPendingData `json:"-"`
+	// AppEntry mirrors applications.app_entry for the PG path; nil on legacy
+	// path. Steps that need extra metadata (price, apiVersion, ...) read from
+	// here instead of going back through the cache.
+	AppEntry *types.ApplicationInfoEntry `json:"-"`
+
+	// RenderedManifest is set by TaskForApiStep on the success path of the
+	// PG-driven hydration: it is the per-user, per-render UserAppManifest
+	// built from chart-repo's /dcr/sync-app raw_data, i.e. exactly what
+	// gets persisted to the user_applications JSONB columns. The Pipeline
+	// reads it after a successful hydration and passes it through
+	// types.ComposeApplicationInfoEntry to populate the "new_app_ready"
+	// NATS notification, so the pushed app_info reflects the rendered
+	// per-user manifest rather than the source-side applications.app_entry
+	// catalog snapshot.
+	RenderedManifest *types.UserAppManifest `json:"-"`
+
 	// Context data
-	Cache           *types.CacheData            `json:"-"` // Cache data reference
-	CacheManager    types.CacheManagerInterface `json:"-"` // CacheManager for unified lock strategy
-	SettingsManager *settings.SettingsManager   `json:"-"` // Settings manager
+	//
+	// Cache / CacheManager are kept on the struct because the legacy
+	// TaskForPaymentStep (currently unregistered, see Hydrator.NewHydrator)
+	// still depends on them via TaskForApiStep.findPendingDataFromCache. The
+	// PG-driven hydration path leaves both fields nil — every step on that
+	// path must therefore guard against nil before touching them.
+	Cache           *types.CacheData            `json:"-"`
+	CacheManager    types.CacheManagerInterface `json:"-"`
+	SettingsManager *settings.SettingsManager   `json:"-"`
 
 	mutex sync.RWMutex `json:"-"` // Task mutex for thread safety
 
@@ -167,6 +195,44 @@ func NewHydrationTaskWithManager(userID, sourceID, appID string, appData map[str
 		Cache:              cache,
 		CacheManager:       cacheManager,
 		SettingsManager:    settingsManager,
+		ChartData:          make(map[string]interface{}),
+		DatabaseUpdateData: make(map[string]interface{}),
+	}
+}
+
+// HydrationTaskInput captures the minimum data required to drive a single
+// PG-backed hydration task. Cache / CacheManager are intentionally absent;
+// callers on this path must not depend on the in-memory cache.
+type HydrationTaskInput struct {
+	UserID, SourceID, SourceType string
+	AppID, AppName, AppVersion   string
+	AppType                      string
+	AppEntry                     *types.ApplicationInfoEntry
+	PendingPayload               *types.AppInfoLatestPendingData
+	SettingsManager              *settings.SettingsManager
+}
+
+// NewHydrationTaskFromInput builds a task for the PG-driven hydration path.
+// It deliberately leaves the cache fields (Cache, CacheManager, AppData) nil
+// so any accidental cache access from a step shows up as a nil-deref instead
+// of silently consulting stale data.
+func NewHydrationTaskFromInput(in HydrationTaskInput) *HydrationTask {
+	return &HydrationTask{
+		ID:                 generateTaskID(in.UserID, in.SourceID, in.AppID),
+		UserID:             in.UserID,
+		SourceID:           in.SourceID,
+		SourceType:         in.SourceType,
+		AppID:              in.AppID,
+		AppName:            in.AppName,
+		AppVersion:         in.AppVersion,
+		AppType:            in.AppType,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+		Status:             TaskStatusPending,
+		MaxRetries:         3,
+		AppEntry:           in.AppEntry,
+		PendingPayload:     in.PendingPayload,
+		SettingsManager:    in.SettingsManager,
 		ChartData:          make(map[string]interface{}),
 		DatabaseUpdateData: make(map[string]interface{}),
 	}

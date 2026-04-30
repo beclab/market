@@ -234,6 +234,9 @@ func (m *AppInfoModule) Start() error {
 		if m.dataWatcherRepo != nil {
 			p.SetDataWatcherRepo(m.dataWatcherRepo)
 		}
+		if m.dataSender != nil {
+			p.SetDataSender(m.dataSender)
+		}
 		if m.statusCorrectionChecker != nil {
 			p.SetStatusCorrectionChecker(m.statusCorrectionChecker)
 		}
