@@ -3,7 +3,6 @@ package models
 import (
 	"time"
 
-	"market/internal/v2/db/models/payload"
 	"market/internal/v2/types"
 )
 
@@ -18,30 +17,32 @@ type UserApplication struct {
 	AppName    string `gorm:"column:app_name;size:100;not null"`
 	AppRawName string `gorm:"column:app_raw_name;size:100;not null;index:idx_user_applications_app_raw_name"`
 
-	ManifestVersion string `gorm:"column:manifest_version;size:32;not null"`
-	ManifestType    string `gorm:"column:manifest_type;size:32;not null"`
+	ManifestVersion string `gorm:"column:manifest_version;size:32;not null;default:''"`
+	ManifestType    string `gorm:"column:manifest_type;size:32;not null;default:''"`
 	APIVersion      string `gorm:"column:api_version;size:32"`
 
-	// Manifest top-level blocks. Payload structs are placeholders until the
-	// corresponding business types land.
-	Metadata        *JSONB[payload.ManifestMetadata] `gorm:"column:metadata;type:jsonb"`
-	Spec            *JSONB[payload.ManifestSpec]     `gorm:"column:spec;type:jsonb"`
-	Resources       *JSONB[payload.Resources]        `gorm:"column:resources;type:jsonb"`
-	Options         *JSONB[payload.Options]          `gorm:"column:options;type:jsonb"`
-	Entrances       *JSONB[[]payload.Entrance]       `gorm:"column:entrances;type:jsonb"`
-	SharedEntrances *JSONB[[]payload.Entrance]       `gorm:"column:shared_entrances;type:jsonb"`
-	Ports           *JSONB[[]payload.Port]           `gorm:"column:ports;type:jsonb"`
-	Tailscale       *JSONB[payload.TailscaleSpec]    `gorm:"column:tailscale;type:jsonb"`
-	Permission      *JSONB[payload.Permission]       `gorm:"column:permission;type:jsonb"`
-	Middleware      *JSONB[payload.Middleware]       `gorm:"column:middleware;type:jsonb"`
-	Envs            *JSONB[[]payload.Env]            `gorm:"column:envs;type:jsonb"`
+	// Manifest top-level blocks. We store catch-all map payloads (see
+	// types.UserAppManifest / types.BuildUserAppManifest) so chart-repo
+	// schema additions flow through without model changes. The historical
+	// "metadata" column was dropped (see migration 00008): name / title /
+	// description / icon / categories / locale now fall through to spec.
+	Spec            *JSONB[map[string]any]   `gorm:"column:spec;type:jsonb"`
+	Resources       *JSONB[map[string]any]   `gorm:"column:resources;type:jsonb"`
+	Options         *JSONB[map[string]any]   `gorm:"column:options;type:jsonb"`
+	Entrances       *JSONB[[]map[string]any] `gorm:"column:entrances;type:jsonb"`
+	SharedEntrances *JSONB[[]map[string]any] `gorm:"column:shared_entrances;type:jsonb"`
+	Ports           *JSONB[[]map[string]any] `gorm:"column:ports;type:jsonb"`
+	Tailscale       *JSONB[map[string]any]   `gorm:"column:tailscale;type:jsonb"`
+	Permission      *JSONB[map[string]any]   `gorm:"column:permission;type:jsonb"`
+	Middleware      *JSONB[map[string]any]   `gorm:"column:middleware;type:jsonb"`
+	Envs            *JSONB[[]map[string]any] `gorm:"column:envs;type:jsonb"`
 
 	// Pricing & purchase live alongside the manifest data because they are
 	// per-(user, app) too.
 	Price        *JSONB[types.PriceConfig]  `gorm:"column:price;type:jsonb"`
 	PurchaseInfo *JSONB[types.PurchaseInfo] `gorm:"column:purchase_info;type:jsonb"`
 
-	RenderStatus              string `gorm:"column:render_status;size:16;not null;default:'pending'"` // pending | success | failed
+	RenderStatus              string `gorm:"column:render_status;size:16;not null;default:'pending'"`
 	RenderError               string `gorm:"column:render_error;size:200"`
 	RenderConsecutiveFailures int    `gorm:"column:render_consecutive_failures;not null;default:0"`
 

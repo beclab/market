@@ -14,11 +14,17 @@ import (
 	"github.com/golang/glog"
 )
 
-// Response represents the response from chart repo sync-app API
-type Response struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+// syncAppResponse is the minimal shape we need from chart-repo's
+// /dcr/sync-app reply. Only data.app_data.raw_data is consumed; every
+// other field in the response is intentionally ignored.
+type syncAppResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    *struct {
+		AppData *struct {
+			RawData map[string]any `json:"raw_data"`
+		} `json:"app_data"`
+	} `json:"data"`
 }
 
 type TaskForApiStep struct {
@@ -91,7 +97,7 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		return fmt.Errorf("chart repo sync-app returned non-2xx: %d, body: %s", resp.StatusCode(), resp.String())
 	}
 
-	var apiResponse Response
+	var apiResponse syncAppResponse
 	if err := json.Unmarshal(resp.Body(), &apiResponse); err != nil {
 		return fmt.Errorf("failed to parse response JSON: %w", err)
 	}
@@ -105,9 +111,24 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		return fmt.Errorf("chart repo sync-app rejected app: %s", msg)
 	}
 
-	// Persist render success to user_applications. Skipped when the task has
-	// no AppEntry (legacy cache-driven path); on that path the cache write is
-	// the source of truth for render outcome.
+	// Build the manifest payload (= JSONB columns) from raw_data when
+	// chart-repo provided it. A missing data.app_data.raw_data is treated
+	// as "manifest unavailable, persist scalar render status only" — the
+	// next render attempt will fill in the manifest.
+	var manifest *types.UserAppManifest
+	if apiResponse.Data != nil && apiResponse.Data.AppData != nil && apiResponse.Data.AppData.RawData != nil {
+		rawData := apiResponse.Data.AppData.RawData
+		// chart-repo's /dcr/sync-app returns wrong values for raw_data.id
+		// and raw_data.appID; the catalog (applications.app_id) is the
+		// source of truth, so we override on the map before splitting.
+		rawData["id"] = task.AppID
+		rawData["appID"] = task.AppID
+		manifest = types.BuildUserAppManifest(rawData)
+	}
+
+	// Persist render success to user_applications. Skipped when the task
+	// has no AppEntry (legacy cache-driven path); on that path the cache
+	// write is the source of truth for render outcome.
 	if task.AppEntry != nil {
 		in := store.UpsertRenderSuccessInput{
 			UserID:          task.UserID,
@@ -119,6 +140,7 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 			ManifestVersion: task.AppVersion,
 			ManifestType:    task.AppType,
 			APIVersion:      task.AppEntry.ApiVersion,
+			Manifest:        manifest,
 		}
 		if err := store.UpsertRenderSuccess(ctx, in); err != nil {
 			return fmt.Errorf("persist render success to user_applications: %w", err)

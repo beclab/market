@@ -48,10 +48,11 @@ type RenderCandidate struct {
 }
 
 // UpsertRenderSuccessInput captures everything UpsertRenderSuccess needs to
-// flip a user_applications row to render_status='success'. Only scalar
-// identity / manifest columns and the Price JSONB are written here; the
-// remaining manifest JSONB columns (metadata / spec / resources / ...) are
-// intentionally left untouched until their payload structs gain real fields.
+// flip a user_applications row to render_status='success'. Manifest carries
+// the JSONB-column payloads (built via types.BuildUserAppManifest from
+// chart-repo's raw_data); when nil the JSONB columns are written as SQL
+// NULL — useful for first-time inserts before the manifest data is
+// available.
 type UpsertRenderSuccessInput struct {
 	UserID   string
 	SourceID string
@@ -66,6 +67,8 @@ type UpsertRenderSuccessInput struct {
 	APIVersion      string
 
 	Price *types.PriceConfig
+
+	Manifest *types.UserAppManifest
 }
 
 // MarkRenderFailedInput captures the minimum fields required to upsert a
@@ -184,10 +187,13 @@ LIMIT ?
 }
 
 // UpsertRenderSuccess inserts or updates the user_applications row for a
-// successful render. On conflict it overwrites only the columns this method
-// owns (manifest_version / manifest_type / api_version / price /
-// render_status / render_error / render_consecutive_failures); existing
-// JSONB manifest columns and purchase_info are left intact.
+// successful render. On conflict it overwrites the columns this method
+// owns (manifest scalars, price, render status fields, and all JSONB
+// manifest columns); purchase_info is not touched here (payment step
+// owns it).
+//
+// When in.Manifest is nil, the JSONB columns are written as SQL NULL —
+// useful for callers that have only the scalar header info available.
 func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error {
 	if err := validateIdentity(in.UserID, in.SourceID, in.AppID); err != nil {
 		return err
@@ -228,6 +234,9 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 		priceJSON := models.NewJSONB(*in.Price)
 		row.Price = &priceJSON
 	}
+	if in.Manifest != nil {
+		assignManifestColumns(row, in.Manifest)
+	}
 
 	result := gdb.WithContext(ctx).
 		Clauses(clause.OnConflict{
@@ -244,6 +253,16 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 				"render_status",
 				"render_error",
 				"render_consecutive_failures",
+				"spec",
+				"resources",
+				"options",
+				"entrances",
+				"shared_entrances",
+				"ports",
+				"tailscale",
+				"permission",
+				"middleware",
+				"envs",
 			}),
 		}).
 		Create(row)
@@ -252,6 +271,52 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 			in.UserID, in.SourceID, in.AppID, result.Error)
 	}
 	return nil
+}
+
+// assignManifestColumns copies a UserAppManifest's payloads into the
+// corresponding JSONB pointer fields on the model row. nil payloads leave
+// the field nil so GORM writes SQL NULL.
+func assignManifestColumns(row *models.UserApplication, m *types.UserAppManifest) {
+	if m.Spec != nil {
+		j := models.NewJSONB(m.Spec)
+		row.Spec = &j
+	}
+	if m.Resources != nil {
+		j := models.NewJSONB(m.Resources)
+		row.Resources = &j
+	}
+	if m.Options != nil {
+		j := models.NewJSONB(m.Options)
+		row.Options = &j
+	}
+	if m.Tailscale != nil {
+		j := models.NewJSONB(m.Tailscale)
+		row.Tailscale = &j
+	}
+	if m.Permission != nil {
+		j := models.NewJSONB(m.Permission)
+		row.Permission = &j
+	}
+	if m.Middleware != nil {
+		j := models.NewJSONB(m.Middleware)
+		row.Middleware = &j
+	}
+	if m.Entrances != nil {
+		j := models.NewJSONB(m.Entrances)
+		row.Entrances = &j
+	}
+	if m.SharedEntrances != nil {
+		j := models.NewJSONB(m.SharedEntrances)
+		row.SharedEntrances = &j
+	}
+	if m.Ports != nil {
+		j := models.NewJSONB(m.Ports)
+		row.Ports = &j
+	}
+	if m.Envs != nil {
+		j := models.NewJSONB(m.Envs)
+		row.Envs = &j
+	}
 }
 
 // MarkRenderFailed records a render failure for the given (user, source, app).

@@ -287,6 +287,10 @@ type ApplicationInfoEntry struct {
 	SupportArch        []string                 `json:"supportArch"`
 	RequiredGPU        string                   `json:"requiredGPU,omitempty"`
 	RequiredCPU        string                   `json:"requiredCPU"`
+	LimitedMemory      string                   `json:"limitedMemory,omitempty"`
+	LimitedDisk        string                   `json:"limitedDisk,omitempty"`
+	LimitedCPU         string                   `json:"limitedCPU,omitempty"`
+	LimitedGPU         string                   `json:"limitedGPU,omitempty"`
 	Rating             float32                  `json:"rating"`
 	Target             string                   `json:"target"`
 	Permission         map[string]interface{}   `json:"permission"`          // Using interface{} for flexibility
@@ -1674,6 +1678,18 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 	}
 	if val, ok := sourceData["requiredCPU"].(string); ok && val != "" {
 		entry.RequiredCPU = val
+	}
+	if val, ok := sourceData["limitedMemory"].(string); ok && val != "" {
+		entry.LimitedMemory = val
+	}
+	if val, ok := sourceData["limitedDisk"].(string); ok && val != "" {
+		entry.LimitedDisk = val
+	}
+	if val, ok := sourceData["limitedCPU"].(string); ok && val != "" {
+		entry.LimitedCPU = val
+	}
+	if val, ok := sourceData["limitedGPU"].(string); ok && val != "" {
+		entry.LimitedGPU = val
 	}
 	if val, ok := sourceData["target"].(string); ok && val != "" {
 		entry.Target = val
