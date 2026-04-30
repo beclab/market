@@ -3,7 +3,6 @@ package types
 import (
 	"encoding/json"
 	"market/internal/v2/client"
-	"reflect"
 	"strings"
 	"time"
 
@@ -324,7 +323,12 @@ type ApplicationInfoEntry struct {
 	// Legacy fields for backward compatibility
 	Screenshots []string               `json:"screenshots"`
 	Tags        []string               `json:"tags"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	// Metadata is in-memory only: chart-repo's parser metadata
+	// ({config_type, config_version, parsed_at, ...}) and the previous
+	// "source_data" mirror used to land here, neither of which the JSONB
+	// columns on applications / user_applications need to persist.
+	// Excluded from JSON so the persisted app_entry payload stays clean.
+	Metadata    map[string]interface{} `json:"-"`
 	UpdatedAt   string                 `json:"updated_at"`
 }
 
@@ -1946,104 +1950,7 @@ func NewApplicationInfoEntry(sourceData map[string]interface{}) *ApplicationInfo
 	// Validate and fix AppLabels if needed
 	ValidateAndFixAppLabels(sourceData, entry)
 
-	// Store a safe copy of source data in metadata to avoid circular references
-	// Create a deep copy of source data without potential circular references
-	safeSourceData := createSafeSourceDataCopy(sourceData)
-	entry.Metadata["source_data"] = safeSourceData
-	entry.Metadata["creation_method"] = "NewApplicationInfoEntry"
-
 	return entry
-}
-
-// createSafeSourceDataCopy creates a safe copy of source data to avoid circular references
-func createSafeSourceDataCopy(sourceData map[string]interface{}) map[string]interface{} {
-	if sourceData == nil {
-		return nil
-	}
-
-	safeCopy := make(map[string]interface{})
-	visited := make(map[uintptr]bool)
-
-	for key, value := range sourceData {
-		// Skip potential circular reference keys
-		if key == "source_data" || key == "raw_data" || key == "app_info" ||
-			key == "parent" || key == "self" || key == "circular_ref" ||
-			key == "back_ref" || key == "loop" {
-			continue
-		}
-
-		safeCopy[key] = deepCopyValue(value, visited)
-	}
-
-	return safeCopy
-}
-
-// deepCopyValue performs a deep copy of a value while avoiding circular references
-func deepCopyValue(value interface{}, visited map[uintptr]bool) interface{} {
-	if value == nil {
-		return nil
-	}
-
-	switch v := value.(type) {
-	case string, int, int64, float64, bool:
-		return v
-	case []string:
-		return append([]string{}, v...)
-	case []interface{}:
-		// Only copy simple types from interface slice
-		safeSlice := make([]interface{}, 0, len(v))
-		for _, item := range v {
-			switch item.(type) {
-			case string, int, int64, float64, bool:
-				safeSlice = append(safeSlice, item)
-			default:
-				// Skip complex slice items to avoid circular references
-			}
-		}
-		return safeSlice
-	case map[string]interface{}:
-		// Check for circular references using pointer
-		ptr := reflect.ValueOf(v).Pointer()
-		if visited[ptr] {
-			return nil // Skip circular reference
-		}
-		visited[ptr] = true
-		defer delete(visited, ptr)
-
-		safeMap := make(map[string]interface{})
-		for k, val := range v {
-			// Skip potential circular reference keys
-			if k == "source_data" || k == "raw_data" || k == "app_info" ||
-				k == "parent" || k == "self" || k == "circular_ref" ||
-				k == "back_ref" || k == "loop" {
-				continue
-			}
-			safeMap[k] = deepCopyValue(val, visited)
-		}
-		return safeMap
-	case map[interface{}]interface{}:
-		// 新增: 支持 map[interface{}]interface{} 转 map[string]interface{}
-		safeMap := make(map[string]interface{})
-		for k, val := range v {
-			if ks, ok := k.(string); ok {
-				safeMap[ks] = deepCopyValue(val, visited)
-			}
-		}
-		return safeMap
-	case []map[string]interface{}:
-		safeSlice := make([]map[string]interface{}, 0, len(v))
-		for _, item := range v {
-			if itemCopy := deepCopyValue(item, visited); itemCopy != nil {
-				if itemMap, ok := itemCopy.(map[string]interface{}); ok {
-					safeSlice = append(safeSlice, itemMap)
-				}
-			}
-		}
-		return safeSlice
-	default:
-		// For other types, return nil to avoid potential circular references
-		return nil
-	}
 }
 
 // ValidateAndFixAppLabels ensures AppLabels are properly set and not lost
