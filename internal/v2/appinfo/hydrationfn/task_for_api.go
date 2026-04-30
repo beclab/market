@@ -14,17 +14,46 @@ import (
 	"github.com/golang/glog"
 )
 
-// syncAppResponse is the minimal shape we need from chart-repo's
-// /dcr/sync-app reply. Only data.app_data.raw_data is consumed; every
-// other field in the response is intentionally ignored.
+// syncAppResponse mirrors the full shape of chart-repo's /dcr/sync-app
+// reply. The hydration logic currently only reads Data.AppData.RawData
+// (everything else is left in place for future cross-checks, debug logs,
+// and forward compatibility — declaring the shape costs almost nothing
+// and avoids silently dropping fields when chart-repo's contract evolves).
 type syncAppResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    *struct {
-		AppData *struct {
-			RawData map[string]any `json:"raw_data"`
-		} `json:"app_data"`
-	} `json:"data"`
+	Success bool         `json:"success"`
+	Message string       `json:"message"`
+	Data    *syncAppData `json:"data"`
+}
+
+// syncAppData is the data envelope returned by chart-repo. Status mirrors
+// chart-repo's idea of the app's render state ("existing", "new",
+// "updated", ...); Message is its human-readable counterpart.
+type syncAppData struct {
+	AppID    string          `json:"app_id"`
+	UserID   string          `json:"user_id"`
+	SourceID string          `json:"source_id"`
+	Version  string          `json:"version"`
+	Status   string          `json:"status"`
+	Message  string          `json:"message"`
+	AppData  *syncAppPayload `json:"app_data"`
+}
+
+// syncAppPayload is the per-app render artefact. RawData is the input we
+// split into the user_applications JSONB columns. RawPackage and
+// RenderedPackage are file paths to the source / rendered chart packages
+// on chart-repo's filesystem — kept here for diagnostic logging even
+// though the database does not have columns for them. AppInfo includes
+// the same app_entry plus image_analysis (which is not persisted).
+type syncAppPayload struct {
+	Type            string         `json:"type"`
+	Timestamp       int64          `json:"timestamp"`
+	Version         string         `json:"version"`
+	RawData         map[string]any `json:"raw_data"`
+	RawPackage      string         `json:"raw_package"`
+	RenderedPackage string         `json:"rendered_package"`
+	Values          []any          `json:"values"`
+	AppInfo         map[string]any `json:"app_info"`
+	AppSimpleInfo   map[string]any `json:"app_simple_info"`
 }
 
 type TaskForApiStep struct {
@@ -147,8 +176,22 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		}
 	}
 
-	glog.V(2).Infof("[TaskForApi] SyncApp %s(%s %s) to chart repo completed successfully in %v",
-		task.AppID, task.AppName, task.AppVersion, duration)
+	// Surface chart-repo's own status/message on the success path; this is
+	// useful for distinguishing a fresh render from a "already existed"
+	// fast-path response (chart-repo sets status="existing" / message=
+	// "App already exists in latest with same version" in that case).
+	var (
+		repoStatus, repoMessage, renderedPackage string
+	)
+	if apiResponse.Data != nil {
+		repoStatus = apiResponse.Data.Status
+		repoMessage = apiResponse.Data.Message
+		if apiResponse.Data.AppData != nil {
+			renderedPackage = apiResponse.Data.AppData.RenderedPackage
+		}
+	}
+	glog.V(2).Infof("[TaskForApi] SyncApp %s(%s %s) to chart repo completed in %v: status=%q msg=%q rendered=%s",
+		task.AppID, task.AppName, task.AppVersion, duration, repoStatus, repoMessage, renderedPackage)
 	return nil
 }
 
