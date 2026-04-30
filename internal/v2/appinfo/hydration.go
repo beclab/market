@@ -127,8 +127,14 @@ func NewHydrator(cache *types.CacheData, settingsManager *settings.SettingsManag
 	// Add default steps
 
 	hydrator.AddStep(hydrationfn.NewTaskForApiStep())
-	// Payment information processing step: call payment logic for validation and status query
-	hydrator.AddStep(hydrationfn.NewTaskForPaymentStep())
+	// TODO(hydration-pg): TaskForPaymentStep is intentionally NOT registered
+	// while hydration migrates to PG. The step still reads from the in-memory
+	// cache (via TaskForApiStep.findPendingDataFromCache) and writes its
+	// result back into pending data, neither of which makes sense on the
+	// PG-driven path. The step file (task_for_payment.go) and its supporting
+	// fields on HydrationTask (Cache / CacheManager) are kept untouched so it
+	// can be reactivated once it has been ported to store.UpsertPurchaseInfo.
+	// hydrator.AddStep(hydrationfn.NewTaskForPaymentStep())
 
 	// hydrator.AddStep(hydrationfn.NewSourceChartStep())
 	// hydrator.AddStep(hydrationfn.NewRenderedChartStep())
