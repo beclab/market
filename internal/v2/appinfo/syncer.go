@@ -319,9 +319,6 @@ func (s *Syncer) executeSyncCycle(ctx context.Context) error {
 		return nil
 	}
 
-	// clears all AppRenderFailed data for all users and sources
-	s.cacheManager.Load().ClearAppRenderFailedData()
-
 	glog.V(3).Infof("Found %d configured market sources (%d remote, %d local)", len(sources), len(remoteSources), len(sources)-len(remoteSources))
 
 	// Process all remote sources in priority order - each source is synced independently

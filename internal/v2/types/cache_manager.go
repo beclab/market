@@ -18,5 +18,4 @@ type CacheManagerInterface interface {
 	// Write operations
 	UpdateSourceOthers(sourceID string, others *Others)
 	RemoveAppFromAllSources(appName, sourceID string) int
-	CopyPendingVersionHistory(userID, sourceID, appID, appName string, latestData *AppInfoLatestData) error
 }
