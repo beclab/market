@@ -140,20 +140,27 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		return fmt.Errorf("chart repo sync-app rejected app: %s", msg)
 	}
 
-	// Build the manifest payload (= JSONB columns) from raw_data when
-	// chart-repo provided it. A missing data.app_data.raw_data is treated
-	// as "manifest unavailable, persist scalar render status only" — the
-	// next render attempt will fill in the manifest.
-	var manifest *types.UserAppManifest
-	if apiResponse.Data != nil && apiResponse.Data.AppData != nil && apiResponse.Data.AppData.RawData != nil {
-		rawData := apiResponse.Data.AppData.RawData
-		// chart-repo's /dcr/sync-app returns wrong values for raw_data.id
-		// and raw_data.appID; the catalog (applications.app_id) is the
-		// source of truth, so we override on the map before splitting.
-		rawData["id"] = task.AppID
-		rawData["appID"] = task.AppID
-		manifest = types.BuildUserAppManifest(rawData)
+	// Build the manifest payload (= JSONB columns) from raw_data. We rely
+	// on chart-repo always returning raw_data alongside success=true,
+	// including on the "existing" fast path. If raw_data is missing we
+	// would otherwise persist a scalar-only success row and lose the
+	// per-user JSONB manifest, so we treat that case as a render failure
+	// and let the upstream loop call MarkRenderFailed instead. The
+	// manifest is also stashed on the task so the pipeline can compose
+	// the post-render app_info for NATS notifications without doing a
+	// follow-up PG read.
+	if apiResponse.Data == nil || apiResponse.Data.AppData == nil || apiResponse.Data.AppData.RawData == nil {
+		return fmt.Errorf("chart repo sync-app returned success without raw_data (user=%s source=%s app=%s)",
+			task.UserID, task.SourceID, task.AppID)
 	}
+	rawData := apiResponse.Data.AppData.RawData
+	// chart-repo's /dcr/sync-app returns wrong values for raw_data.id
+	// and raw_data.appID; the catalog (applications.app_id) is the
+	// source of truth, so we override on the map before splitting.
+	rawData["id"] = task.AppID
+	rawData["appID"] = task.AppID
+	manifest := types.BuildUserAppManifest(rawData)
+	task.RenderedManifest = manifest
 
 	// Persist render success to user_applications. Skipped when the task
 	// has no AppEntry (legacy cache-driven path); on that path the cache

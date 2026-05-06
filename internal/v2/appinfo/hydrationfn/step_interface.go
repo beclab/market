@@ -59,6 +59,17 @@ type HydrationTask struct {
 	// here instead of going back through the cache.
 	AppEntry *types.ApplicationInfoEntry `json:"-"`
 
+	// RenderedManifest is set by TaskForApiStep on the success path of the
+	// PG-driven hydration: it is the per-user, per-render UserAppManifest
+	// built from chart-repo's /dcr/sync-app raw_data, i.e. exactly what
+	// gets persisted to the user_applications JSONB columns. The Pipeline
+	// reads it after a successful hydration and passes it through
+	// types.ComposeApplicationInfoEntry to populate the "new_app_ready"
+	// NATS notification, so the pushed app_info reflects the rendered
+	// per-user manifest rather than the source-side applications.app_entry
+	// catalog snapshot.
+	RenderedManifest *types.UserAppManifest `json:"-"`
+
 	// Context data
 	//
 	// Cache / CacheManager are kept on the struct because the legacy
