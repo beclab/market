@@ -64,6 +64,14 @@ var passThroughArrayKeys = []string{
 
 // scalarKeys are raw_data keys already carried by dedicated scalar columns
 // on user_applications. They are excluded from spec to avoid duplication.
+//
+// Note: even though manifest_version / api_version are scalar columns, the
+// app's logical version still needs to be visible inside spec (callers
+// query user_applications.spec.version directly). Trimming this list is
+// tracked separately; for now we keep the historical set so that
+// manifest_version's legacy semantics (set from applications.app_version
+// via task.AppVersion) stay untouched while we land the spec/metadata
+// fixes.
 var scalarKeys = []string{
 	"id",
 	"appID",
@@ -72,19 +80,38 @@ var scalarKeys = []string{
 	"apiVersion",
 }
 
+// excludedKeys are top-level raw_data keys that must NOT land in any JSONB
+// column. They are chart-repo's processing metadata — hydration_task_id,
+// rendered_chart_url, validation_status, etc. — rather than app manifest
+// content. This complements the json:"-" tag on
+// ApplicationInfoEntry.Metadata, which only suppresses the field on the
+// struct → JSON path; raw_data arrives as a map[string]any so the tag
+// does not apply, and without this list "metadata" would otherwise leak
+// into spec via catch-all.
+//
+// Migration 00008 already dropped the dedicated metadata column from
+// user_applications; keeping this filter consistent with that intent.
+var excludedKeys = []string{
+	"metadata",
+}
+
 // BuildUserAppManifest splits a chart-repo raw_data payload into the
 // JSONB-column shapes that user_applications expects. spec is a catch-all:
-// every raw_data key not consumed by another column or scalar lands there,
-// so chart-repo schema additions flow through without code changes.
+// every raw_data key not consumed by another column, not in scalarKeys,
+// and not in excludedKeys lands there — so chart-repo schema additions
+// flow through without code changes.
 //
 // The caller is expected to have already applied any role-based filtering
 // (e.g. stripping admin-only fields when writing for a regular user) on
 // rawData before calling this function. BuildUserAppManifest itself is a
 // pure transformation with no role awareness.
 //
-// Zero-valued raw_data fields (empty string, 0, empty slice/map, nil) are
-// dropped from spec to avoid noise; they remain in resources / pass-through
-// columns if they happen to be in those fixed key sets.
+// Persistence policy: every key chart-repo returns is preserved verbatim,
+// including zero values (empty string, 0, false, nil, empty slice, empty
+// map). This way user_applications.spec faithfully reflects the raw_data
+// shape, which is what direct PG readers (debug tools, ops SQL) rely on.
+// API consumers go through ComposeApplicationInfoEntry which round-trips
+// these zero values losslessly through the ApplicationInfoEntry struct.
 func BuildUserAppManifest(rawData map[string]any) *UserAppManifest {
 	if rawData == nil {
 		return &UserAppManifest{}
@@ -122,8 +149,12 @@ func BuildUserAppManifest(rawData map[string]any) *UserAppManifest {
 	}
 
 	consumed := make(map[string]struct{}, len(resourcesKeys)+
-		len(passThroughObjectKeys)+len(passThroughArrayKeys)+len(scalarKeys))
-	for _, list := range [][]string{resourcesKeys, passThroughObjectKeys, passThroughArrayKeys, scalarKeys} {
+		len(passThroughObjectKeys)+len(passThroughArrayKeys)+
+		len(scalarKeys)+len(excludedKeys))
+	for _, list := range [][]string{
+		resourcesKeys, passThroughObjectKeys, passThroughArrayKeys,
+		scalarKeys, excludedKeys,
+	} {
 		for _, k := range list {
 			consumed[k] = struct{}{}
 		}
@@ -132,9 +163,6 @@ func BuildUserAppManifest(rawData map[string]any) *UserAppManifest {
 	spec := make(map[string]any)
 	for k, v := range rawData {
 		if _, skip := consumed[k]; skip {
-			continue
-		}
-		if isZeroValue(v) {
 			continue
 		}
 		spec[k] = v
@@ -203,13 +231,14 @@ func ComposeApplicationInfoEntry(m *UserAppManifest) (*ApplicationInfoEntry, err
 }
 
 // extractFixedFields returns a sub-map containing only the requested keys
-// from rawData; missing or zero-valued entries are skipped to keep the
-// resulting JSONB column compact.
+// from rawData. Keys that are absent in rawData are not included; values
+// that chart-repo returned (even zero values like "" or 0) are preserved
+// verbatim so the resulting JSONB column mirrors raw_data exactly.
 func extractFixedFields(rawData map[string]any, keys []string) map[string]any {
 	out := make(map[string]any, len(keys))
 	for _, k := range keys {
 		v, ok := rawData[k]
-		if !ok || isZeroValue(v) {
+		if !ok {
 			continue
 		}
 		out[k] = v
@@ -220,66 +249,34 @@ func extractFixedFields(rawData map[string]any, keys []string) map[string]any {
 	return out
 }
 
+// passThroughObject returns the raw_data[key] map verbatim if it is a JSON
+// object, otherwise nil. Empty objects are preserved (the column will
+// contain '{}') so direct PG readers can tell "chart-repo returned this
+// key as an empty object" apart from "chart-repo did not return this key".
 func passThroughObject(rawData map[string]any, key string) map[string]any {
 	v, ok := rawData[key].(map[string]any)
-	if !ok || len(v) == 0 {
+	if !ok {
 		return nil
 	}
 	return v
 }
 
+// passThroughArray returns the raw_data[key] array verbatim if it is a
+// JSON array of objects, otherwise nil. Empty arrays are preserved (the
+// column will contain '[]') for the same reason as passThroughObject.
 func passThroughArray(rawData map[string]any, key string) []map[string]any {
 	switch v := rawData[key].(type) {
 	case []map[string]any:
-		if len(v) == 0 {
-			return nil
-		}
 		return v
 	case []any:
-		if len(v) == 0 {
-			return nil
-		}
 		out := make([]map[string]any, 0, len(v))
 		for _, item := range v {
 			if mm, ok := item.(map[string]any); ok {
 				out = append(out, mm)
 			}
 		}
-		if len(out) == 0 {
-			return nil
-		}
 		return out
 	default:
 		return nil
 	}
-}
-
-// isZeroValue reports whether v is the zero value of its dynamic type for
-// the kinds of values json.Unmarshal can produce. Used by spec collection
-// to drop noise such as empty strings, 0, false, empty arrays, empty maps,
-// and nil pointers.
-func isZeroValue(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return true
-	case string:
-		return x == ""
-	case bool:
-		return !x
-	case float64:
-		return x == 0
-	case int:
-		return x == 0
-	case int64:
-		return x == 0
-	case []any:
-		return len(x) == 0
-	case map[string]any:
-		return len(x) == 0
-	case []string:
-		return len(x) == 0
-	case []map[string]any:
-		return len(x) == 0
-	}
-	return false
 }

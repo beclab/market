@@ -38,7 +38,6 @@ func TestBuildUserAppManifest_Splitting(t *testing.T) {
 		t.Fatalf("supportArch must NOT be in resources, got %+v", m.Resources)
 	}
 
-	// All "metadata-like" fields should now fall into spec via catch-all.
 	for _, k := range []string{"name", "title", "description", "icon", "categories", "locale"} {
 		if _, ok := m.Spec[k]; !ok {
 			t.Fatalf("spec.%s missing (should fall through via catch-all): %+v", k, m.Spec)
@@ -53,8 +52,11 @@ func TestBuildUserAppManifest_Splitting(t *testing.T) {
 	if _, ok := m.Spec["id"]; ok {
 		t.Fatalf("scalar key 'id' must not appear in spec")
 	}
+	if _, ok := m.Spec["version"]; ok {
+		t.Fatalf("scalar key 'version' must not appear in spec (carried by manifest_version column)")
+	}
 	if _, ok := m.Spec["apiVersion"]; ok {
-		t.Fatalf("zero-value/scalar key 'apiVersion' must not appear in spec")
+		t.Fatalf("scalar key 'apiVersion' must not appear in spec (carried by api_version column)")
 	}
 	if m.Permission["appCache"] != true {
 		t.Fatalf("permission missing: %+v", m.Permission)
@@ -96,6 +98,130 @@ func TestBuildUserAppManifest_ForwardCompat(t *testing.T) {
 	}
 }
 
+// TestBuildUserAppManifest_KeepsZeroValues asserts that zero-valued
+// raw_data keys (empty string, 0, false, JSON null, empty arrays / maps)
+// are NOT dropped from spec. Direct PG readers rely on
+// user_applications.spec mirroring raw_data, including zero values, so
+// they can distinguish "chart-repo returned this key as zero" from
+// "chart-repo did not return this key".
+func TestBuildUserAppManifest_KeepsZeroValues(t *testing.T) {
+	rawData := map[string]any{
+		"id":            "homebox",
+		"appID":         "homebox",
+		"target":        "",
+		"rating":        float64(0),
+		"onlyAdmin":     false,
+		"promoteVideo": "",
+		"subCategory":  "",
+		"namespace":    "",
+		"featuredImage": "",
+		"legal":        nil,
+		"count":        nil,
+		"screenshots":  nil,
+		"tags":         nil,
+		"emptyMap":     map[string]any{},
+		"emptyList":    []any{},
+	}
+
+	m := BuildUserAppManifest(rawData)
+
+	cases := []struct {
+		key  string
+		want any
+	}{
+		{"target", ""},
+		{"rating", float64(0)},
+		{"onlyAdmin", false},
+		{"promoteVideo", ""},
+		{"subCategory", ""},
+		{"namespace", ""},
+		{"featuredImage", ""},
+		{"legal", nil},
+		{"count", nil},
+		{"screenshots", nil},
+		{"tags", nil},
+		{"emptyMap", map[string]any{}},
+		{"emptyList", []any{}},
+	}
+	for _, c := range cases {
+		v, ok := m.Spec[c.key]
+		if !ok {
+			t.Errorf("spec.%s missing; zero values must be preserved", c.key)
+			continue
+		}
+		if !reflect.DeepEqual(v, c.want) {
+			t.Errorf("spec.%s = %#v, want %#v", c.key, v, c.want)
+		}
+	}
+}
+
+// TestBuildUserAppManifest_DropsMetadata asserts that chart-repo's own
+// processing metadata block ("hydration_task_id", "rendered_chart_url",
+// "validation_status", ...) never lands in user_applications.spec. The
+// historical metadata column was dropped by migration 00008; without
+// excludedKeys, this top-level "metadata" key would otherwise leak into
+// spec via catch-all and re-create that data on the wrong column.
+func TestBuildUserAppManifest_DropsMetadata(t *testing.T) {
+	rawData := map[string]any{
+		"id":      "homebox",
+		"version": "1.0.4",
+		"name":    "homebox",
+		"metadata": map[string]any{
+			"data_source":         "hydration_task",
+			"hydration_status":    "completed",
+			"hydration_task_id":   "user_market.olares_app_1234",
+			"rendered_chart_url":  "https://example/chart.tgz",
+			"validation_status":   "validated",
+		},
+	}
+
+	m := BuildUserAppManifest(rawData)
+
+	if _, ok := m.Spec["metadata"]; ok {
+		t.Fatalf("spec must not contain chart-repo processing metadata: %+v", m.Spec)
+	}
+	// Sanity: the rest of the catch-all still works.
+	if m.Spec["name"] != "homebox" {
+		t.Fatalf("spec.name lost during metadata filtering: %+v", m.Spec)
+	}
+}
+
+// TestBuildUserAppManifest_PassThroughEmptyContainers asserts that an
+// explicitly empty pass-through key (e.g. "tailscale": {}) is preserved
+// as an empty container rather than collapsed into nil. This complements
+// TestBuildUserAppManifest_KeepsZeroValues: nil means "chart-repo did
+// not return the key at all", while an empty object/array means
+// "chart-repo returned it explicitly empty".
+func TestBuildUserAppManifest_PassThroughEmptyContainers(t *testing.T) {
+	rawData := map[string]any{
+		"id":              "homebox",
+		"version":         "1.0.4",
+		"tailscale":       map[string]any{},
+		"sharedEntrances": []any{},
+	}
+
+	m := BuildUserAppManifest(rawData)
+
+	if m.Tailscale == nil {
+		t.Fatalf("tailscale must be preserved as empty map, got nil")
+	}
+	if len(m.Tailscale) != 0 {
+		t.Fatalf("tailscale must be an empty map, got %+v", m.Tailscale)
+	}
+	if m.SharedEntrances == nil {
+		t.Fatalf("sharedEntrances must be preserved as empty slice, got nil")
+	}
+	if len(m.SharedEntrances) != 0 {
+		t.Fatalf("sharedEntrances must be an empty slice, got %+v", m.SharedEntrances)
+	}
+
+	// Keys not present in rawData should still produce nil so the JSONB
+	// column is written as SQL NULL.
+	if m.Permission != nil {
+		t.Fatalf("permission must be nil when raw_data omits the key, got %+v", m.Permission)
+	}
+}
+
 // TestRoundTrip ensures BuildUserAppManifest -> ComposeApplicationInfoEntry
 // preserves every non-scalar field declared on ApplicationInfoEntry.
 //
@@ -127,6 +253,15 @@ func TestRoundTrip(t *testing.T) {
 		LimitedCPU:     "200m",
 		SupportArch:    []string{"amd64", "arm64"},
 		Permission:     map[string]any{"appCache": true, "appData": true},
+		// Zero-valued fields exercise the "preserve everything" rule:
+		// they survive the round-trip via spec rather than relying on
+		// the struct's zero-value default.
+		Target:        "",
+		PromoteVideo:  "",
+		SubCategory:   "",
+		Namespace:     "",
+		FeaturedImage: "",
+		OnlyAdmin:     false,
 	}
 
 	buf, err := json.Marshal(original)
@@ -144,8 +279,6 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("compose: %v", err)
 	}
 
-	// Re-inject scalars (= user_applications scalar columns) on the
-	// composed result so the comparison only checks manifest content.
 	composed.ID = original.ID
 	composed.AppID = original.AppID
 	composed.Version = original.Version
