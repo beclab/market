@@ -255,9 +255,11 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 			wg.Add(1)
 			go func(c store.RenderCandidate) {
 				defer wg.Done()
-				if p.hydrator.HydrateSingleApp(ctx, c) {
-					p.notifyRenderSuccess(c)
+				task, ok := p.hydrator.HydrateSingleApp(ctx, c)
+				if !ok {
+					return
 				}
+				p.notifyRenderSuccess(c, task)
 			}(c)
 		}
 		wg.Wait()
@@ -276,9 +278,19 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 // the NATS payload is identical so the frontend keeps its single-event
 // handler.
 //
+// The pushed app_info is composed from task.RenderedManifest (= the JSONB
+// payload that was just persisted to user_applications) via
+// types.ComposeApplicationInfoEntry, so subscribers see the per-user
+// rendered manifest rather than the source-side applications.app_entry
+// catalog snapshot. When the manifest is unexpectedly nil (would mean the
+// hydration step success-path skipped manifest assembly), we fall back to
+// the candidate's catalog entry so the notification still carries useful
+// scalar info; this branch should be unreachable as long as
+// TaskForApiStep enforces "success ⇒ raw_data" on chart-repo's response.
+//
 // Notifications are best-effort: a missing dataSender is silent, and a
 // SendMarketSystemUpdate failure is logged but does not fail hydration.
-func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate) {
+func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate, task *hydrationfn.HydrationTask) {
 	isUpgrade := c.ExistingRenderStatus == "success" &&
 		c.ExistingManifestVersion != c.AppVersion
 	if isUpgrade {
@@ -293,6 +305,22 @@ func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate) {
 		return
 	}
 
+	var appInfo interface{}
+	if task != nil && task.RenderedManifest != nil {
+		entry, err := types.ComposeApplicationInfoEntry(task.RenderedManifest)
+		if err != nil {
+			glog.Errorf("hydration: compose app_info from rendered manifest failed for app %s (user=%s): %v; falling back to catalog entry",
+				c.AppID, c.UserID, err)
+			appInfo = c.AppEntry
+		} else {
+			appInfo = entry
+		}
+	} else {
+		glog.Warningf("hydration: rendered manifest unavailable for app %s (user=%s); falling back to catalog entry in notification",
+			c.AppID, c.UserID)
+		appInfo = c.AppEntry
+	}
+
 	update := types.MarketSystemUpdate{
 		Timestamp:  time.Now().Unix(),
 		User:       c.UserID,
@@ -304,7 +332,7 @@ func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate) {
 			"source":      c.SourceID,
 		},
 		ExtensionsObj: map[string]interface{}{
-			"app_info": c.AppEntry,
+			"app_info": appInfo,
 		},
 	}
 	if err := p.dataSender.SendMarketSystemUpdate(update); err != nil {
@@ -365,13 +393,14 @@ func (p *Pipeline) phaseHashAndSync(affectedUsers map[string]bool) {
 }
 
 // HydrateSingleApp runs hydration steps for a single PG-sourced candidate.
-// Returns true when chart-repo accepted the render (= store.UpsertRenderSuccess
-// happened in TaskForApiStep) and false otherwise. On failure, the (user,
-// source, app) row in user_applications is upserted to render_status='failed'
-// via store.MarkRenderFailed.
-func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate) bool {
+// On success it returns the completed task (with task.RenderedManifest set
+// by TaskForApiStep, so the caller can compose the per-user app_info for
+// notifications) plus true. On failure it returns nil, false; the (user,
+// source, app) row in user_applications has already been upserted to
+// render_status='failed' via store.MarkRenderFailed by then.
+func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate) (*hydrationfn.HydrationTask, bool) {
 	if c.AppEntry == nil || strings.TrimSpace(c.AppID) == "" {
-		return false
+		return nil, false
 	}
 
 	pending := &types.AppInfoLatestPendingData{
@@ -431,7 +460,7 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate
 
 			duration := time.Since(taskStartTime)
 			h.markTaskFailed(task, taskStartTime, duration, failureStep, failureReason)
-			return false
+			return nil, false
 		}
 		task.IncrementStep()
 	}
@@ -440,5 +469,5 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate
 	duration := time.Since(taskStartTime)
 	h.markTaskCompleted(task, taskStartTime, duration)
 	glog.V(2).Infof("HydrateSingleApp: completed for app %s(%s) in %v", c.AppID, c.AppName, duration)
-	return true
+	return task, true
 }
