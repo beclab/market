@@ -33,6 +33,11 @@ type Pipeline struct {
 	dataWatcher             *DataWatcher
 	dataWatcherRepo         *DataWatcherRepo
 	statusCorrectionChecker *StatusCorrectionChecker
+	// dataSender is held independently of dataWatcher so the
+	// post-hydration NATS notification keeps working when datawatcher_app
+	// is eventually retired. nil means "no NATS available", in which case
+	// notifyRenderSuccess only logs.
+	dataSender *DataSender
 
 	runGuard             atomic.Bool
 	stopChan             chan struct{}
@@ -64,6 +69,7 @@ func (p *Pipeline) SetSyncer(s *Syncer)                     { p.syncer = s }
 func (p *Pipeline) SetHydrator(h *Hydrator)                 { p.hydrator = h }
 func (p *Pipeline) SetDataWatcher(dw *DataWatcher)          { p.dataWatcher = dw }
 func (p *Pipeline) SetDataWatcherRepo(dwr *DataWatcherRepo) { p.dataWatcherRepo = dwr }
+func (p *Pipeline) SetDataSender(ds *DataSender)            { p.dataSender = ds }
 func (p *Pipeline) SetStatusCorrectionChecker(scc *StatusCorrectionChecker) {
 	p.statusCorrectionChecker = scc
 }
@@ -249,7 +255,9 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 			wg.Add(1)
 			go func(c store.RenderCandidate) {
 				defer wg.Done()
-				p.hydrator.HydrateSingleApp(ctx, c)
+				if p.hydrator.HydrateSingleApp(ctx, c) {
+					p.notifyRenderSuccess(c)
+				}
 			}(c)
 		}
 		wg.Wait()
@@ -260,6 +268,49 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 	}
 
 	return affectedUsers
+}
+
+// notifyRenderSuccess emits the unified "new_app_ready" market system
+// update after a successful hydration, matching the cache-era semantics.
+// The first-install vs version-upgrade split exists only in the log line;
+// the NATS payload is identical so the frontend keeps its single-event
+// handler.
+//
+// Notifications are best-effort: a missing dataSender is silent, and a
+// SendMarketSystemUpdate failure is logged but does not fail hydration.
+func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate) {
+	isUpgrade := c.ExistingRenderStatus == "success" &&
+		c.ExistingManifestVersion != c.AppVersion
+	if isUpgrade {
+		glog.V(2).Infof("hydration: version upgrade user=%s app=%s %s -> %s",
+			c.UserID, c.AppID, c.ExistingManifestVersion, c.AppVersion)
+	} else {
+		glog.V(2).Infof("hydration: first install user=%s app=%s version=%s",
+			c.UserID, c.AppID, c.AppVersion)
+	}
+
+	if p.dataSender == nil {
+		return
+	}
+
+	update := types.MarketSystemUpdate{
+		Timestamp:  time.Now().Unix(),
+		User:       c.UserID,
+		NotifyType: "market_system_point",
+		Point:      "new_app_ready",
+		Extensions: map[string]string{
+			"app_name":    c.AppName,
+			"app_version": c.AppVersion,
+			"source":      c.SourceID,
+		},
+		ExtensionsObj: map[string]interface{}{
+			"app_info": c.AppEntry,
+		},
+	}
+	if err := p.dataSender.SendMarketSystemUpdate(update); err != nil {
+		glog.Errorf("hydration: notify render success failed for app %s (user=%s): %v",
+			c.AppID, c.UserID, err)
+	}
 }
 
 // phaseDataWatcherRepo processes chart-repo state changes
