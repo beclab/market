@@ -156,11 +156,14 @@ func TestBuildUserAppManifest_KeepsZeroValues(t *testing.T) {
 }
 
 // TestBuildUserAppManifest_DropsMetadata asserts that chart-repo's own
-// processing metadata block ("hydration_task_id", "rendered_chart_url",
-// "validation_status", ...) never lands in user_applications.spec. The
-// historical metadata column was dropped by migration 00008; without
-// excludedKeys, this top-level "metadata" key would otherwise leak into
-// spec via catch-all and re-create that data on the wrong column.
+// per-render processing metadata block ("hydration_task_id",
+// "rendered_chart_url", "validation_status", ...) never lands in
+// user_applications.spec. Without excludedKeys this top-level "metadata"
+// key would leak into spec via catch-all and pollute it with chart-repo
+// internals. Note: the OlaresManifest metadata block (name / icon /
+// title / ...) only arrives nested inside the new raw_data_ex payload
+// and lands in the dedicated metadata column via a separate code path —
+// not via this catch-all.
 func TestBuildUserAppManifest_DropsMetadata(t *testing.T) {
 	rawData := map[string]any{
 		"id":      "homebox",
@@ -322,5 +325,64 @@ func TestComposeApplicationInfoEntry_InjectsScalars(t *testing.T) {
 	}
 	if entry.ApiVersion != "v1" {
 		t.Errorf("apiVersion not injected: %q", entry.ApiVersion)
+	}
+}
+
+// TestComposeApplicationInfoEntry_MergesMetadata asserts that
+// UserAppManifest.Metadata — the OlaresManifest "metadata" block from
+// the raw_data_ex payload — is folded into the merged map alongside
+// Spec/Resources, so its name / icon / title / categories / etc. land
+// on the composed *ApplicationInfoEntry. This is the round-trip that
+// makes the dedicated metadata JSONB column safe to consume from the
+// API path without losing top-level fields.
+func TestComposeApplicationInfoEntry_MergesMetadata(t *testing.T) {
+	m := &UserAppManifest{
+		Metadata: map[string]any{
+			"name":        "ollamav2",
+			"icon":        "https://example/icon.png",
+			"title":       map[string]any{"en-US": "Ollama"},
+			"description": map[string]any{"en-US": "LLMs"},
+			"categories":  []any{"Productivity"},
+			"rating":      float64(0),
+			"target":      "",
+		},
+		Spec: map[string]any{
+			"developer":  "ollama",
+			"versionName": "0.20.5",
+			"website":    "https://ollama.com/",
+		},
+	}
+
+	entry, err := ComposeApplicationInfoEntry(m, EntryScalars{
+		ID:         "ollamav2",
+		AppID:      "ollamav2",
+		Version:    "1.0.22",
+		CfgType:    "app",
+		ApiVersion: "v2",
+	})
+	if err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+
+	if entry.Name != "ollamav2" {
+		t.Errorf("name from metadata lost: %q", entry.Name)
+	}
+	if entry.Icon != "https://example/icon.png" {
+		t.Errorf("icon from metadata lost: %q", entry.Icon)
+	}
+	if entry.Title["en-US"] != "Ollama" {
+		t.Errorf("title from metadata lost: %+v", entry.Title)
+	}
+	if entry.Description["en-US"] != "LLMs" {
+		t.Errorf("description from metadata lost: %+v", entry.Description)
+	}
+	if len(entry.Categories) != 1 || entry.Categories[0] != "Productivity" {
+		t.Errorf("categories from metadata lost: %+v", entry.Categories)
+	}
+	if entry.Developer != "ollama" {
+		t.Errorf("developer from spec lost: %q", entry.Developer)
+	}
+	if entry.VersionName != "0.20.5" {
+		t.Errorf("versionName from spec lost: %q", entry.VersionName)
 	}
 }

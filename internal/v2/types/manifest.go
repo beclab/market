@@ -16,6 +16,13 @@ import (
 // ComposeApplicationInfoEntry can json.Unmarshal a merged view back into
 // *ApplicationInfoEntry losslessly.
 type UserAppManifest struct {
+	// Metadata mirrors the OlaresManifest "metadata" block (name / icon /
+	// title / description / categories / appid / version / rating /
+	// target / type) when chart-repo's /dcr/sync-app returns the
+	// structured raw_data_ex payload. While the legacy flat raw_data is
+	// still in use this stays nil and the equivalent fields fall through
+	// to Spec via the catch-all in BuildUserAppManifest.
+	Metadata        map[string]any
 	Spec            map[string]any
 	Resources       map[string]any
 	Options         map[string]any
@@ -80,17 +87,19 @@ var scalarKeys = []string{
 	"apiVersion",
 }
 
-// excludedKeys are top-level raw_data keys that must NOT land in any JSONB
-// column. They are chart-repo's processing metadata — hydration_task_id,
-// rendered_chart_url, validation_status, etc. — rather than app manifest
-// content. This complements the json:"-" tag on
-// ApplicationInfoEntry.Metadata, which only suppresses the field on the
-// struct → JSON path; raw_data arrives as a map[string]any so the tag
-// does not apply, and without this list "metadata" would otherwise leak
-// into spec via catch-all.
+// excludedKeys are top-level raw_data keys that must NOT land in spec on
+// the legacy flat raw_data path. The literal "metadata" key here is
+// chart-repo's per-render processing metadata (hydration_task_id /
+// rendered_chart_url / validation_status / ...) — NOT the OlaresManifest
+// metadata block, which arrives nested under "metadata" only in the new
+// raw_data_ex payload and lands directly into the dedicated metadata
+// JSONB column via a separate code path.
 //
-// Migration 00008 already dropped the dedicated metadata column from
-// user_applications; keeping this filter consistent with that intent.
+// This complements the json:"-" tag on ApplicationInfoEntry.Metadata,
+// which only suppresses the field on the struct → JSON path; raw_data
+// arrives as a map[string]any so the tag does not apply, and without
+// this list "metadata" would leak into spec via catch-all and pollute
+// it with chart-repo internals.
 var excludedKeys = []string{
 	"metadata",
 }
@@ -214,7 +223,13 @@ func ComposeApplicationInfoEntry(m *UserAppManifest, scalars EntryScalars) (*App
 	}
 
 	merged := make(map[string]any)
-	for _, src := range []map[string]any{m.Resources, m.Spec} {
+	// Metadata, Resources, Spec all flatten into the same target struct
+	// (ApplicationInfoEntry); their keys are disjoint by design (see the
+	// resourcesKeys list and the OlaresManifest metadata vs spec split),
+	// so merging them in any order produces the same result. Listing
+	// Spec last keeps "spec wins on accidental overlap" as a defensive
+	// last-resort tiebreaker.
+	for _, src := range []map[string]any{m.Metadata, m.Resources, m.Spec} {
 		for k, v := range src {
 			merged[k] = v
 		}

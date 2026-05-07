@@ -253,6 +253,7 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 				"render_status",
 				"render_error",
 				"render_consecutive_failures",
+				"metadata",
 				"spec",
 				"resources",
 				"options",
@@ -277,6 +278,10 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 // corresponding JSONB pointer fields on the model row. nil payloads leave
 // the field nil so GORM writes SQL NULL.
 func assignManifestColumns(row *models.UserApplication, m *types.UserAppManifest) {
+	if m.Metadata != nil {
+		j := models.NewJSONB(m.Metadata)
+		row.Metadata = &j
+	}
 	if m.Spec != nil {
 		j := models.NewJSONB(m.Spec)
 		row.Spec = &j

@@ -23,9 +23,15 @@ type UserApplication struct {
 
 	// Manifest top-level blocks. We store catch-all map payloads (see
 	// types.UserAppManifest / types.BuildUserAppManifest) so chart-repo
-	// schema additions flow through without model changes. The historical
-	// "metadata" column was dropped (see migration 00008): name / title /
-	// description / icon / categories / locale now fall through to spec.
+	// schema additions flow through without model changes.
+	//
+	// metadata holds the OlaresManifest "metadata" block (name / title /
+	// description / icon / categories / locale / appid / version /
+	// rating / target / type) once chart-repo's /dcr/sync-app starts
+	// returning the structured raw_data_ex payload. While the legacy
+	// flat raw_data is still in use this column stays nil — the
+	// equivalent fields fall through to spec via the catch-all instead.
+	Metadata        *JSONB[map[string]any]   `gorm:"column:metadata;type:jsonb"`
 	Spec            *JSONB[map[string]any]   `gorm:"column:spec;type:jsonb"`
 	Resources       *JSONB[map[string]any]   `gorm:"column:resources;type:jsonb"`
 	Options         *JSONB[map[string]any]   `gorm:"column:options;type:jsonb"`
