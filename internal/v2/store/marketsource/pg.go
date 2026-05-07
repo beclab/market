@@ -2,6 +2,7 @@ package marketsource
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -140,6 +141,63 @@ func TruncateAll(ctx context.Context) error {
 		Where("1 = 1").
 		Delete(&models.MarketSource{}).Error; err != nil {
 		return fmt.Errorf("truncate market_sources: %w", err)
+	}
+	return nil
+}
+
+// GetSourceByID fetches a single market_sources row by its source_id.
+// Returns (nil, nil) when no matching row exists; the caller decides
+// whether absence is an error.
+func GetSourceByID(ctx context.Context, sourceID string) (*models.MarketSource, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return nil, fmt.Errorf("sourceID cannot be empty")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	var row models.MarketSource
+	err := gdb.WithContext(ctx).
+		Where("source_id = ?", sourceID).
+		First(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get market_source %s: %w", sourceID, err)
+	}
+	return &row, nil
+}
+
+// UpdateSourceNsfwByID flips the `nsfw` flag of a single market_sources
+// row. It is the only writer of that column outside the schema default,
+// so the startup default-seeding path (UpsertSources, which excludes
+// nsfw from DoUpdates) never races with this UPDATE.
+//
+// Returns nil when no matching row exists so the caller can treat
+// "set nsfw on a source we don't track" as a soft no-op rather than an
+// error — the typical trigger is a stale per-user `selected_source`
+// pointing at a source that has since been deleted.
+func UpdateSourceNsfwByID(ctx context.Context, sourceID string, nsfw bool) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return fmt.Errorf("sourceID cannot be empty")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	res := gdb.WithContext(ctx).
+		Model(&models.MarketSource{}).
+		Where("source_id = ?", sourceID).
+		Update("nsfw", nsfw)
+	if res.Error != nil {
+		return fmt.Errorf("update market_source.nsfw (source=%s): %w", sourceID, res.Error)
 	}
 	return nil
 }

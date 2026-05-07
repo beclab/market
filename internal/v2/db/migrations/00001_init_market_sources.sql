@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS market_sources (
     source_type  VARCHAR(16)  NOT NULL CHECK (source_type IN ('local', 'remote')),
     description  TEXT         NOT NULL DEFAULT '',
     priority     INTEGER      NOT NULL DEFAULT 100 CHECK (priority >= 0),
+    -- nsfw is a per-source flag set via PUT /settings/market-settings.
+    -- New sources default to FALSE; the startup default-seeding path
+    -- excludes nsfw from its UPSERT DoUpdates list so an existing
+    -- source's flag is never clobbered by a restart.
+    nsfw         BOOLEAN      NOT NULL DEFAULT FALSE,
     data         JSONB,
     created_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW(),

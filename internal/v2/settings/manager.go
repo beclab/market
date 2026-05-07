@@ -737,6 +737,7 @@ func modelToSetting(m *models.MarketSource) *MarketSource {
 		BaseURL:     m.SourceURL,
 		Priority:    m.Priority,
 		IsActive:    true,
+		Nsfw:        m.Nsfw,
 		UpdatedAt:   m.UpdatedAt,
 		Description: m.Description,
 	}
@@ -747,6 +748,12 @@ func modelToSetting(m *models.MarketSource) *MarketSource {
 // excludes it from DoUpdates, so existing payloads are preserved on
 // upsert and new rows are simply created with NULL data (the syncer
 // fills it in on its next cycle).
+//
+// Nsfw is also intentionally not propagated through the upsert path:
+// UpsertSources excludes it from DoUpdates so the per-source flag set
+// via PUT /settings/market-settings is never clobbered by a startup
+// default-seeding cycle. New INSERT rows pick up the column default
+// (FALSE) regardless of what callers populate here.
 func settingToModel(s *MarketSource) *models.MarketSource {
 	if s == nil {
 		return nil

@@ -13,6 +13,7 @@ type MarketSource struct {
 	BaseURL     string    `json:"base_url" redis:"base_url"`   // Base URL of the market source
 	Priority    int       `json:"priority" redis:"priority"`   // Priority for selection (higher = more priority)
 	IsActive    bool      `json:"is_active" redis:"is_active"` // Whether this source is active
+	Nsfw        bool      `json:"nsfw" redis:"nsfw"`           // Whether this source serves NSFW content
 	UpdatedAt   time.Time `json:"updated_at" redis:"updated_at"`
 	Description string    `json:"description" redis:"description"` // Description of the source
 }
