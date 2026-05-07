@@ -32,6 +32,7 @@ type AppInfoModule struct {
 	dataWatcherRepo         *DataWatcherRepo
 	dataSender              *DataSender
 	statusCorrectionChecker *StatusCorrectionChecker
+	stateNotifier           *StateNotifier
 	settingsManager         *settings.SettingsManager
 	ctx                     context.Context
 	cancel                  context.CancelFunc
@@ -196,6 +197,17 @@ func (m *AppInfoModule) Start() error {
 		}
 	}
 
+	// Initialize StateNotifier (PG-side, runs alongside DataWatcherState).
+	// Gated on EnableDataWatcherState so the cache and PG paths are
+	// enabled / disabled together — the PG path is observability-only
+	// during phase 1, so it should not run when the cache path is
+	// disabled (e.g. public environments).
+	if m.config.EnableDataWatcherState {
+		if err := m.initStateNotifier(); err != nil {
+			return fmt.Errorf("failed to initialize StateNotifier: %w", err)
+		}
+	}
+
 	// Initialize DataWatcherUser if enabled
 	if m.config.EnableDataWatcherUser {
 		if err := m.initDataWatcherUser(); err != nil {
@@ -278,6 +290,13 @@ func (m *AppInfoModule) Stop() error {
 	if m.dataWatcherState != nil {
 		if err := m.dataWatcherState.Stop(); err != nil {
 			glog.Errorf("Failed to stop DataWatcherState: %v", err)
+		}
+	}
+
+	// Stop StateNotifier (PG-side state subscriber, runs alongside DataWatcherState)
+	if m.stateNotifier != nil {
+		if err := m.stateNotifier.Stop(); err != nil {
+			glog.Errorf("Failed to stop StateNotifier: %v", err)
 		}
 	}
 
@@ -607,6 +626,31 @@ func (m *AppInfoModule) initDataWatcherState() error {
 	}
 
 	glog.V(2).Info("DataWatcherState initialized successfully")
+	return nil
+}
+
+// initStateNotifier initialises the PG-side state subscriber. It runs in
+// parallel to DataWatcherState (same NATS subject, both subscribe via
+// independent connections so each receives every message). The legacy
+// DataWatcherState continues to drive cache.AppStateLatest and the
+// frontend-visible NATS push; StateNotifier writes user_application_states
+// for observability and as the foundation for later phases that
+// migrate readers to PG. See internal/v2/appinfo/state.go for the
+// phase-1 contract.
+func (m *AppInfoModule) initStateNotifier() error {
+	glog.V(3).Info("Initializing StateNotifier...")
+
+	if helper.IsPublicEnvironment() {
+		glog.V(3).Info("Public environment detected, StateNotifier disabled")
+		return nil
+	}
+
+	m.stateNotifier = NewStateNotifier()
+	if err := m.stateNotifier.Start(); err != nil {
+		return fmt.Errorf("failed to start StateNotifier: %w", err)
+	}
+
+	glog.V(2).Info("StateNotifier initialized successfully")
 	return nil
 }
 
