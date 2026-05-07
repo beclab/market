@@ -627,216 +627,126 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	s.sendResponse(w, http.StatusOK, true, "Market hash retrieved successfully", map[string]string{"hash": hash})
 }
 
-// Get market state information (only AppStateLatest data)
+// getMarketState handles GET /api/v2/market/state and returns the
+// per-user runtime state of every visible source (active remote +
+// locals). app_info_latest is omitted; for the variant that includes
+// it see getMarketStateSimple.
 func (s *Server) getMarketState(w http.ResponseWriter, r *http.Request) {
-	requestStart := time.Now()
-	glog.V(2).Infof("GET /api/v2/market/state - Getting market state, request start: %v", requestStart)
-
-	// Add timeout context
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
-	// Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Info("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
-		return
-	}
-
-	// Convert http.Request to restful.Request to reuse utils functions
-	restfulReq := s.httpToRestfulRequest(r)
-
-	// Get user information from request using utils module
-	authStart := time.Now()
-	userID, err := utils.GetUserInfoFromRequest(restfulReq)
-	if err != nil {
-		glog.Errorf("Failed to get user from request: %v", err)
-		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
-		return
-	}
-	glog.V(3).Infof("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
-
-	// Create a channel to receive the result
-	type result struct {
-		data MarketStateResponse
-		err  error
-	}
-	resultChan := make(chan result, 1)
-
-	// Run the data retrieval in a goroutine
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("Panic in getMarketState: %v", r)
-				resultChan <- result{err: fmt.Errorf("internal error occurred")}
-			}
-		}()
-
-		// Get user data from cache with timeout check
-		start := time.Now()
-		userData := s.cacheManager.GetUserData(userID)
-		if userData == nil {
-			glog.V(3).Infof("User data not found for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("user data not found")}
-			return
-		}
-		glog.V(3).Infof("GetUserData took %v for user: %s", time.Since(start), userID)
-
-		// Check if we're still within timeout before filtering
-		select {
-		case <-ctx.Done():
-			glog.V(3).Infof("Context cancelled during user data retrieval for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("request cancelled")}
-			return
-		default:
-		}
-
-		// Filter the user data to include only AppStateLatest fields with timeout
-		filterStart := time.Now()
-		filteredUserData := s.filterUserDataForStateWithTimeout(ctx, userData, false)
-		if filteredUserData == nil {
-			glog.V(3).Infof("Data filtering timed out or failed for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("data filtering timeout")}
-			return
-		}
-		glog.V(3).Infof("Data filtering took %v for user: %s", time.Since(filterStart), userID)
-
-		// Prepare response data
-		responseData := MarketStateResponse{
-			UserData:  filteredUserData,
-			UserID:    userID,
-			Timestamp: time.Now().Unix(),
-		}
-
-		resultChan <- result{data: responseData}
-	}()
-
-	// Wait for result or timeout
-	select {
-	case <-ctx.Done():
-		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/state")
-		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
-		return
-	case res := <-resultChan:
-		if res.err != nil {
-			glog.Errorf("Error retrieving market state: %v", res.err)
-			if res.err.Error() == "user data not found" {
-				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-			} else {
-				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market state", nil)
-			}
-			return
-		}
-
-		glog.V(2).Infof("Market state retrieved successfully for user: %s", userID)
-		s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", res.data)
-	}
+	s.handleMarketStateRequest(w, r, false)
 }
 
-// Get market state information (only AppStateLatest data)
+// getMarketStateSimple handles GET /api/v2/market/statesimple and
+// returns the same payload as getMarketState plus a per-source
+// app_info_latest list carrying only AppSimpleInfo (the heavyweight
+// fields are intentionally nil to keep the response light, mirroring
+// the cache-side wire shape).
 func (s *Server) getMarketStateSimple(w http.ResponseWriter, r *http.Request) {
-	requestStart := time.Now()
-	glog.V(2).Infof("GET /api/v2/market/statesimple - Getting market state simple, request start: %v", requestStart)
+	s.handleMarketStateRequest(w, r, true)
+}
 
-	// Add timeout context
+// handleMarketStateRequest is the shared body of getMarketState and
+// getMarketStateSimple. The withAppInfoLatest flag is the only
+// difference between them.
+func (s *Server) handleMarketStateRequest(w http.ResponseWriter, r *http.Request, withAppInfoLatest bool) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	// Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Info("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
-		return
-	}
-
-	// Convert http.Request to restful.Request to reuse utils functions
 	restfulReq := s.httpToRestfulRequest(r)
-
-	// Get user information from request using utils module
-	authStart := time.Now()
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
 		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	glog.V(3).Infof("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
+	glog.V(3).Infof("GET /api/v2/market/state[simple] - user: %s, withAppInfoLatest: %v", userID, withAppInfoLatest)
 
-	// Create a channel to receive the result
-	type result struct {
-		data MarketStateResponse
-		err  error
-	}
-	resultChan := make(chan result, 1)
-
-	// Run the data retrieval in a goroutine
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("Panic in getMarketState: %v", r)
-				resultChan <- result{err: fmt.Errorf("internal error occurred")}
-			}
-		}()
-
-		// Get user data from cache with timeout check
-		start := time.Now()
-		userData := s.cacheManager.GetUserData(userID)
-		if userData == nil {
-			glog.V(3).Infof("User data not found for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("user data not found")}
-			return
-		}
-		glog.V(3).Infof("GetUserData took %v for user: %s", time.Since(start), userID)
-
-		// Check if we're still within timeout before filtering
-		select {
-		case <-ctx.Done():
-			glog.V(3).Infof("Context cancelled during user data retrieval for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("request cancelled")}
-			return
-		default:
-		}
-
-		// Filter the user data to include only AppStateLatest fields with timeout
-		filterStart := time.Now()
-		filteredUserData := s.filterUserDataForStateWithTimeout(ctx, userData, true)
-		if filteredUserData == nil {
-			glog.V(3).Infof("Data filtering timed out or failed for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("data filtering timeout")}
-			return
-		}
-		glog.V(3).Infof("Data filtering took %v for user: %s", time.Since(filterStart), userID)
-
-		// Prepare response data
-		responseData := MarketStateResponse{
-			UserData:  filteredUserData,
-			UserID:    userID,
-			Timestamp: time.Now().Unix(),
-		}
-
-		resultChan <- result{data: responseData}
-	}()
-
-	// Wait for result or timeout
-	select {
-	case <-ctx.Done():
-		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/state")
-		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
+	response, err := s.assembleMarketStateResponse(ctx, userID, withAppInfoLatest)
+	if err != nil {
+		glog.Errorf("Failed to assemble market state response for user %s: %v", userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market state", nil)
 		return
-	case res := <-resultChan:
-		if res.err != nil {
-			glog.Errorf("Error retrieving market state: %v", res.err)
-			if res.err.Error() == "user data not found" {
-				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-			} else {
-				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market state", nil)
-			}
-			return
-		}
-
-		glog.V(2).Infof("Market state retrieved successfully for user: %s", userID)
-		s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", res.data)
 	}
+
+	glog.V(2).Infof("Market state retrieved successfully for user: %s", userID)
+	s.sendResponse(w, http.StatusOK, true, "Market state retrieved successfully", response)
+}
+
+// assembleMarketStateResponse pulls every input the state endpoints
+// need from PG and stitches them into a MarketStateResponse. Sources
+// are scoped the same way getMarketData scopes them (active remote +
+// locals); app_info_latest is only fetched when the caller asks for
+// it. Hash read errors are non-fatal so a transient PG hiccup on the
+// hash column does not strand the rest of the response.
+func (s *Server) assembleMarketStateResponse(ctx context.Context, userID string, withAppInfoLatest bool) (*MarketStateResponse, error) {
+	sources, err := marketsource.ListVisibleSources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list visible market sources: %w", err)
+	}
+
+	sourceIDs := make([]string, 0, len(sources))
+	for _, src := range sources {
+		if src != nil {
+			sourceIDs = append(sourceIDs, src.SourceID)
+		}
+	}
+
+	states, err := store.ListUserAppStateLatest(ctx, userID, sourceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list app_state_latest: %w", err)
+	}
+
+	var apps []*store.AppInfoSimpleRow
+	if withAppInfoLatest {
+		apps, err = store.ListAppInfoLatestForUser(ctx, userID, sourceIDs)
+		if err != nil {
+			return nil, fmt.Errorf("list app_info_latest: %w", err)
+		}
+	}
+
+	hash, err := marketsource.GetActiveRemoteSourceHash(ctx)
+	if err != nil {
+		glog.Errorf("Failed to read market hash for user %s: %v", userID, err)
+		hash = ""
+	}
+
+	statesBySource := make(map[string][]*store.AppStateLatestRow, len(sources))
+	for _, row := range states {
+		if row == nil {
+			continue
+		}
+		statesBySource[row.SourceID] = append(statesBySource[row.SourceID], row)
+	}
+	appsBySource := make(map[string][]*store.AppInfoSimpleRow, len(sources))
+	for _, row := range apps {
+		if row == nil {
+			continue
+		}
+		appsBySource[row.SourceID] = append(appsBySource[row.SourceID], row)
+	}
+
+	filtered := &FilteredUserDataForState{
+		Sources: make(map[string]*FilteredSourceDataForState, len(sources)),
+		Hash:    hash,
+	}
+	for _, src := range sources {
+		if src == nil {
+			continue
+		}
+		sd := &FilteredSourceDataForState{
+			Type:           types.SourceDataType(src.SourceType),
+			AppStateLatest: buildAppStateLatestList(userID, src.SourceID, statesBySource[src.SourceID]),
+		}
+		if withAppInfoLatest {
+			sd.AppInfoLatest = buildAppInfoLatestStateList(appsBySource[src.SourceID])
+		}
+		filtered.Sources[src.SourceID] = sd
+	}
+
+	return &MarketStateResponse{
+		UserData:  filtered,
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
+	}, nil
 }
 
 // Get market data information.
@@ -977,7 +887,7 @@ func buildOthersFromSource(src *models.MarketSource) *types.Others {
 }
 
 // buildAppInfoLatestList wraps each AppInfoSimpleRow in the
-// FilteredAppInfoLatestData envelope the API contract returns.
+// FilteredAppInfoLatestData envelope returned by /market/data.
 func buildAppInfoLatestList(rows []*store.AppInfoSimpleRow) []*FilteredAppInfoLatestData {
 	out := make([]*FilteredAppInfoLatestData, 0, len(rows))
 	for _, row := range rows {
@@ -994,55 +904,164 @@ func buildAppInfoLatestList(rows []*store.AppInfoSimpleRow) []*FilteredAppInfoLa
 	return out
 }
 
-// buildAppSimpleInfoMap mirrors the cache-side createSafeAppSimpleInfoCopy
-// output shape, sourcing fields from user_applications.metadata first
-// (the manifest's own metadata block) and falling back to
-// applications.app_entry for SupportArch / Categories / AppLabels —
-// the same fallback chain the cache path used.
-//
-// Keys are emitted unconditionally for app_id / app_name / app_version
-// / support_arch (the latter as an empty slice when unknown) so the
-// JSON shape is stable for clients that index into the map by key.
-func buildAppSimpleInfoMap(row *store.AppInfoSimpleRow) map[string]interface{} {
-	out := map[string]interface{}{
-		"app_id":      row.AppID,
-		"app_name":    row.AppName,
-		"app_version": row.AppVersion,
+// buildAppInfoLatestStateList wraps each AppInfoSimpleRow in a sparse
+// types.AppInfoLatestData carrying only AppSimpleInfo. Used by
+// /market/statesimple, which mirrors the cache-side wire shape that
+// kept all heavyweight fields (RawData / AppInfo / RawPackage / ...)
+// nil and surfaced AppSimpleInfo only.
+func buildAppInfoLatestStateList(rows []*store.AppInfoSimpleRow) []*types.AppInfoLatestData {
+	out := make([]*types.AppInfoLatestData, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		out = append(out, &types.AppInfoLatestData{
+			AppSimpleInfo: buildAppSimpleInfo(row),
+		})
 	}
+	return out
+}
 
+// buildAppSimpleInfo extracts the AppSimpleInfo wire shape from a
+// user_applications JOIN applications row. Field sources match the
+// cache-side fallback chain: prefer the manifest metadata block
+// (user_applications.metadata) for the user-facing fields, fall back
+// to applications.app_entry for SupportArch / Categories which the
+// metadata block does not always carry.
+//
+// Returns nil only when the row itself is nil; otherwise the struct
+// is always populated, with empty fields where data is unavailable.
+func buildAppSimpleInfo(row *store.AppInfoSimpleRow) *types.AppSimpleInfo {
+	if row == nil {
+		return nil
+	}
+	info := &types.AppSimpleInfo{
+		AppID:      row.AppID,
+		AppName:    row.AppName,
+		AppVersion: row.AppVersion,
+	}
 	var meta map[string]any
 	if row.Metadata != nil {
 		meta = row.Metadata.Data
 	}
-	if v, ok := meta["icon"].(string); ok {
-		out["app_icon"] = v
+	if s, ok := meta["icon"].(string); ok {
+		info.AppIcon = s
 	}
-	if v, ok := meta["title"]; ok {
-		out["app_title"] = v
-	}
-	if v, ok := meta["description"]; ok {
-		out["app_description"] = v
-	}
-	if v, ok := meta["categories"]; ok {
-		out["categories"] = v
-	}
+	info.AppDescription = stringMapFromAny(meta["description"])
+	info.AppTitle = stringMapFromAny(meta["title"])
+	info.Categories = stringSliceFromAny(meta["categories"])
 
 	if row.AppEntry != nil {
 		entry := row.AppEntry.Data
 		if len(entry.SupportArch) > 0 {
-			out["support_arch"] = entry.SupportArch
+			info.SupportArch = entry.SupportArch
 		}
-		if _, ok := out["categories"]; !ok && len(entry.Categories) > 0 {
-			out["categories"] = entry.Categories
-		}
-		if len(entry.AppLabels) > 0 {
-			out["app_labels"] = entry.AppLabels
+		if len(info.Categories) == 0 && len(entry.Categories) > 0 {
+			info.Categories = entry.Categories
 		}
 	}
-	if _, ok := out["support_arch"]; !ok {
+	return info
+}
+
+// buildAppSimpleInfoMap is the map-shape variant returned by
+// /market/data. The cache path used a map[string]interface{} because
+// createSafeAppSimpleInfoCopy emitted optional fields conditionally;
+// preserving that wire compat means we cannot just JSON-marshal the
+// typed struct (which would always emit empty strings / null maps).
+//
+// Field extraction lives in buildAppSimpleInfo; this wrapper just
+// strips empty values and adds the AppLabels extra key the typed
+// struct does not carry.
+func buildAppSimpleInfoMap(row *store.AppInfoSimpleRow) map[string]interface{} {
+	info := buildAppSimpleInfo(row)
+	if info == nil {
+		return nil
+	}
+	out := map[string]interface{}{
+		"app_id":      info.AppID,
+		"app_name":    info.AppName,
+		"app_version": info.AppVersion,
+	}
+	if info.AppIcon != "" {
+		out["app_icon"] = info.AppIcon
+	}
+	if len(info.AppTitle) > 0 {
+		out["app_title"] = info.AppTitle
+	}
+	if len(info.AppDescription) > 0 {
+		out["app_description"] = info.AppDescription
+	}
+	if len(info.Categories) > 0 {
+		out["categories"] = info.Categories
+	}
+	if len(info.SupportArch) > 0 {
+		out["support_arch"] = info.SupportArch
+	} else {
 		out["support_arch"] = []string{}
 	}
+	if row.AppEntry != nil && len(row.AppEntry.Data.AppLabels) > 0 {
+		out["app_labels"] = row.AppEntry.Data.AppLabels
+	}
 	return out
+}
+
+// stringMapFromAny converts a json-decoded `interface{}` (which arrives
+// as map[string]interface{}) into the map[string]string shape the
+// types.AppSimpleInfo description / title fields expect. Returns nil
+// for empty / missing input so the JSON-marshalled response keeps
+// clean shape.
+func stringMapFromAny(v any) map[string]string {
+	m, ok := v.(map[string]interface{})
+	if !ok || len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, val := range m {
+		if s, ok := val.(string); ok {
+			out[k] = s
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stringSliceFromAny is the slice equivalent of stringMapFromAny.
+func stringSliceFromAny(v any) []string {
+	s, ok := v.([]interface{})
+	if !ok || len(s) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s))
+	for _, val := range s {
+		if str, ok := val.(string); ok {
+			out = append(out, str)
+		}
+	}
+	return out
+}
+
+// pickStringFromAny coerces a json-decoded value into a single string,
+// handling both bare-string and {locale: string} multi-language map
+// shapes. Used for AppStateLatestDataSpec.Title which the schema
+// stores as a multi-language map but the wire contract surfaces as a
+// scalar.
+func pickStringFromAny(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case map[string]interface{}:
+		if s, ok := x["en-US"].(string); ok {
+			return s
+		}
+		for _, vv := range x {
+			if s, ok := vv.(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // buildAppStateLatestList wraps each AppStateLatestRow in the typed
@@ -1071,26 +1090,12 @@ func buildAppStateLatestList(userID, sourceID string, rows []*store.AppStateLate
 func buildAppStateLatestData(userID, sourceID string, row *store.AppStateLatestRow) *types.AppStateLatestData {
 	var icon, title string
 	if row.Metadata != nil {
-		if v, ok := row.Metadata.Data["icon"].(string); ok {
-			icon = v
+		if s, ok := row.Metadata.Data["icon"].(string); ok {
+			icon = s
 		}
-		// metadata.title is a multi-language map; pick en-US first,
-		// then any other locale, so the single-string AppStateLatest
-		// Title field has something useful.
-		if v, ok := row.Metadata.Data["title"].(string); ok {
-			title = v
-		} else if m, ok := row.Metadata.Data["title"].(map[string]interface{}); ok {
-			if s, ok := m["en-US"].(string); ok {
-				title = s
-			} else {
-				for _, vv := range m {
-					if s, ok := vv.(string); ok {
-						title = s
-						break
-					}
-				}
-			}
-		}
+		// metadata.title is a multi-language map; flatten to a single
+		// string for the wire contract via pickStringFromAny.
+		title = pickStringFromAny(row.Metadata.Data["title"])
 	}
 
 	timeStr := ""
@@ -1131,76 +1136,6 @@ func buildAppStateLatestData(userID, sourceID string, row *store.AppStateLatestR
 		Version: row.InstalledVersion,
 		Status:  spec,
 	}
-}
-
-// filterUserDataForStateWithTimeout filters user data to include only AppStateLatest fields with timeout
-func (s *Server) filterUserDataForStateWithTimeout(ctx context.Context, userData *types.UserData, withAppInfoLatest bool) *FilteredUserDataForState {
-	if userData == nil {
-		return nil
-	}
-
-	glog.V(3).Infof("DEBUG: Starting filterUserDataForStateWithTimeout with single global lock approach")
-
-	// Use single lock for all data access to avoid deadlocks
-	filteredUserData := &FilteredUserDataForState{
-		Sources: make(map[string]*FilteredSourceDataForState),
-		Hash:    userData.Hash,
-	}
-
-	// Check timeout
-	select {
-	case <-ctx.Done():
-		glog.V(3).Infof("Context cancelled before data processing")
-		return nil
-	default:
-	}
-
-	// Process each source in the user data
-	for sourceID, sourceData := range userData.Sources {
-		// Check timeout
-		select {
-		case <-ctx.Done():
-			glog.V(3).Infof("Context cancelled during source processing: %s", sourceID)
-			return nil
-		default:
-		}
-
-		// Convert data directly without additional locks
-		filteredSourceData := s.convertSourceDataToFilteredForState(sourceData, withAppInfoLatest)
-		if filteredSourceData != nil {
-			filteredUserData.Sources[sourceID] = filteredSourceData
-		}
-	}
-
-	glog.V(3).Infof("DEBUG: Completed filterUserDataForStateWithTimeout with %d sources processed", len(filteredUserData.Sources))
-	return filteredUserData
-}
-
-// convertSourceDataToFilteredForState converts source data to filtered format for state endpoint (only AppStateLatest)
-func (s *Server) convertSourceDataToFilteredForState(sourceData *types.SourceData, withAppInfoLatest bool) *FilteredSourceDataForState {
-	if sourceData == nil {
-		return nil
-	}
-
-	s.patchStateRawName(sourceData)
-
-	filteredSourceData := &FilteredSourceDataForState{
-		Type:           sourceData.Type,
-		AppStateLatest: sourceData.AppStateLatest,
-	}
-
-	if withAppInfoLatest {
-		var appInfoLatest []*types.AppInfoLatestData
-		for _, app := range sourceData.AppInfoLatest {
-			var info = &types.AppInfoLatestData{
-				AppSimpleInfo: app.AppSimpleInfo,
-			}
-			appInfoLatest = append(appInfoLatest, info)
-		}
-		filteredSourceData.AppInfoLatest = appInfoLatest
-	}
-
-	return filteredSourceData
 }
 
 // 5. Diagnostic endpoint for cache and Redis analysis
@@ -2785,21 +2720,3 @@ func (s *Server) resendPaymentVC(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// helper
-func (s *Server) patchStateRawName(sourceData *types.SourceData) {
-	if len(sourceData.AppStateLatest) == 0 || len(sourceData.AppInfoLatest) == 0 {
-		return
-	}
-
-	for _, state := range sourceData.AppStateLatest {
-		if state.Status.RawAppName == "" {
-			for _, app := range sourceData.AppInfoLatest {
-				if strings.HasPrefix(state.Status.Name, app.AppInfo.AppEntry.Name) {
-					state.Status.RawAppName = app.AppInfo.AppEntry.Name
-					glog.Infof("[PATCH] App state: %s, app: %s", state.Status.Name, app.AppInfo.AppEntry.Name)
-					break
-				}
-			}
-		}
-	}
-}
