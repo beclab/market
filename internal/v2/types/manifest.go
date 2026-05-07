@@ -3,6 +3,8 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/beclab/Olares/framework/oac"
 )
 
 // UserAppManifest is the in-memory representation of the JSONB columns on
@@ -42,12 +44,12 @@ type UserAppManifest struct {
 var resourcesKeys = []string{
 	"requiredMemory",
 	"requiredDisk",
-	"requiredCPU",
-	"requiredGPU",
+	"requiredCpu",
+	"requiredGpu",
 	"limitedMemory",
 	"limitedDisk",
-	"limitedCPU",
-	"limitedGPU",
+	"limitedCpu",
+	"limitedGpu",
 }
 
 // passThroughObjectKeys are top-level raw_data keys whose value is a JSON
@@ -121,7 +123,7 @@ var excludedKeys = []string{
 // shape, which is what direct PG readers (debug tools, ops SQL) rely on.
 // API consumers go through ComposeApplicationInfoEntry which round-trips
 // these zero values losslessly through the ApplicationInfoEntry struct.
-func BuildUserAppManifest(rawData map[string]any) *UserAppManifest {
+func BuildUserAppManifest(rawData *oac.AppConfiguration) *UserAppManifest {
 	if rawData == nil {
 		return &UserAppManifest{}
 	}

@@ -10,6 +10,7 @@ import (
 	"market/internal/v2/store"
 	"market/internal/v2/types"
 
+	"github.com/beclab/Olares/framework/oac"
 	"github.com/go-resty/resty/v2"
 	"github.com/golang/glog"
 )
@@ -45,15 +46,16 @@ type syncAppData struct {
 // though the database does not have columns for them. AppInfo includes
 // the same app_entry plus image_analysis (which is not persisted).
 type syncAppPayload struct {
-	Type            string         `json:"type"`
-	Timestamp       int64          `json:"timestamp"`
-	Version         string         `json:"version"`
-	RawData         map[string]any `json:"raw_data"`
-	RawPackage      string         `json:"raw_package"`
-	RenderedPackage string         `json:"rendered_package"`
-	Values          []any          `json:"values"`
-	AppInfo         map[string]any `json:"app_info"`
-	AppSimpleInfo   map[string]any `json:"app_simple_info"`
+	Type            string                `json:"type"`
+	Timestamp       int64                 `json:"timestamp"`
+	Version         string                `json:"version"`
+	RawData         map[string]any        `json:"raw_data"`
+	RawDataEx       *oac.AppConfiguration `json:"raw_data_ex"`
+	RawPackage      string                `json:"raw_package"`
+	RenderedPackage string                `json:"rendered_package"`
+	Values          []any                 `json:"values"`
+	AppInfo         map[string]any        `json:"app_info"`
+	AppSimpleInfo   map[string]any        `json:"app_simple_info"`
 }
 
 type TaskForApiStep struct {
@@ -127,6 +129,7 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 	}
 
 	var apiResponse syncAppResponse
+
 	if err := json.Unmarshal(resp.Body(), &apiResponse); err != nil {
 		return fmt.Errorf("failed to parse response JSON: %w", err)
 	}
@@ -153,12 +156,10 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		return fmt.Errorf("chart repo sync-app returned success without raw_data (user=%s source=%s app=%s)",
 			task.UserID, task.SourceID, task.AppID)
 	}
-	rawData := apiResponse.Data.AppData.RawData
+	rawData := apiResponse.Data.AppData.RawDataEx
 	// chart-repo's /dcr/sync-app returns wrong values for raw_data.id
 	// and raw_data.appID; the catalog (applications.app_id) is the
 	// source of truth, so we override on the map before splitting.
-	rawData["id"] = task.AppID
-	rawData["appID"] = task.AppID
 	manifest := types.BuildUserAppManifest(rawData)
 	task.RenderedManifest = manifest
 
@@ -173,9 +174,9 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 			AppName:         task.AppName,
 			AppRawID:        task.AppID,
 			AppRawName:      task.AppName,
-			ManifestVersion: task.AppVersion,
-			ManifestType:    task.AppType,
-			APIVersion:      task.AppEntry.ApiVersion,
+			ManifestVersion: rawData.ConfigVersion,
+			ManifestType:    rawData.ConfigType,
+			APIVersion:      rawData.APIVersion,
 			Manifest:        manifest,
 		}
 		if err := store.UpsertRenderSuccess(ctx, in); err != nil {
