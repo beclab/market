@@ -12,6 +12,7 @@ import (
 	"market/internal/v2/appinfo"
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
+	"market/internal/v2/store/marketsource"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 
@@ -589,23 +590,22 @@ func extractAppDataFromPending(pendingData *types.AppInfoLatestPendingData) map[
 	return data
 }
 
-// Get market hash information
+// Get market hash information.
+//
+// Returns the catalogue fingerprint of the active remote source
+// (market_sources.data->>'hash' WHERE source_type='remote' AND
+// is_active=true). The active remote is a system-wide singleton
+// enforced by the partial unique index on market_sources, so this
+// hash is identical across replicas and across users — front-end
+// polling can use it to detect chart-repo catalogue changes.
+//
+// User-state changes (install/uninstall/upgrade) are NOT reflected
+// here; they should be polled via /market/state separately.
 func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
-	// Add timeout context
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Info("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
-		return
-	}
-
-	// Convert http.Request to restful.Request to reuse utils functions
 	restfulReq := s.httpToRestfulRequest(r)
-
-	// Get user information from request using utils module
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
 		glog.Errorf("Failed to get user from request: %v", err)
@@ -614,79 +614,15 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 	}
 	glog.V(2).Infof("GET /api/v2/market/hash - Getting market hash, user: %s", userID)
 
-	// Create a channel to receive the result
-	type result struct {
-		hash string
-		err  error
-	}
-	resultChan := make(chan result, 1)
-
-	// Run the data retrieval in a goroutine
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("Panic in getMarketHash: %v", r)
-				resultChan <- result{err: fmt.Errorf("internal error occurred")}
-			}
-		}()
-
-		userData := s.cacheManager.GetUserData(userID)
-		if userData == nil {
-			glog.Warningf("User data not found for user: %s, attempting to resync user data", userID)
-
-			if err := s.cacheManager.ResynceUser(); err != nil {
-				glog.Errorf("Failed to resync user data for user %s: %v", userID, err)
-				resultChan <- result{err: fmt.Errorf("failed to resync user data: %v", err)}
-				return
-			}
-
-			userData = s.cacheManager.GetUserData(userID)
-			if userData == nil {
-				glog.Warningf("User data still not found for user: %s after resync", userID)
-				resultChan <- result{err: fmt.Errorf("user data not found even after resync")}
-				return
-			}
-
-			glog.V(2).Infof("Successfully retrieved user data for user: %s after resync", userID)
-		}
-
-		// Get hash from user data
-		hash := userData.Hash
-		glog.V(2).Infof("Retrieved hash for user %s: %s", userID, hash)
-
-		resultChan <- result{hash: hash}
-	}()
-
-	// Wait for result or timeout
-	select {
-	case <-ctx.Done():
-		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/hash")
-		// On timeout, dump lock info to find who holds the lock
-		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - hash retrieval took too long", nil)
+	hash, err := marketsource.GetActiveRemoteSourceHash(ctx)
+	if err != nil {
+		glog.Errorf("Failed to read market hash for user %s: %v", userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market hash", nil)
 		return
-	case res := <-resultChan:
-		if res.err != nil {
-			glog.Errorf("Error retrieving market hash: %v", res.err)
-			if res.err.Error() == "user data not found" {
-				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-			} else if strings.Contains(res.err.Error(), "failed to resync user data") {
-				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to resync user data", nil)
-			} else if strings.Contains(res.err.Error(), "user data not found even after resync") {
-				s.sendResponse(w, http.StatusNotFound, false, "User data not found even after resync attempt", nil)
-			} else {
-				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market hash", nil)
-			}
-			return
-		}
-
-		// Return hash in response data
-		hashData := map[string]string{
-			"hash": res.hash,
-		}
-
-		glog.V(3).Infof("Market hash retrieved successfully for user: %s", userID)
-		s.sendResponse(w, http.StatusOK, true, "Market hash retrieved successfully", hashData)
 	}
+
+	glog.V(3).Infof("Market hash retrieved successfully for user: %s", userID)
+	s.sendResponse(w, http.StatusOK, true, "Market hash retrieved successfully", map[string]string{"hash": hash})
 }
 
 // Get market state information (only AppStateLatest data)

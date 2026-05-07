@@ -326,6 +326,38 @@ SELECT EXISTS (
 	return exists, nil
 }
 
+// GetActiveRemoteSourceHash returns the catalogue hash
+// (data->>'hash') of the currently-active remote source, or "" when
+// no remote row has is_active=true or its data JSONB is NULL / has no
+// 'hash' key. Used by GET /market/hash to surface chart-repo's
+// catalogue fingerprint to client polling.
+//
+// The partial unique index uq_market_sources_one_active_remote
+// guarantees this query returns at most one row, so LIMIT 1 is a
+// safety belt rather than a correctness requirement. The query is
+// ctx-cancellable end-to-end (gorm/pgx propagates ctx to the wire),
+// so a slow PG can be aborted by the handler's request timeout
+// without an extra goroutine wrapper.
+func GetActiveRemoteSourceHash(ctx context.Context) (string, error) {
+	gdb := db.Global()
+	if gdb == nil {
+		return "", fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	const query = `
+SELECT COALESCE(data->>'hash', '')
+FROM market_sources
+WHERE source_type = 'remote' AND is_active = true
+LIMIT 1
+`
+
+	var hash string
+	if err := gdb.WithContext(ctx).Raw(query).Scan(&hash).Error; err != nil {
+		return "", fmt.Errorf("get active remote source hash: %w", err)
+	}
+	return hash, nil
+}
+
 func GetOthersHash(ctx context.Context, sourceID string) (string, error) {
 	if sourceID == "" {
 		return "", fmt.Errorf("sourceID cannot be empty")
