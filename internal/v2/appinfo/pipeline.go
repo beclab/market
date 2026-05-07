@@ -309,11 +309,13 @@ func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate, task *hydrationf
 	if task != nil && task.RenderedManifest != nil {
 		// Re-inject the identity / header scalars on Compose so the
 		// pushed app_info carries non-empty id / appID / version /
-		// cfgType / apiVersion. Those keys live in scalarKeys (= they
-		// have dedicated user_applications scalar columns) and are
-		// therefore absent from the manifest's spec map; without
+		// cfgType / apiVersion. These five keys are not carried in the
+		// JSONB manifest blocks (id/appID are not present on
+		// *oac.AppConfiguration at all; version arrives nested under
+		// metadata; cfgType arrives as olaresManifest.type), so without
 		// re-injection ComposeApplicationInfoEntry would emit an entry
-		// with empty strings for all five fields.
+		// with empty strings for all five fields. See
+		// types.EntryScalars for the per-field rationale.
 		scalars := types.EntryScalars{
 			ID:      task.AppID,
 			AppID:   task.AppID,

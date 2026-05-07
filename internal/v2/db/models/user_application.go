@@ -21,16 +21,14 @@ type UserApplication struct {
 	ManifestType    string `gorm:"column:manifest_type;size:32;not null;default:''"`
 	APIVersion      string `gorm:"column:api_version;size:32"`
 
-	// Manifest top-level blocks. We store catch-all map payloads (see
-	// types.UserAppManifest / types.BuildUserAppManifest) so chart-repo
-	// schema additions flow through without model changes.
+	// Manifest top-level blocks. We store map payloads (see
+	// types.UserAppManifest / types.BuildUserAppManifest) keyed by oac's
+	// json-tag shape so the columns mirror chart-repo's typed
+	// raw_data_ex wire form one-to-one.
 	//
 	// metadata holds the OlaresManifest "metadata" block (name / title /
-	// description / icon / categories / locale / appid / version /
-	// rating / target / type) once chart-repo's /dcr/sync-app starts
-	// returning the structured raw_data_ex payload. While the legacy
-	// flat raw_data is still in use this column stays nil — the
-	// equivalent fields fall through to spec via the catch-all instead.
+	// description / icon / categories / appid / version / rating /
+	// target / type) populated from cfg.Metadata.
 	Metadata        *JSONB[map[string]any]   `gorm:"column:metadata;type:jsonb"`
 	Spec            *JSONB[map[string]any]   `gorm:"column:spec;type:jsonb"`
 	Resources       *JSONB[map[string]any]   `gorm:"column:resources;type:jsonb"`

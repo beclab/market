@@ -39,12 +39,19 @@ type syncAppData struct {
 	AppData  *syncAppPayload `json:"app_data"`
 }
 
-// syncAppPayload is the per-app render artefact. RawData is the input we
-// split into the user_applications JSONB columns. RawPackage and
+// syncAppPayload is the per-app render artefact. RawDataEx is the input
+// we split into the user_applications JSONB columns. RawPackage and
 // RenderedPackage are file paths to the source / rendered chart packages
 // on chart-repo's filesystem — kept here for diagnostic logging even
 // though the database does not have columns for them. AppInfo includes
 // the same app_entry plus image_analysis (which is not persisted).
+//
+// Migration plan: RawData is the legacy flat-map field kept on the wire
+// only during chart-repo's gradual rollout of the typed payload. Market
+// consumes RawDataEx exclusively — RawData is not read anywhere. When
+// chart-repo drops RawData on the wire, this field can be removed and
+// RawDataEx renamed to RawData (with `json:"raw_data"`); no other logic
+// changes needed.
 type syncAppPayload struct {
 	Type            string                `json:"type"`
 	Timestamp       int64                 `json:"timestamp"`
@@ -143,23 +150,20 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		return fmt.Errorf("chart repo sync-app rejected app: %s", msg)
 	}
 
-	// Build the manifest payload (= JSONB columns) from raw_data. We rely
-	// on chart-repo always returning raw_data alongside success=true,
-	// including on the "existing" fast path. If raw_data is missing we
+	// Build the manifest payload (= JSONB columns) from raw_data_ex. We
+	// rely on chart-repo always returning raw_data_ex alongside success=
+	// true, including on the "existing" fast path. If it is missing we
 	// would otherwise persist a scalar-only success row and lose the
 	// per-user JSONB manifest, so we treat that case as a render failure
 	// and let the upstream loop call MarkRenderFailed instead. The
 	// manifest is also stashed on the task so the pipeline can compose
 	// the post-render app_info for NATS notifications without doing a
 	// follow-up PG read.
-	if apiResponse.Data == nil || apiResponse.Data.AppData == nil || apiResponse.Data.AppData.RawData == nil {
-		return fmt.Errorf("chart repo sync-app returned success without raw_data (user=%s source=%s app=%s)",
+	if apiResponse.Data == nil || apiResponse.Data.AppData == nil || apiResponse.Data.AppData.RawDataEx == nil {
+		return fmt.Errorf("chart repo sync-app returned success without raw_data_ex (user=%s source=%s app=%s)",
 			task.UserID, task.SourceID, task.AppID)
 	}
 	rawData := apiResponse.Data.AppData.RawDataEx
-	// chart-repo's /dcr/sync-app returns wrong values for raw_data.id
-	// and raw_data.appID; the catalog (applications.app_id) is the
-	// source of truth, so we override on the map before splitting.
 	manifest := types.BuildUserAppManifest(rawData)
 	task.RenderedManifest = manifest
 
