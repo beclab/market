@@ -33,6 +33,33 @@ func GetMarketSources() ([]*models.MarketSource, error) {
 	return sources, nil
 }
 
+// ListVisibleSources returns the set of market_sources rows that
+// /market/data should expose to the caller: the single active remote
+// (source_type='remote' AND is_active=true) plus every local source.
+// Inactive remote rows are intentionally excluded — only the
+// currently-promoted remote is part of the user-visible catalogue.
+//
+// Rows are returned sorted by source_id so the output is deterministic
+// across replicas, which matters because the response shape is a JSON
+// object keyed by source_id (deterministic key order helps with diff
+// tooling and client caching).
+func ListVisibleSources(ctx context.Context) ([]*models.MarketSource, error) {
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	var sources []*models.MarketSource
+	err := gdb.WithContext(ctx).
+		Where("(source_type = ? AND is_active = ?) OR source_type = ?", "remote", true, "local").
+		Order("source_id ASC").
+		Find(&sources).Error
+	if err != nil {
+		return nil, fmt.Errorf("list visible market sources: %w", err)
+	}
+	return sources, nil
+}
+
 // UpsertSources inserts new market_sources rows or updates the descriptor
 // columns of existing ones, keyed by the source_id unique index. The
 // catalogue payload column (`data`) is intentionally excluded from

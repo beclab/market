@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"market/internal/v2/appinfo"
+	"market/internal/v2/db/models"
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
+	"market/internal/v2/store"
 	"market/internal/v2/store/marketsource"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
@@ -837,110 +839,112 @@ func (s *Server) getMarketStateSimple(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Get market data information
+// Get market data information.
+//
+// Sources surfaced in the response:
+//   - the single active remote (source_type='remote' AND is_active=true)
+//   - every local source (upload / studio / cli)
+//
+// Inactive remotes are intentionally excluded — only the
+// currently-promoted remote is part of the user-visible catalogue.
+//
+// Per-app data is sourced from PG: app_info_latest comes from
+// user_applications JOIN applications, app_state_latest from
+// user_application_states JOIN user_applications. Entrance URLs are
+// returned verbatim from the NATS payload — the cache-side
+// enhanceAppStateDataWithUrls round-trip to app-service is NOT
+// performed here. Empty / placeholder URL handling is the front-end's
+// responsibility for now.
 func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
-	requestStart := time.Now()
-	glog.V(3).Infof("GET /api/v2/market/data - Getting market data, request start: %v", requestStart)
-
-	// Add timeout context
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	// Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Info("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
-		return
-	}
-
-	// Convert http.Request to restful.Request to reuse utils functions
 	restfulReq := s.httpToRestfulRequest(r)
-
-	// Get user information from request using utils module
-	authStart := time.Now()
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
 		glog.Errorf("Failed to get user from request: %v", err)
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	glog.V(3).Infof("User authentication took %v, retrieved user ID: %s", time.Since(authStart), userID)
+	glog.V(3).Infof("GET /api/v2/market/data - user: %s", userID)
 
-	// Create a channel to receive the result
-	type result struct {
-		data MarketDataResponse
-		err  error
-	}
-	resultChan := make(chan result, 1)
-
-	// Run the data retrieval in a goroutine
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("Panic in getMarketData: %v", r)
-				resultChan <- result{err: fmt.Errorf("internal error occurred")}
-			}
-		}()
-
-		// Get user data from cache with timeout check
-		start := time.Now()
-		userData := s.cacheManager.GetUserData(userID)
-		if userData == nil {
-			glog.V(3).Infof("User data not found for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("user data not found")}
-			return
-		}
-		glog.V(3).Infof("GetUserData took %v for user: %s", time.Since(start), userID)
-
-		// Check if we're still within timeout before filtering
-		select {
-		case <-ctx.Done():
-			glog.V(3).Infof("Context cancelled during user data retrieval for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("request cancelled")}
-			return
-		default:
-		}
-
-		// Filter the user data to include only required fields with timeout
-		filterStart := time.Now()
-		filteredUserData := s.filterUserDataWithTimeout(ctx, userData)
-		if filteredUserData == nil {
-			glog.V(3).Infof("Data filtering timed out or failed for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("data filtering timeout")}
-			return
-		}
-		glog.V(3).Infof("Data filtering took %v for user: %s", time.Since(filterStart), userID)
-
-		// Prepare response data
-		responseData := MarketDataResponse{
-			UserData:  filteredUserData,
-			UserID:    userID,
-			Timestamp: time.Now().Unix(),
-		}
-
-		resultChan <- result{data: responseData}
-	}()
-
-	// Wait for result or timeout
-	select {
-	case <-ctx.Done():
-		glog.V(3).Infof("Request timeout or cancelled for /api/v2/market/data")
-		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - data retrieval took too long", nil)
+	sources, err := marketsource.ListVisibleSources(ctx)
+	if err != nil {
+		glog.Errorf("Failed to list visible market sources for user %s: %v", userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market data", nil)
 		return
-	case res := <-resultChan:
-		if res.err != nil {
-			glog.Errorf("Error retrieving market data: %v", res.err)
-			if res.err.Error() == "user data not found" {
-				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-			} else {
-				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market data", nil)
-			}
-			return
-		}
-
-		glog.V(2).Infof("Market data retrieved successfully for user: %s", userID)
-		s.sendResponse(w, http.StatusOK, true, "Market data retrieved successfully", res.data)
 	}
+
+	sourceIDs := make([]string, 0, len(sources))
+	for _, src := range sources {
+		if src != nil {
+			sourceIDs = append(sourceIDs, src.SourceID)
+		}
+	}
+
+	apps, err := store.ListAppInfoLatestForUser(ctx, userID, sourceIDs)
+	if err != nil {
+		glog.Errorf("Failed to list app_info_latest for user %s: %v", userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market data", nil)
+		return
+	}
+
+	states, err := store.ListUserAppStateLatest(ctx, userID, sourceIDs)
+	if err != nil {
+		glog.Errorf("Failed to list app_state_latest for user %s: %v", userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market data", nil)
+		return
+	}
+
+	hash, err := marketsource.GetActiveRemoteSourceHash(ctx)
+	if err != nil {
+		// Soft-fail the hash lookup so a transient PG hiccup on one
+		// column does not strand /market/data altogether — the rest
+		// of the response is still usable, the client will simply
+		// see an empty hash and refetch on the next poll.
+		glog.Errorf("Failed to read market hash for user %s: %v", userID, err)
+		hash = ""
+	}
+
+	appsBySource := make(map[string][]*store.AppInfoSimpleRow, len(sources))
+	for _, row := range apps {
+		if row == nil {
+			continue
+		}
+		appsBySource[row.SourceID] = append(appsBySource[row.SourceID], row)
+	}
+	statesBySource := make(map[string][]*store.AppStateLatestRow, len(sources))
+	for _, row := range states {
+		if row == nil {
+			continue
+		}
+		statesBySource[row.SourceID] = append(statesBySource[row.SourceID], row)
+	}
+
+	filtered := &FilteredUserData{
+		Sources: make(map[string]*FilteredSourceData, len(sources)),
+		Hash:    hash,
+	}
+	for _, src := range sources {
+		if src == nil {
+			continue
+		}
+		filtered.Sources[src.SourceID] = &FilteredSourceData{
+			Type:           types.SourceDataType(src.SourceType),
+			AppStateLatest: buildAppStateLatestList(userID, src.SourceID, statesBySource[src.SourceID]),
+			AppInfoLatest:  buildAppInfoLatestList(appsBySource[src.SourceID]),
+			Others:         buildOthersFromSource(src),
+		}
+	}
+
+	response := MarketDataResponse{
+		UserData:  filtered,
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
+	}
+
+	glog.V(2).Infof("Market data retrieved successfully for user: %s (sources=%d)", userID, len(sources))
+	s.sendResponse(w, http.StatusOK, true, "Market data retrieved successfully", response)
 }
 
 // httpToRestfulRequest converts http.Request to restful.Request for utils compatibility
@@ -949,140 +953,184 @@ func (s *Server) httpToRestfulRequest(r *http.Request) *restful.Request {
 	return &restful.Request{Request: r}
 }
 
-// filterUserData filters user data to include only required fields
-func (s *Server) filterUserData(userData *types.UserData) *FilteredUserData {
-	// This function has been replaced by filterUserDataWithTimeout using single global lock
-	return s.filterUserDataWithTimeout(context.Background(), userData)
-}
-
-// filterSourceData filters source data to include only required fields
-func (s *Server) filterSourceData(sourceData *types.SourceData) *FilteredSourceData {
-	// This function has been replaced by convertSourceDataToFiltered using single global lock
-	return s.convertSourceDataToFiltered(sourceData)
-}
-
-// filterUserDataWithTimeout filters user data to include only required fields with timeout
-func (s *Server) filterUserDataWithTimeout(ctx context.Context, userData *types.UserData) *FilteredUserData {
-	if userData == nil {
+// buildOthersFromSource projects the JSONB-backed MarketSourceData
+// (which embeds Others) onto the wire-shape *types.Others that
+// FilteredSourceData carries. Returns nil when the source row has no
+// data column yet (syncer hasn't populated it), so the response just
+// omits the others block rather than emitting an empty {hash:""}.
+func buildOthersFromSource(src *models.MarketSource) *types.Others {
+	if src == nil || src.Data == nil {
 		return nil
 	}
-
-	glog.V(3).Infof("DEBUG: Starting filterUserDataWithTimeout with single global lock approach")
-
-	// Use single lock for all data access to avoid deadlocks
-	filteredUserData := &FilteredUserData{
-		Sources: make(map[string]*FilteredSourceData),
-		Hash:    userData.Hash,
+	d := src.Data.Data
+	return &types.Others{
+		Hash:       d.Hash,
+		Version:    d.Version,
+		Topics:     d.Topics,
+		TopicLists: d.TopicLists,
+		Recommends: d.Recommends,
+		Pages:      d.Pages,
+		Tops:       d.Tops,
+		Latest:     d.Latest,
+		Tags:       d.Tags,
 	}
-
-	// Check timeout
-	select {
-	case <-ctx.Done():
-		glog.V(3).Infof("Context cancelled before data processing")
-		return nil
-	default:
-	}
-
-	// Process each source in the user data
-	for sourceID, sourceData := range userData.Sources {
-		// Check timeout
-		select {
-		case <-ctx.Done():
-			glog.V(3).Infof("Context cancelled during source processing: %s", sourceID)
-			return nil
-		default:
-		}
-
-		// Convert data directly without additional locks
-		filteredSourceData := s.convertSourceDataToFiltered(sourceData)
-		if filteredSourceData != nil {
-			filteredUserData.Sources[sourceID] = filteredSourceData
-		}
-	}
-
-	glog.V(4).Infof("DEBUG: Completed filterUserDataWithTimeout with %d sources processed", len(filteredUserData.Sources))
-	return filteredUserData
 }
 
-// convertSourceDataToFiltered converts source data to filtered format
-func (s *Server) convertSourceDataToFiltered(sourceData *types.SourceData) *FilteredSourceData {
-	if sourceData == nil {
-		return nil
+// buildAppInfoLatestList wraps each AppInfoSimpleRow in the
+// FilteredAppInfoLatestData envelope the API contract returns.
+func buildAppInfoLatestList(rows []*store.AppInfoSimpleRow) []*FilteredAppInfoLatestData {
+	out := make([]*FilteredAppInfoLatestData, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		out = append(out, &FilteredAppInfoLatestData{
+			Type:          types.AppInfoLatest,
+			Timestamp:     row.UpdatedAt.Unix(),
+			Version:       row.AppVersion,
+			AppSimpleInfo: buildAppSimpleInfoMap(row),
+		})
+	}
+	return out
+}
+
+// buildAppSimpleInfoMap mirrors the cache-side createSafeAppSimpleInfoCopy
+// output shape, sourcing fields from user_applications.metadata first
+// (the manifest's own metadata block) and falling back to
+// applications.app_entry for SupportArch / Categories / AppLabels —
+// the same fallback chain the cache path used.
+//
+// Keys are emitted unconditionally for app_id / app_name / app_version
+// / support_arch (the latter as an empty slice when unknown) so the
+// JSON shape is stable for clients that index into the map by key.
+func buildAppSimpleInfoMap(row *store.AppInfoSimpleRow) map[string]interface{} {
+	out := map[string]interface{}{
+		"app_id":      row.AppID,
+		"app_name":    row.AppName,
+		"app_version": row.AppVersion,
 	}
 
-	var filteredOthers *types.Others
-	if sourceData.Others != nil {
-		filteredOthers = &types.Others{
-			Hash:       sourceData.Others.Hash,
-			Version:    sourceData.Others.Version,
-			Topics:     sourceData.Others.Topics,
-			TopicLists: sourceData.Others.TopicLists,
-			Recommends: sourceData.Others.Recommends,
-			Pages:      sourceData.Others.Pages,
-			Tops:       sourceData.Others.Tops,
-			Latest:     sourceData.Others.Latest,
-			Tags:       sourceData.Others.Tags,
+	var meta map[string]any
+	if row.Metadata != nil {
+		meta = row.Metadata.Data
+	}
+	if v, ok := meta["icon"].(string); ok {
+		out["app_icon"] = v
+	}
+	if v, ok := meta["title"]; ok {
+		out["app_title"] = v
+	}
+	if v, ok := meta["description"]; ok {
+		out["app_description"] = v
+	}
+	if v, ok := meta["categories"]; ok {
+		out["categories"] = v
+	}
+
+	if row.AppEntry != nil {
+		entry := row.AppEntry.Data
+		if len(entry.SupportArch) > 0 {
+			out["support_arch"] = entry.SupportArch
+		}
+		if _, ok := out["categories"]; !ok && len(entry.Categories) > 0 {
+			out["categories"] = entry.Categories
+		}
+		if len(entry.AppLabels) > 0 {
+			out["app_labels"] = entry.AppLabels
 		}
 	}
-
-	s.patchStateRawName(sourceData)
-
-	filteredSourceData := &FilteredSourceData{
-		Type:           sourceData.Type,
-		AppStateLatest: sourceData.AppStateLatest,
-		Others:         filteredOthers,
-		AppInfoLatest:  make([]*FilteredAppInfoLatestData, 0),
+	if _, ok := out["support_arch"]; !ok {
+		out["support_arch"] = []string{}
 	}
+	return out
+}
 
-	// Convert AppInfoLatest data
-	if sourceData.AppInfoLatest != nil {
-		for _, appInfoData := range sourceData.AppInfoLatest {
-			if appInfoData != nil {
-				// Use createSafeAppSimpleInfoCopy to ensure all fields including support_arch and categories are included
-				var safeAppSimpleInfo map[string]interface{}
-				if appInfoData.AppSimpleInfo != nil {
-					// Debug: Log the original AppSimpleInfo data
-					// glog.Infof("DEBUG: Original AppSimpleInfo - SupportArch: %+v (length: %d)",
-					// 	appInfoData.AppSimpleInfo.SupportArch, len(appInfoData.AppSimpleInfo.SupportArch))
+// buildAppStateLatestList wraps each AppStateLatestRow in the typed
+// AppStateLatestData wire shape. userID and sourceID are passed in
+// because the Status block carries them as Owner / Source even though
+// they are not stored on the user_application_states row itself.
+func buildAppStateLatestList(userID, sourceID string, rows []*store.AppStateLatestRow) []*types.AppStateLatestData {
+	out := make([]*types.AppStateLatestData, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		out = append(out, buildAppStateLatestData(userID, sourceID, row))
+	}
+	return out
+}
 
-					// Check if SupportArch is empty, try to get it from RawData or AppInfo
-					if len(appInfoData.AppSimpleInfo.SupportArch) == 0 {
-						if appInfoData.RawData != nil && len(appInfoData.RawData.SupportArch) > 0 {
-							glog.V(3).Infof("DEBUG: Found SupportArch in RawData: %+v", appInfoData.RawData.SupportArch)
-							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.RawData.SupportArch...)
-						} else if appInfoData.AppInfo != nil && appInfoData.AppInfo.AppEntry != nil && len(appInfoData.AppInfo.AppEntry.SupportArch) > 0 {
-							glog.V(3).Infof("DEBUG: Found SupportArch in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.SupportArch)
-							appInfoData.AppSimpleInfo.SupportArch = append([]string{}, appInfoData.AppInfo.AppEntry.SupportArch...)
-						}
+// buildAppStateLatestData hydrates a single AppStateLatestData from a
+// user_application_states JOIN user_applications row. Three time
+// fields (UpdateTime / StatusTime / LastTransitionTime) all collapse
+// onto event_create_time because the schema only stores a single
+// monotonic timestamp; if a future product need distinguishes them,
+// add columns. Tailscale and Settings are not stored, so they are
+// returned as empty / nil — the cache-side path also produced these
+// values from the upstream NATS message verbatim.
+func buildAppStateLatestData(userID, sourceID string, row *store.AppStateLatestRow) *types.AppStateLatestData {
+	var icon, title string
+	if row.Metadata != nil {
+		if v, ok := row.Metadata.Data["icon"].(string); ok {
+			icon = v
+		}
+		// metadata.title is a multi-language map; pick en-US first,
+		// then any other locale, so the single-string AppStateLatest
+		// Title field has something useful.
+		if v, ok := row.Metadata.Data["title"].(string); ok {
+			title = v
+		} else if m, ok := row.Metadata.Data["title"].(map[string]interface{}); ok {
+			if s, ok := m["en-US"].(string); ok {
+				title = s
+			} else {
+				for _, vv := range m {
+					if s, ok := vv.(string); ok {
+						title = s
+						break
 					}
-
-					// Check if Categories is empty, try to get it from RawData or AppInfo
-					if len(appInfoData.AppSimpleInfo.Categories) == 0 {
-						if appInfoData.RawData != nil && len(appInfoData.RawData.Categories) > 0 {
-							glog.V(3).Infof("DEBUG: Found Categories in RawData: %+v", appInfoData.RawData.Categories)
-							appInfoData.AppSimpleInfo.Categories = append([]string{}, appInfoData.RawData.Categories...)
-						} else if appInfoData.AppInfo != nil && appInfoData.AppInfo.AppEntry != nil && len(appInfoData.AppInfo.AppEntry.Categories) > 0 {
-							glog.V(3).Infof("DEBUG: Found Categories in AppInfo.AppEntry: %+v", appInfoData.AppInfo.AppEntry.Categories)
-							appInfoData.AppSimpleInfo.Categories = append([]string{}, appInfoData.AppInfo.AppEntry.Categories...)
-						}
-					}
-
-					safeAppSimpleInfo = s.createSafeAppSimpleInfoCopy(appInfoData.AppSimpleInfo, appInfoData.AppInfo.AppEntry)
-					// glog.Infof("DEBUG: Safe AppSimpleInfo - support_arch: %+v", safeAppSimpleInfo["support_arch"])
 				}
-
-				filteredAppInfo := &FilteredAppInfoLatestData{
-					Type:          appInfoData.Type,
-					Timestamp:     appInfoData.Timestamp,
-					Version:       appInfoData.Version,
-					AppSimpleInfo: safeAppSimpleInfo, // Use safe copy instead of direct reference
-				}
-				filteredSourceData.AppInfoLatest = append(filteredSourceData.AppInfoLatest, filteredAppInfo)
 			}
 		}
 	}
 
-	return filteredSourceData
+	timeStr := ""
+	if !row.EventCreateTime.IsZero() {
+		timeStr = row.EventCreateTime.UTC().Format(time.RFC3339)
+	}
+
+	spec := &types.AppStateLatestDataSpec{
+		AppStateLatestDataSpecMetadata: types.AppStateLatestDataSpecMetadata{
+			Name:               row.AppName,
+			RawAppName:         row.AppRawName,
+			AppID:              row.AppID,
+			IsSysApp:           row.IsSysApp,
+			Owner:              userID,
+			Icon:               icon,
+			Source:             sourceID,
+			Title:              title,
+			State:              row.State,
+			UpdateTime:         timeStr,
+			StatusTime:         timeStr,
+			LastTransitionTime: timeStr,
+			Progress:           row.Progress,
+			OpType:             row.OpType,
+			Message:            row.Message,
+			Reason:             row.Reason,
+		},
+		Tailscale: map[string]interface{}{},
+	}
+	if row.StatusEntrances != nil {
+		spec.EntranceStatuses = row.StatusEntrances.Data
+	}
+	if row.SharedEntrances != nil {
+		spec.SharedEntrances = row.SharedEntrances.Data
+	}
+
+	return &types.AppStateLatestData{
+		Type:    types.AppStateLatest,
+		Version: row.InstalledVersion,
+		Status:  spec,
+	}
 }
 
 // filterUserDataForStateWithTimeout filters user data to include only AppStateLatest fields with timeout
