@@ -165,6 +165,22 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 	}
 	rawData := apiResponse.Data.AppData.RawDataEx
 	manifest := types.BuildUserAppManifest(rawData)
+
+	// VersionHistory comes from the catalog row (applications.app_entry),
+	// not from chart-repo's per-render raw_data_ex. Splice it into spec
+	// before the RenderedManifest assignment so:
+	//   * user_applications.spec persisted by UpsertRenderSuccess below
+	//     carries it (direct PG readers see it under spec.versionHistory);
+	//   * the NATS "new_app_ready" push composed by notifyRenderSuccess
+	//     from task.RenderedManifest also carries it (same pointer, no
+	//     follow-up read needed).
+	if task.AppEntry != nil && len(task.AppEntry.VersionHistory) > 0 {
+		if manifest.Spec == nil {
+			manifest.Spec = map[string]any{}
+		}
+		manifest.Spec["versionHistory"] = task.AppEntry.VersionHistory
+	}
+
 	task.RenderedManifest = manifest
 
 	// Persist render success to user_applications. Skipped when the task
