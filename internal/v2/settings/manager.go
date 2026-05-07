@@ -223,6 +223,11 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	glog.Infof("Base URL after trimming: %s", baseURL)
 
+	// market.olares is the default active remote on first deploy. The
+	// IsActive=true here only takes effect on the very first INSERT
+	// (clean market_sources table); subsequent startups go through
+	// UpsertSources.DoUpdates which excludes is_active, so any later
+	// switch via PUT /settings/market-settings survives restarts.
 	defaultSource := &MarketSource{
 		ID:          "market.olares",
 		Name:        "market.olares",
@@ -723,9 +728,7 @@ func (sm *SettingsManager) saveMarketSourcesToStore(config *MarketSourcesConfig)
 }
 
 // modelToSetting maps the persisted PG row shape onto the settings
-// package's in-memory MarketSource. IsActive is not persisted in the
-// schema, so it defaults to true on read (the only call sites that
-// flip it to false are debug paths and tests).
+// package's in-memory MarketSource.
 func modelToSetting(m *models.MarketSource) *MarketSource {
 	if m == nil {
 		return nil
@@ -736,7 +739,7 @@ func modelToSetting(m *models.MarketSource) *MarketSource {
 		Type:        m.SourceType,
 		BaseURL:     m.SourceURL,
 		Priority:    m.Priority,
-		IsActive:    true,
+		IsActive:    m.IsActive,
 		Nsfw:        m.Nsfw,
 		UpdatedAt:   m.UpdatedAt,
 		Description: m.Description,
@@ -749,11 +752,13 @@ func modelToSetting(m *models.MarketSource) *MarketSource {
 // upsert and new rows are simply created with NULL data (the syncer
 // fills it in on its next cycle).
 //
-// Nsfw is also intentionally not propagated through the upsert path:
-// UpsertSources excludes it from DoUpdates so the per-source flag set
-// via PUT /settings/market-settings is never clobbered by a startup
-// default-seeding cycle. New INSERT rows pick up the column default
-// (FALSE) regardless of what callers populate here.
+// Nsfw and IsActive are propagated so that the FIRST INSERT (clean
+// PG, no existing row) seeds them from createDefaultMarketSources
+// (e.g. market.olares is seeded with IsActive=true). On subsequent
+// startups the row already exists and ON CONFLICT routes to the
+// UPDATE path, where UpsertSources.DoUpdates excludes both columns —
+// so values flipped via PUT /settings/market-settings survive
+// service restarts.
 func settingToModel(s *MarketSource) *models.MarketSource {
 	if s == nil {
 		return nil
@@ -765,6 +770,8 @@ func settingToModel(s *MarketSource) *models.MarketSource {
 		SourceType:  s.Type,
 		Description: s.Description,
 		Priority:    s.Priority,
+		Nsfw:        s.Nsfw,
+		IsActive:    s.IsActive,
 	}
 }
 

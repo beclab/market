@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -882,6 +883,19 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := settingsManager.UpdateMarketSettings(userID, &settings); err != nil {
+		// Map the sentinel errors from the settings/store layer onto
+		// fail-fast 4xx responses so the client distinguishes "you sent
+		// a bad source_id" from a real internal failure.
+		switch {
+		case errors.Is(err, marketSettingsErrSourceNotFound()):
+			glog.V(2).Infof("market settings update for user %s rejected: source not found (selected_source=%q)", userID, settings.SelectedSource)
+			s.sendResponse(w, http.StatusNotFound, false, "selected_source does not exist", nil)
+			return
+		case errors.Is(err, marketSettingsErrSourceNotRemote()):
+			glog.V(2).Infof("market settings update for user %s rejected: source is not remote (selected_source=%q)", userID, settings.SelectedSource)
+			s.sendResponse(w, http.StatusBadRequest, false, "selected_source must reference a remote source", nil)
+			return
+		}
 		glog.Errorf("Failed to update market settings for user %s: %v", userID, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to update market settings", nil)
 		return
@@ -890,6 +904,14 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 	glog.V(2).Infof("Market settings updated successfully for user: %s", userID)
 	s.sendResponse(w, http.StatusOK, true, "Market settings updated successfully", settings)
 }
+
+// marketSettingsErrSourceNotFound / marketSettingsErrSourceNotRemote
+// indirect through the settings package so this file does not gain a
+// direct dependency on the store/marketsource package; all the
+// errors.Is comparisons above resolve through the same sentinels
+// the settings package re-exports.
+func marketSettingsErrSourceNotFound() error  { return settings.ErrSourceNotFound }
+func marketSettingsErrSourceNotRemote() error { return settings.ErrSourceNotRemote }
 
 // submitSignature handles POST /api/v2/payment/submit-signature
 func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {

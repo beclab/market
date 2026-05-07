@@ -2,9 +2,8 @@ package settings
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"market/internal/v2/helper"
@@ -14,125 +13,100 @@ import (
 
 type MarketSettings = types.MarketSettings
 
-// Redis key for market settings
-const RedisKeyMarketSettings = "market:settings"
-
-// pgLookupTimeout bounds the per-call PG read/write performed alongside
-// the Redis read/write of the per-user selected_source preference.
+// pgLookupTimeout bounds the per-call PG read/write performed by the
+// market-settings GET/PUT handlers.
 const pgLookupTimeout = 5 * time.Second
 
-// getMarketSettings retrieves the user's market settings.
+// Sentinel errors re-exported from store/marketsource so the API
+// handler in pkg/v2/api can map them to HTTP status codes without
+// importing the store package directly.
 //
-// Storage split (since the per-source nsfw move):
-//   - selected_source is a per-user preference and stays in Redis at
-//     "market:settings:<userID>" (legacy shape, JSON-encoded MarketSettings).
-//   - nsfw is a per-source flag and is read from market_sources.nsfw
-//     for the row identified by the user's selected_source.
-//
-// The wire shape returned to the API caller stays {selected_source, nsfw};
-// callers do not need to know storage moved.
-func getMarketSettings(redisClient RedisClient, userID string) (*MarketSettings, error) {
-	if helper.IsPublicEnvironment() {
-		return &MarketSettings{
-			SelectedSource: "market.olares",
-			Nsfw:           false,
-		}, nil
-	}
+//   - ErrSourceNotFound  → HTTP 404
+//   - ErrSourceNotRemote → HTTP 400
+var (
+	ErrSourceNotFound  = marketsource.ErrSourceNotFound
+	ErrSourceNotRemote = marketsource.ErrSourceNotRemote
+)
 
-	out := &MarketSettings{
+// defaultMarketSettings returns the response shape used as a fallback
+// when the underlying state cannot be resolved (public environment,
+// no active remote yet, PG read errors). The selected_source value
+// matches createDefaultMarketSources so a fresh deployment without
+// any user-driven PUT still returns a coherent answer.
+func defaultMarketSettings() *MarketSettings {
+	return &MarketSettings{
 		SelectedSource: "market.olares",
+		Nsfw:           false,
 	}
-
-	// 1. Pull the per-user selected_source from Redis (preserved from
-	//    the pre-PG-migration shape).
-	if redisClient != nil {
-		userRedisKey := fmt.Sprintf("%s:%s", RedisKeyMarketSettings, userID)
-		data, err := redisClient.Get(userRedisKey)
-		if err != nil {
-			// "key not found" is the expected first-access path; fall
-			// through with the default selected_source. Any other Redis
-			// error bubbles up so the caller can decide.
-			if err.Error() != "key not found" {
-				return nil, err
-			}
-		} else if data != "" {
-			var stored MarketSettings
-			if uerr := json.Unmarshal([]byte(data), &stored); uerr != nil {
-				return nil, uerr
-			}
-			// Backward-compat translation for the deprecated source id.
-			if stored.SelectedSource == "Official-Market-Sources" {
-				stored.SelectedSource = "market.olares"
-			}
-			if strings.TrimSpace(stored.SelectedSource) != "" {
-				out.SelectedSource = stored.SelectedSource
-			}
-		}
-	}
-
-	// 2. Resolve nsfw from market_sources.nsfw for the user's source.
-	//    Soft-fail on missing source / read error — return out.Nsfw=false
-	//    so the API contract stays "valid response with default" rather
-	//    than failing the GET because a stale selected_source points at
-	//    a deleted source.
-	if strings.TrimSpace(out.SelectedSource) != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), pgLookupTimeout)
-		defer cancel()
-		row, err := marketsource.GetSourceByID(ctx, out.SelectedSource)
-		if err == nil && row != nil {
-			out.Nsfw = row.Nsfw
-		}
-	}
-
-	return out, nil
 }
 
-// updateMarketSettings applies a settings update from
-// PUT /settings/market-settings.
+// getMarketSettings answers GET /settings/market-settings.
 //
-// Body shape is unchanged: {selected_source, nsfw}. Storage split:
-//   - selected_source is persisted to Redis as the per-user preference
-//     (same key shape as the pre-migration code).
-//   - nsfw is applied to market_sources.nsfw for the row identified by
-//     the body's selected_source. This is the only writer of that
-//     column outside the schema default; the startup default-seeding
-//     path explicitly excludes nsfw from its UPSERT DoUpdates so that
-//     a PUT here is never clobbered by a service restart.
+// The wire shape stays {selected_source, nsfw} (preserved from the
+// pre-PG-migration contract) but both fields are now sourced from the
+// market_sources table rather than per-user Redis state:
 //
-// Public environment is a silent no-op so callers don't panic on a
-// nil redisClient + nil PG handle.
-func updateMarketSettings(redisClient RedisClient, userID string, settings *MarketSettings) error {
+//   - selected_source = source_id of the row with source_type='remote'
+//     AND is_active=true.
+//   - nsfw            = nsfw column of that same row.
+//
+// "No active remote" is treated as a soft fallback (default response)
+// rather than an error, so a fresh deployment that has not yet seen a
+// PUT still returns 200 with the canned default.
+//
+// userID is unused because the active remote is a system-wide
+// singleton; it is kept on the signature for symmetry with the API
+// handler call site and for any future per-user enrichment.
+func getMarketSettings(_ RedisClient, _ string) (*MarketSettings, error) {
+	if helper.IsPublicEnvironment() {
+		return defaultMarketSettings(), nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), pgLookupTimeout)
+	defer cancel()
+
+	row, err := marketsource.GetActiveRemoteSource(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get active remote source: %w", err)
+	}
+	if row == nil {
+		return defaultMarketSettings(), nil
+	}
+	return &MarketSettings{
+		SelectedSource: row.SourceID,
+		Nsfw:           row.Nsfw,
+	}, nil
+}
+
+// updateMarketSettings answers PUT /settings/market-settings.
+//
+// The body's selected_source identifies which remote source should
+// become active; the body's nsfw is applied to that same source.
+// Both writes happen inside a single PG transaction owned by
+// marketsource.SwitchActiveRemoteAndSetNsfw, which also enforces the
+// "at most one active remote" invariant. Local sources are rejected
+// with ErrSourceNotRemote — the API handler maps this to HTTP 400 so
+// the client sees fail-fast feedback rather than a silent no-op.
+//
+// Empty selected_source is rejected as ErrSourceNotFound (HTTP 404),
+// matching the "you addressed a source that does not exist" semantics
+// rather than introducing a third "missing field" sentinel.
+//
+// Public environment is a silent no-op so callers do not panic on a
+// nil PG handle or nil Redis client.
+//
+// userID is unused; the row itself is global and the API path
+// already authenticates the caller.
+func updateMarketSettings(_ RedisClient, _ string, settings *MarketSettings) error {
 	if helper.IsPublicEnvironment() {
 		return nil
 	}
 	if settings == nil {
-		return fmt.Errorf("settings cannot be nil")
+		return errors.New("settings cannot be nil")
 	}
 
-	// 1. Persist the per-user selected_source preference to Redis.
-	if redisClient != nil {
-		userRedisKey := fmt.Sprintf("%s:%s", RedisKeyMarketSettings, userID)
-		data, err := json.Marshal(settings)
-		if err != nil {
-			return err
-		}
-		if err := redisClient.Set(userRedisKey, string(data), 0); err != nil {
-			return err
-		}
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), pgLookupTimeout)
+	defer cancel()
 
-	// 2. Apply nsfw to the per-source row in PG. A blank selected_source
-	//    is treated as "no source addressed" and skips the PG update so
-	//    a PUT with only a selected_source change does not flap nsfw on
-	//    an unrelated row.
-	source := strings.TrimSpace(settings.SelectedSource)
-	if source != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), pgLookupTimeout)
-		defer cancel()
-		if err := marketsource.UpdateSourceNsfwByID(ctx, source, settings.Nsfw); err != nil {
-			return fmt.Errorf("update market_source.nsfw for %s: %w", source, err)
-		}
-	}
-
-	return nil
+	return marketsource.SwitchActiveRemoteAndSetNsfw(ctx, settings.SelectedSource, settings.Nsfw)
 }

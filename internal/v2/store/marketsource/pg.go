@@ -145,15 +145,28 @@ func TruncateAll(ctx context.Context) error {
 	return nil
 }
 
-// GetSourceByID fetches a single market_sources row by its source_id.
-// Returns (nil, nil) when no matching row exists; the caller decides
-// whether absence is an error.
-func GetSourceByID(ctx context.Context, sourceID string) (*models.MarketSource, error) {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return nil, fmt.Errorf("sourceID cannot be empty")
-	}
+// ErrSourceNotFound is returned by SwitchActiveRemoteAndSetNsfw when
+// the requested source_id has no row in market_sources. Callers map
+// this to HTTP 404 so the client distinguishes "you typed a source
+// that does not exist" from an internal server error.
+var ErrSourceNotFound = errors.New("market source not found")
 
+// ErrSourceNotRemote is returned by SwitchActiveRemoteAndSetNsfw when
+// the requested source_id exists but its source_type is not 'remote'.
+// The /settings/market-settings handler only manipulates remote
+// sources; pointing it at a local source is a client bug. Callers map
+// this to HTTP 400.
+var ErrSourceNotRemote = errors.New("market source is not of type remote")
+
+// GetActiveRemoteSource returns the single market_sources row with
+// source_type='remote' AND is_active=true, or (nil, nil) if no such
+// row exists. The caller decides what to fall back to (typically the
+// hardcoded default selected_source).
+//
+// The partial unique index uq_market_sources_one_active_remote
+// guarantees this query returns at most one row, so LIMIT 1 is more
+// of a safety belt than a correctness requirement.
+func GetActiveRemoteSource(ctx context.Context) (*models.MarketSource, error) {
 	gdb := db.Global()
 	if gdb == nil {
 		return nil, fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
@@ -161,30 +174,52 @@ func GetSourceByID(ctx context.Context, sourceID string) (*models.MarketSource, 
 
 	var row models.MarketSource
 	err := gdb.WithContext(ctx).
-		Where("source_id = ?", sourceID).
+		Where("source_type = ? AND is_active = ?", "remote", true).
+		Limit(1).
 		First(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("get market_source %s: %w", sourceID, err)
+		return nil, fmt.Errorf("get active remote source: %w", err)
 	}
 	return &row, nil
 }
 
-// UpdateSourceNsfwByID flips the `nsfw` flag of a single market_sources
-// row. It is the only writer of that column outside the schema default,
-// so the startup default-seeding path (UpsertSources, which excludes
-// nsfw from DoUpdates) never races with this UPDATE.
+// SwitchActiveRemoteAndSetNsfw atomically promotes sourceID to be the
+// active remote source and updates its nsfw flag, in a single
+// transaction.
 //
-// Returns nil when no matching row exists so the caller can treat
-// "set nsfw on a source we don't track" as a soft no-op rather than an
-// error — the typical trigger is a stale per-user `selected_source`
-// pointing at a source that has since been deleted.
-func UpdateSourceNsfwByID(ctx context.Context, sourceID string, nsfw bool) error {
+// The transaction layout:
+//  1. SELECT ... FOR UPDATE on the target row to lock it and read
+//     source_type for the validation below. Concurrent PUTs targeting
+//     the same source serialise here.
+//  2. Validate source existence and source_type='remote'. Local
+//     sources are rejected with ErrSourceNotRemote (client bug —
+//     /settings/market-settings only manipulates remotes).
+//  3. UPDATE every other remote row to is_active=false. Doing this
+//     before step 4 keeps the partial unique index
+//     uq_market_sources_one_active_remote satisfied at every
+//     statement boundary, even when the target was already active or
+//     when another remote was the previous active.
+//  4. UPDATE the target to is_active=true and set its nsfw column to
+//     the requested value, in one statement.
+//
+// The order of statements 3 → 4 is required by the partial unique
+// index: any reordering would risk transient "two actives" violations
+// that PostgreSQL would refuse with a unique constraint failure. This
+// helper is the only blessed writer of the is_active column outside
+// the schema default, so callers should never wire a separate
+// UPDATE.
+//
+// Errors:
+//   - ErrSourceNotFound — sourceID does not exist
+//   - ErrSourceNotRemote — sourceID exists but source_type != 'remote'
+//   - other errors are wrapped fmt.Errorf with context
+func SwitchActiveRemoteAndSetNsfw(ctx context.Context, sourceID string, nsfw bool) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
-		return fmt.Errorf("sourceID cannot be empty")
+		return ErrSourceNotFound
 	}
 
 	gdb := db.Global()
@@ -192,14 +227,42 @@ func UpdateSourceNsfwByID(ctx context.Context, sourceID string, nsfw bool) error
 		return fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
 	}
 
-	res := gdb.WithContext(ctx).
-		Model(&models.MarketSource{}).
-		Where("source_id = ?", sourceID).
-		Update("nsfw", nsfw)
-	if res.Error != nil {
-		return fmt.Errorf("update market_source.nsfw (source=%s): %w", sourceID, res.Error)
-	}
-	return nil
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1+2. Lock the target row and validate source_type.
+		var row models.MarketSource
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("source_id = ?", sourceID).
+			First(&row).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrSourceNotFound
+			}
+			return fmt.Errorf("lock market_source %s: %w", sourceID, err)
+		}
+		if row.SourceType != "remote" {
+			return ErrSourceNotRemote
+		}
+
+		// 3. Clear is_active on every other remote row. We deliberately
+		//    include rows that already have is_active=false; the row-level
+		//    write is cheap and the WHERE clause stays simple.
+		if err := tx.Model(&models.MarketSource{}).
+			Where("source_type = ? AND source_id <> ?", "remote", sourceID).
+			Update("is_active", false).Error; err != nil {
+			return fmt.Errorf("clear other active remotes: %w", err)
+		}
+
+		// 4. Promote target + set nsfw in one statement.
+		if err := tx.Model(&models.MarketSource{}).
+			Where("source_id = ?", sourceID).
+			Updates(map[string]interface{}{
+				"is_active": true,
+				"nsfw":      nsfw,
+			}).Error; err != nil {
+			return fmt.Errorf("activate market_source %s: %w", sourceID, err)
+		}
+		return nil
+	})
 }
 
 func SaveData(ctx context.Context, sourceID string, data *types.MarketSourceData) error {
