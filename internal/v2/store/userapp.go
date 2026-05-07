@@ -41,10 +41,20 @@ type RenderCandidate struct {
 
 	// Snapshot of the existing user_applications row, if any. ExistingUserAppID
 	// is 0 when the row is missing (= never rendered for this user).
-	ExistingUserAppID       int64
-	ExistingRenderStatus    string
-	ExistingManifestVersion string
-	ExistingFailures        int
+	//
+	// ExistingAppVersion is the app's logical version (= metadata.version
+	// in OlaresManifest.yaml) of the previously-rendered manifest, sourced
+	// from user_applications.metadata->>'version'. NOT to be confused with
+	// user_applications.manifest_version which stores the OlaresManifest
+	// schema version (e.g. "0.8.10") and has nothing to do with upgrade
+	// detection. Empty string when the row is missing or the metadata
+	// column is NULL (legacy raw_data path); both cases trigger a (re-)
+	// render via the candidate-selection query so legacy rows migrate
+	// automatically on the next hydration cycle.
+	ExistingUserAppID    int64
+	ExistingRenderStatus string
+	ExistingAppVersion   string
+	ExistingFailures     int
 }
 
 // UpsertRenderSuccessInput captures everything UpsertRenderSuccess needs to
@@ -93,8 +103,17 @@ type MarkRenderFailedInput struct {
 //
 //   - applications rows with no matching user_applications row (never rendered)
 //   - user_applications rows in render_status='pending' or 'failed'
-//   - user_applications rows where manifest_version drifted away from the
-//     applications.app_version (= source-side version bump)
+//   - user_applications rows where the previously-rendered app version
+//     (metadata->>'version') drifted away from applications.app_version
+//     (= source-side version bump)
+//
+// Note we compare metadata->>'version' (the app's logical version) against
+// applications.app_version, NOT manifest_version: the manifest_version
+// column stores the OlaresManifest schema version (e.g. "0.8.10") and has
+// nothing to do with the app's logical version (e.g. "1.0.3"). Legacy
+// raw_data rows where the metadata JSONB column is NULL also match this
+// branch via NULL IS DISTINCT FROM, and migrate automatically on their
+// next hydration cycle.
 //
 // User ↔ source visibility is intentionally not filtered here: every user
 // sees every source's applications, matching the legacy cache-based fan-out.
@@ -124,10 +143,10 @@ func ListRenderCandidates(ctx context.Context, userID string, limit int) ([]Rend
 		AppEntry *models.JSONB[types.ApplicationInfoEntry] `gorm:"column:app_entry"`
 		Price    *models.JSONB[types.PriceConfig]          `gorm:"column:price"`
 
-		ExistingUserAppID       int64  `gorm:"column:ua_id"`
-		ExistingRenderStatus    string `gorm:"column:ua_render_status"`
-		ExistingManifestVersion string `gorm:"column:ua_manifest_version"`
-		ExistingFailures        int    `gorm:"column:ua_failures"`
+		ExistingUserAppID    int64  `gorm:"column:ua_id"`
+		ExistingRenderStatus string `gorm:"column:ua_render_status"`
+		ExistingAppVersion   string `gorm:"column:ua_existing_app_version"`
+		ExistingFailures     int    `gorm:"column:ua_failures"`
 	}
 
 	const query = `
@@ -138,10 +157,10 @@ SELECT a.source_id,
        a.app_type,
        a.app_entry,
        a.price,
-       COALESCE(ua.id, 0)                             AS ua_id,
-       COALESCE(ua.render_status, '')                 AS ua_render_status,
-       COALESCE(ua.manifest_version, '')              AS ua_manifest_version,
-       COALESCE(ua.render_consecutive_failures, 0)    AS ua_failures
+       COALESCE(ua.id, 0)                                  AS ua_id,
+       COALESCE(ua.render_status, '')                      AS ua_render_status,
+       COALESCE(ua.metadata->>'version', '')               AS ua_existing_app_version,
+       COALESCE(ua.render_consecutive_failures, 0)         AS ua_failures
 FROM applications a
 LEFT JOIN user_applications ua
        ON ua.user_id   = ?
@@ -149,7 +168,7 @@ LEFT JOIN user_applications ua
       AND ua.app_id    = a.app_id
 WHERE ua.id IS NULL
    OR ua.render_status IN ('pending', 'failed')
-   OR (ua.render_status = 'success' AND ua.manifest_version IS DISTINCT FROM a.app_version)
+   OR (ua.render_status = 'success' AND (ua.metadata->>'version') IS DISTINCT FROM a.app_version)
 ORDER BY ua_failures, a.updated_at
 LIMIT ?
 `
@@ -162,16 +181,16 @@ LIMIT ?
 	out := make([]RenderCandidate, 0, len(rows))
 	for _, r := range rows {
 		c := RenderCandidate{
-			UserID:                  userID,
-			SourceID:                r.SourceID,
-			AppID:                   r.AppID,
-			AppName:                 r.AppName,
-			AppVersion:              r.AppVersion,
-			AppType:                 r.AppType,
-			ExistingUserAppID:       r.ExistingUserAppID,
-			ExistingRenderStatus:    r.ExistingRenderStatus,
-			ExistingManifestVersion: r.ExistingManifestVersion,
-			ExistingFailures:        r.ExistingFailures,
+			UserID:               userID,
+			SourceID:             r.SourceID,
+			AppID:                r.AppID,
+			AppName:              r.AppName,
+			AppVersion:           r.AppVersion,
+			AppType:              r.AppType,
+			ExistingUserAppID:    r.ExistingUserAppID,
+			ExistingRenderStatus: r.ExistingRenderStatus,
+			ExistingAppVersion:   r.ExistingAppVersion,
+			ExistingFailures:     r.ExistingFailures,
 		}
 		if r.AppEntry != nil {
 			entry := r.AppEntry.Data

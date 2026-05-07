@@ -292,10 +292,10 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 // SendMarketSystemUpdate failure is logged but does not fail hydration.
 func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate, task *hydrationfn.HydrationTask) {
 	isUpgrade := c.ExistingRenderStatus == "success" &&
-		c.ExistingManifestVersion != c.AppVersion
+		c.ExistingAppVersion != c.AppVersion
 	if isUpgrade {
 		glog.V(2).Infof("hydration: version upgrade user=%s app=%s %s -> %s",
-			c.UserID, c.AppID, c.ExistingManifestVersion, c.AppVersion)
+			c.UserID, c.AppID, c.ExistingAppVersion, c.AppVersion)
 	} else {
 		glog.V(2).Infof("hydration: first install user=%s app=%s version=%s",
 			c.UserID, c.AppID, c.AppVersion)

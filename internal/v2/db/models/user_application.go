@@ -17,6 +17,14 @@ type UserApplication struct {
 	AppName    string `gorm:"column:app_name;size:100;not null"`
 	AppRawName string `gorm:"column:app_raw_name;size:100;not null;index:idx_user_applications_app_raw_name"`
 
+	// ManifestVersion stores the OlaresManifest schema version
+	// (= rawData.ConfigVersion / olaresManifest.version, e.g. "0.8.10")
+	// returned by chart-repo's raw_data_ex. It is NOT the app's logical
+	// version — that lives in metadata->>'version' (sourced from
+	// cfg.Metadata.Version) and applications.app_version. For upgrade
+	// detection / candidate selection see ListRenderCandidates in
+	// store/userapp.go, which compares metadata->>'version' against
+	// applications.app_version. Do not reuse ManifestVersion for that.
 	ManifestVersion string `gorm:"column:manifest_version;size:32;not null;default:''"`
 	ManifestType    string `gorm:"column:manifest_type;size:32;not null;default:''"`
 	APIVersion      string `gorm:"column:api_version;size:32"`
