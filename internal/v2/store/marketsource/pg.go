@@ -3,6 +3,7 @@ package marketsource
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"market/internal/v2/db"
@@ -10,6 +11,7 @@ import (
 	"market/internal/v2/types"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func GetMarketSources() ([]*models.MarketSource, error) {
@@ -22,12 +24,124 @@ func GetMarketSources() ([]*models.MarketSource, error) {
 	defer cancel()
 
 	var sources []*models.MarketSource
-	result := gdb.WithContext(ctx).Find(&sources)
+	result := gdb.WithContext(ctx).Order("source_id ASC").Find(&sources)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 
 	return sources, nil
+}
+
+// UpsertSources inserts new market_sources rows or updates the descriptor
+// columns of existing ones, keyed by the source_id unique index. The
+// catalogue payload column (`data`) is intentionally excluded from
+// DoUpdates so a startup-time upsert does not clobber the JSONB snapshot
+// that the syncer has already populated for an existing source.
+//
+// Empty / whitespace SourceID rows are skipped silently — the caller
+// (settingsManager.saveMarketSourcesToStore) iterates a settings.MarketSource
+// slice that the API contract guarantees has non-empty IDs, so a violation
+// here would be a programming error rather than user input.
+func UpsertSources(ctx context.Context, sources []*models.MarketSource) error {
+	if len(sources) == 0 {
+		return nil
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	rows := make([]*models.MarketSource, 0, len(sources))
+	for _, src := range sources {
+		if src == nil {
+			continue
+		}
+		if strings.TrimSpace(src.SourceID) == "" {
+			continue
+		}
+		rows = append(rows, src)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	if err := gdb.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "source_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"source_title",
+				"source_url",
+				"source_type",
+				"description",
+				"priority",
+			}),
+		}).
+		Create(&rows).Error; err != nil {
+		return fmt.Errorf("upsert market_sources: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteSourceByID removes a single market_sources row by its source_id.
+// Returns nil when no matching row exists so the caller can treat
+// "already gone" the same way the Redis path did.
+func DeleteSourceByID(ctx context.Context, sourceID string) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return fmt.Errorf("sourceID cannot be empty")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	if err := gdb.WithContext(ctx).
+		Where("source_id = ?", sourceID).
+		Delete(&models.MarketSource{}).Error; err != nil {
+		return fmt.Errorf("delete market_source %s: %w", sourceID, err)
+	}
+	return nil
+}
+
+// Count returns the total number of market_sources rows. Used by the
+// settings bootstrap path to decide whether the catalogue is empty
+// (first deploy → seed defaults) or already populated (merge defaults
+// with existing config).
+func Count(ctx context.Context) (int64, error) {
+	gdb := db.Global()
+	if gdb == nil {
+		return 0, fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	var n int64
+	if err := gdb.WithContext(ctx).
+		Model(&models.MarketSource{}).
+		Count(&n).Error; err != nil {
+		return 0, fmt.Errorf("count market_sources: %w", err)
+	}
+	return n, nil
+}
+
+// TruncateAll removes every market_sources row. Intended for the
+// CLEAR_CACHE=true debug path — it is more destructive than the
+// previous Redis-only clear because the JSONB `data` column lives on
+// the same row, so the syncer will have to refetch the catalogue
+// payload after the next startup.
+func TruncateAll(ctx context.Context) error {
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	if err := gdb.WithContext(ctx).
+		Where("1 = 1").
+		Delete(&models.MarketSource{}).Error; err != nil {
+		return fmt.Errorf("truncate market_sources: %w", err)
+	}
+	return nil
 }
 
 func SaveData(ctx context.Context, sourceID string, data *types.MarketSourceData) error {

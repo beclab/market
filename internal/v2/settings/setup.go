@@ -10,6 +10,10 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/db/models"
+	"market/internal/v2/helper"
+	"market/internal/v2/store/marketsource"
+
 	"github.com/golang/glog"
 )
 
@@ -221,49 +225,40 @@ func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManage
 		glog.V(3).Info("Remote source already exists, skipping")
 	}
 
-	// 7. Get final configuration from chart repo (after all additions) and save to Redis
-	glog.V(2).Info("Step 6: Saving final market source configuration to Redis")
+	// 7. Get final configuration from chart repo (after all additions) and persist to PG
+	glog.V(2).Info("Step 6: Saving final market source configuration to PG")
 	finalConfig, err := getMarketSourceFromChartRepo(chartRepoHost)
 	if err != nil {
 		glog.Errorf("Failed to get final market source configuration: %v", err)
 		// Continue even if this fails - we've already synced the sources
 	} else {
-		// Convert ChartRepoMarketSourcesConfig to MarketSourcesConfig
-		var marketSources []*MarketSource
+		// Convert ChartRepoMarketSourcesConfig to []*models.MarketSource for upsert
+		rows := make([]*models.MarketSource, 0, len(finalConfig.Sources))
 		for _, chartRepoSource := range finalConfig.Sources {
-			marketSource := &MarketSource{
-				ID:          chartRepoSource.ID,
-				Name:        chartRepoSource.Name,
-				Type:        chartRepoSource.Type,
-				BaseURL:     chartRepoSource.BaseURL,
-				Priority:    chartRepoSource.Priority,
-				IsActive:    chartRepoSource.IsActive,
-				UpdatedAt:   chartRepoSource.UpdatedAt,
+			if chartRepoSource == nil {
+				continue
+			}
+			rows = append(rows, &models.MarketSource{
+				SourceID:    chartRepoSource.ID,
+				SourceTitle: chartRepoSource.Name,
+				SourceURL:   chartRepoSource.BaseURL,
+				SourceType:  chartRepoSource.Type,
 				Description: chartRepoSource.Description,
-			}
-			marketSources = append(marketSources, marketSource)
+				Priority:    chartRepoSource.Priority,
+			})
 		}
 
-		marketSourcesConfig := &MarketSourcesConfig{
-			Sources:       marketSources,
-			DefaultSource: finalConfig.DefaultSource,
-			UpdatedAt:     time.Now(),
-		}
-
-		// Save to Redis (skip if redisClient is nil, e.g., in public environment)
-		if redisClient != nil {
-			configJSON, err := json.Marshal(marketSourcesConfig)
-			if err != nil {
-				glog.Errorf("Failed to marshal market sources config: %v", err)
+		// Persist to PG (skip in public environment where db.Global() is nil)
+		if !helper.IsPublicEnvironment() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			if upsertErr := marketsource.UpsertSources(ctx, rows); upsertErr != nil {
+				glog.Errorf("Failed to save market sources to PG: %v", upsertErr)
 			} else {
-				if err := redisClient.Set(RedisKeyMarketSources, string(configJSON), 0); err != nil {
-					glog.Errorf("Failed to save market sources to Redis: %v", err)
-				} else {
-					glog.Infof("Successfully saved %d market sources to Redis", len(marketSources))
-				}
+				glog.Infof("Successfully saved %d market sources to PG", len(rows))
 			}
+			cancel()
 		} else {
-			glog.Info("Redis client not available, skipping save to Redis (public environment)")
+			glog.Info("Public environment, skipping save to PG")
 		}
 
 		// Reload SettingsManager if provided

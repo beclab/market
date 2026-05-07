@@ -51,7 +51,10 @@ type RedisClient interface {
 }
 
 // Constants for Redis keys
+//
+// The market sources list moved to the PostgreSQL `market_sources` table;
+// the legacy Redis key `market:sources:config` is no longer read or
+// written. API endpoints config still lives in Redis.
 const (
-	RedisKeyMarketSources = "market:sources:config"
-	RedisKeyAPIEndpoints  = "market:api:endpoints"
+	RedisKeyAPIEndpoints = "market:api:endpoints"
 )
