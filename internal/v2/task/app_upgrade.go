@@ -142,6 +142,24 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 
 	glog.Infof("[APP] HTTP request completed successfully for app upgrade: task=%s, response_length=%d", task.ID, len(response))
 
+	// Parse response to extract opID (mirrors install/uninstall/cancel/clone).
+	// Errors are logged but don't fail the task — upgrade has historically
+	// returned the raw response on success regardless of opID parsing.
+	var responseData map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
+		glog.Errorf("Failed to parse response JSON for upgrade task %s: %v", task.ID, err)
+	} else if code, ok := responseData["code"].(float64); ok && code == 200 {
+		if data, ok := responseData["data"].(map[string]interface{}); ok {
+			if opID, ok := data["opID"].(string); ok && opID != "" {
+				task.OpID = opID
+				glog.Infof("Successfully extracted opID: %s for upgrade task: %s", opID, task.ID)
+				tm.linkStateOpID(task, appName, "upgrade")
+			} else {
+				glog.Infof("opID not found in response data for upgrade task: %s", task.ID)
+			}
+		}
+	}
+
 	// Create success result
 	successResult := map[string]interface{}{
 		"operation": "upgrade",
@@ -152,6 +170,7 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		"version":   version,
 		"url":       urlStr,
 		"response":  response,
+		"opID":      task.OpID,
 		"status":    "success",
 	}
 	successJSON, _ := json.Marshal(successResult)

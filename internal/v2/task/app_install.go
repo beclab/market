@@ -250,6 +250,7 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 			if opID, ok := data["opID"].(string); ok && opID != "" {
 				task.OpID = opID
 				glog.V(3).Infof("Successfully extracted opID: %s for task: %s", opID, task.ID)
+				tm.linkStateOpID(task, appName, "install")
 			} else {
 				glog.V(3).Infof("opID not found in response data for task: %s", task.ID)
 				// Return backend response with additional context

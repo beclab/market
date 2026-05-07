@@ -91,6 +91,7 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 				if opID, ok := data["opID"].(string); ok && opID != "" {
 					task.OpID = opID
 					glog.Infof("Successfully extracted opID: %s for task: %s", opID, task.ID)
+					tm.linkStateOpID(task, appName, "cancel")
 				} else {
 					glog.Infof("opID not found in response data for task: %s", task.ID)
 				}

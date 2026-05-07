@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -16,10 +17,60 @@ import (
 	"github.com/golang/glog"
 	"github.com/gorilla/mux"
 
+	"market/internal/v2/store"
 	"market/internal/v2/task"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 )
+
+// opType* are the user_application_states.op_type values written by API
+// handlers at pending-row creation. The strings are persisted verbatim and
+// match the operation kinds NATS msg.OpType uses, so a NATS event can
+// overwrite the value cleanly without a translation table.
+const (
+	opTypeInstall   = "install"
+	opTypeUninstall = "uninstall"
+	opTypeUpgrade   = "upgrade"
+	opTypeClone     = "clone"
+	opTypeCancel    = "cancel"
+)
+
+// writePendingState writes the initial user_application_states pending row
+// for an app operation, before TaskModule.AddTask is invoked. Failures are
+// logged but never block task creation: the legacy cache + NATS path
+// continues to drive client-visible behaviour during phase 1; the PG row
+// is observability-only until later phases wire readers against it.
+//
+// sourceID may legitimately be empty for handlers (cancelInstall,
+// uninstallApp) that look up app metadata across all of a user's sources
+// and happen not to find the app — in that case the call is a no-op
+// rather than a fabrication of source. Same for ErrUserApplicationStateNotFound,
+// which fires when no user_applications row exists for the (user, source,
+// app) tuple (clones, or apps removed from catalog mid-flight). Both are
+// logged at V(3) so they are visible during phase-1 monitoring without
+// polluting normal logs.
+func (s *Server) writePendingState(ctx context.Context, userID, sourceID, appID, opType string) {
+	if sourceID == "" || appID == "" {
+		glog.V(3).Infof("writePendingState: skipping (user=%s source=%q app=%q op=%s) — missing source or app",
+			userID, sourceID, appID, opType)
+		return
+	}
+	if err := store.UpsertPendingState(ctx, store.PendingStateInput{
+		UserID:   userID,
+		SourceID: sourceID,
+		AppID:    appID,
+		OpType:   opType,
+	}); err != nil {
+		switch {
+		case errors.Is(err, store.ErrUserApplicationStateNotFound):
+			glog.V(3).Infof("writePendingState: no user_applications row for (user=%s source=%s app=%s op=%s); skipping pending state write",
+				userID, sourceID, appID, opType)
+		default:
+			glog.Errorf("writePendingState: persist pending state failed (user=%s source=%s app=%s op=%s): %v",
+				userID, sourceID, appID, opType, err)
+		}
+	}
+}
 
 const syncTaskHardTimeout = 30 * time.Minute
 
@@ -342,6 +393,11 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		glog.V(2).Infof("installApp: added realAppID=%s to metadata for app=%s, source=%s", realAppID, request.AppName, request.Source)
 	}
 
+	// Establish the user_application_states pending row before AddTask so
+	// it exists from the moment the user clicks. Indexed by (user, source,
+	// realAppID) — this matches user_applications which hydration writes.
+	s.writePendingState(r.Context(), userID, request.Source, realAppID, opTypeInstall)
+
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
 		callback, wait := waitForSyncTask(r.Context())
@@ -554,6 +610,14 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		"title":       request.Title, // Pass title in metadata (for display purposes)
 	}
 
+	// Pending-row write for clone is keyed by newAppName (the fabricated
+	// rawAppName+hash). Hydration does not pre-render clones, so
+	// user_applications typically has no row for newAppName — the helper
+	// logs a V(3) skip in that case and the task creation proceeds.
+	// Tracking clone state in PG is deferred to a later phase that
+	// teaches hydration about clones.
+	s.writePendingState(r.Context(), userID, request.Source, newAppName, opTypeClone)
+
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
 		callback, wait := waitForSyncTask(r.Context())
@@ -662,7 +726,11 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: Get app cfgType from cache
-	var cfgType string
+	// stateSourceID captures the source the app was found in so the
+	// subsequent writePendingState call can locate the user_applications
+	// row. Empty when the app is not present in any of this user's
+	// AppInfoLatest views (writePendingState then no-ops).
+	var cfgType, stateSourceID string
 	// Try to find the app in user data to get cfgType
 	if userData != nil {
 		// Search through all sources to find the app
@@ -671,6 +739,7 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 				for _, appInfoData := range sourceData.AppInfoLatest {
 					if appInfoData != nil && appInfoData.RawData != nil && appInfoData.RawData.Name == appName {
 						cfgType = appInfoData.RawData.CfgType
+						stateSourceID = sourceID
 						glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s", cfgType, appName, sourceID)
 						break
 					}
@@ -694,6 +763,16 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		"token":    utils.GetTokenFromRequest(restfulReq),
 		"cfgType":  cfgType, // Use retrieved cfgType
 	}
+	// Push the resolved source into task metadata so the executor's
+	// linkStateOpID can locate the user_application_states row by
+	// (user, source, app) when app-service returns the opID.
+	if stateSourceID != "" {
+		taskMetadata["source"] = stateSourceID
+	}
+
+	// Refresh the pending row so any subsequent NATS state event can find
+	// it via the FK chain. stateSourceID is best-effort — see helper docs.
+	s.writePendingState(r.Context(), userID, stateSourceID, appName, opTypeCancel)
 
 	// Handle synchronous requests with proper blocking
 	if sync {
@@ -813,7 +892,11 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: Get app cfgType from cache
-	var cfgType string
+	// stateSourceID captures the source the app was found in so the
+	// subsequent writePendingState call can locate the user_applications
+	// row. Empty when the app is not present in any of this user's
+	// AppInfoLatest views.
+	var cfgType, stateSourceID string
 	// Try to find the app in user data to get cfgType
 	if userData != nil {
 		// Search through all sources to find the app
@@ -822,6 +905,7 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 				for _, appInfoData := range sourceData.AppInfoLatest {
 					if appInfoData != nil && appInfoData.RawData != nil && appInfoData.RawData.Name == appName {
 						cfgType = appInfoData.RawData.CfgType
+						stateSourceID = sourceID
 						glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s", cfgType, appName, sourceID)
 						break
 					}
@@ -847,6 +931,16 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		"all":        all,        // Add all parameter to metadata
 		"deleteData": deleteData, // Add delete userData
 	}
+	// Push the resolved source into task metadata so the executor's
+	// linkStateOpID can locate the user_application_states row by
+	// (user, source, app) when app-service returns the opID.
+	if stateSourceID != "" {
+		taskMetadata["source"] = stateSourceID
+	}
+
+	// Refresh the pending row so any subsequent NATS state event can find
+	// it via the FK chain. stateSourceID is best-effort — see helper docs.
+	s.writePendingState(r.Context(), userID, stateSourceID, appName, opTypeUninstall)
 
 	// Handle synchronous requests with proper blocking
 	if sync {
@@ -1084,6 +1178,12 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		taskMetadata["rawAppName"] = rawAppName
 		glog.V(3).Infof("Adding rawAppName to upgrade task metadata: %s for clone app: %s", rawAppName, request.AppName)
 	}
+
+	// Refresh the pending row before AddTask. Upgrade rows must already
+	// exist (the app is currently installed), so writePendingState should
+	// always find a matching user_applications row — log on miss for
+	// observability.
+	s.writePendingState(r.Context(), userID, request.Source, request.AppName, opTypeUpgrade)
 
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
