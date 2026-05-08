@@ -282,3 +282,256 @@ func ListUserAppStateLatest(ctx context.Context, userID string, sourceIDs []stri
 	}
 	return rows, nil
 }
+
+// AppInstallRow is the projection GetAppInstallRow yields. It carries
+// the user_applications + applications JOIN columns the install /
+// upgrade / clone API handlers need to populate task metadata for the
+// downstream app-service call: cfgType (manifest_type), the chart-repo
+// rendered_package path used to derive chart_path, the image_analysis
+// blob unpacked into task.Image[], the per-(user, app) price config
+// the VC injection step reads, and the catalog app_entry that supplies
+// the realAppID fallback chain. Heavyweight manifest JSONB blocks
+// (metadata / spec / resources / ...) are NOT projected here on
+// purpose — the action handlers do not consume them and the bandwidth
+// cost would be substantial; getAppsInfo (/api/v2/apps) keeps using
+// AppDetailRow when the rich payload is required.
+type AppInstallRow struct {
+	SourceID        string                                    `gorm:"column:source_id"`
+	AppID           string                                    `gorm:"column:app_id"`
+	AppRawID        string                                    `gorm:"column:app_raw_id"`
+	AppName         string                                    `gorm:"column:app_name"`
+	AppRawName      string                                    `gorm:"column:app_raw_name"`
+	ManifestType    string                                    `gorm:"column:manifest_type"`
+	AppVersion      string                                    `gorm:"column:app_version"`
+	RenderedPackage string                                    `gorm:"column:rendered_package"`
+	Price           *models.JSONB[types.PriceConfig]          `gorm:"column:price"`
+	ImageAnalysis   *models.JSONB[types.ImageAnalysisResult]  `gorm:"column:image_analysis"`
+	AppEntry        *models.JSONB[types.ApplicationInfoEntry] `gorm:"column:app_entry"`
+}
+
+// GetAppInstallRow fetches the single user_applications + applications
+// JOIN row that the install / upgrade / clone API handlers need to
+// dispatch a backend call.
+//
+// version="" matches any version of the named app; this is the cloneApp
+// path, where the version is later read from user_application_states
+// (via GetInstalledAppVersion) rather than supplied by the caller. A
+// non-empty version restricts the match exactly, mirroring installApp's
+// "must match the version the user clicked" behaviour.
+//
+// The "ua.app_id = ua.app_raw_id" predicate intentionally excludes
+// clone rows: install / upgrade / clone all act on the original chart
+// even when the wire-level app_name is a clone alias, and the original
+// row is the only one that carries the unmodified manifest_type and
+// price config the action handlers consume.
+//
+// render_status is restricted to 'success' so failure / pending
+// placeholder rows from MarkRenderFailed do not match. Returns
+// (nil, nil) when no row matches; the caller is expected to surface a
+// 404-style response in that case.
+func GetAppInstallRow(ctx context.Context, userID, sourceID, appName, version string) (*AppInstallRow, error) {
+	userID = strings.TrimSpace(userID)
+	sourceID = strings.TrimSpace(sourceID)
+	appName = strings.TrimSpace(appName)
+	if userID == "" || sourceID == "" || appName == "" {
+		return nil, fmt.Errorf("GetAppInstallRow: empty userID/sourceID/appName")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+	}
+
+	const query = `
+SELECT ua.source_id,
+       ua.app_id,
+       ua.app_raw_id,
+       ua.app_name,
+       ua.app_raw_name,
+       ua.manifest_type,
+       COALESCE(ua.metadata->>'version', '') AS app_version,
+       ua.rendered_package,
+       ua.price,
+       ua.image_analysis,
+       a.app_entry
+FROM user_applications ua
+LEFT JOIN applications a
+    ON a.source_id = ua.source_id AND a.app_id = ua.app_id
+WHERE ua.user_id        = ?
+  AND ua.source_id      = ?
+  AND ua.app_name       = ?
+  AND ua.app_id         = ua.app_raw_id
+  AND ua.render_status  = 'success'
+  AND (? = '' OR ua.metadata->>'version' = ?)
+ORDER BY ua.updated_at DESC
+LIMIT 1
+`
+
+	var rows []*AppInstallRow
+	if err := gdb.WithContext(ctx).Raw(query, userID, sourceID, appName, version, version).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("get app install row (user=%s source=%s app=%s version=%s): %w",
+			userID, sourceID, appName, version, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+// AppLocatorRow is the projection LookupAppLocator yields. It carries
+// the minimum fields cancelInstall / uninstallApp need to pivot from
+// an app_name (which is what the wire contract gives them) to the
+// (source_id, app_id) pair plus the manifest_type the executor uses
+// as cfgType.
+type AppLocatorRow struct {
+	SourceID     string `gorm:"column:source_id"`
+	AppID        string `gorm:"column:app_id"`
+	AppRawID     string `gorm:"column:app_raw_id"`
+	AppRawName   string `gorm:"column:app_raw_name"`
+	ManifestType string `gorm:"column:manifest_type"`
+}
+
+// LookupAppLocator finds a single user_applications row by user_id and
+// app_name across all sources. Used by cancelInstall and uninstallApp,
+// which receive only the app_name on the wire and need to discover
+// which source the row lives in plus the manifest_type that goes into
+// the cancel / uninstall task metadata.
+//
+// The match is OR'd against ua.app_name and ua.app_raw_name so a
+// clone-suffixed name resolves to the clone row directly, and a bare
+// raw-name request still resolves through to the underlying row when
+// only the original is present. This mirrors the cache-side fallback
+// where datawatcher_state matches against either Status.Name or
+// Status.RawAppName.
+//
+// When the same name shows up in multiple sources (e.g. an app
+// installed from both a remote and a local source), the most recently
+// rendered row wins via ORDER BY updated_at DESC — matching the
+// cache-side "first hit wins" semantics where map iteration order
+// was already non-deterministic.
+//
+// Returns (nil, nil) when no row matches; the caller surfaces the
+// not-found case with whatever cfgType default is appropriate (usually
+// "app").
+func LookupAppLocator(ctx context.Context, userID, appName string) (*AppLocatorRow, error) {
+	userID = strings.TrimSpace(userID)
+	appName = strings.TrimSpace(appName)
+	if userID == "" || appName == "" {
+		return nil, fmt.Errorf("LookupAppLocator: empty userID/appName")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+	}
+
+	const query = `
+SELECT ua.source_id,
+       ua.app_id,
+       ua.app_raw_id,
+       ua.app_raw_name,
+       ua.manifest_type
+FROM user_applications ua
+WHERE ua.user_id       = ?
+  AND (ua.app_name     = ? OR ua.app_raw_name = ?)
+  AND ua.render_status = 'success'
+ORDER BY ua.updated_at DESC
+LIMIT 1
+`
+
+	var rows []*AppLocatorRow
+	if err := gdb.WithContext(ctx).Raw(query, userID, appName, appName).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lookup app locator (user=%s app=%s): %w", userID, appName, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+// GetAppPaymentInfo composes a *types.AppInfo straight from PG for the
+// six payment endpoints (getAppPaymentStatus / getAppPaymentStatusLegacy
+// / purchaseApp / restorePurchase / startPaymentPolling /
+// startFrontendPayment). The wire contract those handlers honour passes
+// AppInfo to the paymentnew package, so doing the assembly here once
+// removes per-handler boilerplate and keeps the JSONB unwrapping in a
+// single place.
+//
+// AppEntry is sourced from applications (catalogue-side, identical
+// across users); Price / PurchaseInfo / ImageAnalysis are sourced from
+// the per-user user_applications row. nil JSONB columns leave the
+// corresponding *types.AppInfo field nil — caller code must keep its
+// existing nil guards (the cache-side build path also produced nil for
+// these fields when chart-repo / payment had not populated them).
+//
+// sourceID="" widens the match across all sources, mirroring
+// getAppPaymentStatusLegacy's behaviour where the route does not carry
+// a source path parameter. appNameOrID is matched against both
+// ua.app_name and ua.app_id so the helper handles the cache-side
+// MatchAppID fallback chain (ID > AppID > Name) without forcing
+// callers to disambiguate. Returns (nil, nil) when no row matches.
+func GetAppPaymentInfo(ctx context.Context, userID, sourceID, appNameOrID string) (*types.AppInfo, error) {
+	userID = strings.TrimSpace(userID)
+	sourceID = strings.TrimSpace(sourceID)
+	appNameOrID = strings.TrimSpace(appNameOrID)
+	if userID == "" || appNameOrID == "" {
+		return nil, fmt.Errorf("GetAppPaymentInfo: empty userID/appNameOrID")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+	}
+
+	type row struct {
+		Price         *models.JSONB[types.PriceConfig]          `gorm:"column:price"`
+		PurchaseInfo  *models.JSONB[types.PurchaseInfo]         `gorm:"column:purchase_info"`
+		ImageAnalysis *models.JSONB[types.ImageAnalysisResult]  `gorm:"column:image_analysis"`
+		AppEntry      *models.JSONB[types.ApplicationInfoEntry] `gorm:"column:app_entry"`
+	}
+
+	const query = `
+SELECT ua.price,
+       ua.purchase_info,
+       ua.image_analysis,
+       a.app_entry
+FROM user_applications ua
+LEFT JOIN applications a
+    ON a.source_id = ua.source_id AND a.app_id = ua.app_id
+WHERE ua.user_id       = ?
+  AND (? = '' OR ua.source_id = ?)
+  AND (ua.app_name     = ? OR ua.app_id = ?)
+  AND ua.render_status = 'success'
+ORDER BY ua.updated_at DESC
+LIMIT 1
+`
+
+	var rows []*row
+	if err := gdb.WithContext(ctx).Raw(query, userID, sourceID, sourceID, appNameOrID, appNameOrID).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("get app payment info (user=%s source=%s app=%s): %w",
+			userID, sourceID, appNameOrID, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	r := rows[0]
+	info := &types.AppInfo{}
+	if r.AppEntry != nil {
+		entry := r.AppEntry.Data
+		info.AppEntry = &entry
+	}
+	if r.Price != nil {
+		price := r.Price.Data
+		info.Price = &price
+	}
+	if r.PurchaseInfo != nil {
+		pi := r.PurchaseInfo.Data
+		info.PurchaseInfo = &pi
+	}
+	if r.ImageAnalysis != nil {
+		ia := r.ImageAnalysis.Data
+		info.ImageAnalysis = &ia
+	}
+	return info, nil
+}

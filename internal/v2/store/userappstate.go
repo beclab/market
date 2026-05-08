@@ -294,3 +294,57 @@ func nullableJSON(b []byte) any {
 	}
 	return b
 }
+
+// GetInstalledAppVersion returns the user_application_states.installed_version
+// for the named app in the given source, used by cloneApp to discover which
+// version of the original app is currently installed (the clone is meant to
+// share the original chart's version, but the request body does not carry
+// it so the helper bridges the gap).
+//
+// The match is by ua.app_name (not app_raw_name) because cloneApp's caller
+// supplies the original app's name, not a clone alias; clones live behind
+// a different name in user_applications and would not be the desired
+// resolution target here.
+//
+// render_status is intentionally NOT filtered to 'success': the presence
+// of a user_application_states row already implies app-service has
+// reported a state for this row, which implies a successful render
+// happened at some point. Filtering would also reject installed apps whose
+// catalog entry was later revoked but whose runtime state is still valid.
+//
+// Returns ("", nil) when no row matches — same as the cache-side
+// GetAppVersionFromState's (version, found=false) tuple, just collapsed
+// into the (string, error) idiom store helpers favour.
+func GetInstalledAppVersion(ctx context.Context, userID, sourceID, appName string) (string, error) {
+	userID = strings.TrimSpace(userID)
+	sourceID = strings.TrimSpace(sourceID)
+	appName = strings.TrimSpace(appName)
+	if userID == "" || sourceID == "" || appName == "" {
+		return "", fmt.Errorf("GetInstalledAppVersion: empty userID/sourceID/appName")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return "", fmt.Errorf("postgres not initialised; db.Open must run before user application state store usage")
+	}
+
+	const query = `
+SELECT uas.installed_version
+FROM user_application_states uas
+JOIN user_applications ua ON uas.user_application_id = ua.id
+WHERE ua.user_id   = ?
+  AND ua.source_id = ?
+  AND ua.app_name  = ?
+LIMIT 1
+`
+
+	var versions []string
+	if err := gdb.WithContext(ctx).Raw(query, userID, sourceID, appName).Scan(&versions).Error; err != nil {
+		return "", fmt.Errorf("get installed app version (user=%s source=%s app=%s): %w",
+			userID, sourceID, appName, err)
+	}
+	if len(versions) == 0 {
+		return "", nil
+	}
+	return versions[0], nil
+}
