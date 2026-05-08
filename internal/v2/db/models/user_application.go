@@ -54,6 +54,15 @@ type UserApplication struct {
 	Price        *JSONB[types.PriceConfig]  `gorm:"column:price;type:jsonb"`
 	PurchaseInfo *JSONB[types.PurchaseInfo] `gorm:"column:purchase_info;type:jsonb"`
 
+	// I18n stores chart-repo's localised metadata bundle keyed by
+	// locale -> {field -> string}. Sourced directly from the
+	// sync-app response top-level field, not derived from raw_data_ex.
+	I18n *JSONB[map[string]map[string]string] `gorm:"column:i18n;type:jsonb"`
+	// VersionHistory stores chart-repo's per-app changelog. Sourced
+	// directly from the sync-app response top-level field; the
+	// previous "splice into spec.versionHistory" path is gone.
+	VersionHistory *JSONB[[]types.VersionInfo] `gorm:"column:version_history;type:jsonb"`
+
 	RenderStatus              string `gorm:"column:render_status;size:16;not null;default:'pending'"`
 	RenderError               string `gorm:"column:render_error;size:200"`
 	RenderConsecutiveFailures int    `gorm:"column:render_consecutive_failures;not null;default:0"`

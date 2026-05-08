@@ -58,6 +58,12 @@ type syncAppPayload struct {
 	Version         string                `json:"version"`
 	RawData         map[string]any        `json:"raw_data"`
 	RawDataEx       *oac.AppConfiguration `json:"raw_data_ex"`
+	// I18n / VersionHistory live at the same level as RawDataEx on
+	// the chart-repo wire and are persisted to dedicated JSONB columns
+	// on user_applications (see store.UpsertRenderSuccess); they are
+	// NOT split into the manifest payload anymore.
+	I18n           map[string]map[string]string `json:"i18n"`
+	VersionHistory []types.VersionInfo          `json:"version_history"`
 	RawPackage      string                `json:"raw_package"`
 	RenderedPackage string                `json:"rendered_package"`
 	Values          []any                 `json:"values"`
@@ -166,21 +172,6 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 	rawData := apiResponse.Data.AppData.RawDataEx
 	manifest := types.BuildUserAppManifest(rawData)
 
-	// VersionHistory comes from the catalog row (applications.app_entry),
-	// not from chart-repo's per-render raw_data_ex. Splice it into spec
-	// before the RenderedManifest assignment so:
-	//   * user_applications.spec persisted by UpsertRenderSuccess below
-	//     carries it (direct PG readers see it under spec.versionHistory);
-	//   * the NATS "new_app_ready" push composed by notifyRenderSuccess
-	//     from task.RenderedManifest also carries it (same pointer, no
-	//     follow-up read needed).
-	if task.AppEntry != nil && len(task.AppEntry.VersionHistory) > 0 {
-		if manifest.Spec == nil {
-			manifest.Spec = map[string]any{}
-		}
-		manifest.Spec["versionHistory"] = task.AppEntry.VersionHistory
-	}
-
 	task.RenderedManifest = manifest
 
 	// Persist render success to user_applications. Skipped when the task
@@ -198,6 +189,8 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 			ManifestType:    rawData.ConfigType,
 			APIVersion:      rawData.APIVersion,
 			Manifest:        manifest,
+			I18n:            apiResponse.Data.AppData.I18n,
+			VersionHistory:  apiResponse.Data.AppData.VersionHistory,
 		}
 		if err := store.UpsertRenderSuccess(ctx, in); err != nil {
 			return fmt.Errorf("persist render success to user_applications: %w", err)

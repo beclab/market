@@ -63,6 +63,12 @@ type RenderCandidate struct {
 // chart-repo's raw_data); when nil the JSONB columns are written as SQL
 // NULL — useful for first-time inserts before the manifest data is
 // available.
+//
+// I18n / VersionHistory are sourced directly from chart-repo's sync-app
+// response (top-level fields, not nested under raw_data_ex) and persist
+// to dedicated JSONB columns. Empty / nil values write SQL NULL so a
+// caller without those payloads does not clobber a previously stored
+// non-empty bundle.
 type UpsertRenderSuccessInput struct {
 	UserID   string
 	SourceID string
@@ -79,6 +85,9 @@ type UpsertRenderSuccessInput struct {
 	Price *types.PriceConfig
 
 	Manifest *types.UserAppManifest
+
+	I18n           map[string]map[string]string
+	VersionHistory []types.VersionInfo
 }
 
 // MarkRenderFailedInput captures the minimum fields required to upsert a
@@ -256,6 +265,14 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 	if in.Manifest != nil {
 		assignManifestColumns(row, in.Manifest)
 	}
+	if len(in.I18n) > 0 {
+		j := models.NewJSONB(in.I18n)
+		row.I18n = &j
+	}
+	if len(in.VersionHistory) > 0 {
+		j := models.NewJSONB(in.VersionHistory)
+		row.VersionHistory = &j
+	}
 
 	result := gdb.WithContext(ctx).
 		Clauses(clause.OnConflict{
@@ -283,6 +300,8 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 				"permission",
 				"middleware",
 				"envs",
+				"i18n",
+				"version_history",
 			}),
 		}).
 		Create(row)

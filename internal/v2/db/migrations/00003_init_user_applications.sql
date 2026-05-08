@@ -40,6 +40,18 @@ CREATE TABLE IF NOT EXISTS user_applications (
     price                       JSONB,
     purchase_info               JSONB,
 
+    -- i18n carries chart-repo's localised metadata bundle keyed by
+    -- locale ("zh-CN" / "en-US" / ...). Each value is itself a flat
+    -- {field -> string} object (title / description / ...). Sourced
+    -- directly from the chart-repo sync-app response, not derived
+    -- from raw_data_ex.
+    i18n                        JSONB,
+    -- version_history is the per-app changelog as emitted by chart-repo
+    -- (one entry per release: version / versionName / mergedAt /
+    -- upgradeDescription). Sourced directly from sync-app's
+    -- top-level version_history field, NOT spliced into spec.
+    version_history             JSONB,
+
     -- render_status reflects the result of the latest chart-repo render
     -- attempt for this user_application: 'pending' before the first attempt,
     -- 'success' once the render succeeded, 'failed' otherwise.
@@ -88,6 +100,10 @@ CREATE TABLE IF NOT EXISTS user_applications (
         CHECK (price IS NULL OR jsonb_typeof(price) = 'object'),
     CONSTRAINT ck_user_applications_purchase_info_object
         CHECK (purchase_info IS NULL OR jsonb_typeof(purchase_info) = 'object'),
+    CONSTRAINT ck_user_applications_i18n_object
+        CHECK (i18n IS NULL OR jsonb_typeof(i18n) = 'object'),
+    CONSTRAINT ck_user_applications_version_history_array
+        CHECK (version_history IS NULL OR jsonb_typeof(version_history) = 'array'),
     CONSTRAINT ck_user_applications_render_status
         CHECK (render_status IN ('pending', 'success', 'failed'))
 );
