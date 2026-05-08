@@ -255,6 +255,20 @@ type EntryScalars struct {
 	Version    string
 	CfgType    string
 	ApiVersion string
+
+	// I18n is the pre-shaped multi-language bundle the API contract
+	// expects on ApplicationInfoEntry (locale-major + nested by
+	// manifest block). API callers should run NestI18nForEntry on the
+	// flat field-major bundle stored in user_applications.i18n before
+	// passing it here. Hydration callers leave it nil; the persisted
+	// app_entry payload is unaffected.
+	I18n map[string]any
+
+	// VersionHistory mirrors the user_applications.version_history
+	// JSONB column. API callers pass it through verbatim so the
+	// composed ApplicationInfoEntry.VersionHistory carries the
+	// chart-repo-emitted changelog. nil leaves the field unset.
+	VersionHistory []*VersionInfo
 }
 
 // ComposeApplicationInfoEntry is the inverse of BuildUserAppManifest. It
@@ -344,5 +358,97 @@ func ComposeApplicationInfoEntry(m *UserAppManifest, scalars EntryScalars) (*App
 	entry.Version = scalars.Version
 	entry.CfgType = scalars.CfgType
 	entry.ApiVersion = scalars.ApiVersion
+	if scalars.I18n != nil {
+		entry.I18n = scalars.I18n
+	}
+	if len(scalars.VersionHistory) > 0 {
+		entry.VersionHistory = scalars.VersionHistory
+	}
 	return &entry, nil
+}
+
+// i18nFieldToBlock pins which manifest block each localisable field
+// belongs to. Drives NestI18nForEntry's locale-major + nested output
+// shape for the API contract; chart-repo's i18n top-level field is
+// stored field-major and this map is the inverse routing table.
+//
+// Add an entry here when chart-repo introduces a new localisable
+// field. Fields not listed here are ignored by NestI18nForEntry,
+// which keeps the output stable when storage shape and API contract
+// drift apart.
+var i18nFieldToBlock = map[string]string{
+	"title":              "metadata",
+	"description":        "metadata",
+	"fullDescription":    "spec",
+	"upgradeDescription": "spec",
+}
+
+// NestI18nForEntry transforms chart-repo's field-major i18n bundle
+// (as stored in user_applications.i18n) into the locale-major +
+// manifest-block-nested shape the /api/v2/apps wire contract expects
+// for ApplicationInfoEntry.I18n:
+//
+//	field-major (storage):
+//	  { "title":       {"en-US": "...", "zh-CN": "..."},
+//	    "description": {"en-US": "...", "zh-CN": "..."},
+//	    "fullDescription":    {"en-US": "...", "zh-CN": "..."},
+//	    "upgradeDescription": {"en-US": "...", "zh-CN": "..."} }
+//
+//	locale-major + nested (wire):
+//	  { "en-US": { "metadata": {"title": "...", "description": "..."},
+//	               "spec":     {"fullDescription": "...", "upgradeDescription": "..."},
+//	               "entrances": null },
+//	    "zh-CN": {...} }
+//
+// Empty values are dropped; locales that end up with no fields after
+// filtering are still present in the output (with all blocks empty
+// objects) only when at least one of their fields was carried; locales
+// that had zero non-empty values across every recognised field are
+// dropped entirely. The "entrances" key is emitted with a nil value
+// per locale to match the wire contract; per-entrance localisation
+// is not yet supported.
+//
+// Returns nil when the input is empty or no recognised fields are
+// present.
+func NestI18nForEntry(i18n map[string]map[string]string) map[string]any {
+	if len(i18n) == 0 {
+		return nil
+	}
+	// locale -> block -> field -> value
+	staged := map[string]map[string]map[string]string{}
+	for field, localeMap := range i18n {
+		block, ok := i18nFieldToBlock[field]
+		if !ok {
+			continue
+		}
+		for locale, value := range localeMap {
+			if value == "" {
+				continue
+			}
+			byBlock, ok := staged[locale]
+			if !ok {
+				byBlock = map[string]map[string]string{}
+				staged[locale] = byBlock
+			}
+			byField, ok := byBlock[block]
+			if !ok {
+				byField = map[string]string{}
+				byBlock[block] = byField
+			}
+			byField[field] = value
+		}
+	}
+	if len(staged) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(staged))
+	for locale, blocks := range staged {
+		slot := make(map[string]any, len(blocks)+1)
+		for k, v := range blocks {
+			slot[k] = v
+		}
+		slot["entrances"] = nil
+		out[locale] = slot
+	}
+	return out
 }

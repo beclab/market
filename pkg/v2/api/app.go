@@ -216,22 +216,32 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// 2. Get specific application information (supports multiple queries)
+// getAppsInfo handles POST /api/v2/apps and returns the rendered
+// catalogue entry for each requested (source, app) tuple. The
+// response shape is:
+//
+//	{
+//	  apps: [{
+//	    app_info:        { app_entry: ApplicationInfoEntry },
+//	    app_simple_info: AppSimpleInfo,
+//	    timestamp:       int64,
+//	    type:            "app-info-latest",
+//	    version:         string
+//	  }, ...],
+//	  total_count: int,
+//	  not_found:   [{appid, sourceDataName}, ...]    (omitted when empty)
+//	}
+//
+// app_entry is rebuilt from the user_applications JSONB columns via
+// types.ComposeApplicationInfoEntry and carries the locale-major +
+// nested i18n bundle plus the chart-repo-emitted version_history.
+// raw_data, raw_package, rendered_package, values, and
+// app_info.image_analysis are intentionally not part of the response
+// — they were redundant or unsupported on the PG path.
 func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
-	glog.V(2).Info("POST /api/v2/apps - Getting apps information")
-
-	// Add timeout context
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	// Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Info("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
-		return
-	}
-
-	// Step 1: Get user information from request
 	restfulReq := s.httpToRestfulRequest(r)
 	userID, err := utils.GetUserInfoFromRequest(restfulReq)
 	if err != nil {
@@ -239,9 +249,8 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		s.sendResponse(w, http.StatusUnauthorized, false, "Failed to get user information", nil)
 		return
 	}
-	glog.V(2).Infof("Retrieved user ID for apps request: %s", userID)
+	glog.V(2).Infof("POST /api/v2/apps - user: %s", userID)
 
-	// Step 2: Parse JSON request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		glog.Errorf("Failed to read request body: %v", err)
@@ -256,139 +265,179 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		s.sendResponse(w, http.StatusBadRequest, false, "Invalid JSON format", nil)
 		return
 	}
-
 	if len(request.Apps) == 0 {
-		glog.V(3).Info("Empty apps array in request")
 		s.sendResponse(w, http.StatusBadRequest, false, "Apps array cannot be empty", nil)
 		return
 	}
 
-	glog.V(2).Infof("Received request for %d apps from user %s", len(request.Apps), userID)
-
-	// Create a channel to receive the result
-	type result struct {
-		response map[string]interface{}
-		err      error
+	keys := make([]store.AppQueryKey, 0, len(request.Apps))
+	for _, q := range request.Apps {
+		keys = append(keys, store.AppQueryKey{
+			SourceID: q.SourceDataName,
+			AppID:    q.AppID,
+		})
 	}
-	resultChan := make(chan result, 1)
 
-	// Step 3: Process apps information retrieval in goroutine
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("Panic in getAppsInfo: %v", r)
-				resultChan <- result{err: fmt.Errorf("internal error occurred")}
-			}
-		}()
-
-		// Get user data from cache
-		userData := s.cacheManager.GetUserData(userID)
-		if userData == nil {
-			glog.V(3).Infof("User data not found for user: %s", userID)
-			resultChan <- result{err: fmt.Errorf("user data not found")}
-			return
-		}
-
-		var foundApps []map[string]interface{}
-		var notFoundApps []AppQueryInfo
-
-		// Step 4: Find AppInfoLatestData for each requested app
-		for _, appQuery := range request.Apps {
-			glog.V(3).Infof("Searching for app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
-
-			// Check if source exists
-			sourceData, exists := userData.Sources[appQuery.SourceDataName]
-			if !exists {
-				glog.V(3).Infof("Source data not found: %s for user: %s", appQuery.SourceDataName, userID)
-				notFoundApps = append(notFoundApps, appQuery)
-				continue
-			}
-
-			// Search for app in AppInfoLatest array
-			found := false
-			for _, appInfoData := range sourceData.AppInfoLatest {
-				if appInfoData == nil {
-					continue
-				}
-
-				// Check multiple possible ID fields for matching
-				var appID string
-				if appInfoData.RawData != nil {
-					// Priority: ID > AppID > Name
-					if appInfoData.RawData.ID != "" {
-						appID = appInfoData.RawData.ID
-					} else if appInfoData.RawData.AppID != "" {
-						appID = appInfoData.RawData.AppID
-					} else if appInfoData.RawData.Name != "" {
-						appID = appInfoData.RawData.Name
-					}
-				}
-
-				// Also check AppSimpleInfo if available
-				if appID == "" && appInfoData.AppSimpleInfo != nil {
-					appID = appInfoData.AppSimpleInfo.AppID
-				}
-
-				// Match the requested app ID or name
-				if appID == appQuery.AppID || (appInfoData.RawData != nil && appInfoData.RawData.Name == appQuery.AppID) {
-					glog.V(3).Infof("Found app: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
-
-					safeCopy := s.createSafeAppInfoLatestCopy(appInfoData)
-					foundApps = append(foundApps, safeCopy)
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				glog.V(3).Infof("App not found: %s in source: %s", appQuery.AppID, appQuery.SourceDataName)
-				notFoundApps = append(notFoundApps, appQuery)
-			}
-		}
-
-		// Step 5: Prepare response
-		response := map[string]interface{}{
-			"apps":        foundApps,
-			"total_count": len(foundApps),
-		}
-		if len(notFoundApps) > 0 {
-			response["not_found"] = notFoundApps
-		}
-		glog.V(3).Infof("Apps info retrieval completed: %d found, %d not found", len(foundApps), len(notFoundApps))
-		resultChan <- result{response: response}
-	}()
-
-	// Wait for result or timeout
-	select {
-	case <-ctx.Done():
-		glog.V(3).Info("Request timeout or cancelled for /api/v2/apps")
-		s.sendResponse(w, http.StatusRequestTimeout, false, "Request timeout - apps retrieval took too long", nil)
+	rows, err := store.ListAppDetailsForUser(ctx, userID, keys)
+	if err != nil {
+		glog.Errorf("Failed to list app details for user %s: %v", userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve apps information", nil)
 		return
-	case res := <-resultChan:
-		if res.err != nil {
-			glog.Errorf("Error retrieving apps information: %v", res.err)
-			if res.err.Error() == "user data not found" {
-				s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-			} else {
-				s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve apps information", nil)
-			}
-			return
-		}
+	}
 
-		glog.V(2).Infof("Apps information retrieved successfully for user: %s", userID)
+	rowsByKey := make(map[store.AppQueryKey]*store.AppDetailRow, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		rowsByKey[store.AppQueryKey{SourceID: row.SourceID, AppID: row.AppID}] = row
+	}
 
-		// Add debug logging to check response data
-		if apps, ok := res.response["apps"]; ok {
-			glog.V(3).Infof("DEBUG: - Total apps found: %d", len(apps.([]map[string]interface{})))
+	foundApps := make([]map[string]interface{}, 0, len(request.Apps))
+	notFoundApps := make([]AppQueryInfo, 0)
+	for _, q := range request.Apps {
+		key := store.AppQueryKey{SourceID: q.SourceDataName, AppID: q.AppID}
+		row, ok := rowsByKey[key]
+		if !ok {
+			notFoundApps = append(notFoundApps, q)
+			continue
 		}
-		if total, ok := res.response["total_count"]; ok {
-			glog.V(3).Infof("DEBUG: - Total count: %d", total)
+		entry, err := buildAppDetailEntry(row)
+		if err != nil {
+			glog.Errorf("Failed to compose ApplicationInfoEntry for %s/%s: %v", q.SourceDataName, q.AppID, err)
+			notFoundApps = append(notFoundApps, q)
+			continue
 		}
-		if notFound, ok := res.response["not_found"]; ok {
-			glog.V(3).Infof("DEBUG: - Not found count: %d", len(notFound.([]AppQueryInfo)))
+		item := map[string]interface{}{
+			"app_info": map[string]interface{}{
+				"app_entry": entry,
+			},
+			"app_simple_info": buildAppSimpleInfo(detailRowAsSimpleRow(row)),
+			"timestamp":       row.UpdatedAt.Unix(),
+			"type":            string(types.AppInfoLatest),
+			"version":         metadataVersion(row),
 		}
+		foundApps = append(foundApps, item)
+	}
 
-		s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", res.response)
+	response := map[string]interface{}{
+		"apps":        foundApps,
+		"total_count": len(foundApps),
+	}
+	if len(notFoundApps) > 0 {
+		response["not_found"] = notFoundApps
+	}
+
+	glog.V(2).Infof("Apps information retrieved successfully for user %s (found=%d not_found=%d)",
+		userID, len(foundApps), len(notFoundApps))
+	s.sendResponse(w, http.StatusOK, true, "Apps information retrieved successfully", response)
+}
+
+// buildAppDetailEntry rebuilds an *ApplicationInfoEntry from the
+// per-(user, source, app) PG row. The 11 manifest JSONB columns feed
+// types.ComposeApplicationInfoEntry, which already knows how to merge
+// metadata + spec + resources, translate resource-key aliases and
+// wrap multi-language strings; this wrapper handles the i18n
+// nesting transformation and version_history pass-through that
+// ComposeApplicationInfoEntry's scalars argument carries.
+func buildAppDetailEntry(row *store.AppDetailRow) (*types.ApplicationInfoEntry, error) {
+	manifest := manifestFromDetailRow(row)
+
+	scalars := types.EntryScalars{
+		ID:         row.AppID,
+		AppID:      row.AppID,
+		Version:    metadataVersion(row),
+		CfgType:    row.ManifestType,
+		ApiVersion: row.APIVersion,
+	}
+	if row.I18n != nil {
+		scalars.I18n = types.NestI18nForEntry(row.I18n.Data)
+	}
+	if row.VersionHistory != nil && len(row.VersionHistory.Data) > 0 {
+		// types.ApplicationInfoEntry.VersionHistory is []*VersionInfo;
+		// the row carries a value-typed slice so take addresses here.
+		vh := make([]*types.VersionInfo, 0, len(row.VersionHistory.Data))
+		for i := range row.VersionHistory.Data {
+			vh = append(vh, &row.VersionHistory.Data[i])
+		}
+		scalars.VersionHistory = vh
+	}
+
+	return types.ComposeApplicationInfoEntry(manifest, scalars)
+}
+
+// manifestFromDetailRow lifts the eleven manifest JSONB columns off
+// the row into the typed UserAppManifest container that
+// ComposeApplicationInfoEntry expects.
+func manifestFromDetailRow(row *store.AppDetailRow) *types.UserAppManifest {
+	m := &types.UserAppManifest{}
+	if row.Metadata != nil {
+		m.Metadata = row.Metadata.Data
+	}
+	if row.Spec != nil {
+		m.Spec = row.Spec.Data
+	}
+	if row.Resources != nil {
+		m.Resources = row.Resources.Data
+	}
+	if row.Options != nil {
+		m.Options = row.Options.Data
+	}
+	if row.Tailscale != nil {
+		m.Tailscale = row.Tailscale.Data
+	}
+	if row.Permission != nil {
+		m.Permission = row.Permission.Data
+	}
+	if row.Middleware != nil {
+		m.Middleware = row.Middleware.Data
+	}
+	if row.Entrances != nil {
+		m.Entrances = row.Entrances.Data
+	}
+	if row.SharedEntrances != nil {
+		m.SharedEntrances = row.SharedEntrances.Data
+	}
+	if row.Ports != nil {
+		m.Ports = row.Ports.Data
+	}
+	if row.Envs != nil {
+		m.Envs = row.Envs.Data
+	}
+	return m
+}
+
+// metadataVersion reads the user-facing app version (= OlaresManifest
+// metadata.version) off the metadata JSONB column. Returns "" when
+// the column is missing or the field is absent.
+func metadataVersion(row *store.AppDetailRow) string {
+	if row == nil || row.Metadata == nil {
+		return ""
+	}
+	if v, ok := row.Metadata.Data["version"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// detailRowAsSimpleRow projects an AppDetailRow onto the
+// AppInfoSimpleRow shape buildAppSimpleInfo consumes. The two
+// structs share their i18n-driven fields so this is essentially a
+// field-by-field copy plus AppEntry / AppVersion derivation.
+func detailRowAsSimpleRow(row *store.AppDetailRow) *store.AppInfoSimpleRow {
+	if row == nil {
+		return nil
+	}
+	return &store.AppInfoSimpleRow{
+		SourceID:     row.SourceID,
+		AppID:        row.AppID,
+		AppName:      row.AppName,
+		ManifestType: row.ManifestType,
+		AppVersion:   metadataVersion(row),
+		UpdatedAt:    row.UpdatedAt,
+		Metadata:     row.Metadata,
+		I18n:         row.I18n,
+		AppEntry:     row.AppEntry,
 	}
 }
 
