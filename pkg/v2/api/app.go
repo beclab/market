@@ -270,11 +270,17 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// AppQueryInfo.AppID on the wire is the manifest's app_name (the
+	// short, human-readable handle like "ollamav2"), not the hashed
+	// app_id ("a5be2268"). Every existing client uses name-based
+	// addressing, so the store-side lookup matches against
+	// user_applications.app_name; see AppQueryKey doc for the
+	// rationale and the clone-name caveat.
 	keys := make([]store.AppQueryKey, 0, len(request.Apps))
 	for _, q := range request.Apps {
 		keys = append(keys, store.AppQueryKey{
 			SourceID: q.SourceDataName,
-			AppID:    q.AppID,
+			AppName:  q.AppID,
 		})
 	}
 
@@ -290,13 +296,13 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 		if row == nil {
 			continue
 		}
-		rowsByKey[store.AppQueryKey{SourceID: row.SourceID, AppID: row.AppID}] = row
+		rowsByKey[store.AppQueryKey{SourceID: row.SourceID, AppName: row.AppName}] = row
 	}
 
 	foundApps := make([]map[string]interface{}, 0, len(request.Apps))
 	notFoundApps := make([]AppQueryInfo, 0)
 	for _, q := range request.Apps {
-		key := store.AppQueryKey{SourceID: q.SourceDataName, AppID: q.AppID}
+		key := store.AppQueryKey{SourceID: q.SourceDataName, AppName: q.AppID}
 		row, ok := rowsByKey[key]
 		if !ok {
 			notFoundApps = append(notFoundApps, q)

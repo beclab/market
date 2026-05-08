@@ -114,9 +114,18 @@ func ListAppInfoLatestForUser(ctx context.Context, userID string, sourceIDs []st
 // per-(source, app) bulk lookup. The user_id is supplied separately
 // because every row in a single ListAppDetailsForUser call shares
 // the same user_id.
+//
+// AppName matches against user_applications.app_name (the manifest's
+// metadata.name) rather than user_applications.app_id (the short
+// hash) because every existing client surfaces the name as its
+// addressable "app id" on the wire. (user_id, source_id, app_name)
+// is NOT unique at the schema level — clones may share a name with
+// the original app — so a name collision returns multiple rows; in
+// that case the deterministic ORDER BY in the SQL picks one. Switch
+// to AppID once a client sends the hashed id.
 type AppQueryKey struct {
 	SourceID string
-	AppID    string
+	AppName  string
 }
 
 // AppDetailRow is the projection ListAppDetailsForUser yields. It
@@ -175,7 +184,7 @@ func ListAppDetailsForUser(ctx context.Context, userID string, keys []AppQueryKe
 	args = append(args, userID, "success")
 	for _, k := range keys {
 		tuples = append(tuples, "(?, ?)")
-		args = append(args, k.SourceID, k.AppID)
+		args = append(args, k.SourceID, k.AppName)
 	}
 
 	query := `
@@ -209,8 +218,8 @@ LEFT JOIN applications a
     ON a.source_id = ua.source_id AND a.app_id = ua.app_id
 WHERE ua.user_id = ?
   AND ua.render_status = ?
-  AND (ua.source_id, ua.app_id) IN (` + strings.Join(tuples, ",") + `)
-ORDER BY ua.source_id, ua.app_id
+  AND (ua.source_id, ua.app_name) IN (` + strings.Join(tuples, ",") + `)
+ORDER BY ua.source_id, ua.app_name, ua.app_id
 `
 
 	var rows []*AppDetailRow
