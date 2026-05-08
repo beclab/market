@@ -87,37 +87,31 @@ func LocaleMapFromAny(v any) map[string]string {
 	return nil
 }
 
-// PivotI18n transposes a chart-repo i18n bundle from locale-major
-// ({locale: {field: value}}) to field-major ({field: {locale: value}})
-// for the requested field names. Empty values are dropped so the
-// JSON output never carries {locale: ""} entries; fields that end
-// up with no locales are omitted from the result so a caller's
-// `len(out[field]) > 0` check works as a "have any localised data
-// for field?" probe.
+// LocalisedString reads a single localised field from chart-repo's
+// i18n bundle (field-major shape: {field: {locale: value}}) and
+// returns the inner {locale: value} map with empty-string locales
+// dropped, so the JSON output never carries entries like
+// {"en-US": ""}. Returns nil if the field is absent or every locale
+// is empty.
 //
 // Typical caller:
 //
-//	pivoted := helper.PivotI18n(row.I18n.Data, "title", "description")
-//	info.AppTitle       = pivoted["title"]
-//	info.AppDescription = pivoted["description"]
-func PivotI18n(i18n map[string]map[string]string, fields ...string) map[string]map[string]string {
-	if len(i18n) == 0 || len(fields) == 0 {
+//	info.AppTitle       = helper.LocalisedString(row.I18n.Data, "title")
+//	info.AppDescription = helper.LocalisedString(row.I18n.Data, "description")
+func LocalisedString(i18n map[string]map[string]string, field string) map[string]string {
+	inner, ok := i18n[field]
+	if !ok || len(inner) == 0 {
 		return nil
 	}
-	out := make(map[string]map[string]string, len(fields))
-	for locale, kv := range i18n {
-		for _, field := range fields {
-			v := kv[field]
-			if v == "" {
-				continue
-			}
-			inner, ok := out[field]
-			if !ok {
-				inner = make(map[string]string)
-				out[field] = inner
-			}
-			inner[locale] = v
+	out := make(map[string]string, len(inner))
+	for locale, v := range inner {
+		if v == "" {
+			continue
 		}
+		out[locale] = v
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

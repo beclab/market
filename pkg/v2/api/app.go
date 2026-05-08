@@ -950,17 +950,17 @@ func buildAppSimpleInfo(row *store.AppInfoSimpleRow) *types.AppSimpleInfo {
 		info.AppIcon = s
 	}
 
-	// Multi-language title / description: prefer the dedicated i18n
-	// column (chart-repo's localised bundle), fall back to whatever
-	// the manifest metadata block carries (which may be either a map
-	// or a bare string).
+	// Multi-language title / description: chart-repo's i18n bundle is
+	// already field-major ({title: {locale: value}}) so we just pull
+	// the requested field's locale map. Fall back to the manifest
+	// metadata block (which may be either a map or a bare string)
+	// for legacy rows where the i18n column is empty.
 	var i18nBundle map[string]map[string]string
 	if row.I18n != nil {
 		i18nBundle = row.I18n.Data
 	}
-	pivoted := helper.PivotI18n(i18nBundle, "title", "description")
-	info.AppTitle = pivoted["title"]
-	info.AppDescription = pivoted["description"]
+	info.AppTitle = helper.LocalisedString(i18nBundle, "title")
+	info.AppDescription = helper.LocalisedString(i18nBundle, "description")
 	if len(info.AppTitle) == 0 {
 		info.AppTitle = helper.LocaleMapFromAny(meta["title"])
 	}
