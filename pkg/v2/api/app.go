@@ -312,10 +312,13 @@ func (s *Server) getAppsInfo(w http.ResponseWriter, r *http.Request) {
 			"app_info": map[string]interface{}{
 				"app_entry": entry,
 			},
-			"app_simple_info": buildAppSimpleInfo(detailRowAsSimpleRow(row)),
-			"timestamp":       row.UpdatedAt.Unix(),
-			"type":            string(types.AppInfoLatest),
-			"version":         metadataVersion(row),
+			"app_simple_info":  buildAppSimpleInfo(detailRowAsSimpleRow(row)),
+			"manifest_version": row.ManifestVersion,
+			"manifest_type":    row.ManifestType,
+			"api_version":      row.APIVersion,
+			"timestamp":        row.UpdatedAt.Unix(),
+			"type":             string(types.AppInfoLatest),
+			"version":          metadataVersion(row),
 		}
 		foundApps = append(foundApps, item)
 	}
