@@ -44,7 +44,10 @@ type syncAppData struct {
 // RenderedPackage are file paths to the source / rendered chart packages
 // on chart-repo's filesystem — kept here for diagnostic logging even
 // though the database does not have columns for them. AppInfo includes
-// the same app_entry plus image_analysis (which is not persisted).
+// the same app_entry; the previous "image_analysis lives only inside
+// AppInfo" arrangement is gone now that chart-repo emits a typed
+// ImageAnalysis block at this level (see ImageAnalysis below) and
+// Market persists it.
 //
 // Migration plan: RawData is the legacy flat-map field kept on the wire
 // only during chart-repo's gradual rollout of the typed payload. Market
@@ -58,6 +61,15 @@ type syncAppPayload struct {
 	Version         string                `json:"version"`
 	RawData         map[string]any        `json:"raw_data"`
 	RawDataEx       *oac.AppConfiguration `json:"raw_data_ex"`
+	// ImageAnalysis is chart-repo's per-app docker image analysis,
+	// emitted at the same level as RawDataEx. We persist it verbatim
+	// to user_applications.image_analysis via UpsertRenderSuccess so
+	// /api/v2/apps callers can render image-level details (size,
+	// architecture, download progress) without round-tripping back
+	// to chart-repo. nil here is normal for older chart-repo builds
+	// that pre-date this field — the column stays NULL until the
+	// next render with the new chart-repo refreshes it.
+	ImageAnalysis *types.ImageAnalysisResult `json:"image_analysis"`
 	// I18n / VersionHistory live at the same level as RawDataEx on
 	// the chart-repo wire and are persisted to dedicated JSONB columns
 	// on user_applications (see store.UpsertRenderSuccess); they are
@@ -191,6 +203,7 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 			Manifest:        manifest,
 			I18n:            apiResponse.Data.AppData.I18n,
 			VersionHistory:  apiResponse.Data.AppData.VersionHistory,
+			ImageAnalysis:   apiResponse.Data.AppData.ImageAnalysis,
 		}
 		if err := store.UpsertRenderSuccess(ctx, in); err != nil {
 			return fmt.Errorf("persist render success to user_applications: %w", err)

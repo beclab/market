@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS user_applications (
     -- upgradeDescription). Sourced directly from sync-app's
     -- top-level version_history field, NOT spliced into spec.
     version_history             JSONB,
+    -- image_analysis is chart-repo's per-app docker image analysis
+    -- result (types.ImageAnalysisResult: app_id / user_id / source_id /
+    -- analyzed_at / total_images / images map keyed by image name).
+    -- Sourced directly from the sync-app response top-level field
+    -- (sibling of raw_data_ex), NOT derived from raw_data_ex. Kept
+    -- nullable so the failure / never-rendered placeholder rows can
+    -- be inserted without a value, and so that legacy rows persisted
+    -- before this column existed surface as NULL until their next
+    -- successful render refreshes them.
+    image_analysis              JSONB,
 
     -- render_status reflects the result of the latest chart-repo render
     -- attempt for this user_application: 'pending' before the first attempt,
@@ -104,6 +114,8 @@ CREATE TABLE IF NOT EXISTS user_applications (
         CHECK (i18n IS NULL OR jsonb_typeof(i18n) = 'object'),
     CONSTRAINT ck_user_applications_version_history_array
         CHECK (version_history IS NULL OR jsonb_typeof(version_history) = 'array'),
+    CONSTRAINT ck_user_applications_image_analysis_object
+        CHECK (image_analysis IS NULL OR jsonb_typeof(image_analysis) = 'object'),
     CONSTRAINT ck_user_applications_render_status
         CHECK (render_status IN ('pending', 'success', 'failed'))
 );

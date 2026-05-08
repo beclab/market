@@ -62,6 +62,14 @@ type UserApplication struct {
 	// directly from the sync-app response top-level field; the
 	// previous "splice into spec.versionHistory" path is gone.
 	VersionHistory *JSONB[[]types.VersionInfo] `gorm:"column:version_history;type:jsonb"`
+	// ImageAnalysis stores chart-repo's per-app docker image analysis
+	// result (types.ImageAnalysisResult). Sourced directly from the
+	// sync-app response top-level image_analysis field (sibling of
+	// raw_data_ex), persisted verbatim. Pointer-typed so the failure /
+	// never-rendered placeholder rows can be written without it; nil
+	// here means the row predates this column's existence or the
+	// upstream omitted the field.
+	ImageAnalysis *JSONB[types.ImageAnalysisResult] `gorm:"column:image_analysis;type:jsonb"`
 
 	RenderStatus              string `gorm:"column:render_status;size:16;not null;default:'pending'"`
 	RenderError               string `gorm:"column:render_error;size:200"`

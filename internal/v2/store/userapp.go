@@ -69,6 +69,12 @@ type RenderCandidate struct {
 // to dedicated JSONB columns. Empty / nil values write SQL NULL so a
 // caller without those payloads does not clobber a previously stored
 // non-empty bundle.
+//
+// ImageAnalysis carries chart-repo's per-app docker image analysis
+// (types.ImageAnalysisResult) emitted alongside raw_data_ex. nil here
+// writes SQL NULL — same "don't clobber on absence" rule as I18n /
+// VersionHistory; the failure / placeholder paths supply nil and the
+// previously-stored value (if any) survives.
 type UpsertRenderSuccessInput struct {
 	UserID   string
 	SourceID string
@@ -88,6 +94,7 @@ type UpsertRenderSuccessInput struct {
 
 	I18n           map[string]map[string]string
 	VersionHistory []types.VersionInfo
+	ImageAnalysis  *types.ImageAnalysisResult
 }
 
 // MarkRenderFailedInput captures the minimum fields required to upsert a
@@ -273,6 +280,10 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 		j := models.NewJSONB(in.VersionHistory)
 		row.VersionHistory = &j
 	}
+	if in.ImageAnalysis != nil {
+		j := models.NewJSONB(*in.ImageAnalysis)
+		row.ImageAnalysis = &j
+	}
 
 	result := gdb.WithContext(ctx).
 		Clauses(clause.OnConflict{
@@ -302,6 +313,7 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 				"envs",
 				"i18n",
 				"version_history",
+				"image_analysis",
 			}),
 		}).
 		Create(row)
