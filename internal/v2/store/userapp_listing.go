@@ -14,18 +14,20 @@ import (
 // AppInfoSimpleRow is the projection ListAppInfoLatestForUser yields.
 // Each row carries enough data to assemble the FilteredAppInfoLatestData
 // payload returned by /market/data: the manifest metadata block (for
-// AppSimpleInfo's app-facing fields) and the catalog-level app_entry
+// AppSimpleInfo's app-facing fields), the chart-repo i18n bundle (for
+// localised title / description), and the catalog-level app_entry
 // (for SupportArch / AppLabels which the manifest metadata does not
 // always carry).
 type AppInfoSimpleRow struct {
-	SourceID     string                                    `gorm:"column:source_id"`
-	AppID        string                                    `gorm:"column:app_id"`
-	AppName      string                                    `gorm:"column:app_name"`
-	ManifestType string                                    `gorm:"column:manifest_type"`
-	AppVersion   string                                    `gorm:"column:app_version"`
-	UpdatedAt    time.Time                                 `gorm:"column:updated_at"`
-	Metadata     *models.JSONB[map[string]any]             `gorm:"column:metadata"`
-	AppEntry     *models.JSONB[types.ApplicationInfoEntry] `gorm:"column:app_entry"`
+	SourceID     string                                      `gorm:"column:source_id"`
+	AppID        string                                      `gorm:"column:app_id"`
+	AppName      string                                      `gorm:"column:app_name"`
+	ManifestType string                                      `gorm:"column:manifest_type"`
+	AppVersion   string                                      `gorm:"column:app_version"`
+	UpdatedAt    time.Time                                   `gorm:"column:updated_at"`
+	Metadata     *models.JSONB[map[string]any]               `gorm:"column:metadata"`
+	I18n         *models.JSONB[map[string]map[string]string] `gorm:"column:i18n"`
+	AppEntry     *models.JSONB[types.ApplicationInfoEntry]   `gorm:"column:app_entry"`
 }
 
 // AppStateLatestRow is the projection ListUserAppStateLatest yields.
@@ -95,6 +97,7 @@ func ListAppInfoLatestForUser(ctx context.Context, userID string, sourceIDs []st
 		        COALESCE(ua.metadata->>'version', '') AS app_version,
 		        ua.updated_at,
 		        ua.metadata,
+		        ua.i18n,
 		        a.app_entry`).
 		Where("ua.user_id = ?", userID).
 		Where("ua.render_status = ?", "success").

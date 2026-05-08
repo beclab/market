@@ -11,6 +11,7 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/db/models"
+	"market/internal/v2/helper"
 	"market/internal/v2/paymentnew"
 	"market/internal/v2/settings"
 	"market/internal/v2/store"
@@ -923,11 +924,12 @@ func buildAppInfoLatestStateList(rows []*store.AppInfoSimpleRow) []*types.AppInf
 }
 
 // buildAppSimpleInfo extracts the AppSimpleInfo wire shape from a
-// user_applications JOIN applications row. Field sources match the
-// cache-side fallback chain: prefer the manifest metadata block
-// (user_applications.metadata) for the user-facing fields, fall back
-// to applications.app_entry for SupportArch / Categories which the
-// metadata block does not always carry.
+// user_applications JOIN applications row. Title and description are
+// sourced from the dedicated user_applications.i18n bundle (pivoted
+// from locale-major to field-major); the manifest metadata block
+// supplies single-language fallbacks for legacy rows where i18n is
+// NULL. SupportArch / Categories fall back to applications.app_entry
+// when not present on the manifest.
 //
 // Returns nil only when the row itself is nil; otherwise the struct
 // is always populated, with empty fields where data is unavailable.
@@ -947,9 +949,26 @@ func buildAppSimpleInfo(row *store.AppInfoSimpleRow) *types.AppSimpleInfo {
 	if s, ok := meta["icon"].(string); ok {
 		info.AppIcon = s
 	}
-	info.AppDescription = stringMapFromAny(meta["description"])
-	info.AppTitle = stringMapFromAny(meta["title"])
-	info.Categories = stringSliceFromAny(meta["categories"])
+
+	// Multi-language title / description: prefer the dedicated i18n
+	// column (chart-repo's localised bundle), fall back to whatever
+	// the manifest metadata block carries (which may be either a map
+	// or a bare string).
+	var i18nBundle map[string]map[string]string
+	if row.I18n != nil {
+		i18nBundle = row.I18n.Data
+	}
+	pivoted := helper.PivotI18n(i18nBundle, "title", "description")
+	info.AppTitle = pivoted["title"]
+	info.AppDescription = pivoted["description"]
+	if len(info.AppTitle) == 0 {
+		info.AppTitle = helper.LocaleMapFromAny(meta["title"])
+	}
+	if len(info.AppDescription) == 0 {
+		info.AppDescription = helper.LocaleMapFromAny(meta["description"])
+	}
+
+	info.Categories = helper.StringSliceFromAny(meta["categories"])
 
 	if row.AppEntry != nil {
 		entry := row.AppEntry.Data
@@ -1005,64 +1024,6 @@ func buildAppSimpleInfoMap(row *store.AppInfoSimpleRow) map[string]interface{} {
 	return out
 }
 
-// stringMapFromAny converts a json-decoded `interface{}` (which arrives
-// as map[string]interface{}) into the map[string]string shape the
-// types.AppSimpleInfo description / title fields expect. Returns nil
-// for empty / missing input so the JSON-marshalled response keeps
-// clean shape.
-func stringMapFromAny(v any) map[string]string {
-	m, ok := v.(map[string]interface{})
-	if !ok || len(m) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(m))
-	for k, val := range m {
-		if s, ok := val.(string); ok {
-			out[k] = s
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-// stringSliceFromAny is the slice equivalent of stringMapFromAny.
-func stringSliceFromAny(v any) []string {
-	s, ok := v.([]interface{})
-	if !ok || len(s) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(s))
-	for _, val := range s {
-		if str, ok := val.(string); ok {
-			out = append(out, str)
-		}
-	}
-	return out
-}
-
-// pickStringFromAny coerces a json-decoded value into a single string,
-// handling both bare-string and {locale: string} multi-language map
-// shapes. Used for AppStateLatestDataSpec.Title which the schema
-// stores as a multi-language map but the wire contract surfaces as a
-// scalar.
-func pickStringFromAny(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case map[string]interface{}:
-		if s, ok := x["en-US"].(string); ok {
-			return s
-		}
-		for _, vv := range x {
-			if s, ok := vv.(string); ok {
-				return s
-			}
-		}
-	}
-	return ""
-}
 
 // buildAppStateLatestList wraps each AppStateLatestRow in the typed
 // AppStateLatestData wire shape. userID and sourceID are passed in
@@ -1094,8 +1055,8 @@ func buildAppStateLatestData(userID, sourceID string, row *store.AppStateLatestR
 			icon = s
 		}
 		// metadata.title is a multi-language map; flatten to a single
-		// string for the wire contract via pickStringFromAny.
-		title = pickStringFromAny(row.Metadata.Data["title"])
+		// string for the wire contract via helper.PickStringFromAny.
+		title = helper.PickStringFromAny(row.Metadata.Data["title"])
 	}
 
 	timeStr := ""
