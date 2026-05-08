@@ -42,12 +42,13 @@ type syncAppData struct {
 // syncAppPayload is the per-app render artefact. RawDataEx is the input
 // we split into the user_applications JSONB columns. RawPackage and
 // RenderedPackage are file paths to the source / rendered chart packages
-// on chart-repo's filesystem — kept here for diagnostic logging even
-// though the database does not have columns for them. AppInfo includes
-// the same app_entry; the previous "image_analysis lives only inside
-// AppInfo" arrangement is gone now that chart-repo emits a typed
-// ImageAnalysis block at this level (see ImageAnalysis below) and
-// Market persists it.
+// on chart-repo's filesystem; they are persisted to the homonymous
+// user_applications.{raw_package, rendered_package} columns via
+// UpsertRenderSuccess so the API layer can derive the chart_path argument
+// for app-service without a cache round-trip. AppInfo includes the same
+// app_entry; the previous "image_analysis lives only inside AppInfo"
+// arrangement is gone now that chart-repo emits a typed ImageAnalysis
+// block at this level (see ImageAnalysis below) and Market persists it.
 //
 // Migration plan: RawData is the legacy flat-map field kept on the wire
 // only during chart-repo's gradual rollout of the typed payload. Market
@@ -204,6 +205,8 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 			I18n:            apiResponse.Data.AppData.I18n,
 			VersionHistory:  apiResponse.Data.AppData.VersionHistory,
 			ImageAnalysis:   apiResponse.Data.AppData.ImageAnalysis,
+			RawPackage:      apiResponse.Data.AppData.RawPackage,
+			RenderedPackage: apiResponse.Data.AppData.RenderedPackage,
 		}
 		if err := store.UpsertRenderSuccess(ctx, in); err != nil {
 			return fmt.Errorf("persist render success to user_applications: %w", err)

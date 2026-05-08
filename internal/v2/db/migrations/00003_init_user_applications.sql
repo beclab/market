@@ -61,6 +61,20 @@ CREATE TABLE IF NOT EXISTS user_applications (
     -- before this column existed surface as NULL until their next
     -- successful render refreshes them.
     image_analysis              JSONB,
+    -- raw_package / rendered_package are filesystem paths emitted by
+    -- chart-repo's sync-app response (siblings of raw_data_ex) that
+    -- point at the source / rendered chart packages on chart-repo's
+    -- filesystem. Persisted verbatim by UpsertRenderSuccess so the
+    -- API layer (installApp / upgradeApp / cloneApp) can derive the
+    -- chart_path argument it forwards to app-service without a
+    -- round-trip back to chart-repo or the in-memory cache. NOT NULL
+    -- DEFAULT '' mirrors the manifest_version / manifest_type style:
+    -- failure-only placeholder rows from MarkRenderFailed get the
+    -- empty default and successful renders overwrite both columns
+    -- in full (the OnConflict assignment list owns them, so a
+    -- subsequent re-render reflects chart-repo's latest paths).
+    raw_package                 TEXT         NOT NULL DEFAULT '',
+    rendered_package            TEXT         NOT NULL DEFAULT '',
 
     -- render_status reflects the result of the latest chart-repo render
     -- attempt for this user_application: 'pending' before the first attempt,

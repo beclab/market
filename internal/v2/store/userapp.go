@@ -95,6 +95,16 @@ type UpsertRenderSuccessInput struct {
 	I18n           map[string]map[string]string
 	VersionHistory []types.VersionInfo
 	ImageAnalysis  *types.ImageAnalysisResult
+
+	// RawPackage / RenderedPackage are chart-repo filesystem paths
+	// returned by sync-app at the same level as raw_data_ex. Empty
+	// strings are written verbatim — chart-repo always emits them on
+	// the success path, so an empty value here typically signals a
+	// caller bug rather than a missing upstream field. The OnConflict
+	// path overwrites both columns in full so a re-render reflects
+	// chart-repo's latest paths.
+	RawPackage      string
+	RenderedPackage string
 }
 
 // MarkRenderFailedInput captures the minimum fields required to upsert a
@@ -261,6 +271,8 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 		ManifestVersion:           in.ManifestVersion,
 		ManifestType:              in.ManifestType,
 		APIVersion:                in.APIVersion,
+		RawPackage:                in.RawPackage,
+		RenderedPackage:           in.RenderedPackage,
 		RenderStatus:              "success",
 		RenderError:               "",
 		RenderConsecutiveFailures: 0,
@@ -314,6 +326,8 @@ func UpsertRenderSuccess(ctx context.Context, in UpsertRenderSuccessInput) error
 				"i18n",
 				"version_history",
 				"image_analysis",
+				"raw_package",
+				"rendered_package",
 			}),
 		}).
 		Create(row)

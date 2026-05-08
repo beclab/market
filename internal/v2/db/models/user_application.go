@@ -71,6 +71,18 @@ type UserApplication struct {
 	// upstream omitted the field.
 	ImageAnalysis *JSONB[types.ImageAnalysisResult] `gorm:"column:image_analysis;type:jsonb"`
 
+	// RawPackage / RenderedPackage are filesystem paths emitted by
+	// chart-repo's sync-app response (siblings of raw_data_ex) that
+	// point at the source / rendered chart packages on chart-repo's
+	// filesystem. Persisted verbatim so install / upgrade / clone API
+	// handlers can derive their chart_path argument without a cache
+	// round-trip. NOT NULL DEFAULT '' on the SQL side mirrors the
+	// manifest_version style: failure-only placeholder rows surface
+	// as empty strings and successful renders overwrite both columns
+	// in full via UpsertRenderSuccess.
+	RawPackage      string `gorm:"column:raw_package;type:text;not null;default:''"`
+	RenderedPackage string `gorm:"column:rendered_package;type:text;not null;default:''"`
+
 	RenderStatus              string `gorm:"column:render_status;size:16;not null;default:'pending'"`
 	RenderError               string `gorm:"column:render_error;size:200"`
 	RenderConsecutiveFailures int    `gorm:"column:render_consecutive_failures;not null;default:0"`
