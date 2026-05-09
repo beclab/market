@@ -260,13 +260,16 @@ func (s *StateNotifier) worker() {
 func (s *StateNotifier) processEvent(ev stateEvent) {
 	msg := ev.msg
 
-	// Without a (user, source, app) anchor the DAO has nothing to write to.
-	// Externally-initiated operations on apps not in any Market source
-	// land here and are skipped — the legacy cache path covers them via
-	// its own multi-fallback resolution.
-	if msg.User == "" || msg.MarketSource == "" || msg.Name == "" {
-		glog.V(3).Infof("[state] skipping event without (user,source,app) anchor: source=%s opID=%q opType=%q name=%q user=%q marketSource=%q",
-			ev.source, msg.OpID, msg.OpType, msg.Name, msg.User, msg.MarketSource)
+	// Without a (user, source, name, rawAppName) anchor the DAO has
+	// nothing to write to. The DAO matches user_applications by
+	// (app_name AND app_raw_name); both NATS fields are required so
+	// clone vs. original disambiguates correctly. Externally-initiated
+	// operations on apps not in any Market source land here too and
+	// are skipped — the legacy cache path covers them via its own
+	// multi-fallback resolution.
+	if msg.User == "" || msg.MarketSource == "" || msg.Name == "" || msg.RawAppName == "" {
+		glog.V(3).Infof("[state] skipping event without (user,source,name,rawAppName) anchor: source=%s opID=%q opType=%q name=%q rawAppName=%q user=%q marketSource=%q",
+			ev.source, msg.OpID, msg.OpType, msg.Name, msg.RawAppName, msg.User, msg.MarketSource)
 		return
 	}
 
@@ -285,6 +288,7 @@ func (s *StateNotifier) processEvent(ev stateEvent) {
 		UserID:          msg.User,
 		SourceID:        msg.MarketSource,
 		AppName:         msg.Name,
+		AppRawName:      msg.RawAppName,
 		State:           msg.State,
 		Reason:          msg.Reason,
 		Message:         msg.Message,

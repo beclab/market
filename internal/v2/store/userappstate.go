@@ -50,12 +50,24 @@ type PendingStateInput struct {
 // DAO needs to upsert. The DAO does not import internal/v2/appinfo, so the
 // caller (state.go) flattens the wire struct into this DTO.
 //
-// AppName is the value carried in NATS msg.Name; the DAO matches it
-// against user_applications.app_name (and falls back to app_raw_name to
-// cover clones, where the synthesized clone alias lives in app_name and
-// the original app name lives in app_raw_name). NATS does NOT carry an
-// app_id field — manifest ids are not part of the wire contract — so
-// matching by app_id is not possible on this path.
+// AppName / AppRawName are the values carried in NATS msg.Name and
+// msg.RawAppName; the DAO matches them BOTH against
+// user_applications.app_name and user_applications.app_raw_name in
+// the same SQL predicate (AND, not OR) so a user who has both an
+// original app and one of its clones installed lands on exactly one
+// row per NATS event:
+//
+//   - non-clone: msg.Name == msg.RawAppName == display name; matches
+//     the original row where app_name == app_raw_name == display name.
+//   - clone:     msg.Name == clone alias (rawAppName+hash);
+//     msg.RawAppName == original name; matches the clone
+//     row where app_name == clone alias AND app_raw_name ==
+//     original name.
+//
+// NATS does NOT carry an app_id field — manifest ids are not part of
+// the wire contract — so matching by app_id is not possible on this
+// path; the (app_name, app_raw_name) pair is the only NATS-carried
+// key sufficient to disambiguate between original and clone rows.
 //
 // EventCreateTime is the parsed msg.CreateTime; it MUST be non-zero so the
 // monotonic guard in UpsertStateFromNATS can reject out-of-order events.
@@ -68,6 +80,7 @@ type StateNATSUpdate struct {
 	UserID          string
 	SourceID        string
 	AppName         string
+	AppRawName      string
 	State           string
 	Reason          string
 	Message         string
@@ -258,8 +271,9 @@ func UpsertStateFromNATS(ctx context.Context, in StateNATSUpdate) (bool, error) 
 	in.UserID = strings.TrimSpace(in.UserID)
 	in.SourceID = strings.TrimSpace(in.SourceID)
 	in.AppName = strings.TrimSpace(in.AppName)
-	if in.UserID == "" || in.SourceID == "" || in.AppName == "" {
-		return false, fmt.Errorf("UpsertStateFromNATS: empty UserID/SourceID/AppName")
+	in.AppRawName = strings.TrimSpace(in.AppRawName)
+	if in.UserID == "" || in.SourceID == "" || in.AppName == "" || in.AppRawName == "" {
+		return false, fmt.Errorf("UpsertStateFromNATS: empty UserID/SourceID/AppName/AppRawName")
 	}
 	if in.EventCreateTime.IsZero() {
 		return false, fmt.Errorf("UpsertStateFromNATS: zero EventCreateTime; caller must parse msg.CreateTime")
@@ -270,12 +284,15 @@ func UpsertStateFromNATS(ctx context.Context, in StateNATSUpdate) (bool, error) 
 		return false, fmt.Errorf("postgres not initialised; db.Open must run before user application state store usage")
 	}
 
-	// Match the user_applications row by app_name OR app_raw_name. NATS
-	// only ever carries msg.Name (no manifest id), and for clones the
-	// synthesized alias lives in app_name while the original app name
-	// lives in app_raw_name; matching either column finds the right row
-	// in both clone and non-clone cases (mirrors LookupAppLocator's
-	// pattern). $13 is bound twice — once per side of the OR.
+	// Match the user_applications row by (app_name AND app_raw_name).
+	// Both must equal the corresponding NATS field — msg.Name maps to
+	// ua.app_name and msg.RawAppName maps to ua.app_raw_name. AND (not
+	// OR) is required so a user who has both an original app and one
+	// of its clones installed lands exactly on one row per event:
+	//   - original NATS event:  msg.Name == msg.RawAppName == display name;
+	//                          matches only the original row.
+	//   - clone NATS event:     msg.Name == clone alias, msg.RawAppName ==
+	//                          original name; matches only the clone row.
 	const query = `
 INSERT INTO user_application_states (
     user_application_id,
@@ -285,8 +302,10 @@ INSERT INTO user_application_states (
 )
 SELECT ua.id, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 FROM user_applications ua
-WHERE ua.user_id = $11 AND ua.source_id = $12
-  AND (ua.app_name = $13 OR ua.app_raw_name = $13)
+WHERE ua.user_id      = $11
+  AND ua.source_id    = $12
+  AND ua.app_name     = $13
+  AND ua.app_raw_name = $14
 ON CONFLICT (user_application_id) DO UPDATE SET
     state             = EXCLUDED.state,
     reason            = EXCLUDED.reason,
@@ -316,11 +335,11 @@ WHERE user_application_states.event_create_time < EXCLUDED.event_create_time
 		nullableJSON(in.Entrances),
 		nullableJSON(in.SharedEntrances),
 		nullableJSON(in.StatusEntrances),
-		in.UserID, in.SourceID, in.AppName,
+		in.UserID, in.SourceID, in.AppName, in.AppRawName,
 	)
 	if err := res.Error; err != nil {
-		return false, fmt.Errorf("upsert user_application_state from NATS (user=%s source=%s app=%s): %w",
-			in.UserID, in.SourceID, in.AppName, err)
+		return false, fmt.Errorf("upsert user_application_state from NATS (user=%s source=%s app=%s rawApp=%s): %w",
+			in.UserID, in.SourceID, in.AppName, in.AppRawName, err)
 	}
 	// res.RowsAffected == 0 means EITHER:
 	//   - parent user_applications row is missing → INSERT's SELECT yielded
