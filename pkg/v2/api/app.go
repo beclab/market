@@ -1087,74 +1087,20 @@ func buildAppSimpleInfoMap(row *store.AppInfoSimpleRow) map[string]interface{} {
 // AppStateLatestData wire shape. userID and sourceID are passed in
 // because the Status block carries them as Owner / Source even though
 // they are not stored on the user_application_states row itself.
+//
+// Conversion is delegated to (*store.AppStateLatestRow).ToWireData so
+// the same projection is shared with internal/v2/appinfo's PG-side
+// push hook (StateNotifier.notifyStateChange) without a parallel
+// implementation that could drift.
 func buildAppStateLatestList(userID, sourceID string, rows []*store.AppStateLatestRow) []*types.AppStateLatestData {
 	out := make([]*types.AppStateLatestData, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
-		out = append(out, buildAppStateLatestData(userID, sourceID, row))
+		out = append(out, row.ToWireData(userID, sourceID))
 	}
 	return out
-}
-
-// buildAppStateLatestData hydrates a single AppStateLatestData from a
-// user_application_states JOIN user_applications row. Three time
-// fields (UpdateTime / StatusTime / LastTransitionTime) all collapse
-// onto event_create_time because the schema only stores a single
-// monotonic timestamp; if a future product need distinguishes them,
-// add columns. Tailscale and Settings are not stored, so they are
-// returned as empty / nil — the cache-side path also produced these
-// values from the upstream NATS message verbatim.
-func buildAppStateLatestData(userID, sourceID string, row *store.AppStateLatestRow) *types.AppStateLatestData {
-	var icon, title string
-	if row.Metadata != nil {
-		if s, ok := row.Metadata.Data["icon"].(string); ok {
-			icon = s
-		}
-		// metadata.title is a multi-language map; flatten to a single
-		// string for the wire contract via helper.PickStringFromAny.
-		title = helper.PickStringFromAny(row.Metadata.Data["title"])
-	}
-
-	timeStr := ""
-	if !row.EventCreateTime.IsZero() {
-		timeStr = row.EventCreateTime.UTC().Format(time.RFC3339)
-	}
-
-	spec := &types.AppStateLatestDataSpec{
-		AppStateLatestDataSpecMetadata: types.AppStateLatestDataSpecMetadata{
-			Name:               row.AppName,
-			RawAppName:         row.AppRawName,
-			AppID:              row.AppID,
-			IsSysApp:           row.IsSysApp,
-			Owner:              userID,
-			Icon:               icon,
-			Source:             sourceID,
-			Title:              title,
-			State:              row.State,
-			UpdateTime:         timeStr,
-			StatusTime:         timeStr,
-			LastTransitionTime: timeStr,
-			Progress:           row.Progress,
-			OpType:             row.OpType,
-			Message:            row.Message,
-			Reason:             row.Reason,
-		},
-		Tailscale: map[string]interface{}{},
-	}
-	if row.StatusEntrances != nil {
-		spec.EntranceStatuses = row.StatusEntrances.Data
-	}
-	if row.SharedEntrances != nil {
-		spec.SharedEntrances = row.SharedEntrances.Data
-	}
-
-	return &types.AppStateLatestData{
-		Type:    types.AppStateLatest,
-		Version: row.InstalledVersion,
-		Status:  spec,
-	}
 }
 
 // 5. Diagnostic endpoint for cache and Redis analysis
