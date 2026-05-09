@@ -50,6 +50,25 @@ type PendingStateInput struct {
 // DAO needs to upsert. The DAO does not import internal/v2/appinfo, so the
 // caller (state.go) flattens the wire struct into this DTO.
 //
+// AppName / AppRawName are the values carried in NATS msg.Name and
+// msg.RawAppName; the DAO matches them BOTH against
+// user_applications.app_name and user_applications.app_raw_name in
+// the same SQL predicate (AND, not OR) so a user who has both an
+// original app and one of its clones installed lands on exactly one
+// row per NATS event:
+//
+//   - non-clone: msg.Name == msg.RawAppName == display name; matches
+//     the original row where app_name == app_raw_name == display name.
+//   - clone:     msg.Name == clone alias (rawAppName+hash);
+//     msg.RawAppName == original name; matches the clone
+//     row where app_name == clone alias AND app_raw_name ==
+//     original name.
+//
+// NATS does NOT carry an app_id field — manifest ids are not part of
+// the wire contract — so matching by app_id is not possible on this
+// path; the (app_name, app_raw_name) pair is the only NATS-carried
+// key sufficient to disambiguate between original and clone rows.
+//
 // EventCreateTime is the parsed msg.CreateTime; it MUST be non-zero so the
 // monotonic guard in UpsertStateFromNATS can reject out-of-order events.
 //
@@ -60,7 +79,8 @@ type PendingStateInput struct {
 type StateNATSUpdate struct {
 	UserID          string
 	SourceID        string
-	AppID           string
+	AppName         string
+	AppRawName      string
 	State           string
 	Reason          string
 	Message         string
@@ -73,18 +93,49 @@ type StateNATSUpdate struct {
 	StatusEntrances []byte
 }
 
-// UpsertPendingState writes the initial user_application_states row for a
-// Market-initiated operation. It UPSERTs by user_application_id (one row
-// per user_application) so a second click on an in-flight app refreshes
+// UpsertPendingState records that a Market-initiated operation is being
+// dispatched for the (user, source, app) tuple. It UPSERTs by
+// user_application_id so a second click on an in-flight app refreshes
 // the same row rather than failing on the unique constraint.
 //
-// op_id is intentionally not accepted here: at this point Market has not
-// yet called app-service so no opID is known. The task executor calls
-// LinkOpID after the HTTP response to fill it in.
+// Column-level write contract:
+//   - op_type             — overwritten to the new in.OpType so the
+//     frontend can immediately tell which kind of
+//     operation Market is dispatching ("running
+//     (uninstalling)" UI badges etc.). When the
+//     caller passes an empty OpType the previous
+//     value is preserved.
+//   - event_create_time   — set to NOW() so subsequent NATS events
+//     whose createTime is later than this moment
+//     pass the monotonic guard in UpsertStateFromNATS.
+//   - state column        — NOT touched on the UPDATE branch. The state
+//     column reflects what the app is actually
+//     doing (per NATS events); Market overwriting
+//     it on every click would briefly clobber a
+//     legitimate "running" / "downloading" with a
+//     Market-internal placeholder, then race the
+//     NATS pipeline to recover. INSERT path uses
+//     empty string as initial value (schema
+//     default), letting NATS fill it on first
+//     event.
+//   - reason / message / progress / entrances / shared_entrances /
+//     status_entrances    — NOT touched. Owned by NATS.
+//   - installed_version / target_version
+//     — NOT touched. Owned by CompleteTask /
+//     FailTask in the task lifecycle.
+//   - op_id               — NOT touched (preserved on UPDATE). At
+//     pending-row creation Market has not yet
+//     called app-service so the opID is unknown;
+//     overwriting would defeat the executor's
+//     subsequent LinkOpID call.
 //
-// event_create_time is set to NOW() so any subsequent NATS event whose
-// createTime is later than this moment will pass the monotonic guard in
-// UpsertStateFromNATS.
+// op_id is intentionally not accepted as an input here: at this point
+// Market has not yet called app-service so no opID is known. The task
+// executor calls LinkOpID after the HTTP response to fill it in.
+//
+// in.State is accepted for forward compatibility but is currently
+// ignored — the helper always uses the schema default (”) on INSERT
+// and never touches state on UPDATE.
 //
 // Returns ErrUserApplicationStateNotFound if no user_applications row
 // exists for the given (user, source, app) — typically a caller bug
@@ -97,9 +148,6 @@ func UpsertPendingState(ctx context.Context, in PendingStateInput) error {
 	if in.UserID == "" || in.SourceID == "" || in.AppID == "" {
 		return fmt.Errorf("UpsertPendingState: empty UserID/SourceID/AppID: %+v", in)
 	}
-	if in.State == "" {
-		in.State = "pending"
-	}
 
 	gdb := db.Global()
 	if gdb == nil {
@@ -110,20 +158,25 @@ func UpsertPendingState(ctx context.Context, in PendingStateInput) error {
 INSERT INTO user_application_states (
     user_application_id, state, op_type, event_create_time
 )
-SELECT ua.id, $1, $2, NOW()
+SELECT ua.id, '', $1, NOW()
 FROM user_applications ua
-WHERE ua.user_id = $3 AND ua.source_id = $4 AND ua.app_id = $5
+WHERE ua.user_id = $2 AND ua.source_id = $3 AND ua.app_id = $4
 ON CONFLICT (user_application_id) DO UPDATE SET
-    state             = EXCLUDED.state,
     op_type           = COALESCE(NULLIF(EXCLUDED.op_type, ''), user_application_states.op_type),
-    event_create_time = EXCLUDED.event_create_time,
-    -- API handler write does not know op_id; clearing it here would defeat
-    -- the executor's subsequent LinkOpID call. Preserve existing op_id.
-    op_id             = user_application_states.op_id
+    event_create_time = EXCLUDED.event_create_time
+    -- state / reason / message / progress / entrances /
+    -- shared_entrances / status_entrances are owned by the NATS
+    -- pipeline and intentionally not touched here.
+    --
+    -- installed_version / target_version are owned by CompleteTask /
+    -- FailTask and intentionally not touched here.
+    --
+    -- op_id is not known at pending-row write time; preserve the
+    -- existing value so the executor's LinkOpID call can fill it in
+    -- without racing this UPSERT.
 `
 
 	res := gdb.WithContext(ctx).Exec(query,
-		in.State,
 		truncate(in.OpType, stateOpTypeMaxLen),
 		in.UserID, in.SourceID, in.AppID,
 	)
@@ -217,9 +270,10 @@ UPDATE user_application_states
 func UpsertStateFromNATS(ctx context.Context, in StateNATSUpdate) (bool, error) {
 	in.UserID = strings.TrimSpace(in.UserID)
 	in.SourceID = strings.TrimSpace(in.SourceID)
-	in.AppID = strings.TrimSpace(in.AppID)
-	if in.UserID == "" || in.SourceID == "" || in.AppID == "" {
-		return false, fmt.Errorf("UpsertStateFromNATS: empty UserID/SourceID/AppID")
+	in.AppName = strings.TrimSpace(in.AppName)
+	in.AppRawName = strings.TrimSpace(in.AppRawName)
+	if in.UserID == "" || in.SourceID == "" || in.AppName == "" || in.AppRawName == "" {
+		return false, fmt.Errorf("UpsertStateFromNATS: empty UserID/SourceID/AppName/AppRawName")
 	}
 	if in.EventCreateTime.IsZero() {
 		return false, fmt.Errorf("UpsertStateFromNATS: zero EventCreateTime; caller must parse msg.CreateTime")
@@ -230,6 +284,15 @@ func UpsertStateFromNATS(ctx context.Context, in StateNATSUpdate) (bool, error) 
 		return false, fmt.Errorf("postgres not initialised; db.Open must run before user application state store usage")
 	}
 
+	// Match the user_applications row by (app_name AND app_raw_name).
+	// Both must equal the corresponding NATS field — msg.Name maps to
+	// ua.app_name and msg.RawAppName maps to ua.app_raw_name. AND (not
+	// OR) is required so a user who has both an original app and one
+	// of its clones installed lands exactly on one row per event:
+	//   - original NATS event:  msg.Name == msg.RawAppName == display name;
+	//                          matches only the original row.
+	//   - clone NATS event:     msg.Name == clone alias, msg.RawAppName ==
+	//                          original name; matches only the clone row.
 	const query = `
 INSERT INTO user_application_states (
     user_application_id,
@@ -239,7 +302,10 @@ INSERT INTO user_application_states (
 )
 SELECT ua.id, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 FROM user_applications ua
-WHERE ua.user_id = $11 AND ua.source_id = $12 AND ua.app_id = $13
+WHERE ua.user_id      = $11
+  AND ua.source_id    = $12
+  AND ua.app_name     = $13
+  AND ua.app_raw_name = $14
 ON CONFLICT (user_application_id) DO UPDATE SET
     state             = EXCLUDED.state,
     reason            = EXCLUDED.reason,
@@ -269,11 +335,11 @@ WHERE user_application_states.event_create_time < EXCLUDED.event_create_time
 		nullableJSON(in.Entrances),
 		nullableJSON(in.SharedEntrances),
 		nullableJSON(in.StatusEntrances),
-		in.UserID, in.SourceID, in.AppID,
+		in.UserID, in.SourceID, in.AppName, in.AppRawName,
 	)
 	if err := res.Error; err != nil {
-		return false, fmt.Errorf("upsert user_application_state from NATS (user=%s source=%s app=%s): %w",
-			in.UserID, in.SourceID, in.AppID, err)
+		return false, fmt.Errorf("upsert user_application_state from NATS (user=%s source=%s app=%s rawApp=%s): %w",
+			in.UserID, in.SourceID, in.AppName, in.AppRawName, err)
 	}
 	// res.RowsAffected == 0 means EITHER:
 	//   - parent user_applications row is missing → INSERT's SELECT yielded

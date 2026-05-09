@@ -558,28 +558,33 @@ const (
 	DeleteUser                 // Delete user data
 )
 
-// NewCacheManager creates a new cache manager
+// NewCacheManager creates a new cache manager.
+//
+// Phase-2 cutover (post legacy app_state_change push retirement):
+// dataSender / stateMonitor are intentionally left nil. The cache
+// continues to be written by DataWatcherState (frontend API readers
+// are still served from cache) but its push branches no-op:
+//
+//   - cm.dataSender == nil    → setAppData's EntranceStatuses-fallback
+//                               force-push branch is skipped.
+//   - cm.stateMonitor == nil  → setAppDataInternal's pendingNotifications
+//                               dispatch loop is skipped.
+//
+// All app_state_change pushes now flow through StateNotifier.
+// notifyStateChange (internal/v2/appinfo/state.go), which sources its
+// payload from PG (user_application_states JOIN user_applications)
+// instead of cache, making PG the single source of truth for the
+// published state. When cache is fully retired in a later phase, the
+// stateMonitor / dataSender fields and the if-guarded branches in
+// this file can be deleted with no behaviour change.
 func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheManager {
-	// Initialize data sender
-	dataSender, err := NewDataSender()
-	if err != nil {
-		glog.Errorf("Failed to initialize DataSender: %v", err)
-		// Continue without data sender
-	}
-
-	// Initialize state monitor
-	var stateMonitor *utils.StateMonitor
-	if dataSender != nil {
-		stateMonitor = utils.NewStateMonitor(dataSender)
-	}
-
 	return &CacheManager{
 		cache:        NewCacheData(),
 		redisClient:  redisClient,
 		userConfig:   userConfig,
-		stateMonitor: stateMonitor,
-		dataSender:   dataSender,
-		syncChannel:  make(chan SyncRequest, 1000), // Buffer for async sync requests
+		stateMonitor: nil,
+		dataSender:   nil,
+		syncChannel:  make(chan SyncRequest, 1000),
 		stopChannel:  make(chan bool, 1),
 		isRunning:    false,
 	}

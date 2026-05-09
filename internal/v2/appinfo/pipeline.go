@@ -12,6 +12,7 @@ import (
 	"market/internal/v2/appinfo/hydrationfn"
 	"market/internal/v2/store"
 	"market/internal/v2/types"
+	"market/internal/v2/watchers"
 
 	"github.com/golang/glog"
 )
@@ -130,32 +131,33 @@ func (p *Pipeline) run(ctx context.Context) {
 	// Phase 1-4: only modify data, no hash calculation or ForceSync
 	p.phaseSyncer(ctx)
 	hydrateUsers := p.phaseHydrateApps(ctx)
-	repoUsers := p.phaseDataWatcherRepo(ctx)
-	statusUsers := p.phaseStatusCorrection(ctx)
+	// repoUsers := p.phaseDataWatcherRepo(ctx) // + todo
+	// statusUsers := p.phaseStatusCorrection(ctx) // + todo need to remove
 
 	// Phase 5: merge all affected users + dirty users, calculate hash once, sync once
 	allAffected := make(map[string]bool)
 	for u := range hydrateUsers {
 		allAffected[u] = true
 	}
-	for u := range repoUsers {
-		allAffected[u] = true
-	}
-	for u := range statusUsers {
-		allAffected[u] = true
-	}
+	// for u := range repoUsers {
+	// 	allAffected[u] = true
+	// }
+	// for u := range statusUsers {
+	// 	allAffected[u] = true
+	// }
 	// Collect dirty users from event-driven paths (DataWatcherState)
-	if p.dataWatcher != nil {
-		for u := range p.dataWatcher.CollectAndClearDirtyUsers() {
-			allAffected[u] = true
-		}
-	}
+	// if p.dataWatcher != nil {
+	// 	for u := range p.dataWatcher.CollectAndClearDirtyUsers() {
+	// 		allAffected[u] = true
+	// 	}
+	// }
 
-	p.phaseHashAndSync(allAffected)
+	// p.phaseHashAndSync(allAffected)
 
-	cahedData := p.cacheManager.GetCachedData()
+	// cahedData := p.cacheManager.GetCachedData()
 
-	glog.V(2).Infof("Pipeline: [LOOP] cycle completed in %v, cached: %s", time.Since(startTime), cahedData)
+	// glog.V(2).Infof("Pipeline: [LOOP] cycle completed in %v, cached: %s", time.Since(startTime), cahedData)
+	glog.V(2).Infof("Pipeline: [LOOP] cycle completed in %v", time.Since(startTime))
 }
 
 // phaseSyncer fetches remote data
@@ -192,11 +194,13 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		return affectedUsers
 	}
 
-	users := p.cacheManager.GetOrCreateUserIDs("system")
+	users := watchers.GetUserIDs() //p.cacheManager.GetOrCreateUserIDs("system")
 	if len(users) == 0 {
 		glog.V(2).Info("Pipeline Phase 2: no users available, skipping hydration")
 		return affectedUsers
 	}
+
+	glog.V(2).Infof("Pipeline Phase 2: users list: %v", users)
 
 	candidates := make([]store.RenderCandidate, 0)
 	for _, userID := range users {
@@ -260,6 +264,7 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 					return
 				}
 				p.notifyRenderSuccess(c, task)
+
 			}(c)
 		}
 		wg.Wait()
@@ -298,7 +303,7 @@ func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate, task *hydrationf
 			c.UserID, c.AppID, c.ExistingAppVersion, c.AppVersion)
 	} else {
 		glog.V(2).Infof("hydration: first install user=%s app=%s version=%s",
-			c.UserID, c.AppID, c.AppVersion)
+			c.UserID, c.AppID, task.AppVersion)
 	}
 
 	if p.dataSender == nil {
@@ -427,20 +432,20 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate
 		RawData: c.AppEntry,
 	}
 
-	sourceType := ""
-	if h.settingsManager != nil {
-		for _, s := range h.settingsManager.GetActiveMarketSources() {
-			if s.ID == c.SourceID {
-				sourceType = string(s.Type)
-				break
-			}
-		}
-	}
+	// sourceType := ""
+	// if h.settingsManager != nil {
+	// 	for _, s := range h.settingsManager.GetActiveMarketSources() {
+	// 		if s.ID == c.SourceID {
+	// 			sourceType = string(s.Type)
+	// 			break
+	// 		}
+	// 	}
+	// }
 
 	task := hydrationfn.NewHydrationTaskFromInput(hydrationfn.HydrationTaskInput{
 		UserID:          c.UserID,
 		SourceID:        c.SourceID,
-		SourceType:      sourceType,
+		SourceType:      "remote", // + todo sourceType,
 		AppID:           c.AppID,
 		AppName:         c.AppName,
 		AppVersion:      c.AppVersion,

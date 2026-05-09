@@ -153,26 +153,33 @@ func (s *Server) addMarketSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Type == "" {
-		glog.V(3).Info("Market source Type is empty")
-		s.sendResponse(w, http.StatusBadRequest, false, "Market source Type cannot be empty", nil)
+	// This endpoint only adds remote market sources. Local sources
+	// (upload / studio / cli) are seeded by createDefaultMarketSources
+	// at startup and are not user-managed; accepting type="local" here
+	// would let a client mint shadow local rows that the rest of the
+	// system has no contract for. Reject anything other than "remote"
+	// (treating an empty body field as "default to remote" since the
+	// contract is single-purpose).
+	if req.Type != "" && req.Type != "remote" {
+		glog.V(3).Infof("Rejecting market source with non-remote type: %s", req.Type)
+		s.sendResponse(w, http.StatusBadRequest, false, "Market source Type must be 'remote'", nil)
 		return
 	}
 
-	if req.Type != "local" && req.Type != "remote" {
-		glog.V(3).Infof("Invalid market source Type: %s", req.Type)
-		s.sendResponse(w, http.StatusBadRequest, false, "Market source Type must be 'local' or 'remote'", nil)
-		return
-	}
-
-	// Create MarketSource struct
+	// Build the new source with is_active=false. Activation is owned
+	// by PUT /settings/market-settings (→ SwitchActiveRemoteAndSetNsfw),
+	// the only writer that may flip the partial unique index
+	// uq_market_sources_one_active_remote without violating its
+	// "at most one active remote" invariant. Setting IsActive=true
+	// here used to race the existing market.olares row through the
+	// startup-time bulk upsert and crash with a 23505 unique violation.
 	source := &settings.MarketSource{
 		ID:          req.ID,
 		Name:        req.Name,
-		Type:        req.Type,
+		Type:        "remote",
 		BaseURL:     req.BaseURL,
 		Description: req.Description,
-		IsActive:    true,
+		IsActive:    false,
 	}
 
 	if err := settingsManager.AddMarketSource(source); err != nil {

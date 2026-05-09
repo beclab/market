@@ -387,7 +387,9 @@ func (dw *DataWatcherState) startNatsConnection() error {
 
 // handleMessage processes incoming NATS messages
 func (dw *DataWatcherState) handleMessage(msg *nats.Msg) { // +
-	glog.V(2).Infof("State - Received message from NATS subject %s: %s", msg.Subject, string(msg.Data))
+	// glog.V(2).Infof("State - Received message from NATS subject %s: %s", msg.Subject, string(msg.Data))
+	
+	return
 
 	var appStateMsg AppStateMessage
 	if err := json.Unmarshal(msg.Data, &appStateMsg); err != nil {

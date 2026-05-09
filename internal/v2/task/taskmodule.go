@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"market/internal/v2/history"
 	"market/internal/v2/settings"
+	"market/internal/v2/store"
 	"market/internal/v2/types"
 
 	"github.com/golang/glog"
@@ -141,7 +143,26 @@ func (tm *TaskModule) SetSettingsManager(settingsManager *settings.SettingsManag
 	tm.settingsManager = settingsManager
 }
 
-// AddTask adds a new task to the pending queue
+// AddTask adds a new task to the pending queue.
+//
+// Persistence ordering: the PG row is committed BEFORE the task is
+// appended to the in-memory pendingTasks slice. This direction is
+// deliberate — it eliminates the legacy "in memory but not in PG"
+// window that lost tasks across crashes (the legacy code appended to
+// memory first and persisted best-effort afterwards). A PG failure
+// here surfaces as a concrete AddTask error so the API handler can
+// return 5xx and the user can retry; previously the task would silently
+// disappear on the next restart.
+//
+// State-table side-effect: when the metadata carries the (source,
+// realAppID) pair needed to locate the user_application_states row,
+// CreateTask refreshes the row's op_type column atomically with the
+// task_records insert. This replaces the API handlers' separate
+// writePendingState calls so the two writes can no longer land in a
+// half-committed state. Callers that don't have a state row to refresh
+// (e.g. cloneApp's synthesized newAppName, which has no user_applications
+// parent yet) trigger a tolerable miss inside CreateTask: the task is
+// committed and the state-row absence is logged at V(3) by the helper.
 func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, metadata map[string]interface{}, callback TaskCallback) (*Task, error) {
 	if metadata == nil {
 		metadata = make(map[string]interface{})
@@ -158,19 +179,75 @@ func (tm *TaskModule) AddTask(taskType TaskType, appName string, user string, me
 		Callback:  callback,
 	}
 
+	if err := store.CreateTask(context.Background(), store.CreateTaskInput{
+		TaskID:       task.ID,
+		Type:         int(taskType),
+		AppName:      appName,
+		UserAccount:  user,
+		Metadata:     metadata,
+		CreatedAt:    task.CreatedAt,
+		PendingState: pendingStateFromMetadata(taskType, user, appName, metadata),
+	}); err != nil {
+		glog.Errorf("[%s] Failed to persist task %s: %v", tm.instanceID, task.ID, err)
+		return nil, fmt.Errorf("persist task: %w", err)
+	}
+
 	tm.mu.Lock()
 	tm.pendingTasks = append(tm.pendingTasks, task)
 	tm.mu.Unlock()
-
-	if err := tm.persistTask(task); err != nil {
-		glog.Errorf("[%s] Failed to persist task %s: %v", tm.instanceID, task.ID, err)
-	}
 
 	glog.V(2).Infof("[%s] Task added: ID=%s, Type=%d, AppName=%s, User=%s, HasCallback=%v", tm.instanceID, task.ID, task.Type, task.AppName, user, callback != nil)
 
 	tm.recordTaskHistory(task, user)
 
 	return task, nil
+}
+
+// pendingStateFromMetadata builds the optional PendingTaskState input
+// for store.CreateTask out of a task's metadata. The conventions
+// callers honour today:
+//
+//   - source           the originating market source (set by every
+//     handler that has it)
+//   - realAppID        the user_applications.app_id of the target app;
+//     install / upgrade handlers set this directly,
+//     cancel / uninstall handlers set it from
+//     LookupAppLocator's projection. cloneApp uses the
+//     synthesized newAppName as appName argument
+//     directly (no realAppID metadata, no
+//     user_applications row) — the fallback to
+//     appName lets us still attempt the state UPSERT;
+//     CreateTask soft-skips the not-found case.
+//   - app_name         set by cancel / uninstall handlers; also used
+//     as a last-resort fallback.
+//
+// Returns nil when neither realAppID nor an appName is available (the
+// task is not associated with a user_application — admin paths, future
+// reconciliation tasks, ...). CreateTask then writes only the
+// task_records row.
+func pendingStateFromMetadata(taskType TaskType, user, appName string, metadata map[string]interface{}) *store.PendingTaskState {
+	sourceID := metadataString(metadata, "source")
+	if sourceID == "" {
+		return nil
+	}
+
+	appID := metadataString(metadata, "realAppID")
+	if appID == "" {
+		appID = metadataString(metadata, "app_name")
+	}
+	if appID == "" {
+		appID = strings.TrimSpace(appName)
+	}
+	if appID == "" {
+		return nil
+	}
+
+	return &store.PendingTaskState{
+		UserID:   user,
+		SourceID: sourceID,
+		AppID:    appID,
+		OpType:   getTaskTypeString(taskType),
+	}
 }
 
 // getHistoryType converts TaskType to appropriate HistoryType
@@ -502,73 +579,65 @@ func (tm *TaskModule) handleTaskFailure(task *Task, result string, err error, fa
 	tm.recordTaskResult(task, result, err)
 }
 
-// executeTask executes the actual task logic
+// executeTask executes the actual task logic. Each TaskType maps to a
+// single method on TaskModule; the switch picks the dispatcher and the
+// surrounding scaffold (logging / sendTaskExecutionUpdate / failure
+// handling / success handling) is uniform across types.
+//
+// Per-type side-effects (e.g. cancel marking the cancelled install
+// task as Canceled) live inside the executor itself, not here, so the
+// switch stays a pure dispatch table.
 func (tm *TaskModule) executeTask(task *Task) {
-	var result string
-	var err error
-
-	glog.V(2).Infof("[TASK] Starting task execution: ID=%s, Type=%s, App=%s, User=%s",
-		task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
+	typeStr := getTaskTypeString(task.Type)
+	glog.V(2).Infof("[TASK] Starting %s: ID=%s, App=%s, User=%s",
+		typeStr, task.ID, task.AppName, task.User)
 
 	tm.sendTaskExecutionUpdate(task)
 
+	var result string
+	var err error
 	switch task.Type {
 	case InstallApp:
-		glog.V(2).Infof("[TASK] Executing app installation for task: %s", task.ID)
 		result, err = tm.AppInstall(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Installation failed")
-			return
-		}
-		glog.V(2).Infof("[TASK] App installation completed successfully for task: %s", task.ID)
-
 	case UninstallApp:
-		glog.V(2).Infof("[TASK] Executing app uninstallation for task: %s", task.ID)
 		result, err = tm.AppUninstall(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Uninstallation failed")
-			return
-		}
-		glog.V(2).Infof("[TASK] App uninstallation completed successfully for task: %s", task.ID)
-
 	case CancelAppInstall:
-		glog.V(2).Infof("[TASK] Executing app cancel for task: %s", task.ID)
 		result, err = tm.AppCancel(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Cancel failed")
-			return
-		}
-
-		if cancelErr := tm.InstallTaskCanceled(task.AppName, "", "", task.User); cancelErr != nil {
-			glog.Errorf("[TASK] InstallTaskCanceled failed for task: %s, app: %s, error: %v", task.ID, task.AppName, cancelErr)
-		}
-		glog.V(2).Infof("[TASK] App cancel completed successfully for task: %s, app: %s", task.ID, task.AppName)
-
 	case UpgradeApp:
-		glog.V(2).Infof("[TASK] Executing app upgrade for task: %s", task.ID)
 		result, err = tm.AppUpgrade(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Upgrade failed")
-			return
-		}
-		glog.V(2).Infof("[TASK] App upgrade completed successfully for task: %s, app: %s", task.ID, task.AppName)
-
 	case CloneApp:
-		glog.V(2).Infof("[TASK] Executing app clone for task: %s", task.ID)
 		result, err = tm.AppClone(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Clone failed")
-			return
-		}
-		glog.V(2).Infof("[TASK] App clone completed successfully for task: %s, app: %s", task.ID, task.AppName)
+	default:
+		err = fmt.Errorf("unknown task type: %d", task.Type)
 	}
 
+	if err != nil {
+		tm.handleTaskFailure(task, result, err, typeStr+" failed")
+		return
+	}
+
+	glog.V(2).Infof("[TASK] %s completed: ID=%s, App=%s", typeStr, task.ID, task.AppName)
+	tm.handleTaskSuccess(task, result)
+}
+
+// handleTaskSuccess is the success-side counterpart of handleTaskFailure.
+// Both run the same shape — update the in-memory task fields, drop the
+// task from runningTasks, persist the terminal record, push a finished
+// notification, fire the (sync) callback, and record the result in the
+// history module — so keeping them as symmetric helpers makes the
+// success / failure paths read identically and lets future store-layer
+// migrations (CompleteTask / FailTask) land in a single function each
+// instead of being scattered through executeTask.
+func (tm *TaskModule) handleTaskSuccess(task *Task, result string) {
 	task.Result = result
 	task.Status = Completed
 	now := time.Now()
 	task.CompletedAt = &now
-	glog.V(2).Infof("[TASK] Task completed successfully: ID=%s, Type=%s, AppName=%s, User=%s, Duration=%v",
-		task.ID, getTaskTypeString(task.Type), task.AppName, task.User, now.Sub(*task.StartedAt))
+
+	if task.StartedAt != nil {
+		glog.V(2).Infof("[TASK] Task completed: ID=%s, Type=%s, App=%s, User=%s, Duration=%v",
+			task.ID, getTaskTypeString(task.Type), task.AppName, task.User, now.Sub(*task.StartedAt))
+	}
 
 	tm.removeRunningTask(task.ID)
 	tm.finalizeTaskPersistence(task)

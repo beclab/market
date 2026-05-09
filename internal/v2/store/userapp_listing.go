@@ -8,6 +8,7 @@ import (
 
 	"market/internal/v2/db"
 	"market/internal/v2/db/models"
+	"market/internal/v2/helper"
 	"market/internal/v2/types"
 )
 
@@ -284,34 +285,42 @@ func ListUserAppStateLatest(ctx context.Context, userID string, sourceIDs []stri
 }
 
 // AppInstallRow is the projection GetAppInstallRow yields. It carries
-// the user_applications + applications JOIN columns the install /
-// upgrade / clone API handlers need to populate task metadata for the
-// downstream app-service call: cfgType (manifest_type), the chart-repo
-// rendered_package path used to derive chart_path, the image_analysis
-// blob unpacked into task.Image[], the per-(user, app) price config
-// the VC injection step reads, and the catalog app_entry that supplies
-// the realAppID fallback chain. Heavyweight manifest JSONB blocks
-// (metadata / spec / resources / ...) are NOT projected here on
-// purpose — the action handlers do not consume them and the bandwidth
-// cost would be substantial; getAppsInfo (/api/v2/apps) keeps using
-// AppDetailRow when the rich payload is required.
+// the user_applications columns the install / upgrade / clone API
+// handlers need to populate task metadata for the downstream app-service
+// call: cfgType (manifest_type), the chart-repo rendered_package path
+// used to derive chart_path, the image_analysis blob unpacked into
+// task.Image[], and the per-(user, app) price config the VC injection
+// step reads.
+//
+// All fields are sourced from user_applications. The applications table
+// (catalogue-level app_entry) is intentionally NOT joined: app
+// operations are scoped to the user's rendered manifest and any
+// realAppID derivation is satisfied by user_applications.app_id (which
+// is the manifest's id, identical to applications.app_entry.ID for the
+// non-clone rows install / upgrade / clone act on — clones are filtered
+// out by the SQL's app_id = app_raw_id predicate).
+//
+// Heavyweight manifest JSONB blocks (metadata / spec / resources / ...)
+// are NOT projected here on purpose — the action handlers do not
+// consume them and the bandwidth cost would be substantial;
+// getAppsInfo (/api/v2/apps) keeps using AppDetailRow when the rich
+// payload is required.
 type AppInstallRow struct {
-	SourceID        string                                    `gorm:"column:source_id"`
-	AppID           string                                    `gorm:"column:app_id"`
-	AppRawID        string                                    `gorm:"column:app_raw_id"`
-	AppName         string                                    `gorm:"column:app_name"`
-	AppRawName      string                                    `gorm:"column:app_raw_name"`
-	ManifestType    string                                    `gorm:"column:manifest_type"`
-	AppVersion      string                                    `gorm:"column:app_version"`
-	RenderedPackage string                                    `gorm:"column:rendered_package"`
-	Price           *models.JSONB[types.PriceConfig]          `gorm:"column:price"`
-	ImageAnalysis   *models.JSONB[types.ImageAnalysisResult]  `gorm:"column:image_analysis"`
-	AppEntry        *models.JSONB[types.ApplicationInfoEntry] `gorm:"column:app_entry"`
+	SourceID        string                                   `gorm:"column:source_id"`
+	AppID           string                                   `gorm:"column:app_id"`
+	AppRawID        string                                   `gorm:"column:app_raw_id"`
+	AppName         string                                   `gorm:"column:app_name"`
+	AppRawName      string                                   `gorm:"column:app_raw_name"`
+	ManifestType    string                                   `gorm:"column:manifest_type"`
+	AppVersion      string                                   `gorm:"column:app_version"`
+	RenderedPackage string                                   `gorm:"column:rendered_package"`
+	Price           *models.JSONB[types.PriceConfig]         `gorm:"column:price"`
+	ImageAnalysis   *models.JSONB[types.ImageAnalysisResult] `gorm:"column:image_analysis"`
 }
 
-// GetAppInstallRow fetches the single user_applications + applications
-// JOIN row that the install / upgrade / clone API handlers need to
-// dispatch a backend call.
+// GetAppInstallRow fetches the single user_applications row that the
+// install / upgrade / clone API handlers need to dispatch a backend
+// call.
 //
 // version="" matches any version of the named app; this is the cloneApp
 // path, where the version is later read from user_application_states
@@ -352,11 +361,8 @@ SELECT ua.source_id,
        COALESCE(ua.metadata->>'version', '') AS app_version,
        ua.rendered_package,
        ua.price,
-       ua.image_analysis,
-       a.app_entry
+       ua.image_analysis
 FROM user_applications ua
-LEFT JOIN applications a
-    ON a.source_id = ua.source_id AND a.app_id = ua.app_id
 WHERE ua.user_id        = ?
   AND ua.source_id      = ?
   AND ua.app_name       = ?
@@ -534,4 +540,141 @@ LIMIT 1
 		info.ImageAnalysis = &ia
 	}
 	return info, nil
+}
+
+// ToWireData hydrates the AppStateLatestData wire shape from a
+// user_application_states JOIN user_applications row. Three time
+// fields (UpdateTime / StatusTime / LastTransitionTime) all collapse
+// onto event_create_time because the schema only stores a single
+// monotonic timestamp; if a future product need distinguishes them,
+// add columns. Tailscale and Settings are not stored, so they are
+// returned as empty / nil — the cache-side path also produced these
+// values from the upstream NATS message verbatim.
+//
+// userID and sourceID are passed in because the Status block carries
+// them as Owner / Source even though they are not stored on the
+// user_application_states row itself.
+//
+// Two call sites consume this projection: the /market/state* API
+// handlers (pkg/v2/api/app.go) and the StateNotifier push hook
+// (internal/v2/appinfo/state.go). Keeping the converter next to the
+// row definition avoids a parallel implementation drifting from the
+// API-side wire contract.
+func (r *AppStateLatestRow) ToWireData(userID, sourceID string) *types.AppStateLatestData {
+	if r == nil {
+		return nil
+	}
+
+	var icon, title string
+	if r.Metadata != nil {
+		if s, ok := r.Metadata.Data["icon"].(string); ok {
+			icon = s
+		}
+		title = helper.PickStringFromAny(r.Metadata.Data["title"])
+	}
+
+	timeStr := ""
+	if !r.EventCreateTime.IsZero() {
+		timeStr = r.EventCreateTime.UTC().Format(time.RFC3339)
+	}
+
+	spec := &types.AppStateLatestDataSpec{
+		AppStateLatestDataSpecMetadata: types.AppStateLatestDataSpecMetadata{
+			Name:               r.AppName,
+			RawAppName:         r.AppRawName,
+			AppID:              r.AppID,
+			IsSysApp:           r.IsSysApp,
+			Owner:              userID,
+			Icon:               icon,
+			Source:             sourceID,
+			Title:              title,
+			State:              r.State,
+			UpdateTime:         timeStr,
+			StatusTime:         timeStr,
+			LastTransitionTime: timeStr,
+			Progress:           r.Progress,
+			OpType:             r.OpType,
+			Message:            r.Message,
+			Reason:             r.Reason,
+		},
+		Tailscale: map[string]interface{}{},
+	}
+	if r.StatusEntrances != nil {
+		spec.EntranceStatuses = r.StatusEntrances.Data
+	}
+	if r.SharedEntrances != nil {
+		spec.SharedEntrances = r.SharedEntrances.Data
+	}
+
+	return &types.AppStateLatestData{
+		Type:    types.AppStateLatest,
+		Version: r.InstalledVersion,
+		Status:  spec,
+	}
+}
+
+// GetUserAppStateLatest reads a single user_application_states JOIN
+// user_applications row identified by (user, source, app_name,
+// app_raw_name). Mirrors ListUserAppStateLatest's projection so the
+// row can flow into the same wire converter (ToWireData).
+//
+// AppName and AppRawName are matched via AND (not OR) for the same
+// reason UpsertStateFromNATS uses AND — a user may have both an
+// original app and one of its clones installed; the (name, rawName)
+// pair is the only catalog-independent way to disambiguate. Both
+// must equal the values carried by the originating NATS message.
+//
+// Returns (nil, nil) when no row matches; callers (the StateNotifier
+// push hook) are expected to skip silently in that case — the parent
+// user_applications row is missing or the state row was never
+// written, both legitimate "no push" conditions.
+func GetUserAppStateLatest(ctx context.Context, userID, sourceID, appName, appRawName string) (*AppStateLatestRow, error) {
+	userID = strings.TrimSpace(userID)
+	sourceID = strings.TrimSpace(sourceID)
+	appName = strings.TrimSpace(appName)
+	appRawName = strings.TrimSpace(appRawName)
+	if userID == "" || sourceID == "" || appName == "" || appRawName == "" {
+		return nil, fmt.Errorf("GetUserAppStateLatest: empty userID/sourceID/appName/appRawName")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before user application state store usage")
+	}
+
+	var rows []*AppStateLatestRow
+	err := gdb.WithContext(ctx).
+		Table("user_applications AS ua").
+		Joins("JOIN user_application_states AS uas ON uas.user_application_id = ua.id").
+		Select(`ua.source_id,
+		        ua.app_id,
+		        ua.app_name,
+		        ua.app_raw_name,
+		        ua.metadata,
+		        uas.installed_version,
+		        uas.is_sys_app,
+		        uas.state,
+		        uas.reason,
+		        uas.message,
+		        uas.progress,
+		        uas.op_type,
+		        uas.event_create_time,
+		        uas.updated_at AS uas_updated_at,
+		        uas.entrances,
+		        uas.shared_entrances,
+		        uas.status_entrances`).
+		Where("ua.user_id = ?", userID).
+		Where("ua.source_id = ?", sourceID).
+		Where("ua.app_name = ?", appName).
+		Where("ua.app_raw_name = ?", appRawName).
+		Limit(1).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("get app_state_latest (user=%s source=%s app=%s rawApp=%s): %w",
+			userID, sourceID, appName, appRawName, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
 }

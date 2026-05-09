@@ -117,5 +117,19 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 	}
 	successJSON, _ := json.Marshal(successResult)
 	glog.Infof("App cancel completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
+
+	// After app-service has accepted the cancel, mark the install task
+	// being cancelled as Canceled. This side-effect belongs to the
+	// cancel operation itself, not to executeTask's dispatch, so it
+	// lives here. Failure is logged but does not fail the cancel
+	// task — the cancel HTTP succeeded, that is the user-visible
+	// success criterion; the bookkeeping for the cancelled install
+	// task is best-effort and gets reconciled by the NATS pipeline
+	// either way.
+	if cancelErr := tm.InstallTaskCanceled(task.AppName, "", "", task.User); cancelErr != nil {
+		glog.Errorf("[APP] InstallTaskCanceled side-effect failed for task=%s app=%s: %v",
+			task.ID, task.AppName, cancelErr)
+	}
+
 	return string(successJSON), nil
 }

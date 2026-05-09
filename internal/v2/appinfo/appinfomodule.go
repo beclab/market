@@ -645,7 +645,12 @@ func (m *AppInfoModule) initStateNotifier() error {
 		return nil
 	}
 
-	m.stateNotifier = NewStateNotifier()
+	// Pass the module-owned DataSender so notifyStateChange can publish
+	// post-persistence app_state_change events. dataSender may be nil
+	// when the underlying NATS connection failed to initialise; the
+	// push hook short-circuits silently in that case (PG write still
+	// happens, observability preserved).
+	m.stateNotifier = NewStateNotifier(m.dataSender)
 	if err := m.stateNotifier.Start(); err != nil {
 		return fmt.Errorf("failed to start StateNotifier: %w", err)
 	}
