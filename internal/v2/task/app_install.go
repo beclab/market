@@ -121,16 +121,6 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	glog.V(2).Infof("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
 
-	// urlStr is composed for diagnostic / envelope use only; the real
-	// HTTP call is dispatched through the typed appservice.Client
-	// below, which resolves the same APP_SERVICE_SERVICE_HOST/PORT env
-	// vars at construction time.
-	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-	urlStr := fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)
-
-	glog.V(2).Infof("App service URL: %s for task: %s", urlStr, task.ID)
-
 	// Get envs from metadata
 	var envs []AppEnvVar
 	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
@@ -220,7 +210,12 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	// Compose a base envelope shared by every return path so the wire
 	// shape stays compatible with the legacy raw-map projection that
-	// the API layer and frontend already consume.
+	// the API layer and frontend already consume. The legacy "url"
+	// field is no longer emitted: it duplicated the host/port that
+	// appservice.Client resolves itself, with no internal consumer
+	// (the API layer ships task_records.result through to the wire
+	// without inspecting it). Failure diagnostics live on the typed
+	// error path now.
 	baseEnvelope := func() map[string]interface{} {
 		return map[string]interface{}{
 			"operation":  "install",
@@ -229,7 +224,6 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 			"app_source": appSource,
 			"api_source": apiSource,
 			"cfgType":    cfgType,
-			"url":        urlStr,
 		}
 	}
 
