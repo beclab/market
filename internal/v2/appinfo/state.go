@@ -162,7 +162,7 @@ func (s *StateNotifier) Start() error {
 	}
 	s.nc = nc
 
-	sub, err := nc.Subscribe(s.subj, s.handleNATSMessage)
+	sub, err := nc.Subscribe(s.subj, s.handleNATSMessage) // +
 	if err != nil {
 		nc.Close()
 		s.nc = nil
@@ -242,6 +242,8 @@ func (s *StateNotifier) handleNATSMessage(msg *nats.Msg) {
 		glog.Errorf("[state] bad NATS payload (size=%d): %v", len(msg.Data), err)
 		return
 	}
+
+	glog.Infof("[state] NATS subject: %s, payload: %s", msg.Subject, string(msg.Data))
 	s.EnqueueState(ev, "nats")
 }
 

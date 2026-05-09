@@ -333,20 +333,17 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	// AppInfo.AppEntry.ID for non-clone rows (which is all install
 	// targets). Falling back to request.AppName mirrors the legacy
 	// path when both manifest ids are blank.
-	realAppID := row.AppID
-	if realAppID == "" {
-		realAppID = request.AppName
-	}
+	appId := row.AppID
 
 	var price *types.PriceConfig
 	if row.Price != nil {
 		p := row.Price.Data
 		price = &p
 	}
-	productID, developerName := extractInstallProductMetadata(price, realAppID)
+	productID, developerName := extractInstallProductMetadata(price, appId)
 	glog.V(2).Infof("installApp: extracted product metadata app=%s, source=%s, productID=%s, developer=%s", request.AppName, request.Source, productID, developerName)
 
-	glog.V(2).Infof("installApp: resolved realAppID=%s for app=%s, source=%s, sync=%v", realAppID, request.AppName, request.Source, request.Sync)
+	glog.V(2).Infof("installApp: resolved appId=%s for app=%s, source=%s, sync=%v", appId, request.AppName, request.Source, request.Sync)
 
 	// Step 7: Create installation task
 	taskMetadata := map[string]interface{}{
@@ -368,10 +365,8 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		taskMetadata["developerName"] = developerName
 		glog.V(2).Infof("installApp: added developerName=%s to metadata for app=%s, source=%s", developerName, request.AppName, request.Source)
 	}
-	if realAppID != "" {
-		taskMetadata["realAppID"] = realAppID
-		glog.V(2).Infof("installApp: added realAppID=%s to metadata for app=%s, source=%s", realAppID, request.AppName, request.Source)
-	}
+
+	taskMetadata["realAppID"] = appId
 
 	// user_application_states pending row is established by
 	// taskModule.AddTask → store.CreateTask in the same transaction
@@ -380,7 +375,7 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	// CreateTask to locate the row.
 
 	// Handle synchronous requests with proper blocking
-	if request.Sync {
+	if request.Sync { // +
 		callback, wait := waitForSyncTask(r.Context())
 
 		t, err := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)

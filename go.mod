@@ -4,7 +4,7 @@ go 1.24.11
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
-	github.com/beclab/Olares/framework/oac v0.0.0-20260506141732-553492c74ed0
+	github.com/beclab/Olares/framework/oac v0.0.0-20260509033324-899cba323495
 	github.com/emicklei/go-restful/v3 v3.13.0
 	github.com/go-resty/resty/v2 v2.12.0
 	github.com/golang/glog v1.2.5
@@ -27,7 +27,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
 	github.com/Masterminds/squirrel v1.5.4 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
-	github.com/beclab/api v0.0.4 // indirect
+	github.com/beclab/api v0.0.5 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/chai2010/gettext-go v1.0.3 // indirect
 	github.com/containerd/containerd v1.7.29 // indirect

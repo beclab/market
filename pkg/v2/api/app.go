@@ -372,7 +372,16 @@ func buildAppDetailEntry(row *store.AppDetailRow) (*types.ApplicationInfoEntry, 
 		scalars.VersionHistory = vh
 	}
 
-	return types.ComposeApplicationInfoEntry(manifest, scalars)
+	entry, err := types.ComposeApplicationInfoEntry(manifest, scalars)
+
+	if err != nil {
+		return nil, err
+	}
+
+	entry.CreateTime = row.UpdatedAt.Unix()
+	entry.UpdateTime = row.UpdatedAt.Unix()
+
+	return entry, nil
 }
 
 // manifestFromDetailRow lifts the eleven manifest JSONB columns off
@@ -1081,7 +1090,6 @@ func buildAppSimpleInfoMap(row *store.AppInfoSimpleRow) map[string]interface{} {
 	}
 	return out
 }
-
 
 // buildAppStateLatestList wraps each AppStateLatestRow in the typed
 // AppStateLatestData wire shape. userID and sourceID are passed in
@@ -2684,4 +2692,3 @@ func (s *Server) resendPaymentVC(w http.ResponseWriter, r *http.Request) {
 		"product_id": productID,
 	})
 }
-
