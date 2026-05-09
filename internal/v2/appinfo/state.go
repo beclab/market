@@ -284,7 +284,7 @@ func (s *StateNotifier) processEvent(ev stateEvent) {
 	upd := store.StateNATSUpdate{
 		UserID:          msg.User,
 		SourceID:        msg.MarketSource,
-		AppID:           msg.Name,
+		AppName:         msg.Name,
 		State:           msg.State,
 		Reason:          msg.Reason,
 		Message:         msg.Message,
