@@ -12,6 +12,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"market/internal/v2/store"
+	"market/internal/v2/types"
 )
 
 // stateQueueCapacity bounds the in-process queue between NATS / external
@@ -80,6 +81,17 @@ type StateNotifier struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// dataSender publishes the post-persistence app_state_change push
+	// in notifyStateChange. May be nil when DataSender failed to
+	// initialise (production) or in dev/public env where push is
+	// disabled — notifyStateChange short-circuits in that case.
+	//
+	// As of the phase-2 cutover this is the SOLE source of
+	// "app_info_update" / NotifyType="app_state_change" pushes. The
+	// legacy cache path's stateMonitor / EntranceStatuses-fallback
+	// branches are wired with a nil dataSender so they no-op.
+	dataSender *DataSender
+
 	// dropped counts events rejected because the queue was full. Atomic
 	// for lock-free producer increments; exposed via Dropped() for
 	// future metric / debug surfaces.
@@ -90,17 +102,22 @@ type StateNotifier struct {
 // pulled from the same env variables as DataWatcherState, so existing
 // deployments need no new configuration. The caller is responsible for
 // calling Start to actually open the subscription, and Stop on shutdown.
-func NewStateNotifier() *StateNotifier {
+//
+// dataSender drives the post-persistence push in notifyStateChange. nil
+// is accepted (the push hook short-circuits) so unit tests / setups
+// without a configured NATS publisher still write user_application_states.
+func NewStateNotifier(dataSender *DataSender) *StateNotifier {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &StateNotifier{
-		subj:     getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
-		natsHost: getEnvOrDefault("NATS_HOST", "localhost"),
-		natsPort: getEnvOrDefault("NATS_PORT", "4222"),
-		natsUser: getEnvOrDefault("NATS_USERNAME", ""),
-		natsPass: getEnvOrDefault("NATS_PASSWORD", ""),
-		queue:    make(chan stateEvent, stateQueueCapacity),
-		ctx:      ctx,
-		cancel:   cancel,
+		subj:       getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
+		natsHost:   getEnvOrDefault("NATS_HOST", "localhost"),
+		natsPort:   getEnvOrDefault("NATS_PORT", "4222"),
+		natsUser:   getEnvOrDefault("NATS_USERNAME", ""),
+		natsPass:   getEnvOrDefault("NATS_PASSWORD", ""),
+		queue:      make(chan stateEvent, stateQueueCapacity),
+		ctx:        ctx,
+		cancel:     cancel,
+		dataSender: dataSender,
 	}
 }
 
@@ -336,30 +353,85 @@ func (s *StateNotifier) processEvent(ev stateEvent) {
 	s.notifyStateChange(msg)
 }
 
-// notifyStateChange is the phase-2 fan-out hook for state changes. It
-// runs only after a successful UpsertStateFromNATS applied the row, so
-// the push (when implemented) reflects the freshly persisted PG state.
+// notifyStateChange is the post-persistence fan-out hook for state
+// changes. It runs only after UpsertStateFromNATS reported applied=true
+// (i.e. the row was inserted or the monotonic guard accepted the
+// update), so the push always reflects the freshly persisted PG state.
 //
-// PHASE 1: intentionally no-op.
+// As of the phase-2 cutover this is the SOLE source of NATS pushes on
+// the "os.market.<user>" subject for app state transitions. The legacy
+// cache-side path (cacheManager.SetAppData → utils.StateMonitor.
+// NotifyStateChange → dataSender.SendAppInfoUpdate) is wired with a
+// nil DataSender at construction time so its branches no-op; cache is
+// still written by DataWatcherState (frontend API readers are still
+// served from cache for now) but produces no outbound message.
 //
-//	The legacy path (datawatcher_state.go → cacheManager.SetAppData →
-//	utils.StateMonitor.NotifyStateChange → dataSender.SendAppInfoUpdate)
-//	is still running and is the sole source of "app_info_update"
-//	pushes during phase 1. Emitting from this function while the
-//	legacy path is also emitting would produce duplicate client-side
-//	events.
+// Push payload contract:
+//   - AppStateLatest is rebuilt from PG via store.GetUserAppStateLatest +
+//     (*AppStateLatestRow).ToWireData. Sourcing the AppStateLatestData
+//     from PG instead of the inbound NATS msg ensures the published
+//     state matches what /market/state* endpoints would return for
+//     the same user — single source of truth.
+//   - AppInfoLatest is intentionally nil. The legacy path embedded a
+//     full AppInfoLatestData from cache; the contract for this phase
+//     is to omit it and let clients consume AppStateLatest plus their
+//     existing /market/data snapshot. If a future client need
+//     surfaces a real dependency on the embedded info, populate via
+//     a sparse builder against user_applications (do NOT inline the
+//     heavyweight manifest blob).
+//   - NotifyType is "app_state_change", matching the legacy value so
+//     the frontend dispatcher needs no change.
+//   - Source is taken from msg.MarketSource (which the upstream
+//     contract guarantees non-empty; processEvent already drops
+//     events lacking it).
 //
-// PHASE 2: when the cache path's StateMonitor is retired (legacy
-// datawatcher_state.go's NATS subscription unwired), fill this in with
-// dataSender.SendAppInfoUpdate(...) using `msg` (or a re-read of the
-// PG row, whichever the phase-2 design picks). The same PR MUST
-// disable the legacy push in the same change set; do NOT enable this
-// hook independently.
+// A nil DataSender (dev / public env / NATS init failure) silently
+// short-circuits the push; the PG write has already happened by this
+// point so observability is preserved either way.
 //
-// TODO(phase2): wire dataSender push here.
+// Errors from the PG re-read or the publish call are logged at error
+// level but do not retry — the next state event for the same app
+// supersedes it via the monotonic guard, so a missed push self-heals
+// on the next transition. The early returns on nil row also cover the
+// "user_application_states / user_applications row deleted between
+// upsert and re-read" race; the upsert RowsAffected check would have
+// caught the missing-parent case earlier.
 func (s *StateNotifier) notifyStateChange(msg AppStateMessage) {
-	// intentionally empty — see comment above
-	_ = msg
+	if s.dataSender == nil {
+		return
+	}
+
+	row, err := store.GetUserAppStateLatest(s.ctx, msg.User, msg.MarketSource, msg.Name, msg.RawAppName)
+	if err != nil {
+		glog.Errorf("[state] notifyStateChange: read PG row failed (user=%s source=%s app=%s rawApp=%s): %v",
+			msg.User, msg.MarketSource, msg.Name, msg.RawAppName, err)
+		return
+	}
+	if row == nil {
+		glog.V(3).Infof("[state] notifyStateChange: no PG row for (user=%s source=%s app=%s rawApp=%s); skipping push",
+			msg.User, msg.MarketSource, msg.Name, msg.RawAppName)
+		return
+	}
+
+	stateData := row.ToWireData(msg.User, msg.MarketSource)
+	if stateData == nil {
+		return
+	}
+
+	update := types.AppInfoUpdate{
+		AppStateLatest: stateData,
+		AppInfoLatest:  nil,
+		Timestamp:      time.Now().Unix(),
+		User:           msg.User,
+		AppName:        msg.Name,
+		NotifyType:     "app_state_change",
+		Source:         msg.MarketSource,
+	}
+
+	if err := s.dataSender.SendAppInfoUpdate(update, "state_notifier"); err != nil {
+		glog.Errorf("[state] notifyStateChange: publish failed (user=%s source=%s app=%s state=%s opID=%s): %v",
+			msg.User, msg.MarketSource, msg.Name, msg.State, msg.OpID, err)
+	}
 }
 
 // parseStateCreateTime parses the upstream nano-precision createTime.
