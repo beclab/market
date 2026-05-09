@@ -284,34 +284,42 @@ func ListUserAppStateLatest(ctx context.Context, userID string, sourceIDs []stri
 }
 
 // AppInstallRow is the projection GetAppInstallRow yields. It carries
-// the user_applications + applications JOIN columns the install /
-// upgrade / clone API handlers need to populate task metadata for the
-// downstream app-service call: cfgType (manifest_type), the chart-repo
-// rendered_package path used to derive chart_path, the image_analysis
-// blob unpacked into task.Image[], the per-(user, app) price config
-// the VC injection step reads, and the catalog app_entry that supplies
-// the realAppID fallback chain. Heavyweight manifest JSONB blocks
-// (metadata / spec / resources / ...) are NOT projected here on
-// purpose — the action handlers do not consume them and the bandwidth
-// cost would be substantial; getAppsInfo (/api/v2/apps) keeps using
-// AppDetailRow when the rich payload is required.
+// the user_applications columns the install / upgrade / clone API
+// handlers need to populate task metadata for the downstream app-service
+// call: cfgType (manifest_type), the chart-repo rendered_package path
+// used to derive chart_path, the image_analysis blob unpacked into
+// task.Image[], and the per-(user, app) price config the VC injection
+// step reads.
+//
+// All fields are sourced from user_applications. The applications table
+// (catalogue-level app_entry) is intentionally NOT joined: app
+// operations are scoped to the user's rendered manifest and any
+// realAppID derivation is satisfied by user_applications.app_id (which
+// is the manifest's id, identical to applications.app_entry.ID for the
+// non-clone rows install / upgrade / clone act on — clones are filtered
+// out by the SQL's app_id = app_raw_id predicate).
+//
+// Heavyweight manifest JSONB blocks (metadata / spec / resources / ...)
+// are NOT projected here on purpose — the action handlers do not
+// consume them and the bandwidth cost would be substantial;
+// getAppsInfo (/api/v2/apps) keeps using AppDetailRow when the rich
+// payload is required.
 type AppInstallRow struct {
-	SourceID        string                                    `gorm:"column:source_id"`
-	AppID           string                                    `gorm:"column:app_id"`
-	AppRawID        string                                    `gorm:"column:app_raw_id"`
-	AppName         string                                    `gorm:"column:app_name"`
-	AppRawName      string                                    `gorm:"column:app_raw_name"`
-	ManifestType    string                                    `gorm:"column:manifest_type"`
-	AppVersion      string                                    `gorm:"column:app_version"`
-	RenderedPackage string                                    `gorm:"column:rendered_package"`
-	Price           *models.JSONB[types.PriceConfig]          `gorm:"column:price"`
-	ImageAnalysis   *models.JSONB[types.ImageAnalysisResult]  `gorm:"column:image_analysis"`
-	AppEntry        *models.JSONB[types.ApplicationInfoEntry] `gorm:"column:app_entry"`
+	SourceID        string                                   `gorm:"column:source_id"`
+	AppID           string                                   `gorm:"column:app_id"`
+	AppRawID        string                                   `gorm:"column:app_raw_id"`
+	AppName         string                                   `gorm:"column:app_name"`
+	AppRawName      string                                   `gorm:"column:app_raw_name"`
+	ManifestType    string                                   `gorm:"column:manifest_type"`
+	AppVersion      string                                   `gorm:"column:app_version"`
+	RenderedPackage string                                   `gorm:"column:rendered_package"`
+	Price           *models.JSONB[types.PriceConfig]         `gorm:"column:price"`
+	ImageAnalysis   *models.JSONB[types.ImageAnalysisResult] `gorm:"column:image_analysis"`
 }
 
-// GetAppInstallRow fetches the single user_applications + applications
-// JOIN row that the install / upgrade / clone API handlers need to
-// dispatch a backend call.
+// GetAppInstallRow fetches the single user_applications row that the
+// install / upgrade / clone API handlers need to dispatch a backend
+// call.
 //
 // version="" matches any version of the named app; this is the cloneApp
 // path, where the version is later read from user_application_states
@@ -352,11 +360,8 @@ SELECT ua.source_id,
        COALESCE(ua.metadata->>'version', '') AS app_version,
        ua.rendered_package,
        ua.price,
-       ua.image_analysis,
-       a.app_entry
+       ua.image_analysis
 FROM user_applications ua
-LEFT JOIN applications a
-    ON a.source_id = ua.source_id AND a.app_id = ua.app_id
 WHERE ua.user_id        = ?
   AND ua.source_id      = ?
   AND ua.app_name       = ?
