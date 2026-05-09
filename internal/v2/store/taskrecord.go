@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -109,7 +110,17 @@ INSERT INTO task_records (
 		}
 
 		if in.PendingState != nil {
-			if err := upsertPendingStateInTx(tx, *in.PendingState); err != nil {
+			err := upsertPendingStateInTx(tx, *in.PendingState)
+			// ErrUserApplicationStateNotFound is a tolerable miss: the
+			// task is being created against an app that has no
+			// user_applications row (cloneApp's synthesized newAppName
+			// is the canonical case; admin / debug paths the same).
+			// Surface it via an error-free commit so the task_records
+			// insert lands; the caller logs at V(3) for diagnostics.
+			// Other errors (PG down, constraint violation) still
+			// roll back the transaction, refusing to create a task
+			// whose state plumbing is broken in unexpected ways.
+			if err != nil && !errors.Is(err, ErrUserApplicationStateNotFound) {
 				return err
 			}
 		}
@@ -375,17 +386,31 @@ UPDATE task_records
 	})
 }
 
-// upsertPendingStateInTx performs the same UPSERT as the public
-// UpsertPendingState helper (in userappstate.go) but on the supplied
-// transaction handle, so CreateTask can compose it with its
-// task_records insert atomically.
+// upsertPendingStateInTx records that a Market-initiated operation is
+// being dispatched, by upserting the user_application_states row for
+// (user, source, app). It is the in-transaction counterpart of the
+// public UpsertPendingState (userappstate.go); CreateTask uses it so
+// the state-table write and the task_records INSERT land atomically.
 //
-// The SQL is duplicated here rather than refactored out of
-// UpsertPendingState because (a) the SQL is short, (b) refactoring the
-// existing helper to accept *gorm.DB would either change its public
-// signature or add an exported tx-aware variant, both bigger-blast-
-// radius changes than copying twelve lines. If the duplication grows
-// (more callsites needing tx-aware variants), revisit and consolidate.
+// Column-level write contract — IDENTICAL to UpsertPendingState's:
+//   - op_type, event_create_time     overwritten on UPDATE branch
+//   - state                          left to schema default (”) on
+//     INSERT, NEVER touched on UPDATE
+//     (NATS owns this column)
+//   - reason / message / progress    NOT touched (NATS owns)
+//   - entrances / shared_entrances /
+//     status_entrances               NOT touched (NATS owns)
+//   - installed_version /
+//     target_version                 NOT touched (CompleteTask /
+//     FailTask own)
+//   - op_id                          NOT touched (preserved on UPDATE);
+//     Market's task executor calls
+//     LinkOpID after the HTTP response
+//
+// The SQL is duplicated against UpsertPendingState rather than
+// refactored: short, stable, and avoiding the cross-package signature
+// change. Both helpers must evolve together when the contract
+// changes — see UpsertPendingState's doc for the canonical narrative.
 func upsertPendingStateInTx(tx *gorm.DB, in PendingTaskState) error {
 	in.UserID = strings.TrimSpace(in.UserID)
 	in.SourceID = strings.TrimSpace(in.SourceID)
@@ -398,14 +423,12 @@ func upsertPendingStateInTx(tx *gorm.DB, in PendingTaskState) error {
 INSERT INTO user_application_states (
     user_application_id, state, op_type, event_create_time
 )
-SELECT ua.id, 'pending', ?, NOW()
+SELECT ua.id, '', ?, NOW()
 FROM user_applications ua
 WHERE ua.user_id = ? AND ua.source_id = ? AND ua.app_id = ?
 ON CONFLICT (user_application_id) DO UPDATE SET
-    state             = EXCLUDED.state,
     op_type           = COALESCE(NULLIF(EXCLUDED.op_type, ''), user_application_states.op_type),
-    event_create_time = EXCLUDED.event_create_time,
-    op_id             = user_application_states.op_id
+    event_create_time = EXCLUDED.event_create_time
 `
 
 	res := tx.Exec(query,

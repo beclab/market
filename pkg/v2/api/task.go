@@ -373,10 +373,11 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		glog.V(2).Infof("installApp: added realAppID=%s to metadata for app=%s, source=%s", realAppID, request.AppName, request.Source)
 	}
 
-	// Establish the user_application_states pending row before AddTask so
-	// it exists from the moment the user clicks. Indexed by (user, source,
-	// realAppID) — this matches user_applications which hydration writes.
-	s.writePendingState(r.Context(), userID, request.Source, realAppID, opTypeInstall)
+	// user_application_states pending row is established by
+	// taskModule.AddTask → store.CreateTask in the same transaction
+	// as task_records, so the state side-effect cannot diverge from
+	// the task creation. realAppID + source live in taskMetadata for
+	// CreateTask to locate the row.
 
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
@@ -590,13 +591,12 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		"title":       request.Title, // Pass title in metadata (for display purposes)
 	}
 
-	// Pending-row write for clone is keyed by newAppName (the fabricated
-	// rawAppName+hash). Hydration does not pre-render clones, so
-	// user_applications typically has no row for newAppName — the helper
-	// logs a V(3) skip in that case and the task creation proceeds.
-	// Tracking clone state in PG is deferred to a later phase that
-	// teaches hydration about clones.
-	s.writePendingState(r.Context(), userID, request.Source, newAppName, opTypeClone)
+	// State-row creation is delegated to taskModule.AddTask →
+	// store.CreateTask. Clones use newAppName (rawAppName+hash) as
+	// the AppName argument, and CreateTask soft-skips when no
+	// user_applications row exists for that name (hydration does not
+	// pre-render clones today). Tracking clone state in PG is
+	// deferred to a later phase that teaches hydration about clones.
 
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
@@ -690,19 +690,19 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 3: Resolve (source, manifest_type) from PG. cancelInstall
-	// receives only app_name on the wire; LookupAppLocator pivots to
-	// the user_applications row across all of this user's sources.
-	// stateSourceID captures the resolved source so the subsequent
-	// writePendingState call can locate the user_application_states
-	// row. Empty when no row matches — writePendingState then no-ops
-	// and cfgType falls back to the default. The behaviour change vs.
-	// the legacy cache path: a cache miss used to surface as a 500
-	// (cache unavailable) or 404 (user data absent); the PG path
-	// instead proceeds with cfgType="app", which matches the operation
-	// semantics (a cancel should not be rejected because the catalogue
-	// view is unavailable).
-	var cfgType, stateSourceID string
+	// Step 3: Resolve (source, app_id, manifest_type) from PG.
+	// cancelInstall receives only app_name on the wire; LookupAppLocator
+	// pivots to the user_applications row across all of this user's
+	// sources. stateSourceID + stateAppID feed the user_application_states
+	// write that taskModule.AddTask performs in the same transaction
+	// as task_records — the state column itself is owned by the NATS
+	// pipeline; AddTask only refreshes op_type so the frontend sees
+	// "running (canceling)" immediately. When no locator row matches
+	// (empty stateSourceID / stateAppID), AddTask soft-skips the state
+	// write and the task is still created — matching the legacy
+	// best-effort semantics that a cancel must not be rejected because
+	// the catalogue view is unavailable.
+	var cfgType, stateSourceID, stateAppID string
 	loc, err := store.LookupAppLocator(r.Context(), userID, appName)
 	if err != nil {
 		glog.Errorf("cancelInstall: failed to look up user_applications row for app=%s user=%s: %v",
@@ -712,8 +712,9 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	if loc != nil {
 		stateSourceID = loc.SourceID
+		stateAppID = loc.AppID
 		cfgType = loc.ManifestType
-		glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s", cfgType, appName, stateSourceID)
+		glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s (app_id=%s)", cfgType, appName, stateSourceID, stateAppID)
 	}
 	if cfgType == "" {
 		glog.V(3).Infof("Warning: cfgType not resolved for app: %s, using default 'app'", appName)
@@ -727,16 +728,17 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		"token":    utils.GetTokenFromRequest(restfulReq),
 		"cfgType":  cfgType, // Use retrieved cfgType
 	}
-	// Push the resolved source into task metadata so the executor's
-	// linkStateOpID can locate the user_application_states row by
-	// (user, source, app) when app-service returns the opID.
+	// Push the resolved (source, app_id) into task metadata so
+	// AddTask's PG transaction can find the user_application_states
+	// row by (user, source, app_id), and so the executor's
+	// linkStateOpID can later patch op_id onto the same row when
+	// app-service returns it.
 	if stateSourceID != "" {
 		taskMetadata["source"] = stateSourceID
 	}
-
-	// Refresh the pending row so any subsequent NATS state event can find
-	// it via the FK chain. stateSourceID is best-effort — see helper docs.
-	s.writePendingState(r.Context(), userID, stateSourceID, appName, opTypeCancel)
+	if stateAppID != "" {
+		taskMetadata["realAppID"] = stateAppID
+	}
 
 	// Handle synchronous requests with proper blocking
 	if sync {
@@ -840,19 +842,16 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 3: Resolve (source, manifest_type) from PG. uninstallApp
-	// receives only app_name on the wire; LookupAppLocator pivots to
-	// the user_applications row across all of this user's sources.
-	// stateSourceID captures the resolved source so the subsequent
-	// writePendingState call can locate the user_application_states
-	// row. Empty when no row matches — writePendingState then no-ops
-	// and cfgType falls back to the default. The behaviour change vs.
-	// the legacy cache path: a cache miss used to surface as a 500
-	// (cache unavailable) or 404 (user data absent); the PG path
-	// instead proceeds with cfgType="app", which matches the operation
-	// semantics (an uninstall should not be rejected because the
-	// catalogue view is unavailable).
-	var cfgType, stateSourceID string
+	// Step 3: Resolve (source, app_id, manifest_type) from PG.
+	// uninstallApp receives only app_name on the wire; LookupAppLocator
+	// pivots to the user_applications row across all of this user's
+	// sources. stateSourceID + stateAppID feed the user_application_states
+	// op_type refresh that taskModule.AddTask performs in the same
+	// transaction as task_records. When no locator row matches, AddTask
+	// soft-skips the state write — matching the legacy best-effort
+	// semantics that an uninstall must not be rejected because the
+	// catalogue view is unavailable.
+	var cfgType, stateSourceID, stateAppID string
 	loc, err := store.LookupAppLocator(r.Context(), userID, appName)
 	if err != nil {
 		glog.Errorf("uninstallApp: failed to look up user_applications row for app=%s user=%s: %v",
@@ -862,8 +861,9 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if loc != nil {
 		stateSourceID = loc.SourceID
+		stateAppID = loc.AppID
 		cfgType = loc.ManifestType
-		glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s", cfgType, appName, stateSourceID)
+		glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s (app_id=%s)", cfgType, appName, stateSourceID, stateAppID)
 	}
 	if cfgType == "" {
 		glog.V(3).Infof("Warning: cfgType not resolved for app: %s, using default 'app'", appName)
@@ -879,16 +879,16 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		"all":        all,        // Add all parameter to metadata
 		"deleteData": deleteData, // Add delete userData
 	}
-	// Push the resolved source into task metadata so the executor's
-	// linkStateOpID can locate the user_application_states row by
-	// (user, source, app) when app-service returns the opID.
+	// Push the resolved (source, app_id) into task metadata so AddTask's
+	// PG transaction can find the user_application_states row by
+	// (user, source, app_id), and so the executor's linkStateOpID
+	// can later patch op_id onto the same row when app-service returns it.
 	if stateSourceID != "" {
 		taskMetadata["source"] = stateSourceID
 	}
-
-	// Refresh the pending row so any subsequent NATS state event can find
-	// it via the FK chain. stateSourceID is best-effort — see helper docs.
-	s.writePendingState(r.Context(), userID, stateSourceID, appName, opTypeUninstall)
+	if stateAppID != "" {
+		taskMetadata["realAppID"] = stateAppID
+	}
 
 	// Handle synchronous requests with proper blocking
 	if sync {
