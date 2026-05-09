@@ -579,73 +579,65 @@ func (tm *TaskModule) handleTaskFailure(task *Task, result string, err error, fa
 	tm.recordTaskResult(task, result, err)
 }
 
-// executeTask executes the actual task logic
+// executeTask executes the actual task logic. Each TaskType maps to a
+// single method on TaskModule; the switch picks the dispatcher and the
+// surrounding scaffold (logging / sendTaskExecutionUpdate / failure
+// handling / success handling) is uniform across types.
+//
+// Per-type side-effects (e.g. cancel marking the cancelled install
+// task as Canceled) live inside the executor itself, not here, so the
+// switch stays a pure dispatch table.
 func (tm *TaskModule) executeTask(task *Task) {
-	var result string
-	var err error
-
-	glog.V(2).Infof("[TASK] Starting task execution: ID=%s, Type=%s, App=%s, User=%s",
-		task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
+	typeStr := getTaskTypeString(task.Type)
+	glog.V(2).Infof("[TASK] Starting %s: ID=%s, App=%s, User=%s",
+		typeStr, task.ID, task.AppName, task.User)
 
 	tm.sendTaskExecutionUpdate(task)
 
+	var result string
+	var err error
 	switch task.Type {
 	case InstallApp:
-		glog.V(2).Infof("[TASK] Executing app installation for task: %s", task.ID)
 		result, err = tm.AppInstall(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Installation failed")
-			return
-		}
-		glog.V(2).Infof("[TASK] App installation completed successfully for task: %s", task.ID)
-
 	case UninstallApp:
-		glog.V(2).Infof("[TASK] Executing app uninstallation for task: %s", task.ID)
 		result, err = tm.AppUninstall(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Uninstallation failed")
-			return
-		}
-		glog.V(2).Infof("[TASK] App uninstallation completed successfully for task: %s", task.ID)
-
 	case CancelAppInstall:
-		glog.V(2).Infof("[TASK] Executing app cancel for task: %s", task.ID)
 		result, err = tm.AppCancel(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Cancel failed")
-			return
-		}
-
-		if cancelErr := tm.InstallTaskCanceled(task.AppName, "", "", task.User); cancelErr != nil {
-			glog.Errorf("[TASK] InstallTaskCanceled failed for task: %s, app: %s, error: %v", task.ID, task.AppName, cancelErr)
-		}
-		glog.V(2).Infof("[TASK] App cancel completed successfully for task: %s, app: %s", task.ID, task.AppName)
-
 	case UpgradeApp:
-		glog.V(2).Infof("[TASK] Executing app upgrade for task: %s", task.ID)
 		result, err = tm.AppUpgrade(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Upgrade failed")
-			return
-		}
-		glog.V(2).Infof("[TASK] App upgrade completed successfully for task: %s, app: %s", task.ID, task.AppName)
-
 	case CloneApp:
-		glog.V(2).Infof("[TASK] Executing app clone for task: %s", task.ID)
 		result, err = tm.AppClone(task)
-		if err != nil {
-			tm.handleTaskFailure(task, result, err, "Clone failed")
-			return
-		}
-		glog.V(2).Infof("[TASK] App clone completed successfully for task: %s, app: %s", task.ID, task.AppName)
+	default:
+		err = fmt.Errorf("unknown task type: %d", task.Type)
 	}
 
+	if err != nil {
+		tm.handleTaskFailure(task, result, err, typeStr+" failed")
+		return
+	}
+
+	glog.V(2).Infof("[TASK] %s completed: ID=%s, App=%s", typeStr, task.ID, task.AppName)
+	tm.handleTaskSuccess(task, result)
+}
+
+// handleTaskSuccess is the success-side counterpart of handleTaskFailure.
+// Both run the same shape — update the in-memory task fields, drop the
+// task from runningTasks, persist the terminal record, push a finished
+// notification, fire the (sync) callback, and record the result in the
+// history module — so keeping them as symmetric helpers makes the
+// success / failure paths read identically and lets future store-layer
+// migrations (CompleteTask / FailTask) land in a single function each
+// instead of being scattered through executeTask.
+func (tm *TaskModule) handleTaskSuccess(task *Task, result string) {
 	task.Result = result
 	task.Status = Completed
 	now := time.Now()
 	task.CompletedAt = &now
-	glog.V(2).Infof("[TASK] Task completed successfully: ID=%s, Type=%s, AppName=%s, User=%s, Duration=%v",
-		task.ID, getTaskTypeString(task.Type), task.AppName, task.User, now.Sub(*task.StartedAt))
+
+	if task.StartedAt != nil {
+		glog.V(2).Infof("[TASK] Task completed: ID=%s, Type=%s, App=%s, User=%s, Duration=%v",
+			task.ID, getTaskTypeString(task.Type), task.AppName, task.User, now.Sub(*task.StartedAt))
+	}
 
 	tm.removeRunningTask(task.ID)
 	tm.finalizeTaskPersistence(task)
