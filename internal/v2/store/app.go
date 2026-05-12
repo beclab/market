@@ -113,40 +113,56 @@ func buildApplicationRows(sourceID string, requestApps map[string]interface{}, a
 		if !ok {
 			continue
 		}
-
-		appVersion, _ := appMap["version"].(string)
-		appVersion = strings.TrimSpace(appVersion)
-		if appVersion == "" {
-			continue
+		if row := buildApplicationRow(sourceID, appID, appMap); row != nil {
+			rows = append(rows, row)
 		}
-
-		appName, _ := appMap["name"].(string)
-		appName = strings.TrimSpace(appName)
-		if appName == "" {
-			appName = appID
-		}
-
-		row := &models.Application{
-			SourceID:   sourceID,
-			AppID:      appID,
-			AppName:    appName,
-			AppVersion: appVersion,
-			AppType:    normalizeAppType(appMap["cfgType"]),
-		}
-
-		if appEntry := types.NewApplicationInfoEntry(appMap); appEntry != nil {
-			entryJSON := models.NewJSONB(*appEntry)
-			row.AppEntry = &entryJSON
-		}
-
-		if price := parsePriceConfig(appMap["price"]); price != nil {
-			priceJSON := models.NewJSONB(*price)
-			row.Price = &priceJSON
-		}
-
-		rows = append(rows, row)
 	}
 	return rows
+}
+
+// buildApplicationRow maps one chart-repo app payload onto the
+// applications-table row shape. It is the single point where the
+// field-extraction conventions ("version" required, "name" defaulted to
+// appID, cfgType normalised, AppEntry / price decoded from the nested
+// JSON object) live, so the batch syncer (buildApplicationRows) and the
+// event-driven single-app writer (chartrepo_event.go) cannot drift.
+//
+// Returns nil when the payload is missing the mandatory version field —
+// every caller treats the row as a tolerable skip rather than an error,
+// matching the legacy syncer behaviour where a malformed entry would
+// previously be filtered out silently.
+func buildApplicationRow(sourceID, appID string, appMap map[string]interface{}) *models.Application {
+	appVersion, _ := appMap["version"].(string)
+	appVersion = strings.TrimSpace(appVersion)
+	if appVersion == "" {
+		return nil
+	}
+
+	appName, _ := appMap["name"].(string)
+	appName = strings.TrimSpace(appName)
+	if appName == "" {
+		appName = appID
+	}
+
+	row := &models.Application{
+		SourceID:   sourceID,
+		AppID:      appID,
+		AppName:    appName,
+		AppVersion: appVersion,
+		AppType:    normalizeAppType(appMap["cfgType"]),
+	}
+
+	if appEntry := types.NewApplicationInfoEntry(appMap); appEntry != nil {
+		entryJSON := models.NewJSONB(*appEntry)
+		row.AppEntry = &entryJSON
+	}
+
+	if price := parsePriceConfig(appMap["price"]); price != nil {
+		priceJSON := models.NewJSONB(*price)
+		row.Price = &priceJSON
+	}
+
+	return row
 }
 
 func parsePriceConfig(raw interface{}) *types.PriceConfig {
