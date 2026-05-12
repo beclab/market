@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"market/internal/v2/appservice"
+	"market/internal/v2/store"
 
 	"github.com/golang/glog"
 )
@@ -278,6 +279,45 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 
 	task.OpID = opResp.Data.OpID
 	glog.Infof("Successfully extracted opID: %s for task: %s", opResp.Data.OpID, task.ID)
+
+	// Materialise the clone's user_applications + user_application_states
+	// rows AFTER app-service accepts the clone (i.e. opID issued). Doing
+	// this in the HTTP handler before AddTask leaks "ghost" rows whenever
+	// app-service rejects the request — most commonly HTTP 422 when the
+	// user has not yet filled in required envs/entrances. Each retry with
+	// different request body hashes to a distinct newAppID (because
+	// requestHash covers Title/Envs/Entrances), each insert hits a fresh
+	// (user, source, app_id) tuple, and the UNIQUE constraint does not
+	// catch the duplicates.
+	//
+	// On failure here we still return the success envelope because
+	// app-service has already accepted the clone; the operation will
+	// proceed on the cluster. The missing rows are logged loudly so
+	// they show up in monitoring; a follow-up reconciliation pass can
+	// rematerialise them from NATS state events (UpsertStateFromNATS
+	// will silently skip until the user_applications row appears).
+	newAppID := metadataString(task.Metadata, "realAppID")
+	version := metadataString(task.Metadata, "version")
+	if newAppID == "" {
+		glog.Errorf("AppClone: missing realAppID in metadata after app-service success (task=%s app=%s opID=%s); skipping user_applications materialisation",
+			task.ID, urlAppName, task.OpID)
+	} else {
+		ctx := context.Background()
+		if err := store.CloneUserApplication(ctx, user, appSource, rawAppName, newAppID, urlAppName); err != nil {
+			glog.Errorf("AppClone: failed to materialise clone user_applications row after app-service success (task=%s user=%s source=%s src=%s -> new=%s/%s opID=%s): %v",
+				task.ID, user, appSource, rawAppName, urlAppName, newAppID, task.OpID, err)
+		} else if err := store.UpsertPendingState(ctx, store.PendingStateInput{
+			UserID:   user,
+			SourceID: appSource,
+			AppID:    newAppID,
+			OpType:   "clone",
+			Version:  version,
+		}); err != nil {
+			glog.Errorf("AppClone: failed to upsert clone user_application_states row after CloneUserApplication (task=%s user=%s source=%s app=%s opID=%s): %v",
+				task.ID, user, appSource, newAppID, task.OpID, err)
+		}
+	}
+
 	tm.linkStateOpID(task, task.AppName, "clone")
 
 	envelope := baseEnvelope()

@@ -568,28 +568,34 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 10: Materialise the clone's user_applications row by
-	// copying the original chart row and overriding only (app_id,
-	// app_name). This must happen BEFORE AddTask so that
-	// upsertPendingStateInTx (run inside CreateTask) can find the
-	// new user_applications.id and write the clone's pending state
-	// row in the same transaction as task_records — without it the
-	// state row write would soft-skip on ErrUserApplicationStateNotFound
-	// and we would lose the "clone in progress" signal that NATS
-	// events / linkStateOpID later overlay onto.
-	if err := store.CloneUserApplication(r.Context(), userID, request.Source, request.AppName, newAppID, newAppName); err != nil {
-		glog.Errorf("cloneApp: failed to materialise clone user_applications row (user=%s source=%s src=%s -> new=%s/%s): %v",
-			userID, request.Source, request.AppName, newAppName, newAppID, err)
-		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to prepare clone app data", nil)
-		return
-	}
+	// Step 10: Materialise the clone's user_applications row is
+	// DEFERRED to the task executor (internal/v2/task/app_clone.go),
+	// which runs it ONLY after app-service has accepted the clone
+	// request and returned an opID. Writing the row here used to be
+	// the source of "ghost clone rows": app-service can reject a
+	// clone with HTTP 422 when the request is missing required envs
+	// / entrances, the user fills in the form, retries with slightly
+	// different parameters, and each retry produces a fresh
+	// (newAppName, newAppID) — md5(rawAppName + sha256(request)[:6])
+	// is deterministic per-request, so every distinct request body
+	// hashes to a distinct app_id and bypasses the
+	// (user_id, source_id, app_id) UNIQUE constraint.
+	//
+	// Tradeoff: AddTask's pendingStateFromMetadata still emits a
+	// PendingTaskState targeting newAppID below, so CreateTask
+	// attempts the user_application_states upsert in-transaction
+	// with task_records; the upsert soft-skips on
+	// ErrUserApplicationStateNotFound (no user_applications row yet)
+	// and the task_records insert still commits. The clone's state
+	// row is materialised in the same executor step as the
+	// user_applications row, after the opID is known.
 
 	// Step 11: Create clone installation task. realAppID is the
-	// freshly created clone row's app_id so pendingStateFromMetadata
-	// + upsertPendingStateInTx anchor the state write on the clone's
-	// own user_applications.id (NOT the original chart's). Version
-	// is also propagated so installed_version / target_version land
-	// the same way they do for install.
+	// clone row's app_id (md5(newAppName)) — the executor uses it
+	// to call CloneUserApplication + UpsertPendingState after
+	// app-service success. Version is also propagated so
+	// installed_version / target_version land the same way they do
+	// for install.
 	taskMetadata := map[string]interface{}{
 		"user_id":     userID,
 		"source":      request.Source,
