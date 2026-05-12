@@ -1,21 +1,32 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
-	"os"
+
+	"market/internal/v2/appservice"
 
 	"github.com/golang/glog"
 )
 
-// AppCancel cancels a running task, like app installation.
-// It retrieves the task's app_name and an authentication token from the task's metadata.
-// It then constructs a request to the app service's cancel endpoint.
+// AppCancel cancels a running operation (typically an in-flight install)
+// by dispatching a cancel request through the typed appservice client.
+// The (uid) wire argument is taken from task.Metadata["app_name"] — the
+// API handler stores the install task's app name there at cancel-task
+// creation time so the executor can target the correct upstream
+// resource regardless of how the cancel task itself was named.
+//
+// After app-service acknowledges the cancel, we synchronously fire
+// InstallTaskCanceled to mark the cancelled install task's in-memory
+// + PG status as Canceled. That side-effect is best-effort: the cancel
+// HTTP succeeded, which is the user-visible success criterion, and
+// failure on this side just means the NATS pipeline reconciles the
+// install task's terminal state on its own timeline.
 func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 	glog.Infof("Starting app cancel: app=%s, user=%s, task_id=%s", task.AppName, task.User, task.ID)
 
-	// app_name is required to identify which task to cancel.
 	appName, ok := task.Metadata["app_name"].(string)
 	if !ok {
 		glog.Warningf("Missing app_name in task metadata for task: %s", task.ID)
@@ -28,104 +39,100 @@ func (tm *TaskModule) AppCancel(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
-	// Get cfgType from metadata
 	cfgType, ok := task.Metadata["cfgType"].(string)
 	if !ok {
 		glog.Warningf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
-		cfgType = "app" // Default to app type
+		cfgType = "app"
 	}
 
-	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	// Choose API endpoint based on cfgType
-	var urlStr string
-	// if cfgType == "middleware" {
-	// 	// Use middleware API for middleware type
-	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
-	// 	glog.Infof("Using middleware API for cancel: %s", urlStr)
-	// } else {
-	// 	// Use regular app API for other types
-	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/cancel?type=operate", appServiceHost, appServicePort, appName)
-	glog.Infof("Using regular app API for cancel: %s", urlStr)
-	// }
-
-	glog.Infof("App service URL: %s for task: %s, app_name: %s, cfgType: %s", urlStr, task.ID, appName, cfgType)
-
-	headers := map[string]string{
-		"X-Authorization": token,
-		"X-Bfl-User":      task.User,
-		"Content-Type":    "application/json",
-	}
-
-	// Send HTTP request and get response
-	glog.Infof("[APP] Sending HTTP request for app cancel: task=%s, app_name=%s", task.ID, appName)
-	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, nil)
-	if err != nil {
-		glog.Errorf("HTTP request failed for app cancel: task=%s, error=%v", task.ID, err)
-		// Create detailed error result
-		errorResult := map[string]interface{}{
+	// baseEnvelope mirrors the legacy success / failure result shape so
+	// API-side consumers (sync wait + frontend backend_response viewer)
+	// keep the exact same field set as before the appservice.Client
+	// migration. The legacy "url" field is intentionally dropped: it
+	// duplicated the host/port that appservice.Client resolves itself
+	// and no internal consumer reads it.
+	baseEnvelope := func() map[string]interface{} {
+		return map[string]interface{}{
 			"operation": "cancel",
 			"app_name":  task.AppName,
 			"user":      task.User,
 			"uid":       appName,
 			"cfgType":   cfgType,
-			"url":       urlStr,
-			"error":     err.Error(),
-			"status":    "failed",
 		}
-		errorJSON, _ := json.Marshal(errorResult)
+	}
+
+	hdr := appservice.OpHeaders{
+		Token: token,
+		User:  task.User,
+	}
+
+	client, err := getAppServiceClient()
+	if err != nil {
+		glog.Errorf("App-service client unavailable for cancel task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		errorJSON, _ := json.Marshal(envelope)
 		return string(errorJSON), err
 	}
 
-	glog.Infof("[APP] HTTP request completed successfully for app cancel: task=%s, response_length=%d", task.ID, len(response))
-
-	// Parse response to extract opID if cancel is successful
-	var responseData map[string]interface{}
-	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
-		glog.Errorf("Failed to parse response JSON for task %s: %v", task.ID, err)
-	} else {
-		// Check if cancel was successful by checking code field
-		if code, ok := responseData["code"].(float64); ok && code == 200 {
-			if data, ok := responseData["data"].(map[string]interface{}); ok {
-				if opID, ok := data["opID"].(string); ok && opID != "" {
-					task.OpID = opID
-					glog.Infof("Successfully extracted opID: %s for task: %s", opID, task.ID)
-					tm.linkStateOpID(task, appName, "cancel")
-				} else {
-					glog.Infof("opID not found in response data for task: %s", task.ID)
-				}
-			} else {
-				glog.Infof("Data field not found or not a map in response for task: %s", task.ID)
+	glog.Infof("[APP] Sending HTTP request for app cancel: task=%s, app_name=%s", task.ID, appName)
+	opResp, err := client.CancelApp(context.Background(), appName, hdr)
+	if err != nil {
+		glog.Errorf("App-service cancel failed for task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		// HTTP-200-business-error / HTTP-422-structured-envelope both
+		// surface as *appservice.OpError. Forward code/message + the
+		// upstream `data` block (preferring the verbatim DataRaw bytes
+		// when available so structured payloads survive intact) so the
+		// frontend's backend_response viewer keeps working unchanged.
+		var opErr *appservice.OpError
+		if errors.As(err, &opErr) {
+			backend := map[string]interface{}{
+				"code":    opErr.Code,
+				"message": opErr.Message,
 			}
-		} else {
-			glog.Infof("Cancel code is not 200 for task: %s, code: %v", task.ID, code)
+			switch {
+			case opResp != nil && len(opResp.DataRaw) > 0:
+				backend["data"] = json.RawMessage(opResp.DataRaw)
+			case opErr.OpID != "":
+				backend["data"] = map[string]interface{}{"opID": opErr.OpID}
+			}
+			envelope["backend_response"] = backend
 		}
+		errorJSON, _ := json.Marshal(envelope)
+		return string(errorJSON), err
 	}
 
-	// Create success result
-	successResult := map[string]interface{}{
-		"operation": "cancel",
-		"app_name":  task.AppName,
-		"user":      task.User,
-		"uid":       appName,
-		"cfgType":   cfgType,
-		"url":       urlStr,
-		"response":  response,
-		"opID":      task.OpID, // Include opID in result
-		"status":    "success",
+	if opResp != nil && opResp.Data != nil && opResp.Data.OpID != "" {
+		task.OpID = opResp.Data.OpID
+		glog.Infof("Successfully extracted opID: %s for task: %s", task.OpID, task.ID)
+		tm.linkStateOpID(task, appName, "cancel")
+	} else {
+		glog.Infof("opID not found in response data for task: %s", task.ID)
 	}
-	successJSON, _ := json.Marshal(successResult)
+
+	envelope := baseEnvelope()
+	if opResp != nil {
+		backend := map[string]interface{}{
+			"code":    opResp.Code,
+			"message": opResp.Message,
+		}
+		if opResp.Data != nil && opResp.Data.OpID != "" {
+			backend["data"] = map[string]interface{}{"opID": opResp.Data.OpID}
+		}
+		envelope["backend_response"] = backend
+	}
+	envelope["opID"] = task.OpID
+	envelope["status"] = "success"
+	successJSON, _ := json.Marshal(envelope)
 	glog.Infof("App cancel completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
 
-	// After app-service has accepted the cancel, mark the install task
-	// being cancelled as Canceled. This side-effect belongs to the
-	// cancel operation itself, not to executeTask's dispatch, so it
-	// lives here. Failure is logged but does not fail the cancel
-	// task — the cancel HTTP succeeded, that is the user-visible
-	// success criterion; the bookkeeping for the cancelled install
-	// task is best-effort and gets reconciled by the NATS pipeline
-	// either way.
+	// Best-effort install-task cleanup. See doc comment for why a
+	// failure here does NOT propagate up — the cancel itself is
+	// considered successful once app-service acknowledged it.
 	if cancelErr := tm.InstallTaskCanceled(task.AppName, "", "", task.User); cancelErr != nil {
 		glog.Errorf("[APP] InstallTaskCanceled side-effect failed for task=%s app=%s: %v",
 			task.ID, task.AppName, cancelErr)

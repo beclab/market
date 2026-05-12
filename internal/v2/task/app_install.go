@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -19,13 +17,13 @@ import (
 
 // appServiceClientOnce / appServiceClient / appServiceClientErr cache a
 // process-wide typed client built from APP_SERVICE_SERVICE_HOST/PORT.
-// First step of replacing the hand-rolled http.Client + JSON-envelope
-// parsing across the task package; the other four executors (uninstall
-// / cancel / upgrade / clone) keep their legacy sendHttpRequest path
-// until they migrate in subsequent commits.
+// All five task executors (install / clone / uninstall / upgrade /
+// cancel) now share this single client — the previous hand-rolled
+// http.Client + JSON-envelope parsing has been retired across the
+// package.
 //
 // WithTimeout is raised to 2 minutes (vs the package default of 30s)
-// because install today returns synchronously after app-service
+// because operations today return synchronously after app-service
 // acknowledges the request and assigns an OpID; under load that can
 // occasionally exceed 30s. Subsequent state transitions are NATS-driven
 // and do not flow through this client.
@@ -308,35 +306,13 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	return string(successJSON), nil
 }
 
-// getRepoUrl returns the repository URL
+// getRepoUrl returns the repository URL passed through to app-service in
+// install / upgrade / clone request bodies as RepoUrl. Sourced from the
+// REPO_URL_HOST / REPO_URL_PORT env vars set by the chart-repo K8s
+// service. Kept as a package-level helper because all four operation
+// executors share it (and pkg/v2/api/task.go does not).
 func getRepoUrl() string {
 	repoServiceHost := os.Getenv("REPO_URL_HOST")
 	repoStoreServicePort := os.Getenv("REPO_URL_PORT")
 	return fmt.Sprintf("http://%s:%s/", repoServiceHost, repoStoreServicePort)
-}
-
-// sendHttpRequest sends an HTTP request with the given token
-func sendHttpRequest(method, urlStr string, headers map[string]string, body io.Reader) (string, error) {
-	req, err := http.NewRequest(method, urlStr, body)
-	if err != nil {
-		return "", err
-	}
-
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(bodyBytes), nil
 }
