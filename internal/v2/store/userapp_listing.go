@@ -61,6 +61,22 @@ type AppStateLatestRow struct {
 	Entrances       *models.JSONB[[]types.AppStateLatestDataEntrances] `gorm:"column:entrances"`
 	SharedEntrances *models.JSONB[[]types.AppStateLatestDataEntrances] `gorm:"column:shared_entrances"`
 	StatusEntrances *models.JSONB[[]types.AppStateLatestDataEntrances] `gorm:"column:status_entrances"`
+
+	// UAEntrances is the manifest-side entrance declaration projected
+	// from user_applications.entrances (NOT from user_application_states).
+	// It carries the declarative fields a frontend needs to render an
+	// entrance card (name / host / port / icon / title / authLevel /
+	// url / openMethod / invisible / ...). The runtime triplet
+	// (state / statusTime / reason) is then overlaid from
+	// StatusEntrances by ToWireData via mergeEntranceStatuses, using
+	// positional matching: status[i] describes manifest[i].
+	//
+	// Aliased to ua_entrances in the SELECT projection to avoid
+	// colliding with uas.entrances (also surfaced through this struct
+	// as the Entrances field above). nil when the user_applications
+	// row predates the entrances column being populated, in which
+	// case mergeEntranceStatuses falls back to the raw status slice.
+	UAEntrances *models.JSONB[[]types.AppStateLatestDataEntrances] `gorm:"column:ua_entrances"`
 }
 
 // ListAppInfoLatestForUser returns one AppInfoSimpleRow per
@@ -273,7 +289,8 @@ func ListUserAppStateLatest(ctx context.Context, userID string, sourceIDs []stri
 		        uas.updated_at AS uas_updated_at,
 		        uas.entrances,
 		        uas.shared_entrances,
-		        uas.status_entrances`).
+		        uas.status_entrances,
+		        ua.entrances AS ua_entrances`).
 		Where("ua.user_id = ?", userID).
 		Where("ua.source_id IN ?", sourceIDs).
 		Order("ua.source_id, ua.app_id").
@@ -800,9 +817,15 @@ func (r *AppStateLatestRow) ToWireData(userID, sourceID string) *types.AppStateL
 		},
 		Tailscale: map[string]interface{}{},
 	}
-	if r.StatusEntrances != nil {
-		spec.EntranceStatuses = r.StatusEntrances.Data
+	var manifestEntrances, statusEntrances []types.AppStateLatestDataEntrances
+	if r.UAEntrances != nil {
+		manifestEntrances = r.UAEntrances.Data
 	}
+	if r.StatusEntrances != nil {
+		statusEntrances = r.StatusEntrances.Data
+	}
+	spec.EntranceStatuses = mergeEntranceStatuses(manifestEntrances, statusEntrances)
+
 	if r.SharedEntrances != nil {
 		spec.SharedEntrances = r.SharedEntrances.Data
 	}
@@ -812,6 +835,47 @@ func (r *AppStateLatestRow) ToWireData(userID, sourceID string) *types.AppStateL
 		Version: r.InstalledVersion,
 		Status:  spec,
 	}
+}
+
+// mergeEntranceStatuses overlays NATS-delivered runtime status onto the
+// manifest entrance declarations to produce the EntranceStatuses payload
+// the wire contract expects. Match is positional (index-based), NOT by
+// Name: the upstream NATS msg.EntranceStatuses is guaranteed to be in
+// the same order as the manifest entrances, so status[i] always
+// describes manifest[i].
+//
+// Only three fields are taken from status: State, StatusTime, Reason.
+// Everything else (Name / Host / Port / Icon / Title / AuthLevel / Url /
+// OpenMethod / Invisible / WindowPushState / Skip) is copied verbatim
+// from the manifest declaration — manifest is the source of truth for
+// declarative fields, including the URL that EnrichEntranceURLs writes
+// at hydration time.
+//
+// Length handling:
+//   - manifest empty (e.g. ua.entrances NULL on a legacy / partially
+//     rendered row): return status as-is, so callers still see the
+//     runtime triplet without losing the event.
+//   - len(status) < len(manifest): manifest entries beyond status
+//     length keep zero State/StatusTime/Reason (runtime simply has
+//     not reported on them yet).
+//   - len(status) > len(manifest): excess status entries are dropped;
+//     manifest is authoritative for the entrance LIST and any extra
+//     status entries indicate an upstream/manifest drift that should
+//     not silently surface in the wire payload.
+func mergeEntranceStatuses(manifest, status []types.AppStateLatestDataEntrances) []types.AppStateLatestDataEntrances {
+	if len(manifest) == 0 {
+		return status
+	}
+	out := make([]types.AppStateLatestDataEntrances, len(manifest))
+	for i, m := range manifest {
+		out[i] = m
+		if i < len(status) {
+			out[i].State = status[i].State
+			out[i].StatusTime = status[i].StatusTime
+			out[i].Reason = status[i].Reason
+		}
+	}
+	return out
 }
 
 // GetUserAppStateLatest reads a single user_application_states JOIN
@@ -863,7 +927,8 @@ func GetUserAppStateLatest(ctx context.Context, userID, sourceID, appName, appRa
 		        uas.updated_at AS uas_updated_at,
 		        uas.entrances,
 		        uas.shared_entrances,
-		        uas.status_entrances`).
+		        uas.status_entrances,
+		        ua.entrances AS ua_entrances`).
 		Where("ua.user_id = ?", userID).
 		Where("ua.source_id = ?", sourceID).
 		Where("ua.app_name = ?", appName).
