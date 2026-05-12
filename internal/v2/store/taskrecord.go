@@ -236,39 +236,49 @@ type SuccessStateUpdate struct {
 // recording the OpID returned by app-service plus the JSON result the
 // caller composed. When StateUpdate is non-nil, the user_application_
 // states row is updated in the same transaction.
+//
+// Self-contained convenience wrapper: starts and commits its own
+// transaction. In-transaction callers should use CompleteTaskInTx
+// instead.
 func CompleteTask(ctx context.Context, in CompleteTaskInput) error {
-	if strings.TrimSpace(in.TaskID) == "" {
-		return fmt.Errorf("CompleteTask: empty TaskID")
-	}
-
 	gdb := db.Global()
 	if gdb == nil {
 		return fmt.Errorf("postgres not initialised; db.Open must run before CompleteTask")
 	}
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return CompleteTaskInTx(tx, in)
+	})
+}
 
+// CompleteTaskInTx is the in-tx variant of CompleteTask. The caller
+// supplies a *gorm.DB that wraps an open transaction; this lets a
+// composite write (task_records + user_application_states +
+// history_records, for example) land atomically.
+func CompleteTaskInTx(tx *gorm.DB, in CompleteTaskInput) error {
+	if strings.TrimSpace(in.TaskID) == "" {
+		return fmt.Errorf("CompleteTask: empty TaskID")
+	}
 	completedAt := in.CompletedAt
 	if completedAt.IsZero() {
 		completedAt = time.Now()
 	}
 
-	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		const query = `
+	const query = `
 UPDATE task_records
    SET status = ?, result = ?, op_id = ?, completed_at = ?, updated_at = NOW()
  WHERE task_id = ?`
-		if err := tx.Exec(query,
-			taskStatusCompleted, in.Result, in.OpID, completedAt, in.TaskID,
-		).Error; err != nil {
-			return fmt.Errorf("CompleteTask: update task_records (task=%s): %w", in.TaskID, err)
-		}
+	if err := tx.Exec(query,
+		taskStatusCompleted, in.Result, in.OpID, completedAt, in.TaskID,
+	).Error; err != nil {
+		return fmt.Errorf("CompleteTask: update task_records (task=%s): %w", in.TaskID, err)
+	}
 
-		if in.StateUpdate != nil {
-			if err := applySuccessStateUpdate(tx, *in.StateUpdate); err != nil {
-				return err
-			}
+	if in.StateUpdate != nil {
+		if err := applySuccessStateUpdate(tx, *in.StateUpdate); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // FailTaskInput captures the data FailTask updates on the failure path
@@ -327,26 +337,68 @@ type FailedStateUpdate struct {
 // the error message + JSON result. When StateUpdate is non-nil, the
 // user_application_states row is moved to a terminal failed state in
 // the same transaction.
+//
+// Self-contained convenience wrapper: starts and commits its own
+// transaction. Callers that already hold a *gorm.DB tx (e.g.
+// task.persistTaskFailure orchestrating task_records +
+// user_application_states + history_records in one atomic write)
+// should call FailTaskInTx directly instead, so all three writes
+// land in a single transaction.
 func FailTask(ctx context.Context, in FailTaskInput) error {
-	return finishTaskAsTerminal(ctx, "FailTask", taskStatusFailed,
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before FailTask")
+	}
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return FailTaskInTx(tx, in)
+	})
+}
+
+// FailTaskInTx runs the FailTask body inside the supplied tx so the
+// caller can stitch additional writes (history record, secondary
+// state updates) into the same transaction. The tx parameter is a
+// *gorm.DB obtained from gdb.Transaction(...) — passing a non-tx
+// *gorm.DB is allowed but defeats the atomic-write purpose.
+func FailTaskInTx(tx *gorm.DB, in FailTaskInput) error {
+	return finishTaskAsTerminalInTx(tx, "FailTask", taskStatusFailed,
 		in.TaskID, in.Result, in.ErrorMsg, in.CompletedAt, in.StateUpdate)
 }
 
 // CancelTask is the cancel-flavoured twin of FailTask. Identical SQL,
 // just a different status value (Canceled) and the caller is expected
 // to set StateUpdate.State = "canceled".
+//
+// Like FailTask, this is a self-contained convenience wrapper.
+// In-transaction callers should use CancelTaskInTx instead.
 func CancelTask(ctx context.Context, in CancelTaskInput) error {
-	return finishTaskAsTerminal(ctx, "CancelTask", taskStatusCanceled,
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before CancelTask")
+	}
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return CancelTaskInTx(tx, in)
+	})
+}
+
+// CancelTaskInTx is the in-tx variant of CancelTask. See FailTaskInTx
+// for the rationale.
+func CancelTaskInTx(tx *gorm.DB, in CancelTaskInput) error {
+	return finishTaskAsTerminalInTx(tx, "CancelTask", taskStatusCanceled,
 		in.TaskID, in.Result, in.ErrorMsg, in.CompletedAt, in.StateUpdate)
 }
 
-// finishTaskAsTerminal is the shared body of FailTask and CancelTask.
-// Both share the same SQL — UPDATE task_records to a terminal status
-// with result + error_msg + completed_at, then optionally apply a
-// failed-state update — so the function is parameterised by the target
-// status value and the caller's identity (used in error messages).
-func finishTaskAsTerminal(
-	ctx context.Context,
+// finishTaskAsTerminalInTx is the shared body of FailTask/CancelTask
+// (via their *InTx variants). Both share the same SQL — UPDATE
+// task_records to a terminal status with result + error_msg +
+// completed_at, then optionally apply a failed-state update — so the
+// function is parameterised by the target status value and the
+// caller's identity (used in error messages).
+//
+// completedAt is normalised to time.Now() when zero, preserving the
+// legacy convenience behaviour. taskID empty is a caller bug, surfaced
+// as an error rather than silently turning into a no-op UPDATE.
+func finishTaskAsTerminalInTx(
+	tx *gorm.DB,
 	caller string,
 	status int,
 	taskID, result, errorMsg string,
@@ -356,34 +408,26 @@ func finishTaskAsTerminal(
 	if strings.TrimSpace(taskID) == "" {
 		return fmt.Errorf("%s: empty TaskID", caller)
 	}
-
-	gdb := db.Global()
-	if gdb == nil {
-		return fmt.Errorf("postgres not initialised; db.Open must run before %s", caller)
-	}
-
 	if completedAt.IsZero() {
 		completedAt = time.Now()
 	}
 
-	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		const query = `
+	const query = `
 UPDATE task_records
    SET status = ?, result = ?, error_msg = ?, completed_at = ?, updated_at = NOW()
  WHERE task_id = ?`
-		if err := tx.Exec(query,
-			status, result, errorMsg, completedAt, taskID,
-		).Error; err != nil {
-			return fmt.Errorf("%s: update task_records (task=%s): %w", caller, taskID, err)
-		}
+	if err := tx.Exec(query,
+		status, result, errorMsg, completedAt, taskID,
+	).Error; err != nil {
+		return fmt.Errorf("%s: update task_records (task=%s): %w", caller, taskID, err)
+	}
 
-		if stateUpdate != nil {
-			if err := applyFailedStateUpdate(tx, *stateUpdate); err != nil {
-				return err
-			}
+	if stateUpdate != nil {
+		if err := applyFailedStateUpdate(tx, *stateUpdate); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // upsertPendingStateInTx records that a Market-initiated operation is
