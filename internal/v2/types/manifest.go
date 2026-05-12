@@ -1,8 +1,11 @@
 package types
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/beclab/Olares/framework/oac"
 	"github.com/beclab/api/manifest"
@@ -92,6 +95,105 @@ func BuildUserAppManifest(cfg *oac.AppConfiguration) *UserAppManifest {
 	}
 
 	return m
+}
+
+// EnrichEntranceURLs fills in `url` on each entrance / shared-entrance map
+// of m, mirroring the URL scheme app-service applies at install time:
+//
+//   - 1 entrance:   "<appID>.<zone>"
+//   - N entrances:  "<appID><i>.<zone>"          (i = 0-based index)
+//   - shared (any): "<sharedPrefix><i>.<sharedZone>[:port]"
+//                   sharedPrefix = first 8 hex chars of md5(appID + "shared")
+//                   sharedZone   = zone with the first DNS label rewritten to "shared"
+//                   :<port>     appended only when the entrance carries port > 0
+//
+// appID is the user_applications.app_id of the row being rendered (for
+// clones this is md5(newAppName), not the original chart's app_id), so
+// every install / clone produces its own URL space — the same convention
+// app-service follows. Empty appID or zone makes the function a no-op:
+// the caller is in a state where it cannot deterministically derive a
+// URL and writing one anyway would mismatch what app-service later
+// computes from authoritative inputs.
+//
+// Mutates m in place. The defaultThirdLevelDomainConfig override
+// path that app-service consults is intentionally NOT replicated here:
+// the override is per-(app, entrance) and lives in app-service's own
+// settings; until we have a parallel surface for it on Market's side,
+// rewriting URLs Market doesn't know about would silently shadow the
+// app-service-computed value.
+func EnrichEntranceURLs(m *UserAppManifest, appID, zone string) {
+	if m == nil || appID == "" || zone == "" {
+		return
+	}
+
+	switch len(m.Entrances) {
+	case 0:
+		// nothing to do
+	case 1:
+		m.Entrances[0]["url"] = fmt.Sprintf("%s.%s", appID, zone)
+	default:
+		for i, e := range m.Entrances {
+			e["url"] = fmt.Sprintf("%s%d.%s", appID, i, zone)
+		}
+	}
+
+	if len(m.SharedEntrances) > 0 {
+		sharedZone := rewriteFirstLabel(zone, "shared")
+		prefix := sharedEntrancePrefix(appID)
+		for i, e := range m.SharedEntrances {
+			port := mapToInt(e["port"])
+			if port > 0 {
+				e["url"] = fmt.Sprintf("%s%d.%s:%d", prefix, i, sharedZone, port)
+			} else {
+				e["url"] = fmt.Sprintf("%s%d.%s", prefix, i, sharedZone)
+			}
+		}
+	}
+}
+
+// sharedEntrancePrefix mirrors app-service's AppName.SharedEntranceIdPrefix:
+// first 8 hex characters of md5(appID + "shared"). The appID is taken
+// verbatim because in our context AppName.GetAppID() resolves to
+// user_applications.app_id (clone rows carry their own app_id), so
+// callers pass that directly rather than re-running the AppName→AppID
+// derivation.
+func sharedEntrancePrefix(appID string) string {
+	sum := md5.Sum([]byte(appID + "shared"))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// rewriteFirstLabel returns zone with its first dot-separated label
+// replaced by replacement. "alice.olares.com" + "shared" -> "shared.olares.com".
+// Empty input returns empty; a single-label input is replaced wholesale,
+// matching strings.Split / strings.Join behaviour.
+func rewriteFirstLabel(zone, replacement string) string {
+	if zone == "" {
+		return ""
+	}
+	tokens := strings.Split(zone, ".")
+	tokens[0] = replacement
+	return strings.Join(tokens, ".")
+}
+
+// mapToInt extracts an integer from a JSONB-decoded map value. The
+// manifest's entrance maps come from a json.Marshal/Unmarshal round-trip
+// (see marshalSliceToMaps), so numeric fields surface as float64
+// regardless of their original Go type. We tolerate native ints for
+// callers that may construct the map directly in tests.
+func mapToInt(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	}
+	return 0
 }
 
 // buildResources extracts the 8 typed resource cap fields from cfg.Spec

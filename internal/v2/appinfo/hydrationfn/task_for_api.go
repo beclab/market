@@ -185,6 +185,14 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 	rawData := apiResponse.Data.AppData.RawDataEx
 	manifest := types.BuildUserAppManifest(rawData)
 
+	// Inject entrance / shared-entrance URLs while we still have the
+	// per-render context. zone was carried in from Pipeline.phaseHydrateApps
+	// (sourced from the User CR's bytetrade.io/zone annotation); appID is
+	// the clone-aware app_id (clones carry md5(newAppName) here, matching
+	// what app-service uses to compose URLs at install time). Empty zone
+	// is fine — EnrichEntranceURLs no-ops in that case.
+	types.EnrichEntranceURLs(manifest, task.AppID, task.UserZone)
+
 	task.RenderedManifest = manifest
 
 	// Persist render success to user_applications. Skipped when the task

@@ -104,6 +104,107 @@ func TestBuildUserAppManifest_NilInput(t *testing.T) {
 	}
 }
 
+// TestEnrichEntranceURLs_SingleEntrance pins the special-case URL
+// shape app-service uses when the manifest declares exactly one
+// entrance: "<appID>.<zone>" without an index suffix. Mirrors the
+// app-service-side `len(Entrances) == 1` branch in GenEntranceURL.
+func TestEnrichEntranceURLs_SingleEntrance(t *testing.T) {
+	m := &UserAppManifest{
+		Entrances: []map[string]any{
+			{"name": "homebox", "host": "homebox", "port": float64(80)},
+		},
+	}
+
+	EnrichEntranceURLs(m, "homebox", "alice.olares.com")
+
+	got, _ := m.Entrances[0]["url"].(string)
+	if want := "homebox.alice.olares.com"; got != want {
+		t.Fatalf("entrance[0].url = %q, want %q", got, want)
+	}
+}
+
+// TestEnrichEntranceURLs_MultiEntrance pins the indexed URL shape
+// app-service uses when the manifest declares 2+ entrances:
+// "<appID><i>.<zone>" with i starting at 0.
+func TestEnrichEntranceURLs_MultiEntrance(t *testing.T) {
+	m := &UserAppManifest{
+		Entrances: []map[string]any{
+			{"name": "ui"},
+			{"name": "api"},
+			{"name": "metrics"},
+		},
+	}
+
+	EnrichEntranceURLs(m, "homebox", "alice.olares.com")
+
+	want := []string{
+		"homebox0.alice.olares.com",
+		"homebox1.alice.olares.com",
+		"homebox2.alice.olares.com",
+	}
+	for i, w := range want {
+		got, _ := m.Entrances[i]["url"].(string)
+		if got != w {
+			t.Fatalf("entrance[%d].url = %q, want %q", i, got, w)
+		}
+	}
+}
+
+// TestEnrichEntranceURLs_SharedEntrance pins:
+//   - the appID -> sharedPrefix derivation (md5(appID+"shared")[:8]);
+//   - the zone -> sharedZone rewrite (first DNS label replaced with "shared");
+//   - the per-entrance index suffix (always indexed, even for a single shared);
+//   - port > 0 appends ":<port>" to the URL.
+func TestEnrichEntranceURLs_SharedEntrance(t *testing.T) {
+	m := &UserAppManifest{
+		SharedEntrances: []map[string]any{
+			{"name": "db", "port": float64(5432)},
+			{"name": "cache"},
+		},
+	}
+
+	EnrichEntranceURLs(m, "homebox", "alice.olares.com")
+
+	prefix := sharedEntrancePrefix("homebox") // md5("homebox"+"shared")[:8]
+	wantPort := prefix + "0.shared.olares.com:5432"
+	wantNoPort := prefix + "1.shared.olares.com"
+
+	if got, _ := m.SharedEntrances[0]["url"].(string); got != wantPort {
+		t.Fatalf("shared[0].url = %q, want %q", got, wantPort)
+	}
+	if got, _ := m.SharedEntrances[1]["url"].(string); got != wantNoPort {
+		t.Fatalf("shared[1].url = %q, want %q", got, wantNoPort)
+	}
+}
+
+// TestEnrichEntranceURLs_NoOpGuards covers the three caller-side states
+// where the function must leave the manifest untouched (nil manifest,
+// empty appID, empty zone). Without these guards a partial install or
+// a user without a zone annotation would silently get malformed URLs
+// like ".alice.olares.com" or "homebox." that wouldn't resolve.
+func TestEnrichEntranceURLs_NoOpGuards(t *testing.T) {
+	cases := []struct {
+		name   string
+		m      *UserAppManifest
+		appID  string
+		zone   string
+	}{
+		{"nil manifest", nil, "homebox", "alice.olares.com"},
+		{"empty appID", &UserAppManifest{Entrances: []map[string]any{{"name": "x"}}}, "", "alice.olares.com"},
+		{"empty zone", &UserAppManifest{Entrances: []map[string]any{{"name": "x"}}}, "homebox", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			EnrichEntranceURLs(c.m, c.appID, c.zone)
+			if c.m != nil && len(c.m.Entrances) > 0 {
+				if _, exists := c.m.Entrances[0]["url"]; exists {
+					t.Fatalf("expected no url written, got %v", c.m.Entrances[0]["url"])
+				}
+			}
+		})
+	}
+}
+
 // TestBuildUserAppManifest_PassThroughEmptyContainers documents how the
 // typed pipeline handles "empty" inputs. Unlike the legacy map-based
 // path, *oac.AppConfiguration is a closed struct: value-type fields
