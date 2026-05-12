@@ -571,6 +571,82 @@ LIMIT 1
 	return rows[0], nil
 }
 
+// LookupInstalledApp finds the user_applications row for an app that
+// has actually been installed for this user, scoped by app_name AND
+// installed_version. The JOIN against user_application_states serves
+// two purposes:
+//
+//   - Existence proof: the state row's presence means an install task
+//     has run (upsertPendingStateInTx writes the row at install task
+//     creation) — no state row, no install. Returning nil here lets
+//     uninstall surface a clean 404 instead of dispatching against
+//     nothing.
+//
+//   - Version-anchored disambiguation: install writes the chart version
+//     into installed_version at task creation. Filtering uninstall on
+//     (app_name, installed_version) locks onto the SAME row install
+//     populated, eliminating the multi-source / clone-vs-original
+//     ambiguity that the older LookupAppLocator (no source filter, OR
+//     across app_name/app_raw_name, no version) was prone to. The
+//     downstream upsertPendingStateInTx then ON CONFLICTs cleanly on
+//     the existing user_application_id rather than INSERTing a sibling
+//     state row.
+//
+// app_name is matched exactly (NOT app_name OR app_raw_name): clones
+// have their own app_name on the wire (rawAppName+hash) and write
+// their own state row; uninstalling a clone passes the clone's wire
+// name and naturally lands on its own row. Falling back to
+// app_raw_name would re-introduce the original-vs-clone collision
+// LookupAppLocator suffered from.
+//
+// render_status='success' filters out the failure / pending-render
+// placeholder rows, matching every other action-side helper in this
+// file.
+//
+// Returns (nil, nil) when no row matches; the caller surfaces 404.
+// Empty userID / appName / version are caller bugs and return an
+// error rather than a silent miss.
+func LookupInstalledApp(ctx context.Context, userID, appName, version string) (*AppLocatorRow, error) {
+	userID = strings.TrimSpace(userID)
+	appName = strings.TrimSpace(appName)
+	version = strings.TrimSpace(version)
+	if userID == "" || appName == "" || version == "" {
+		return nil, fmt.Errorf("LookupInstalledApp: empty userID/appName/version")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+	}
+
+	const query = `
+SELECT ua.source_id,
+       ua.app_id,
+       ua.app_raw_id,
+       ua.app_raw_name,
+       ua.manifest_type
+FROM user_applications ua
+JOIN user_application_states uas
+       ON uas.user_application_id = ua.id
+WHERE ua.user_id            = ?
+  AND ua.app_name           = ?
+  AND uas.installed_version = ?
+  AND ua.render_status      = 'success'
+ORDER BY ua.updated_at DESC
+LIMIT 1
+`
+
+	var rows []*AppLocatorRow
+	if err := gdb.WithContext(ctx).Raw(query, userID, appName, version).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lookup installed app (user=%s app=%s version=%s): %w",
+			userID, appName, version, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
 // GetAppPaymentInfo composes a *types.AppInfo straight from PG for the
 // six payment endpoints (getAppPaymentStatus / getAppPaymentStatusLegacy
 // / purchaseApp / restorePurchase / startPaymentPolling /

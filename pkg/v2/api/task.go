@@ -798,11 +798,12 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	}
 	glog.V(2).Infof("Retrieved user ID for uninstall request: %s", userID)
 
-	// Step 2: Parse request body for sync parameter and all parameter
+	// Step 2: Parse request body for sync / all / deleteData / version
 	var requestBody map[string]interface{}
 	var sync bool
 	var all bool
 	var deleteData bool
+	var version string
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err == nil {
 			if syncVal, ok := requestBody["sync"].(bool); ok {
@@ -814,55 +815,70 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 			if deleteDataVal, ok := requestBody["deleteData"].(bool); ok {
 				deleteData = deleteDataVal
 			}
+			if versionVal, ok := requestBody["version"].(string); ok {
+				version = strings.TrimSpace(versionVal)
+			}
 		}
 	}
 
-	// Step 3: Resolve (source, app_id, manifest_type) from PG.
-	// uninstallApp receives only app_name on the wire; LookupAppLocator
-	// pivots to the user_applications row across all of this user's
-	// sources. stateSourceID + stateAppID feed the user_application_states
-	// op_type refresh that taskModule.AddTask performs in the same
-	// transaction as task_records. When no locator row matches, AddTask
-	// soft-skips the state write — matching the legacy best-effort
-	// semantics that an uninstall must not be rejected because the
-	// catalogue view is unavailable.
-	var cfgType, stateSourceID, stateAppID string
-	loc, err := store.LookupAppLocator(r.Context(), userID, appName)
+	// Step 3: Validate required fields. version is the anchor that
+	// LookupInstalledApp uses to JOIN user_application_states and
+	// pivot to the exact (user_applications) row install populated;
+	// missing it would force a fall back to a fuzzy lookup and
+	// re-introduce the multi-source / clone collision bugs.
+	if version == "" {
+		glog.V(3).Infof("uninstallApp: missing required field 'version' for app=%s user=%s", appName, userID)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required field: version", nil)
+		return
+	}
+
+	// Step 4: Resolve (source, app_id, manifest_type) from PG via the
+	// installed-app helper. The JOIN against user_application_states
+	// guarantees this app has actually been installed (state row present)
+	// and the installed_version filter locks onto the exact row install
+	// committed at task-creation time. A nil result means "this app is
+	// not installed at the requested version" — surfaced as 404 rather
+	// than dispatching an uninstall against an unknown row.
+	loc, err := store.LookupInstalledApp(r.Context(), userID, appName, version)
 	if err != nil {
-		glog.Errorf("uninstallApp: failed to look up user_applications row for app=%s user=%s: %v",
-			appName, userID, err)
+		glog.Errorf("uninstallApp: failed to look up installed app=%s version=%s user=%s: %v",
+			appName, version, userID, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to load app data", nil)
 		return
 	}
-	if loc != nil {
-		stateSourceID = loc.SourceID
-		stateAppID = loc.AppID
-		cfgType = loc.ManifestType
-		glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s (app_id=%s)", cfgType, appName, stateSourceID, stateAppID)
+	if loc == nil {
+		glog.V(3).Infof("uninstallApp: app not installed (or version mismatch): app=%s version=%s user=%s",
+			appName, version, userID)
+		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("App %s version %s is not installed", appName, version), nil)
+		return
 	}
+	stateSourceID := loc.SourceID
+	stateAppID := loc.AppID
+	cfgType := loc.ManifestType
 	if cfgType == "" {
 		glog.V(3).Infof("Warning: cfgType not resolved for app: %s, using default 'app'", appName)
 		cfgType = "app"
+	} else {
+		glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s (app_id=%s, version=%s)",
+			cfgType, appName, stateSourceID, stateAppID, version)
 	}
 
-	// Step 4: Create uninstallation task
+	// Step 5: Create uninstallation task. (source, realAppID) are
+	// guaranteed non-empty here — LookupInstalledApp returned a row,
+	// otherwise we 404'd above. AddTask's PG transaction uses them
+	// to ON CONFLICT-update the same user_application_states row
+	// install populated; the executor's linkStateOpID likewise pivots
+	// on (source, realAppID) when the op_id arrives back from
+	// app-service.
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"app_name":   appName,
 		"token":      utils.GetTokenFromRequest(restfulReq),
-		"cfgType":    cfgType,    // Use retrieved cfgType
-		"all":        all,        // Add all parameter to metadata
-		"deleteData": deleteData, // Add delete userData
-	}
-	// Push the resolved (source, app_id) into task metadata so AddTask's
-	// PG transaction can find the user_application_states row by
-	// (user, source, app_id), and so the executor's linkStateOpID
-	// can later patch op_id onto the same row when app-service returns it.
-	if stateSourceID != "" {
-		taskMetadata["source"] = stateSourceID
-	}
-	if stateAppID != "" {
-		taskMetadata["realAppID"] = stateAppID
+		"cfgType":    cfgType,
+		"all":        all,
+		"deleteData": deleteData,
+		"source":     stateSourceID,
+		"realAppID":  stateAppID,
 	}
 
 	// Handle synchronous requests with proper blocking
