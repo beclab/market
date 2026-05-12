@@ -383,6 +383,84 @@ func TestInstallApp_TransportFailure(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAppServiceUnavailable)
 }
 
+// TestInstallApp_BusinessError_StructuredData_HTTP422 covers the
+// "real-world" install validation failure: app-service responds with
+// HTTP 422 (not 200) and a structured envelope carrying appenv
+// missingValues. Prior to the doOp non-200-path rework this case
+// returned (nil, fmt.Errorf(...)), losing both the OpResponse with
+// DataRaw and the typed *OpError; the install handler then forwarded
+// only code+message to backend_response and the frontend never saw
+// the structured payload.
+//
+// This test locks in the symmetric contract: non-200 + structured
+// envelope behaves identically to HTTP 200 + Code != 200 — caller
+// gets &op (with DataRaw intact) and an *OpError.
+func TestInstallApp_BusinessError_StructuredData_HTTP422(t *testing.T) {
+	const upstreamBody = `{"code":422,"data":{"type":"appenv","Data":{"missingValues":[{"envName":"USERNAME","type":"string","required":true},{"envName":"PASSWORD","type":"password","required":true}],"missingRefs":null,"invalidValues":null}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer srv.Close()
+
+	c, _ := NewClient(WithBaseURL(srv.URL))
+	resp, err := c.InstallApp(context.Background(), "medusa",
+		InstallOptions{Envs: []AppEnvVar{}}, OpHeaders{Token: "t"})
+	require.Error(t, err)
+
+	// Non-200 + structured envelope must surface as *OpError, exactly
+	// like the HTTP 200 + Code != 200 path.
+	var opErr *OpError
+	require.True(t, errors.As(err, &opErr))
+	assert.Equal(t, 422, opErr.Code)
+	assert.Equal(t, "install", opErr.Op)
+	assert.Equal(t, "", opErr.OpID)
+
+	// OpResponse must be returned (NOT nil) so opResp.DataRaw can
+	// carry the structured payload to the caller's
+	// backend_response forwarding path.
+	require.NotNil(t, resp)
+	assert.Equal(t, 422, resp.Code)
+
+	require.NotEmpty(t, resp.DataRaw)
+	var got, want map[string]any
+	require.NoError(t, json.Unmarshal(resp.DataRaw, &got))
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"type":"appenv","Data":{"missingValues":[{"envName":"USERNAME","type":"string","required":true},{"envName":"PASSWORD","type":"password","required":true}],"missingRefs":null,"invalidValues":null}}`),
+		&want))
+	assert.Equal(t, want, got)
+}
+
+// TestInstallApp_HTTP5xx_PlainText_Unchanged regression-guards the
+// fallback path: when the upstream body is NOT a structured envelope
+// (e.g. an L7 proxy returning plain text on 5xx), the old behaviour
+// is preserved — opResp is nil and err matches the sentinel for
+// the HTTP class. The rework MUST NOT regress this into returning a
+// half-empty OpResponse / OpError for callers that gate on
+// errors.Is(err, ErrAppServiceUnavailable).
+func TestInstallApp_HTTP5xx_PlainText_Unchanged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// http.Error sets Content-Type: text/plain and writes "boom\n".
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c, _ := NewClient(WithBaseURL(srv.URL))
+	resp, err := c.InstallApp(context.Background(), "myapp",
+		InstallOptions{Envs: []AppEnvVar{}}, OpHeaders{Token: "t"})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.ErrorIs(t, err, ErrAppServiceUnavailable)
+
+	// Critically: errors.As(err, &opErr) must NOT match for the
+	// plain-text fallback. Mixing the two paths would let callers
+	// build a backend_response with code=0/message="" and confuse
+	// the frontend's UI flow.
+	var opErr *OpError
+	assert.False(t, errors.As(err, &opErr))
+}
+
 func TestUninstallApp_BodyShape(t *testing.T) {
 	var body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
