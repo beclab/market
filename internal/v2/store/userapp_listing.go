@@ -384,6 +384,122 @@ LIMIT 1
 	return rows[0], nil
 }
 
+// GetAppUpgradeRow resolves the user_applications row that the
+// upgradeApp handler must dispatch a chart-upgrade against. Unlike
+// GetAppInstallRow, the wire-level app_name supplied by the client
+// may legitimately be either:
+//
+//   1. the original app's name (app_id == app_raw_id row), or
+//   2. a clone alias (app_id != app_raw_id row, where app_raw_name
+//      points at the underlying chart row).
+//
+// In both cases the chart that gets upgraded is the original row, so
+// the SQL self-joins user_applications onto itself: the inner alias
+// ("matched") locates the row whose app_name == appName in (user,
+// source); the outer alias ("orig") follows app_raw_id back to the
+// row with app_id = app_raw_id, which is the chart row the API
+// handler actually consumes (manifest_type, rendered_package,
+// image_analysis, etc.).
+//
+// Both sides require render_status='success' — the matched row must
+// be a live install/clone and the original row must hold a usable
+// rendered chart.
+//
+// version is matched against the original row's metadata->>'version'
+// (NOT the matched row's), because the chart is the original's and
+// its version is the canonical one. Empty version is rejected: every
+// upgradeApp request carries a version on the wire and downstream
+// chart_path construction needs it.
+//
+// Returns (row, matchedAppName, nil). matchedAppName is the
+// user_applications.app_name of the inner side — i.e. the original
+// app's name when the client passed the original, or the clone alias
+// when the client passed a clone. Callers compare matchedAppName to
+// row.AppName to decide whether the request was a clone upgrade
+// (matchedAppName != row.AppName) and surface rawAppName in task
+// metadata accordingly.
+//
+// Returns (nil, "", nil) when no matching pair is found; the caller
+// should respond 404.
+func GetAppUpgradeRow(ctx context.Context, userID, sourceID, appName, version string) (*AppInstallRow, string, error) {
+	userID = strings.TrimSpace(userID)
+	sourceID = strings.TrimSpace(sourceID)
+	appName = strings.TrimSpace(appName)
+	version = strings.TrimSpace(version)
+	if userID == "" || sourceID == "" || appName == "" || version == "" {
+		return nil, "", fmt.Errorf("GetAppUpgradeRow: empty userID/sourceID/appName/version")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, "", fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+	}
+
+	const query = `
+SELECT orig.source_id,
+       orig.app_id,
+       orig.app_raw_id,
+       orig.app_name,
+       orig.app_raw_name,
+       orig.manifest_type,
+       COALESCE(orig.metadata->>'version', '') AS app_version,
+       orig.rendered_package,
+       orig.price,
+       orig.image_analysis,
+       matched.app_name                        AS matched_app_name
+FROM user_applications matched
+JOIN user_applications orig
+        ON orig.user_id    = matched.user_id
+       AND orig.source_id  = matched.source_id
+       AND orig.app_raw_id = matched.app_raw_id
+       AND orig.app_id     = orig.app_raw_id
+WHERE matched.user_id        = ?
+  AND matched.source_id      = ?
+  AND matched.app_name       = ?
+  AND matched.render_status  = 'success'
+  AND orig.render_status     = 'success'
+  AND orig.metadata->>'version' = ?
+ORDER BY orig.updated_at DESC
+LIMIT 1
+`
+
+	type row struct {
+		SourceID        string                                   `gorm:"column:source_id"`
+		AppID           string                                   `gorm:"column:app_id"`
+		AppRawID        string                                   `gorm:"column:app_raw_id"`
+		AppName         string                                   `gorm:"column:app_name"`
+		AppRawName      string                                   `gorm:"column:app_raw_name"`
+		ManifestType    string                                   `gorm:"column:manifest_type"`
+		AppVersion      string                                   `gorm:"column:app_version"`
+		RenderedPackage string                                   `gorm:"column:rendered_package"`
+		Price           *models.JSONB[types.PriceConfig]         `gorm:"column:price"`
+		ImageAnalysis   *models.JSONB[types.ImageAnalysisResult] `gorm:"column:image_analysis"`
+		MatchedAppName  string                                   `gorm:"column:matched_app_name"`
+	}
+
+	var rows []*row
+	if err := gdb.WithContext(ctx).Raw(query, userID, sourceID, appName, version).Scan(&rows).Error; err != nil {
+		return nil, "", fmt.Errorf("get app upgrade row (user=%s source=%s app=%s version=%s): %w",
+			userID, sourceID, appName, version, err)
+	}
+	if len(rows) == 0 {
+		return nil, "", nil
+	}
+	r := rows[0]
+	return &AppInstallRow{
+		SourceID:        r.SourceID,
+		AppID:           r.AppID,
+		AppRawID:        r.AppRawID,
+		AppName:         r.AppName,
+		AppRawName:      r.AppRawName,
+		ManifestType:    r.ManifestType,
+		AppVersion:      r.AppVersion,
+		RenderedPackage: r.RenderedPackage,
+		Price:           r.Price,
+		ImageAnalysis:   r.ImageAnalysis,
+	}, r.MatchedAppName, nil
+}
+
 // AppLocatorRow is the projection LookupAppLocator yields. It carries
 // the minimum fields cancelInstall / uninstallApp need to pivot from
 // an app_name (which is what the wire contract gives them) to the
