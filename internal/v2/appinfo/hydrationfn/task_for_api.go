@@ -191,6 +191,25 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 	// has no AppEntry (legacy cache-driven path); on that path the cache
 	// write is the source of truth for render outcome.
 	if task.AppEntry != nil {
+		// VersionHistory is sourced from the catalog-side AppEntry
+		// (loaded by store.ListRenderCandidates from
+		// applications.app_entry) rather than from chart-repo's
+		// sync-app response. Storage uses []types.VersionInfo while
+		// the catalog projection uses []*types.VersionInfo, so the
+		// pointer slice is dereffed into a value slice here. Mirror
+		// of the value→pointer conversion in pkg/v2/api/app.go's
+		// detail-row composer; both sides keep their own layer's
+		// convention and the conversion stays local.
+		var versionHistory []types.VersionInfo
+		if len(task.AppEntry.VersionHistory) > 0 {
+			versionHistory = make([]types.VersionInfo, 0, len(task.AppEntry.VersionHistory))
+			for _, vi := range task.AppEntry.VersionHistory {
+				if vi != nil {
+					versionHistory = append(versionHistory, *vi)
+				}
+			}
+		}
+
 		in := store.UpsertRenderSuccessInput{
 			UserID:          task.UserID,
 			SourceID:        task.SourceID,
@@ -203,7 +222,7 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 			APIVersion:      rawData.APIVersion,
 			Manifest:        manifest,
 			I18n:            apiResponse.Data.AppData.I18n,
-			VersionHistory:  apiResponse.Data.AppData.VersionHistory,
+			VersionHistory:  versionHistory,
 			ImageAnalysis:   apiResponse.Data.AppData.ImageAnalysis,
 			RawPackage:      apiResponse.Data.AppData.RawPackage,
 			RenderedPackage: apiResponse.Data.AppData.RenderedPackage,
