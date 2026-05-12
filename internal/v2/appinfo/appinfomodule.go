@@ -696,7 +696,7 @@ func (m *AppInfoModule) initDataWatcherRepo() error {
 	}
 
 	// Create DataWatcherRepo instance
-	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.cacheManager, m.dataWatcher, m.dataSender)
+	m.dataWatcherRepo = NewDataWatcherRepo(m.redisClient, m.dataWatcher, m.dataSender)
 
 	if err := m.dataWatcherRepo.StartWithOptions(); err != nil {
 		return fmt.Errorf("failed to start DataWatcherRepo: %w", err)
