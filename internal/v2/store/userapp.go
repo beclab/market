@@ -27,11 +27,20 @@ var ErrUserApplicationNotFound = errors.New("user_applications row not found")
 
 // RenderCandidate is a single (user, source, app) tuple the hydration loop
 // should send to chart-repo. It is built from `applications` joined against
-// `user_applications`; the *_existing fields describe the current
-// user_applications state (zero values when no row exists yet).
+// `market_sources` (for source_type) and `user_applications`; the *_existing
+// fields describe the current user_applications state (zero values when no
+// row exists yet).
+//
+// SourceType is the market source flavour — "local" | "remote" — sourced from
+// market_sources.source_type via INNER JOIN. The INNER JOIN encodes the
+// invariant that every applications.source_id has a matching market_sources
+// row (market_sources is a superset of applications.source_id), so SourceType
+// is guaranteed non-empty for any candidate this function returns. Hydration
+// steps that branch on local vs remote rely on this guarantee.
 type RenderCandidate struct {
 	UserID     string
 	SourceID   string
+	SourceType string
 	AppID      string
 	AppName    string
 	AppVersion string
@@ -124,8 +133,9 @@ type MarkRenderFailedInput struct {
 }
 
 // ListRenderCandidates returns up to `limit` (user, source, app) tuples that
-// hydration should (re)render for the given user. It LEFT JOINs applications
-// against user_applications to surface three classes of work:
+// hydration should (re)render for the given user. It joins applications
+// against market_sources (INNER, for source_type) and user_applications
+// (LEFT, for the existing render state) to surface three classes of work:
 //
 //   - applications rows with no matching user_applications row (never rendered)
 //   - user_applications rows in render_status='pending' or 'failed'
@@ -140,6 +150,17 @@ type MarkRenderFailedInput struct {
 // raw_data rows where the metadata JSONB column is NULL also match this
 // branch via NULL IS DISTINCT FROM, and migrate automatically on their
 // next hydration cycle.
+//
+// The INNER JOIN against market_sources serves a single purpose: enrich
+// each candidate with source_type (local | remote) so downstream hydration
+// steps can branch on it. It does NOT act as a filter — the relation
+// applications.source_id ⊆ market_sources.source_id is a system-wide
+// invariant (market_sources is the superset; applications can only carry
+// source_ids that already exist there), so the join cannot remove any row
+// that LEFT JOIN would have returned. We deliberately do NOT filter by
+// market_sources.is_active / nsfw / priority here either; those would
+// silently change the candidate set when a source is toggled, which is
+// a separate product decision.
 //
 // User ↔ source visibility is intentionally not filtered here: every user
 // sees every source's applications, matching the legacy cache-based fan-out.
@@ -161,6 +182,7 @@ func ListRenderCandidates(ctx context.Context, userID string, limit int) ([]Rend
 
 	type row struct {
 		SourceID   string `gorm:"column:source_id"`
+		SourceType string `gorm:"column:source_type"`
 		AppID      string `gorm:"column:app_id"`
 		AppName    string `gorm:"column:app_name"`
 		AppVersion string `gorm:"column:app_version"`
@@ -177,17 +199,20 @@ func ListRenderCandidates(ctx context.Context, userID string, limit int) ([]Rend
 
 	const query = `
 SELECT a.source_id,
+       ms.source_type                              AS source_type,
        a.app_id,
        a.app_name,
        a.app_version,
        a.app_type,
        a.app_entry,
        a.price,
-       COALESCE(ua.id, 0)                                  AS ua_id,
-       COALESCE(ua.render_status, '')                      AS ua_render_status,
-       COALESCE(ua.metadata->>'version', '')               AS ua_existing_app_version,
-       COALESCE(ua.render_consecutive_failures, 0)         AS ua_failures
+       COALESCE(ua.id, 0)                          AS ua_id,
+       COALESCE(ua.render_status, '')              AS ua_render_status,
+       COALESCE(ua.metadata->>'version', '')       AS ua_existing_app_version,
+       COALESCE(ua.render_consecutive_failures, 0) AS ua_failures
 FROM applications a
+JOIN market_sources ms
+       ON ms.source_id = a.source_id
 LEFT JOIN user_applications ua
        ON ua.user_id   = ?
       AND ua.source_id = a.source_id
@@ -209,6 +234,7 @@ LIMIT ?
 		c := RenderCandidate{
 			UserID:               userID,
 			SourceID:             r.SourceID,
+			SourceType:           r.SourceType,
 			AppID:                r.AppID,
 			AppName:              r.AppName,
 			AppVersion:           r.AppVersion,

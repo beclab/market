@@ -441,20 +441,15 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate
 		RawData: c.AppEntry,
 	}
 
-	// sourceType := ""
-	// if h.settingsManager != nil {
-	// 	for _, s := range h.settingsManager.GetActiveMarketSources() {
-	// 		if s.ID == c.SourceID {
-	// 			sourceType = string(s.Type)
-	// 			break
-	// 		}
-	// 	}
-	// }
-
+	// SourceType is sourced from market_sources via store.ListRenderCandidates'
+	// INNER JOIN, so c.SourceType is guaranteed non-empty here. No fallback to
+	// the settings manager is needed; doing one would mask an invariant
+	// violation (applications.source_id without a matching market_sources row)
+	// rather than letting it surface as a missing-candidate error.
 	task := hydrationfn.NewHydrationTaskFromInput(hydrationfn.HydrationTaskInput{
 		UserID:          c.UserID,
 		SourceID:        c.SourceID,
-		SourceType:      "remote", // + todo sourceType,
+		SourceType:      c.SourceType,
 		AppID:           c.AppID,
 		AppName:         c.AppName,
 		AppVersion:      c.AppVersion,
