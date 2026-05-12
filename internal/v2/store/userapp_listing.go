@@ -411,28 +411,35 @@ LIMIT 1
 // upgradeApp request carries a version on the wire and downstream
 // chart_path construction needs it.
 //
-// Returns (row, matchedAppName, nil). matchedAppName is the
-// user_applications.app_name of the inner side — i.e. the original
-// app's name when the client passed the original, or the clone alias
-// when the client passed a clone. Callers compare matchedAppName to
-// row.AppName to decide whether the request was a clone upgrade
-// (matchedAppName != row.AppName) and surface rawAppName in task
-// metadata accordingly.
+// Returns (row, matchedAppName, matchedAppID, nil). matchedAppName /
+// matchedAppID are the user_applications.app_name / app_id of the
+// inner alias — i.e. the original app's identity when the client
+// passed the original, or the clone alias's identity when the client
+// passed a clone. Callers:
 //
-// Returns (nil, "", nil) when no matching pair is found; the caller
-// should respond 404.
-func GetAppUpgradeRow(ctx context.Context, userID, sourceID, appName, version string) (*AppInstallRow, string, error) {
+//   - compare matchedAppName to row.AppName to decide whether the
+//     request was a clone upgrade (matchedAppName != row.AppName) and
+//     surface rawAppName in task metadata accordingly;
+//   - put matchedAppID into task metadata as realAppID so the
+//     downstream upsertPendingStateInTx anchors on the SAME
+//     user_applications row the user clicked on (not the original
+//     chart row, which lives at row.AppID). For non-clone upgrades
+//     matchedAppID == row.AppID so callers can use it unconditionally.
+//
+// Returns (nil, "", "", nil) when no matching pair is found; the
+// caller should respond 404.
+func GetAppUpgradeRow(ctx context.Context, userID, sourceID, appName, version string) (*AppInstallRow, string, string, error) {
 	userID = strings.TrimSpace(userID)
 	sourceID = strings.TrimSpace(sourceID)
 	appName = strings.TrimSpace(appName)
 	version = strings.TrimSpace(version)
 	if userID == "" || sourceID == "" || appName == "" || version == "" {
-		return nil, "", fmt.Errorf("GetAppUpgradeRow: empty userID/sourceID/appName/version")
+		return nil, "", "", fmt.Errorf("GetAppUpgradeRow: empty userID/sourceID/appName/version")
 	}
 
 	gdb := db.Global()
 	if gdb == nil {
-		return nil, "", fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+		return nil, "", "", fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
 	}
 
 	const query = `
@@ -446,7 +453,8 @@ SELECT orig.source_id,
        orig.rendered_package,
        orig.price,
        orig.image_analysis,
-       matched.app_name                        AS matched_app_name
+       matched.app_name                        AS matched_app_name,
+       matched.app_id                          AS matched_app_id
 FROM user_applications matched
 JOIN user_applications orig
         ON orig.user_id    = matched.user_id
@@ -475,15 +483,16 @@ LIMIT 1
 		Price           *models.JSONB[types.PriceConfig]         `gorm:"column:price"`
 		ImageAnalysis   *models.JSONB[types.ImageAnalysisResult] `gorm:"column:image_analysis"`
 		MatchedAppName  string                                   `gorm:"column:matched_app_name"`
+		MatchedAppID    string                                   `gorm:"column:matched_app_id"`
 	}
 
 	var rows []*row
 	if err := gdb.WithContext(ctx).Raw(query, userID, sourceID, appName, version).Scan(&rows).Error; err != nil {
-		return nil, "", fmt.Errorf("get app upgrade row (user=%s source=%s app=%s version=%s): %w",
+		return nil, "", "", fmt.Errorf("get app upgrade row (user=%s source=%s app=%s version=%s): %w",
 			userID, sourceID, appName, version, err)
 	}
 	if len(rows) == 0 {
-		return nil, "", nil
+		return nil, "", "", nil
 	}
 	r := rows[0]
 	return &AppInstallRow{
@@ -497,7 +506,7 @@ LIMIT 1
 		RenderedPackage: r.RenderedPackage,
 		Price:           r.Price,
 		ImageAnalysis:   r.ImageAnalysis,
-	}, r.MatchedAppName, nil
+	}, r.MatchedAppName, r.MatchedAppID, nil
 }
 
 // AppLocatorRow is the projection LookupAppLocator yields. It carries

@@ -513,6 +513,103 @@ func UpsertPurchaseInfo(ctx context.Context, userID, sourceID, appID string, pi 
 // GetUserApplication fetches a single user_applications row by its natural
 // key. Returns (nil, nil) when no row exists; returns the full model
 // (including JSONB payloads) otherwise.
+// CloneUserApplication materialises a clone-side user_applications row by
+// copying the source (original) row in-place and substituting only the
+// identity columns the clone needs to be addressable independently:
+//
+//   - app_id   <- newAppID   (caller passes md5(newAppName)[:32])
+//   - app_name <- newAppName (caller passes rawAppName + requestHash)
+//
+// app_raw_id and app_raw_name carry over from the source row so the
+// clone can still be traced back to the original chart in upgrade /
+// SCC paths. Every other column (manifest blocks, JSONB payloads,
+// rendered_package, image_analysis, price, ...) is copied verbatim
+// because the clone shares the original's chart and rendered output;
+// nothing about the clone install needs a fresh chart-repo render.
+//
+// render_status is forced to 'success' (and render_error / failures
+// reset) so downstream API helpers that filter by render_status='success'
+// surface the clone immediately. is_upgrade is reset to FALSE.
+//
+// The whole operation runs as a single INSERT...SELECT...ON CONFLICT
+// DO UPDATE so:
+//
+//   - all per-column values come straight from the same source row
+//     atomically (no read-then-write race); the source identity is
+//     fixed by (user_id, source_id, srcAppName, app_id = app_raw_id);
+//   - re-issuing the same clone request (same newAppName / newAppID
+//     because requestHash is deterministic from the request body) is
+//     idempotent: ON CONFLICT just bumps updated_at, preserving the
+//     clone row's data even if the original has drifted since the
+//     first clone attempt.
+//
+// Returns nil when the row was inserted or refreshed; ErrUserApplicationNotFound
+// when the source row cannot be located (caller validation issue —
+// cloneApp's GetAppInstallRow already proved the source exists, so a
+// miss here is a programmer error / race with a concurrent delete).
+func CloneUserApplication(ctx context.Context, userID, sourceID, srcAppName, newAppID, newAppName string) error {
+	userID = strings.TrimSpace(userID)
+	sourceID = strings.TrimSpace(sourceID)
+	srcAppName = strings.TrimSpace(srcAppName)
+	newAppID = strings.TrimSpace(newAppID)
+	newAppName = strings.TrimSpace(newAppName)
+	if userID == "" || sourceID == "" || srcAppName == "" || newAppID == "" || newAppName == "" {
+		return fmt.Errorf("CloneUserApplication: empty userID/sourceID/srcAppName/newAppID/newAppName")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+	}
+
+	const query = `
+INSERT INTO user_applications (
+    user_id, source_id,
+    app_id, app_raw_id, app_name, app_raw_name,
+    manifest_version, manifest_type, api_version,
+    metadata, spec, resources, options, entrances, shared_entrances, ports,
+    tailscale, permission, middleware, envs,
+    price, purchase_info, i18n, version_history, image_analysis,
+    raw_package, rendered_package,
+    render_status, render_error, render_consecutive_failures,
+    is_upgrade, created_at, updated_at
+)
+SELECT
+    src.user_id, src.source_id,
+    ?, src.app_raw_id, ?, src.app_raw_name,
+    src.manifest_version, src.manifest_type, src.api_version,
+    src.metadata, src.spec, src.resources, src.options, src.entrances, src.shared_entrances, src.ports,
+    src.tailscale, src.permission, src.middleware, src.envs,
+    src.price, src.purchase_info, src.i18n, src.version_history, src.image_analysis,
+    src.raw_package, src.rendered_package,
+    'success', '', 0,
+    FALSE, NOW(), NOW()
+FROM user_applications src
+WHERE src.user_id       = ?
+  AND src.source_id     = ?
+  AND src.app_name      = ?
+  AND src.app_id        = src.app_raw_id
+  AND src.render_status = 'success'
+LIMIT 1
+ON CONFLICT (user_id, source_id, app_id) DO UPDATE SET
+    updated_at = NOW()
+`
+
+	res := gdb.WithContext(ctx).Exec(query,
+		newAppID, newAppName,
+		userID, sourceID, srcAppName,
+	)
+	if err := res.Error; err != nil {
+		return fmt.Errorf("clone user_applications (user=%s source=%s src=%s -> new=%s/%s): %w",
+			userID, sourceID, srcAppName, newAppName, newAppID, err)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("%w: clone source not found (user=%s source=%s app=%s)", ErrUserApplicationNotFound,
+			userID, sourceID, srcAppName)
+	}
+	return nil
+}
+
 func GetUserApplication(ctx context.Context, userID, sourceID, appID string) (*models.UserApplication, error) {
 	if err := validateIdentity(userID, sourceID, appID); err != nil {
 		return nil, err

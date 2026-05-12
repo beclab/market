@@ -248,13 +248,20 @@ func pendingStateFromMetadata(taskType TaskType, user, appName string, metadata 
 		AppID:    appID,
 		OpType:   getTaskTypeString(taskType),
 	}
-	// Only the install path anchors the state row by version at task
-	// creation time. upsertPendingStateInTx writes Version into BOTH
-	// installed_version and target_version on INSERT, and preserves
-	// the existing values on UPDATE. Uninstall / cancel / upgrade /
-	// clone all leave Version empty so the version columns committed
-	// by the original install survive the subsequent op_type refresh.
-	if taskType == InstallApp {
+	// Install AND clone both anchor their state row by version at
+	// task creation time. upsertPendingStateInTx writes Version into
+	// BOTH installed_version and target_version on INSERT, and
+	// preserves the existing values on UPDATE. Uninstall / cancel /
+	// upgrade leave Version empty so the version columns committed by
+	// the original install/clone survive the subsequent op_type
+	// refresh — and so uninstall's LookupInstalledApp can JOIN on
+	// installed_version to lock onto the same row.
+	//
+	// Clone is included here because cloneApp creates a brand-new
+	// user_applications row and a brand-new state row; both are
+	// independent of the original app's rows and need their own
+	// version anchor for the same uninstall-side reason install does.
+	if taskType == InstallApp || taskType == CloneApp {
 		out.Version = metadataString(metadata, "version")
 	}
 	return out
