@@ -242,12 +242,22 @@ func pendingStateFromMetadata(taskType TaskType, user, appName string, metadata 
 		return nil
 	}
 
-	return &store.PendingTaskState{
+	out := &store.PendingTaskState{
 		UserID:   user,
 		SourceID: sourceID,
 		AppID:    appID,
 		OpType:   getTaskTypeString(taskType),
 	}
+	// Only the install path anchors the state row by version at task
+	// creation time. upsertPendingStateInTx writes Version into BOTH
+	// installed_version and target_version on INSERT, and preserves
+	// the existing values on UPDATE. Uninstall / cancel / upgrade /
+	// clone all leave Version empty so the version columns committed
+	// by the original install survive the subsequent op_type refresh.
+	if taskType == InstallApp {
+		out.Version = metadataString(metadata, "version")
+	}
+	return out
 }
 
 // getHistoryType converts TaskType to appropriate HistoryType

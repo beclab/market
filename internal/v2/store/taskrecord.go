@@ -55,8 +55,17 @@ type CreateTaskInput struct {
 // row hydration has rendered; OpType is "install" / "uninstall" /
 // "upgrade" / "cancel" verbatim, mirroring the values the NATS
 // pipeline writes so cross-pipeline events overlay cleanly.
+//
+// Version is the chart version this task is operating on. Today only
+// the install path supplies it (set by pendingStateFromMetadata when
+// taskType == InstallApp); upsertPendingStateInTx then writes it to
+// BOTH installed_version and target_version on the row, anchoring
+// the (user, source, app, version) tuple so uninstall can later
+// JOIN user_application_states on installed_version to lock onto the
+// exact row install populated. Empty Version means "do not touch the
+// version columns" — preserving any value the row already carries.
 type PendingTaskState struct {
-	UserID, SourceID, AppID, OpType string
+	UserID, SourceID, AppID, OpType, Version string
 }
 
 // CreateTask inserts a fresh task_records row (status=Pending) and,
@@ -459,24 +468,40 @@ func upsertPendingStateInTx(tx *gorm.DB, in PendingTaskState) error {
 	in.UserID = strings.TrimSpace(in.UserID)
 	in.SourceID = strings.TrimSpace(in.SourceID)
 	in.AppID = strings.TrimSpace(in.AppID)
+	in.Version = strings.TrimSpace(in.Version)
 	if in.UserID == "" || in.SourceID == "" || in.AppID == "" {
 		return fmt.Errorf("upsertPendingStateInTx: empty UserID/SourceID/AppID: %+v", in)
 	}
 
+	// installed_version / target_version semantics:
+	//   - INSERT path: NULLIF turns the "" caller default into SQL NULL so
+	//     non-install task creations (uninstall / cancel / upgrade / clone)
+	//     leave both columns null, matching the legacy schema-default
+	//     behaviour. Install supplies a non-empty Version so both columns
+	//     start out as the chart version being installed — the uninstall
+	//     handler later joins on installed_version to find this exact row.
+	//   - UPDATE path: COALESCE(NULLIF(EXCLUDED.x, ''), uas.x) preserves
+	//     the existing value when the new task carries no Version, so
+	//     uninstall / cancel pending-row writes never erase the version
+	//     install committed at task-creation time.
 	const query = `
 INSERT INTO user_application_states (
-    user_application_id, state, op_type, event_create_time
+    user_application_id, state, op_type, event_create_time,
+    installed_version, target_version
 )
-SELECT ua.id, '', ?, NOW()
+SELECT ua.id, '', ?, NOW(), NULLIF(?, ''), NULLIF(?, '')
 FROM user_applications ua
 WHERE ua.user_id = ? AND ua.source_id = ? AND ua.app_id = ?
 ON CONFLICT (user_application_id) DO UPDATE SET
     op_type           = COALESCE(NULLIF(EXCLUDED.op_type, ''), user_application_states.op_type),
-    event_create_time = EXCLUDED.event_create_time
+    event_create_time = EXCLUDED.event_create_time,
+    installed_version = COALESCE(NULLIF(EXCLUDED.installed_version, ''), user_application_states.installed_version),
+    target_version    = COALESCE(NULLIF(EXCLUDED.target_version, ''), user_application_states.target_version)
 `
 
 	res := tx.Exec(query,
 		truncate(in.OpType, stateOpTypeMaxLen),
+		in.Version, in.Version,
 		in.UserID, in.SourceID, in.AppID,
 	)
 	if err := res.Error; err != nil {
