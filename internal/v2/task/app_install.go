@@ -253,7 +253,18 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 				"code":    opErr.Code,
 				"message": opErr.Message,
 			}
-			if opErr.OpID != "" {
+			// Prefer the upstream's full `data` envelope when present
+			// (e.g. install's 422 + appenv missingValues schema). The
+			// raw bytes are preserved verbatim by OpResponse.DataRaw —
+			// passing them as json.RawMessage keeps field ordering and
+			// case sensitivity ("Data" vs "data") intact for the
+			// frontend's backend_response.data view. The opID-only
+			// fallback covers older app-service builds that ship code/
+			// message without a data block.
+			switch {
+			case opResp != nil && len(opResp.DataRaw) > 0:
+				backend["data"] = json.RawMessage(opResp.DataRaw)
+			case opErr.OpID != "":
 				backend["data"] = map[string]interface{}{"opID": opErr.OpID}
 			}
 			envelope["backend_response"] = backend
