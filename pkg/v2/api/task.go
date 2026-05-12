@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -144,6 +145,19 @@ type CloneAppRequest struct {
 // CancelInstallRequest represents the request body for cancel installation
 type CancelInstallRequest struct {
 	Sync bool `json:"sync"` // Whether this is a synchronous request
+}
+
+// cloneAppIDFromName derives the user_applications.app_id for a clone
+// row from its wire-level app_name (rawAppName + requestHash). MD5 is
+// used because its hex digest is exactly 32 characters — the
+// user_applications.app_id column is VARCHAR(32). The choice is for
+// fixed-width fit, NOT for cryptographic strength: collision resistance
+// is irrelevant here because the input (newAppName) is already unique
+// per (rawAppName, requestHash) and the (user_id, source_id, app_id)
+// UNIQUE constraint catches any pathological collision at write time.
+func cloneAppIDFromName(newAppName string) string {
+	sum := md5.Sum([]byte(newAppName))
+	return hex.EncodeToString(sum[:])
 }
 
 // calculateCloneRequestHash calculates SHA256 hash of the entire clone request (excluding Sync field) and returns first 6 characters
@@ -500,9 +514,13 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 6: Calculate hash suffix from entire clone request and construct new app name: rawAppName + hash
+	// Step 6: Calculate hash suffix from entire clone request and
+	// construct new app name + app_id. newAppID is md5(newAppName) so
+	// the clone has its own (user, source, app_id) identity in
+	// user_applications, independent of the original chart's app_id.
 	requestHash := calculateCloneRequestHash(request)
 	newAppName := rawAppName + requestHash
+	newAppID := cloneAppIDFromName(newAppName)
 
 	// Step 7: Read the original app's installed version from PG. Clone
 	// requires the original to already be installed; an empty result
@@ -550,7 +568,28 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 10: Create clone installation task
+	// Step 10: Materialise the clone's user_applications row by
+	// copying the original chart row and overriding only (app_id,
+	// app_name). This must happen BEFORE AddTask so that
+	// upsertPendingStateInTx (run inside CreateTask) can find the
+	// new user_applications.id and write the clone's pending state
+	// row in the same transaction as task_records — without it the
+	// state row write would soft-skip on ErrUserApplicationStateNotFound
+	// and we would lose the "clone in progress" signal that NATS
+	// events / linkStateOpID later overlay onto.
+	if err := store.CloneUserApplication(r.Context(), userID, request.Source, request.AppName, newAppID, newAppName); err != nil {
+		glog.Errorf("cloneApp: failed to materialise clone user_applications row (user=%s source=%s src=%s -> new=%s/%s): %v",
+			userID, request.Source, request.AppName, newAppName, newAppID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to prepare clone app data", nil)
+		return
+	}
+
+	// Step 11: Create clone installation task. realAppID is the
+	// freshly created clone row's app_id so pendingStateFromMetadata
+	// + upsertPendingStateInTx anchor the state write on the clone's
+	// own user_applications.id (NOT the original chart's). Version
+	// is also propagated so installed_version / target_version land
+	// the same way they do for install.
 	taskMetadata := map[string]interface{}{
 		"user_id":     userID,
 		"source":      request.Source,
@@ -564,14 +603,8 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		"rawAppName":  rawAppName,    // Pass rawAppName in metadata
 		"requestHash": requestHash,   // Pass requestHash in metadata
 		"title":       request.Title, // Pass title in metadata (for display purposes)
+		"realAppID":   newAppID,      // Anchor the state row to the clone's user_applications.app_id
 	}
-
-	// State-row creation is delegated to taskModule.AddTask →
-	// store.CreateTask. Clones use newAppName (rawAppName+hash) as
-	// the AppName argument, and CreateTask soft-skips when no
-	// user_applications row exists for that name (hydration does not
-	// pre-render clones today). Tracking clone state in PG is
-	// deferred to a later phase that teaches hydration about clones.
 
 	// Handle synchronous requests with proper blocking
 	if request.Sync {
@@ -982,11 +1015,17 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 	// Step 4: Resolve the user's rendered manifest from PG.
 	// GetAppUpgradeRow handles both direct upgrade (request.AppName is
 	// the original chart's name) and clone upgrade (request.AppName is
-	// a clone alias) in a single round-trip, returning the original
-	// chart row plus the matched app_name. When matchedAppName differs
-	// from row.AppName the request is a clone upgrade and rawAppName
-	// is set so the downstream task carries it.
-	row, matchedAppName, err := store.GetAppUpgradeRow(r.Context(), userID, request.Source, request.AppName, request.Version)
+	// a clone alias) in a single round-trip, returning:
+	//   - row: the ORIGINAL chart row (where the chart artefacts live)
+	//   - matchedAppName: app_name of the row the wire request resolved
+	//     to (== row.AppName for direct, == clone alias for clone)
+	//   - matchedAppID: app_id of that same matched row — for direct it
+	//     equals row.AppID, for clones it is the clone row's own app_id
+	//     (md5 of newAppName, written by cloneApp). This is the value
+	//     that goes into task metadata as realAppID so the state-row
+	//     UPSERT lands on the row the user clicked on, not on the
+	//     original chart row.
+	row, matchedAppName, matchedAppID, err := store.GetAppUpgradeRow(r.Context(), userID, request.Source, request.AppName, request.Version)
 	if err != nil {
 		glog.Errorf("upgradeApp: failed to load user_applications row for app=%s version=%s source=%s user=%s: %v",
 			request.AppName, request.Version, request.Source, userID, err)
@@ -1030,7 +1069,13 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 7: Create upgrade task
+	// Step 7: Create upgrade task. realAppID is matchedAppID — the
+	// app_id of the row the user actually clicked on (clone row's
+	// own app_id for clone upgrades, original's app_id for direct
+	// upgrades). Without this, pendingStateFromMetadata would fall
+	// back to app_name and upsertPendingStateInTx's WHERE app_id=?
+	// would not match either row, silently soft-skipping the state
+	// write.
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"source":     request.Source,
@@ -1041,6 +1086,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":    cfgType, // Add cfgType to metadata
 		"images":     images,
 		"envs":       request.Envs,
+		"realAppID":  matchedAppID,
 	}
 
 	// If this is a clone app, add rawAppName to metadata
