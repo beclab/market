@@ -290,6 +290,12 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	// (user, source, app_id) tuple, and the UNIQUE constraint does not
 	// catch the duplicates.
 	//
+	// CloneUserApplication runs both the user_applications insert (with
+	// per-clone title / entrance-title overrides patched into the source
+	// row's JSONB columns) and the user_application_states pending row
+	// in a single PG transaction; partial failures cannot leave Market
+	// with a half-materialised clone.
+	//
 	// On failure here we still return the success envelope because
 	// app-service has already accepted the clone; the operation will
 	// proceed on the cluster. The missing rows are logged loudly so
@@ -302,19 +308,28 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		glog.Errorf("AppClone: missing realAppID in metadata after app-service success (task=%s app=%s opID=%s); skipping user_applications materialisation",
 			task.ID, urlAppName, task.OpID)
 	} else {
-		ctx := context.Background()
-		if err := store.CloneUserApplication(ctx, user, appSource, rawAppName, newAppID, urlAppName); err != nil {
-			glog.Errorf("AppClone: failed to materialise clone user_applications row after app-service success (task=%s user=%s source=%s src=%s -> new=%s/%s opID=%s): %v",
-				task.ID, user, appSource, rawAppName, urlAppName, newAppID, task.OpID, err)
-		} else if err := store.UpsertPendingState(ctx, store.PendingStateInput{
-			UserID:   user,
-			SourceID: appSource,
-			AppID:    newAppID,
-			OpType:   "clone",
-			Version:  version,
+		// entranceTitles maps positionally onto user_applications.entrances
+		// per the clone-request contract (index-aligned, empty title at
+		// a covered index clears the inherited title, indices beyond the
+		// source's entrances are silently dropped). entrances above is
+		// already the typed []AppEntrance carried in task.Metadata; reuse
+		// it without re-reading the metadata map.
+		entranceTitles := make([]string, len(entrances))
+		for i, e := range entrances {
+			entranceTitles[i] = e.Title
+		}
+		if err := store.CloneUserApplication(context.Background(), store.CloneUserApplicationInput{
+			UserID:              user,
+			SourceID:            appSource,
+			SrcAppName:          rawAppName,
+			NewAppID:            newAppID,
+			NewAppName:          urlAppName,
+			Title:               title,
+			EntranceTitles:      entranceTitles,
+			PendingStateVersion: version,
 		}); err != nil {
-			glog.Errorf("AppClone: failed to upsert clone user_application_states row after CloneUserApplication (task=%s user=%s source=%s app=%s opID=%s): %v",
-				task.ID, user, appSource, newAppID, task.OpID, err)
+			glog.Errorf("AppClone: failed to materialise clone rows after app-service success (task=%s user=%s source=%s src=%s -> new=%s/%s opID=%s): %v",
+				task.ID, user, appSource, rawAppName, urlAppName, newAppID, task.OpID, err)
 		}
 	}
 
