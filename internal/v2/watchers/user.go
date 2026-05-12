@@ -13,6 +13,7 @@ type UserDataInfo struct {
 	Name   string `json:"name"`
 	Role   string `json:"role"`
 	Id     string `json:"id"`
+	Zone   string `json:"zone"`
 	Status string `json:"status"`
 	Exists bool   `json:"exists"`
 }
@@ -55,18 +56,20 @@ func handleUserEvent(obj interface{}, isDelete bool, opType string) {
 		return
 	}
 
-	var role, id, status string
+	var role, id, zone, status string
 	annotations := user.ObjectMeta.Annotations
 	if annotations != nil {
 		role = annotations["bytetrade.io/owner-role"]
 		id = annotations["bytetrade.io/terminus-name"]
 		status = annotations["bytetrade.io/wizard-status"]
+		zone = annotations["bytetrade.io/zone"]
 	}
 
 	userInfo := UserDataInfo{
 		Name:   userName,
 		Role:   role,
 		Id:     id,
+		Zone:   zone,
 		Status: status,
 		Exists: true,
 	}
