@@ -203,16 +203,22 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		return affectedUsers
 	}
 
-	users := watchers.GetUserIDs() //p.cacheManager.GetOrCreateUserIDs("system")
+	// GetUsers (instead of GetUserIDs) so the per-user UserDataInfo —
+	// crucially Zone — is available at iteration time and can be
+	// injected into each RenderCandidate without a second sync.Map
+	// lookup later. Downstream EnrichEntranceURLs (run inside
+	// TaskForApiStep) needs the zone to compute entrance URLs the
+	// same way app-service does at install time.
+	users := watchers.GetUsers()
 	if len(users) == 0 {
 		glog.V(2).Info("Pipeline Phase 2: no users available, skipping hydration")
 		return affectedUsers
 	}
 
-	glog.V(2).Infof("Pipeline Phase 2: users list: %v", users)
+	glog.V(2).Infof("Pipeline Phase 2: users list (count=%d)", len(users))
 
 	candidates := make([]store.RenderCandidate, 0)
-	for _, userID := range users {
+	for _, u := range users {
 		select {
 		case <-ctx.Done():
 			return affectedUsers
@@ -220,13 +226,19 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 			return affectedUsers
 		default:
 		}
-		userCandidates, err := store.ListRenderCandidates(ctx, userID, hydrationCandidateLimitPerUser)
+		userCandidates, err := store.ListRenderCandidates(ctx, u.Name, hydrationCandidateLimitPerUser)
 		if err != nil {
-			glog.Errorf("Pipeline Phase 2: list render candidates for user %s failed: %v", userID, err)
+			glog.Errorf("Pipeline Phase 2: list render candidates for user %s failed: %v", u.Name, err)
 			continue
 		}
+		// Inject Zone so it travels with the candidate down to the
+		// HydrationTask and ultimately to TaskForApiStep. Empty zone
+		// is OK — EnrichEntranceURLs no-ops in that case.
+		for i := range userCandidates {
+			userCandidates[i].UserZone = u.Zone
+		}
 		if len(userCandidates) > 0 {
-			glog.V(3).Infof("Pipeline Phase 2: user=%s, %d candidate(s)", userID, len(userCandidates))
+			glog.V(3).Infof("Pipeline Phase 2: user=%s zone=%q, %d candidate(s)", u.Name, u.Zone, len(userCandidates))
 		}
 		candidates = append(candidates, userCandidates...)
 	}
@@ -448,6 +460,7 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate
 	// rather than letting it surface as a missing-candidate error.
 	task := hydrationfn.NewHydrationTaskFromInput(hydrationfn.HydrationTaskInput{
 		UserID:          c.UserID,
+		UserZone:        c.UserZone,
 		SourceID:        c.SourceID,
 		SourceType:      c.SourceType,
 		AppID:           c.AppID,

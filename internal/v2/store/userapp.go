@@ -64,6 +64,18 @@ type RenderCandidate struct {
 	ExistingRenderStatus string
 	ExistingAppVersion   string
 	ExistingFailures     int
+
+	// UserZone is the per-instance domain suffix sourced from the User CR's
+	// bytetrade.io/zone annotation (e.g. "alice.olares.com"). It is NOT
+	// populated by ListRenderCandidates' SQL — the zone lives in k8s
+	// annotations, not in PG — and is instead injected by the hydration
+	// pipeline (see Pipeline.phaseHydrateApps) before the candidate is
+	// dispatched. Downstream steps (notably types.EnrichEntranceURLs) use
+	// it to derive entrance / shared-entrance URLs the same way app-service
+	// does at install time. Empty when the user has no zone annotation
+	// yet — callers must treat that as "skip URL rewriting" rather than
+	// fabricate a fallback.
+	UserZone string
 }
 
 // UpsertRenderSuccessInput captures everything UpsertRenderSuccess needs to

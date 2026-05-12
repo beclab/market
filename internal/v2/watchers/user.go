@@ -10,9 +10,15 @@ import (
 )
 
 type UserDataInfo struct {
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Id     string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+	Id   string `json:"id"`
+	// Zone is the user's per-instance domain suffix sourced from the
+	// bytetrade.io/zone annotation on the User CR (e.g. "alice.olares.com").
+	// Consumers use it to derive entrance / shared-entrance URLs the same
+	// way app-service does at install time. Empty when the annotation is
+	// missing — callers must treat it as "do not rewrite URLs" rather
+	// than fabricating a fallback.
 	Zone   string `json:"zone"`
 	Status string `json:"status"`
 	Exists bool   `json:"exists"`
@@ -56,7 +62,7 @@ func handleUserEvent(obj interface{}, isDelete bool, opType string) {
 		return
 	}
 
-	var role, id, zone, status string
+	var role, id, status, zone string
 	annotations := user.ObjectMeta.Annotations
 	if annotations != nil {
 		role = annotations["bytetrade.io/owner-role"]
@@ -104,4 +110,21 @@ func GetUserIDs() []string {
 	})
 
 	return ids
+}
+
+// GetUsers returns every cached UserDataInfo with a non-empty Name. Callers
+// that need both userID and zone (e.g. hydration's per-user iteration that
+// later derives entrance URLs) should use this instead of GetUserIDs +
+// GetUserFromCache to avoid a second sync.Map lookup per user.
+func GetUsers() []UserDataInfo {
+	var out []UserDataInfo
+
+	Users.Range(func(_, value interface{}) bool {
+		if userInfo, ok := value.(UserDataInfo); ok && userInfo.Name != "" {
+			out = append(out, userInfo)
+		}
+		return true
+	})
+
+	return out
 }
