@@ -13,6 +13,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/jmoiron/sqlx"
+	"gorm.io/gorm"
 )
 
 // HistoryType represents the type of history record
@@ -134,6 +135,64 @@ func (hm *HistoryModule) StoreRecord(record *HistoryRecord) error {
 	}
 
 	glog.Infof("Stored history record with ID: %d, type: %s, app: %s, account: %s", record.ID, record.Type, record.App, record.Account)
+	return nil
+}
+
+// StoreRecordInTx is the in-transaction variant of StoreRecord. The
+// caller supplies a *gorm.DB that wraps an open transaction (typically
+// obtained via gdb.Transaction(func(tx *gorm.DB) error { ... })). The
+// INSERT runs on that tx so the history write commits atomically with
+// whatever else the caller is doing — task_records + user_application_
+// states updates in the task module, today.
+//
+// Validation rules mirror StoreRecord exactly so the two entry points
+// have identical accept/reject semantics; only the connection handle
+// differs. record.ID is populated with the auto-increment id PG
+// returns, same as the non-tx path.
+//
+// Why gorm.DB and not sqlx.Tx: the rest of the project's transactional
+// writes use gorm (internal/v2/db.Global() returns *gorm.DB), so
+// accepting a *gorm.DB here lets a single caller stitch history into
+// the same tx as store.FailTaskInTx / store.CompleteTaskInTx without
+// juggling two different transaction abstractions on the same
+// underlying *sql.Conn.
+func (hm *HistoryModule) StoreRecordInTx(tx *gorm.DB, record *HistoryRecord) error {
+	if tx == nil {
+		return fmt.Errorf("StoreRecordInTx: nil tx")
+	}
+	if record == nil {
+		return fmt.Errorf("record cannot be nil")
+	}
+
+	if record.Account == "" {
+		return fmt.Errorf("account field cannot be empty")
+	}
+
+	if record.Time == 0 {
+		record.Time = time.Now().Unix()
+	}
+
+	if record.Extended != "" {
+		var temp interface{}
+		if err := json.Unmarshal([]byte(record.Extended), &temp); err != nil {
+			glog.Warningf("Invalid JSON in extended field, storing as plain text: %v", err)
+		}
+	}
+
+	// `RETURNING id` is supported by Postgres; gorm's Raw + Scan walks
+	// the returned row exactly once, populating record.ID without an
+	// extra round-trip. Errors are returned verbatim (no log here) so
+	// the enclosing transaction can roll back cleanly and the caller
+	// decides whether to log.
+	const query = `
+INSERT INTO history_records (type, message, time, app, account, extended)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id`
+	if err := tx.Raw(query,
+		record.Type, record.Message, record.Time, record.App, record.Account, record.Extended,
+	).Scan(&record.ID).Error; err != nil {
+		return fmt.Errorf("store history record (tx): %w", err)
+	}
 	return nil
 }
 

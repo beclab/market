@@ -1,16 +1,21 @@
 package task
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
-	"os"
+
+	"market/internal/v2/appservice"
 
 	"github.com/golang/glog"
 )
 
-// AppUninstall uninstalls an application using the app service.
+// AppUninstall uninstalls an application using the typed appservice
+// client. The (all, deleteData) flags come from the API handler's
+// request body and ride through task metadata; both default to false
+// when missing, matching app-service's "no cascade / no delete" wire
+// semantics.
 func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 	appName := task.AppName
 
@@ -22,18 +27,16 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
-	// Get cfgType from metadata
 	cfgType, ok := task.Metadata["cfgType"].(string)
 	if !ok {
 		glog.Warningf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
-		cfgType = "app" // Default to app type
+		cfgType = "app"
 	}
 
-	// Get all parameter from metadata
 	all, ok := task.Metadata["all"].(bool)
 	if !ok {
 		glog.Warningf("Missing all parameter in task metadata for task: %s, using default false", task.ID)
-		all = false // Default to false
+		all = false
 	}
 
 	deleteData, ok := task.Metadata["deleteData"].(bool)
@@ -42,100 +45,92 @@ func (tm *TaskModule) AppUninstall(task *Task) (string, error) {
 		deleteData = false
 	}
 
-	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	// Choose API endpoint based on cfgType
-	var urlStr string
-	// if cfgType == "middleware" {
-	// 	// Use middleware API for middleware type
-	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/uninstall", appServiceHost, appServicePort, appName)
-	// 	glog.Infof("Using middleware API for uninstall: %s", urlStr)
-	// } else if cfgType == "recommend" {
-	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/uninstall", appServiceHost, appServicePort, appName)
-	// 	glog.Infof("Using middleware API for installation: %s", urlStr)
-	// } else {
-	// 	// Use regular app API for other types
-	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/uninstall", appServiceHost, appServicePort, appName)
-	glog.Infof("Using regular app API for uninstall: %s", urlStr)
-	// }
-
-	glog.Infof("App service URL: %s for task: %s, cfgType: %s", urlStr, task.ID, cfgType)
-
-	headers := map[string]string{
-		"X-Authorization": token,
-		"X-Bfl-User":      task.User,
-		// Content-Type is not strictly necessary for a request with no body,
-		// but we include it for consistency.
-		"Content-Type": "application/json",
-	}
-
-	// Send HTTP request and get response
-	glog.Infof("[APP] Sending HTTP request for app uninstallation: task=%s, all=%v", task.ID, all)
-
-	// Create request body with all parameter
-	requestBody := map[string]interface{}{
-		"all":        all,
-		"deleteData": deleteData,
-	}
-	requestBodyBytes, _ := json.Marshal(requestBody)
-
-	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, bytes.NewReader(requestBodyBytes))
-	if err != nil {
-		glog.Errorf("HTTP request failed for app uninstallation: task=%s, error=%v", task.ID, err)
-		// Create detailed error result
-		errorResult := map[string]interface{}{
+	// baseEnvelope mirrors the legacy success / failure result shape so
+	// API-side consumers (sync wait + frontend backend_response viewer)
+	// keep the exact same field set as before the appservice.Client
+	// migration. The legacy "url" field is intentionally dropped: it
+	// duplicated the host/port the typed client resolves itself.
+	baseEnvelope := func() map[string]interface{} {
+		return map[string]interface{}{
 			"operation":  "uninstall",
 			"app_name":   appName,
 			"user":       task.User,
 			"cfgType":    cfgType,
 			"all":        all,
 			"deleteData": deleteData,
-			"url":        urlStr,
-			"error":      err.Error(),
-			"status":     "failed",
 		}
-		errorJSON, _ := json.Marshal(errorResult)
+	}
+
+	hdr := appservice.OpHeaders{
+		Token: token,
+		User:  task.User,
+	}
+	opts := appservice.UninstallOptions{
+		All:        all,
+		DeleteData: deleteData,
+	}
+
+	client, err := getAppServiceClient()
+	if err != nil {
+		glog.Errorf("App-service client unavailable for uninstall task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		errorJSON, _ := json.Marshal(envelope)
 		return string(errorJSON), err
 	}
 
-	glog.Infof("[APP] HTTP request completed successfully for app uninstallation: task=%s, response_length=%d", task.ID, len(response))
-
-	// Parse response to extract opID if uninstallation is successful
-	var responseData map[string]interface{}
-	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
-		glog.Errorf("Failed to parse response JSON for task %s: %v", task.ID, err)
-	} else {
-		// Check if uninstallation was successful by checking code field
-		if code, ok := responseData["code"].(float64); ok && code == 200 {
-			if data, ok := responseData["data"].(map[string]interface{}); ok {
-				if opID, ok := data["opID"].(string); ok && opID != "" {
-					task.OpID = opID
-					glog.Infof("Successfully extracted opID: %s for task: %s", opID, task.ID)
-				} else {
-					glog.Infof("opID not found in response data for task: %s", task.ID)
-				}
-			} else {
-				glog.Infof("Data field not found or not a map in response for task: %s", task.ID)
+	glog.Infof("[APP] Sending HTTP request for app uninstallation: task=%s, all=%v deleteData=%v", task.ID, all, deleteData)
+	opResp, err := client.UninstallApp(context.Background(), appName, opts, hdr)
+	if err != nil {
+		glog.Errorf("App-service uninstall failed for task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		// HTTP-200-business-error / HTTP-422-structured-envelope both
+		// surface as *appservice.OpError; forward code/message + the
+		// upstream `data` block so the frontend's backend_response
+		// viewer keeps working unchanged.
+		var opErr *appservice.OpError
+		if errors.As(err, &opErr) {
+			backend := map[string]interface{}{
+				"code":    opErr.Code,
+				"message": opErr.Message,
 			}
-		} else {
-			glog.Infof("Uninstallation code is not 200 for task: %s, code: %v", task.ID, code)
+			switch {
+			case opResp != nil && len(opResp.DataRaw) > 0:
+				backend["data"] = json.RawMessage(opResp.DataRaw)
+			case opErr.OpID != "":
+				backend["data"] = map[string]interface{}{"opID": opErr.OpID}
+			}
+			envelope["backend_response"] = backend
 		}
+		errorJSON, _ := json.Marshal(envelope)
+		return string(errorJSON), err
 	}
 
-	// Create success result
-	successResult := map[string]interface{}{
-		"operation": "uninstall",
-		"app_name":  appName,
-		"user":      task.User,
-		"cfgType":   cfgType,
-		"all":       all,
-		"url":       urlStr,
-		"response":  response,
-		"opID":      task.OpID, // Include opID in result
-		"status":    "success",
+	if opResp != nil && opResp.Data != nil && opResp.Data.OpID != "" {
+		task.OpID = opResp.Data.OpID
+		glog.Infof("Successfully extracted opID: %s for task: %s", task.OpID, task.ID)
+		tm.linkStateOpID(task, appName, "uninstall")
+	} else {
+		glog.Infof("opID not found in response data for task: %s", task.ID)
 	}
-	successJSON, _ := json.Marshal(successResult)
+
+	envelope := baseEnvelope()
+	if opResp != nil {
+		backend := map[string]interface{}{
+			"code":    opResp.Code,
+			"message": opResp.Message,
+		}
+		if opResp.Data != nil && opResp.Data.OpID != "" {
+			backend["data"] = map[string]interface{}{"opID": opResp.Data.OpID}
+		}
+		envelope["backend_response"] = backend
+	}
+	envelope["opID"] = task.OpID
+	envelope["status"] = "success"
+	successJSON, _ := json.Marshal(envelope)
 	glog.Infof("App uninstallation completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
 	return string(successJSON), nil
 }

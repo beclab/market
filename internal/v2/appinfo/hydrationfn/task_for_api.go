@@ -7,17 +7,81 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/store"
 	"market/internal/v2/types"
 
+	"github.com/beclab/Olares/framework/oac"
 	"github.com/go-resty/resty/v2"
 	"github.com/golang/glog"
 )
 
-// Response represents the response from chart repo sync-app API
-type Response struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+// syncAppResponse mirrors the full shape of chart-repo's /dcr/sync-app
+// reply. The hydration logic currently only reads Data.AppData.RawData
+// (everything else is left in place for future cross-checks, debug logs,
+// and forward compatibility — declaring the shape costs almost nothing
+// and avoids silently dropping fields when chart-repo's contract evolves).
+type syncAppResponse struct {
+	Success bool         `json:"success"`
+	Message string       `json:"message"`
+	Data    *syncAppData `json:"data"`
+}
+
+// syncAppData is the data envelope returned by chart-repo. Status mirrors
+// chart-repo's idea of the app's render state ("existing", "new",
+// "updated", ...); Message is its human-readable counterpart.
+type syncAppData struct {
+	AppID    string          `json:"app_id"`
+	UserID   string          `json:"user_id"`
+	SourceID string          `json:"source_id"`
+	Version  string          `json:"version"`
+	Status   string          `json:"status"`
+	Message  string          `json:"message"`
+	AppData  *syncAppPayload `json:"app_data"`
+}
+
+// syncAppPayload is the per-app render artefact. RawDataEx is the input
+// we split into the user_applications JSONB columns. RawPackage and
+// RenderedPackage are file paths to the source / rendered chart packages
+// on chart-repo's filesystem; they are persisted to the homonymous
+// user_applications.{raw_package, rendered_package} columns via
+// UpsertRenderSuccess so the API layer can derive the chart_path argument
+// for app-service without a cache round-trip. AppInfo includes the same
+// app_entry; the previous "image_analysis lives only inside AppInfo"
+// arrangement is gone now that chart-repo emits a typed ImageAnalysis
+// block at this level (see ImageAnalysis below) and Market persists it.
+//
+// Migration plan: RawData is the legacy flat-map field kept on the wire
+// only during chart-repo's gradual rollout of the typed payload. Market
+// consumes RawDataEx exclusively — RawData is not read anywhere. When
+// chart-repo drops RawData on the wire, this field can be removed and
+// RawDataEx renamed to RawData (with `json:"raw_data"`); no other logic
+// changes needed.
+type syncAppPayload struct {
+	Type            string                `json:"type"`
+	Timestamp       int64                 `json:"timestamp"`
+	Version         string                `json:"version"`
+	RawData         map[string]any        `json:"raw_data"`
+	RawDataEx       *oac.AppConfiguration `json:"raw_data_ex"`
+	// ImageAnalysis is chart-repo's per-app docker image analysis,
+	// emitted at the same level as RawDataEx. We persist it verbatim
+	// to user_applications.image_analysis via UpsertRenderSuccess so
+	// /api/v2/apps callers can render image-level details (size,
+	// architecture, download progress) without round-tripping back
+	// to chart-repo. nil here is normal for older chart-repo builds
+	// that pre-date this field — the column stays NULL until the
+	// next render with the new chart-repo refreshes it.
+	ImageAnalysis *types.ImageAnalysisResult `json:"image_analysis"`
+	// I18n / VersionHistory live at the same level as RawDataEx on
+	// the chart-repo wire and are persisted to dedicated JSONB columns
+	// on user_applications (see store.UpsertRenderSuccess); they are
+	// NOT split into the manifest payload anymore.
+	I18n           map[string]map[string]string `json:"i18n"`
+	VersionHistory []types.VersionInfo          `json:"version_history"`
+	RawPackage      string                `json:"raw_package"`
+	RenderedPackage string                `json:"rendered_package"`
+	Values          []any                 `json:"values"`
+	AppInfo         map[string]any        `json:"app_info"`
+	AppSimpleInfo   map[string]any        `json:"app_simple_info"`
 }
 
 type TaskForApiStep struct {
@@ -44,23 +108,22 @@ func (s *TaskForApiStep) CanSkip(ctx context.Context, task *HydrationTask) bool 
 }
 
 func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error {
-	// 1. Get chart repo service host from environment
-	host := ""
-	if v := getenv("CHART_REPO_SERVICE_HOST"); v != "" {
-		host = v
-	}
+	host := getenv("CHART_REPO_SERVICE_HOST")
 	if host == "" {
 		return fmt.Errorf("CHART_REPO_SERVICE_HOST environment variable is not set")
 	}
 
-	// 2. Get AppInfoLatestPendingData from cache
-	pendingData := s.findPendingDataFromCache(task)
+	// PG-driven hydration sets task.PendingPayload directly; the legacy
+	// cache-driven path leaves it nil and we fall back to the in-memory cache.
+	pendingData := task.PendingPayload
 	if pendingData == nil {
-		return fmt.Errorf("AppInfoLatestPendingData not found in cache for user=%s, source=%s, app=%s",
+		pendingData = s.findPendingDataFromCache(task)
+	}
+	if pendingData == nil {
+		return fmt.Errorf("AppInfoLatestPendingData not available for user=%s, source=%s, app=%s",
 			task.UserID, task.SourceID, task.AppID)
 	}
 
-	// 3. Build SyncAppRequest
 	request := struct {
 		AppInfoLatestPendingData *types.AppInfoLatestPendingData `json:"app_info_latest_pending_data"`
 		SourceID                 string                          `json:"source_id"`
@@ -71,11 +134,9 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		UserName:                 task.UserID,
 	}
 
-	// 4. Send POST request to chart repo with 3 second timeout
 	url := "http://" + host + "/chart-repo/api/v2/dcr/sync-app"
 	startTime := time.Now()
 
-	// Set timeout on the client
 	s.client.SetTimeout(3 * time.Second)
 
 	resp, err := s.client.R().
@@ -84,114 +145,118 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 		SetBody(request).
 		Post(url)
 	duration := time.Since(startTime)
-	if err != nil || resp.StatusCode() >= 300 {
-		glog.Errorf("TaskForApiStep - Request failed in %v for user=%s, source=%s, app=%s(%s/%s): %v", duration, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion, err)
-	}
 	if err != nil {
+		glog.Errorf("TaskForApiStep - Request failed in %v for user=%s, source=%s, app=%s(%s/%s): %v",
+			duration, task.UserID, task.SourceID, task.AppID, task.AppName, task.AppVersion, err)
 		return fmt.Errorf("failed to call chart repo sync-app: %w", err)
 	}
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 		return fmt.Errorf("chart repo sync-app returned non-2xx: %d, body: %s", resp.StatusCode(), resp.String())
 	}
 
-	// 5. Parse response
-	var apiResponse Response
+	var apiResponse syncAppResponse
+
 	if err := json.Unmarshal(resp.Body(), &apiResponse); err != nil {
 		return fmt.Errorf("failed to parse response JSON: %w", err)
 	}
+	// Treat 2xx + Success=false as a render failure so the hydration loop can
+	// MarkRenderFailed instead of recording a phantom success.
+	if !apiResponse.Success {
+		msg := apiResponse.Message
+		if msg == "" {
+			msg = "chart repo reported success=false"
+		}
+		return fmt.Errorf("chart repo sync-app rejected app: %s", msg)
+	}
 
-	// 6. Handle app_data if present
-	if apiResponse.Success && apiResponse.Data != nil {
-		if dataMap, ok := apiResponse.Data.(map[string]interface{}); ok {
-			if appData, hasAppData := dataMap["app_data"]; hasAppData && appData != nil {
-				// Convert app_data to AppInfoLatestData and write to cache
-				if err := s.writeAppDataToCache(task, appData); err != nil {
-					glog.Errorf("Warning: failed to write app_data to cache: %v", err)
-				} else {
-					glog.V(2).Infof("Successfully wrote app_data to cache for user=%s, source=%s, app=%s, appName=%s",
-						task.UserID, task.SourceID, task.AppID, task.AppName)
+	// Build the manifest payload (= JSONB columns) from raw_data_ex. We
+	// rely on chart-repo always returning raw_data_ex alongside success=
+	// true, including on the "existing" fast path. If it is missing we
+	// would otherwise persist a scalar-only success row and lose the
+	// per-user JSONB manifest, so we treat that case as a render failure
+	// and let the upstream loop call MarkRenderFailed instead. The
+	// manifest is also stashed on the task so the pipeline can compose
+	// the post-render app_info for NATS notifications without doing a
+	// follow-up PG read.
+	if apiResponse.Data == nil || apiResponse.Data.AppData == nil || apiResponse.Data.AppData.RawDataEx == nil {
+		return fmt.Errorf("chart repo sync-app returned success without raw_data_ex (user=%s source=%s app=%s)",
+			task.UserID, task.SourceID, task.AppID)
+	}
+	rawData := apiResponse.Data.AppData.RawDataEx
+	manifest := types.BuildUserAppManifest(rawData)
+
+	// Inject entrance / shared-entrance URLs while we still have the
+	// per-render context. zone was carried in from Pipeline.phaseHydrateApps
+	// (sourced from the User CR's bytetrade.io/zone annotation); appID is
+	// the clone-aware app_id (clones carry md5(newAppName) here, matching
+	// what app-service uses to compose URLs at install time). Empty zone
+	// is fine — EnrichEntranceURLs no-ops in that case.
+	types.EnrichEntranceURLs(manifest, task.AppID, task.UserZone)
+
+	task.RenderedManifest = manifest
+
+	// Persist render success to user_applications. Skipped when the task
+	// has no AppEntry (legacy cache-driven path); on that path the cache
+	// write is the source of truth for render outcome.
+	if task.AppEntry != nil {
+		// VersionHistory is sourced from the catalog-side AppEntry
+		// (loaded by store.ListRenderCandidates from
+		// applications.app_entry) rather than from chart-repo's
+		// sync-app response. Storage uses []types.VersionInfo while
+		// the catalog projection uses []*types.VersionInfo, so the
+		// pointer slice is dereffed into a value slice here. Mirror
+		// of the value→pointer conversion in pkg/v2/api/app.go's
+		// detail-row composer; both sides keep their own layer's
+		// convention and the conversion stays local.
+		var versionHistory []types.VersionInfo
+		if len(task.AppEntry.VersionHistory) > 0 {
+			versionHistory = make([]types.VersionInfo, 0, len(task.AppEntry.VersionHistory))
+			for _, vi := range task.AppEntry.VersionHistory {
+				if vi != nil {
+					versionHistory = append(versionHistory, *vi)
 				}
 			}
 		}
-	}
 
-	glog.V(2).Infof("[TaskForApi] SyncApp %s(%s %s) to chart repo completed successfully", task.AppID, task.AppName, task.AppVersion)
-	return nil
-}
-
-// writeAppDataToCache writes AppInfoLatestData to cache by updating the corresponding AppInfoLatestPendingData
-func (s *TaskForApiStep) writeAppDataToCache(task *HydrationTask, appData interface{}) error {
-	if task == nil || task.Cache == nil {
-		return fmt.Errorf("task or cache is nil")
-	}
-
-	// Convert appData to AppInfoLatestData OUTSIDE the lock to avoid blocking
-	var appInfoLatest *types.AppInfoLatestData
-	if appDataMap, ok := appData.(map[string]interface{}); ok {
-		appInfoLatest = types.NewAppInfoLatestData(appDataMap)
-		if appInfoLatest == nil {
-			return fmt.Errorf("failed to create AppInfoLatestData from response data")
+		in := store.UpsertRenderSuccessInput{
+			UserID:          task.UserID,
+			SourceID:        task.SourceID,
+			AppID:           task.AppID,
+			AppName:         task.AppName,
+			AppRawID:        task.AppID,
+			AppRawName:      task.AppName,
+			ManifestVersion: rawData.ConfigVersion,
+			ManifestType:    rawData.ConfigType,
+			APIVersion:      rawData.APIVersion,
+			Manifest:        manifest,
+			I18n:            apiResponse.Data.AppData.I18n,
+			VersionHistory:  versionHistory,
+			ImageAnalysis:   apiResponse.Data.AppData.ImageAnalysis,
+			RawPackage:      apiResponse.Data.AppData.RawPackage,
+			RenderedPackage: apiResponse.Data.AppData.RenderedPackage,
 		}
-		if rawPkg, ok := appDataMap["raw_package"].(string); ok {
-			appInfoLatest.RawPackage = rawPkg
-		}
-		if renderedPkg, ok := appDataMap["rendered_package"].(string); ok {
-			appInfoLatest.RenderedPackage = renderedPkg
-		}
-		if values, ok := appDataMap["values"].([]interface{}); ok {
-			parsedValues := make([]*types.Values, 0, len(values))
-			for _, v := range values {
-				if vMap, ok := v.(map[string]interface{}); ok {
-					val := &types.Values{}
-					if fileName, ok := vMap["file_name"].(string); ok {
-						val.FileName = fileName
-					}
-					if modifyType, ok := vMap["modify_type"].(string); ok {
-						val.ModifyType = types.ModifyType(modifyType)
-					}
-					if modifyKey, ok := vMap["modify_key"].(string); ok {
-						val.ModifyKey = modifyKey
-					}
-					if modifyValue, ok := vMap["modify_value"].(string); ok {
-						val.ModifyValue = modifyValue
-					}
-					parsedValues = append(parsedValues, val)
-				}
-			}
-			appInfoLatest.Values = parsedValues
-		}
-	} else {
-		return fmt.Errorf("app_data is not in expected format, app=%s, appName=%s", task.AppID, task.AppName)
-	}
-
-	if task.CacheManager == nil {
-		return fmt.Errorf("CacheManager not available for fixVersionHistoryFromPendingData")
-	}
-
-	// Check if chartrepo returned appLabels before taking the lock
-	chartrepoHasLabels := false
-	if appDataMap, ok := appData.(map[string]interface{}); ok {
-		if appInfoMap, ok := appDataMap["app_info"].(map[string]interface{}); ok {
-			if appEntryMap, ok := appInfoMap["app_entry"].(map[string]interface{}); ok {
-				if appLabels, ok := appEntryMap["appLabels"].([]interface{}); ok && len(appLabels) > 0 {
-					chartrepoHasLabels = true
-				}
-			}
-		}
-	}
-	if chartrepoHasLabels {
-		// Clear the AppLabels so CopyPendingVersionHistory won't overwrite them
-		// (it only copies when latest has empty labels)
-	} else if appInfoLatest.RawData != nil {
-		appInfoLatest.RawData.AppLabels = nil
-		if appInfoLatest.AppInfo != nil && appInfoLatest.AppInfo.AppEntry != nil {
-			appInfoLatest.AppInfo.AppEntry.AppLabels = nil
+		if err := store.UpsertRenderSuccess(ctx, in); err != nil {
+			return fmt.Errorf("persist render success to user_applications: %w", err)
 		}
 	}
 
-	return task.CacheManager.CopyPendingVersionHistory(
-		task.UserID, task.SourceID, task.AppID, task.AppName, appInfoLatest,
+	// Surface chart-repo's own status/message on the success path; this is
+	// useful for distinguishing a fresh render from a "already existed"
+	// fast-path response (chart-repo sets status="existing" / message=
+	// "App already exists in latest with same version" in that case).
+	var (
+		repoStatus, repoMessage, renderedPackage string
 	)
+	if apiResponse.Data != nil {
+		repoStatus = apiResponse.Data.Status
+		repoMessage = apiResponse.Data.Message
+		if apiResponse.Data.AppData != nil {
+			renderedPackage = apiResponse.Data.AppData.RenderedPackage
+		}
+	}
+	glog.V(2).Infof("[TaskForApi] SyncApp %s(%s %s) to chart repo completed in %v: status=%q msg=%q rendered=%s",
+		task.AppID, task.AppName, task.AppVersion, duration, repoStatus, repoMessage, renderedPackage)
+	return nil
 }
 
 // findPendingDataFromCache finds AppInfoLatestPendingData from cache based on task information.

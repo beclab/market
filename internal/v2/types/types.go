@@ -3,7 +3,6 @@ package types
 import (
 	"encoding/json"
 	"market/internal/v2/client"
-	"reflect"
 	"strings"
 	"time"
 
@@ -56,7 +55,7 @@ type Recommend struct {
 	Description string         `json:"description"`
 	Content     string         `json:"content"` // Comma-separated app names
 	Data        *RecommendData `json:"data,omitempty"`
-	Source      string         `json:"source,omitempty"` // Data source identifier
+	Source      int            `json:"source,omitempty"` // Data source identifier
 	CreatedAt   time.Time      `json:"createdAt"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
@@ -65,6 +64,7 @@ type Recommend struct {
 type Page struct {
 	Category  string    `json:"category"`
 	Content   string    `json:"content"` // JSON string of page content
+	Source    int       `json:"source"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -89,7 +89,7 @@ type Topic struct {
 	ID        string                `json:"_id"`
 	Name      string                `json:"name"`
 	Data      map[string]*TopicData `json:"data"` // i18n data by language
-	Source    string                `json:"source"`
+	Source    int                   `json:"source"`
 	UpdatedAt time.Time             `json:"updated_at"`
 	CreatedAt time.Time             `json:"createdAt"`
 }
@@ -101,7 +101,7 @@ type TopicList struct {
 	Description string            `json:"description"`
 	Content     string            `json:"content"` // Comma-separated topic IDs
 	Title       map[string]string `json:"title"`   // i18n title mapping
-	Source      string            `json:"source"`
+	Source      int               `json:"source"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 	CreatedAt   time.Time         `json:"createdAt"`
 }
@@ -119,7 +119,7 @@ type Tag struct {
 	Title     map[string]string `json:"title"` // i18n title mapping
 	Icon      string            `json:"icon"`
 	Sort      int               `json:"sort"` // sort order for tag
-	Source    string            `json:"source"`
+	Source    int               `json:"source"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	CreatedAt time.Time         `json:"createdAt"`
 }
@@ -286,6 +286,10 @@ type ApplicationInfoEntry struct {
 	SupportArch        []string                 `json:"supportArch"`
 	RequiredGPU        string                   `json:"requiredGPU,omitempty"`
 	RequiredCPU        string                   `json:"requiredCPU"`
+	LimitedMemory      string                   `json:"limitedMemory,omitempty"`
+	LimitedDisk        string                   `json:"limitedDisk,omitempty"`
+	LimitedCPU         string                   `json:"limitedCPU,omitempty"`
+	LimitedGPU         string                   `json:"limitedGPU,omitempty"`
 	Rating             float32                  `json:"rating"`
 	Target             string                   `json:"target"`
 	Permission         map[string]interface{}   `json:"permission"`          // Using interface{} for flexibility
@@ -323,7 +327,12 @@ type ApplicationInfoEntry struct {
 	// Legacy fields for backward compatibility
 	Screenshots []string               `json:"screenshots"`
 	Tags        []string               `json:"tags"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	// Metadata is in-memory only: chart-repo's parser metadata
+	// ({config_type, config_version, parsed_at, ...}) and the previous
+	// "source_data" mirror used to land here, neither of which the JSONB
+	// columns on applications / user_applications need to persist.
+	// Excluded from JSON so the persisted app_entry payload stays clean.
+	Metadata    map[string]interface{} `json:"-"`
 	UpdatedAt   string                 `json:"updated_at"`
 }
 
@@ -1674,6 +1683,18 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 	if val, ok := sourceData["requiredCPU"].(string); ok && val != "" {
 		entry.RequiredCPU = val
 	}
+	if val, ok := sourceData["limitedMemory"].(string); ok && val != "" {
+		entry.LimitedMemory = val
+	}
+	if val, ok := sourceData["limitedDisk"].(string); ok && val != "" {
+		entry.LimitedDisk = val
+	}
+	if val, ok := sourceData["limitedCPU"].(string); ok && val != "" {
+		entry.LimitedCPU = val
+	}
+	if val, ok := sourceData["limitedGPU"].(string); ok && val != "" {
+		entry.LimitedGPU = val
+	}
 	if val, ok := sourceData["target"].(string); ok && val != "" {
 		entry.Target = val
 	}
@@ -1945,104 +1966,7 @@ func NewApplicationInfoEntry(sourceData map[string]interface{}) *ApplicationInfo
 	// Validate and fix AppLabels if needed
 	ValidateAndFixAppLabels(sourceData, entry)
 
-	// Store a safe copy of source data in metadata to avoid circular references
-	// Create a deep copy of source data without potential circular references
-	safeSourceData := createSafeSourceDataCopy(sourceData)
-	entry.Metadata["source_data"] = safeSourceData
-	entry.Metadata["creation_method"] = "NewApplicationInfoEntry"
-
 	return entry
-}
-
-// createSafeSourceDataCopy creates a safe copy of source data to avoid circular references
-func createSafeSourceDataCopy(sourceData map[string]interface{}) map[string]interface{} {
-	if sourceData == nil {
-		return nil
-	}
-
-	safeCopy := make(map[string]interface{})
-	visited := make(map[uintptr]bool)
-
-	for key, value := range sourceData {
-		// Skip potential circular reference keys
-		if key == "source_data" || key == "raw_data" || key == "app_info" ||
-			key == "parent" || key == "self" || key == "circular_ref" ||
-			key == "back_ref" || key == "loop" {
-			continue
-		}
-
-		safeCopy[key] = deepCopyValue(value, visited)
-	}
-
-	return safeCopy
-}
-
-// deepCopyValue performs a deep copy of a value while avoiding circular references
-func deepCopyValue(value interface{}, visited map[uintptr]bool) interface{} {
-	if value == nil {
-		return nil
-	}
-
-	switch v := value.(type) {
-	case string, int, int64, float64, bool:
-		return v
-	case []string:
-		return append([]string{}, v...)
-	case []interface{}:
-		// Only copy simple types from interface slice
-		safeSlice := make([]interface{}, 0, len(v))
-		for _, item := range v {
-			switch item.(type) {
-			case string, int, int64, float64, bool:
-				safeSlice = append(safeSlice, item)
-			default:
-				// Skip complex slice items to avoid circular references
-			}
-		}
-		return safeSlice
-	case map[string]interface{}:
-		// Check for circular references using pointer
-		ptr := reflect.ValueOf(v).Pointer()
-		if visited[ptr] {
-			return nil // Skip circular reference
-		}
-		visited[ptr] = true
-		defer delete(visited, ptr)
-
-		safeMap := make(map[string]interface{})
-		for k, val := range v {
-			// Skip potential circular reference keys
-			if k == "source_data" || k == "raw_data" || k == "app_info" ||
-				k == "parent" || k == "self" || k == "circular_ref" ||
-				k == "back_ref" || k == "loop" {
-				continue
-			}
-			safeMap[k] = deepCopyValue(val, visited)
-		}
-		return safeMap
-	case map[interface{}]interface{}:
-		// 新增: 支持 map[interface{}]interface{} 转 map[string]interface{}
-		safeMap := make(map[string]interface{})
-		for k, val := range v {
-			if ks, ok := k.(string); ok {
-				safeMap[ks] = deepCopyValue(val, visited)
-			}
-		}
-		return safeMap
-	case []map[string]interface{}:
-		safeSlice := make([]map[string]interface{}, 0, len(v))
-		for _, item := range v {
-			if itemCopy := deepCopyValue(item, visited); itemCopy != nil {
-				if itemMap, ok := itemCopy.(map[string]interface{}); ok {
-					safeSlice = append(safeSlice, itemMap)
-				}
-			}
-		}
-		return safeSlice
-	default:
-		// For other types, return nil to avoid potential circular references
-		return nil
-	}
 }
 
 // ValidateAndFixAppLabels ensures AppLabels are properly set and not lost

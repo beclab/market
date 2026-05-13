@@ -15,6 +15,8 @@ type MarketSource struct {
 	SourceType  string                         `gorm:"column:source_type;size:16;not null"` // local | remote
 	Description string                         `gorm:"column:description;type:text;not null;default:''"`
 	Priority    int                            `gorm:"column:priority;not null;default:100"`
+	Nsfw        bool                           `gorm:"column:nsfw;not null;default:false"`
+	IsActive    bool                           `gorm:"column:is_active;not null;default:false"`
 	Data        *JSONB[types.MarketSourceData] `gorm:"column:data;type:jsonb"`
 	CreatedAt   time.Time                      `gorm:"column:created_at;not null;default:now()"`
 	UpdatedAt   time.Time                      `gorm:"column:updated_at;not null;default:now()"`

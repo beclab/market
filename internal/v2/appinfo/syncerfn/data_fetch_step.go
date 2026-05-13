@@ -3,12 +3,10 @@ package syncerfn
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
-	"time"
 
 	"market/internal/v2/settings"
-	"market/internal/v2/types"
+	"market/internal/v2/store/marketsource"
 
 	"github.com/golang/glog"
 )
@@ -50,8 +48,8 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 	}
 
 	// Build complete URL from market source base URL and endpoint path
-	dataURL := d.SettingsManager.BuildAPIURL(marketSource.BaseURL, d.DataEndpointPath)
-	glog.V(2).Infof("Using data, Source: %s, Version: %s, URL: %s", marketSource.ID, version, dataURL)
+	dataURL := d.SettingsManager.BuildAPIURL(marketSource.SourceURL, d.DataEndpointPath)
+	glog.V(2).Infof("Using data, Source: %s, Version: %s, URL: %s", marketSource.SourceID, version, dataURL)
 
 	if strings.HasPrefix(dataURL, "file://") {
 		return nil
@@ -75,6 +73,10 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 		return fmt.Errorf("remote data API returned status %d from %s", resp.StatusCode(), dataURL)
 	}
 
+	if response.Hash == "" || response.Version == "" {
+		return fmt.Errorf("remote data invalid, hash: %s, version: %s", response.Hash, response.Version)
+	}
+
 	// Update SyncContext with structured data
 	data.LatestData = response
 
@@ -84,67 +86,29 @@ func (d *DataFetchStep) Execute(ctx context.Context, data *SyncContext) error {
 	// Extract app IDs from the latest data
 	d.extractAppIDs(data)
 
-	// Extract and update Others data
-	d.extractAndUpdateOthers(data)
+	marketData := BuildMarketSourceData(response)
+	if marketData == nil {
+		return fmt.Errorf("failed to build market source data for source %s", marketSource.SourceID)
+	}
 
-	glog.V(2).Infof("Fetched latest data with %d app IDs, version: %s",
-		len(data.AppIDs), data.GetVersion())
+	err = marketsource.SaveData(ctx, marketSource.SourceID, marketData)
+	if err != nil {
+		return fmt.Errorf("failed to save market source data for source %s: %w", marketSource.SourceID, err)
+	}
+	glog.V(2).Infof("Fetched and Updated market_sources.data for source: %s (hash=%s, version=%s), apps: %d", marketSource.SourceID, marketData.Hash, data.GetVersion(), len(data.AppIDs))
 
 	return nil
 }
 
 // CanSkip determines if this step can be skipped
-func (d *DataFetchStep) CanSkip(ctx context.Context, data *SyncContext) bool {
-	// Get current market source - only check data for this specific source
-	marketSource := data.GetMarketSource()
-	if marketSource == nil {
-		glog.V(3).Infof("Executing %s - no market source available in sync context", d.GetStepName())
-		return false
-	}
-
-	sourceID := marketSource.ID
-
-	// Check if we have existing data in cache for THIS specific source only
-	hasExistingData := false
-	if data.CacheManager != nil {
-		hasExistingData = data.CacheManager.HasSourceData(sourceID)
-	} else if data.Cache != nil {
-		data.mutex.RLock()
-		for _, userData := range data.Cache.Users {
-			if sourceData, exists := userData.Sources[sourceID]; exists {
-				if len(sourceData.AppInfoLatestPending) > 0 || len(sourceData.AppInfoLatest) > 0 {
-					hasExistingData = true
-					break
-				}
-			}
-		}
-		data.mutex.RUnlock()
-	}
-
-	// Skip only if hashes match AND we have existing data for THIS specific source
-	if data.HashMatches && hasExistingData {
-		glog.V(3).Infof("Skipping %s for source %s - hashes match and existing data found, no sync required", d.GetStepName(), sourceID)
-		return true
-	}
-
-	// Force execution if no existing data for this source, even if hashes match
-	if !hasExistingData {
-		glog.V(3).Infof("Executing %s for source %s - no existing data found for this source, forcing data fetch", d.GetStepName(), sourceID)
-	} else if !data.HashMatches {
-		glog.V(3).Infof("Executing %s for source %s - hashes don't match, sync required", d.GetStepName(), sourceID)
-	}
-
+func (d *DataFetchStep) CanSkip(_ context.Context, _ *SyncContext) bool {
+	// TODO: change to query user_applications for checking.
 	return false
 }
 
 // extractAndSetVersion extracts version from the response and updates SyncContext
 func (d *DataFetchStep) extractAndSetVersion(data *SyncContext) {
-	if data.LatestData != nil && data.LatestData.Version != "" {
-		data.SetVersion(data.LatestData.Version)
-		glog.V(2).Infof("Updated version from response: %s", data.LatestData.Version)
-	} else {
-		glog.V(3).Infof("No version found in response or version is empty")
-	}
+	data.SetVersion(data.LatestData.Version)
 }
 
 // extractAppIDs extracts app IDs from the fetched data
@@ -158,491 +122,25 @@ func (d *DataFetchStep) extractAppIDs(data *SyncContext) {
 		return
 	}
 
-	// Access apps data directly from structured response
-	appsMap := data.LatestData.Data.Apps
-
-	// In development environment, limit the original data to only 2 apps
-	if isDevelopmentEnvironment() {
-		originalCount := len(appsMap)
-		if originalCount > 200 {
-			glog.V(2).Infof("Development environment detected, limiting original apps data to 2 (original count: %d)", originalCount)
-
-			// Create a new map with only the first 2 apps
-			limitedAppsMap := make(map[string]interface{})
-			count := 0
-			for appID, appData := range appsMap {
-				if count >= 2 {
-					break
-				}
-				limitedAppsMap[appID] = appData
-				count++
-			}
-
-			// Replace the original apps data with limited data
-			data.LatestData.Data.Apps = limitedAppsMap
-			appsMap = limitedAppsMap
+	// Convert apps to a minimal typed projection for safer field access.
+	type appBrief struct {
+		ID string
+	}
+	appsMap := make(map[string]appBrief, len(data.LatestData.Data.Apps))
+	for appID, appRaw := range data.LatestData.Data.Apps {
+		if appMap, ok := appRaw.(map[string]interface{}); ok {
+			id, _ := appMap["id"].(string)
+			appsMap[appID] = appBrief{ID: id}
 		}
 	}
 
-	// Iterate through the apps map where keys are app IDs
-	for appID, appData := range appsMap {
-		// Verify this is a valid app entry by checking if it has required fields
-		if appMap, ok := appData.(map[string]interface{}); ok {
-			if id, hasID := appMap["id"].(string); hasID && id == appID {
-				data.AppIDs = append(data.AppIDs, appID)
-			}
+	// Iterate through typed apps map where keys are app IDs.
+	for appID, app := range appsMap {
+		// Keep historical validation semantics: only accept entries with matching id.
+		if app.ID != "" && app.ID == appID {
+			data.AppIDs = append(data.AppIDs, appID)
 		}
 	}
 
 	glog.V(2).Infof("Extracted %d app IDs from response", len(data.AppIDs))
-
-	// Log first few app IDs for debugging
-	if len(data.AppIDs) > 0 {
-		maxLog := 5
-		if len(data.AppIDs) < maxLog {
-			maxLog = len(data.AppIDs)
-		}
-		glog.V(2).Infof("First %d app IDs: %v", maxLog, data.AppIDs[:maxLog])
-	}
-}
-
-// isDevelopmentEnvironment checks if the application is running in development mode
-func isDevelopmentEnvironment() bool {
-	env := strings.ToLower(os.Getenv("GO_ENV"))
-	return env == "dev" || env == "development" || env == ""
-}
-
-// getMapKeys returns the keys of a map as a slice of strings
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
-// extractAndUpdateOthers extracts and updates Others data in SourceData
-func (d *DataFetchStep) extractAndUpdateOthers(data *SyncContext) {
-	glog.V(2).Info("Starting extractAndUpdateOthers")
-	// Check if we have valid response data
-	if data.LatestData == nil {
-		glog.V(3).Infof("Warning: no latest data found for Others extraction")
-		return
-	}
-
-	// Create Others structure from the response data
-	others := &types.Others{
-		Hash:       data.LatestData.Hash,
-		Version:    data.LatestData.Version,
-		Topics:     make([]*types.Topic, 0),
-		TopicLists: make([]*types.TopicList, 0),
-		Recommends: make([]*types.Recommend, 0),
-		Pages:      make([]*types.Page, 0),
-		Tops:       make([]*types.AppStoreTopItem, 0),
-		Latest:     make([]string, 0),
-	}
-
-	// Extract topics data
-	if data.LatestData.Data.Topics != nil {
-		for _, topicData := range data.LatestData.Data.Topics {
-			if topicMap, ok := topicData.(map[string]interface{}); ok {
-				topic := d.mapToTopic(topicMap)
-				if topic != nil {
-					others.Topics = append(others.Topics, topic)
-				}
-			}
-		}
-	}
-
-	// Extract topic lists data
-	if data.LatestData.Data.TopicLists != nil {
-		for _, topicListData := range data.LatestData.Data.TopicLists {
-			if topicListMap, ok := topicListData.(map[string]interface{}); ok {
-				topicList := d.mapToTopicList(topicListMap)
-				if topicList != nil {
-					others.TopicLists = append(others.TopicLists, topicList)
-				}
-			}
-		}
-	}
-
-	// Extract recommends data
-	if data.LatestData.Data.Recommends != nil {
-		glog.V(2).Infof("Processing recommends data, count: %d", len(data.LatestData.Data.Recommends))
-		for i, recommendData := range data.LatestData.Data.Recommends {
-			if recommendMap, ok := recommendData.(map[string]interface{}); ok {
-				glog.V(3).Infof("Processing recommend[%d], keys: %v", i, getMapKeys(recommendMap))
-				if dataField, exists := recommendMap["data"]; exists {
-					glog.V(3).Infof("Recommend[%d] has data field, type: %T, value: %+v", i, dataField, dataField)
-				} else {
-					glog.V(3).Infof("Recommend[%d] missing data field", i)
-				}
-				recommend := d.mapToRecommend(recommendMap)
-				if recommend != nil {
-					glog.V(3).Infof("Recommend[%d] mapped successfully, has Data: %v", i, recommend.Data != nil)
-					if recommend.Data != nil {
-						glog.V(3).Infof("Recommend[%d] Data.Title count: %d, Data.Description count: %d",
-							i, len(recommend.Data.Title), len(recommend.Data.Description))
-					}
-					others.Recommends = append(others.Recommends, recommend)
-				} else {
-					glog.V(3).Infof("Recommend[%s] mapping failed", i)
-				}
-			} else {
-				glog.V(3).Infof("Recommend[%s] is not a map, type: %T", i, recommendData)
-			}
-		}
-		glog.V(3).Infof("Extracted %d recommends from response", len(others.Recommends))
-	} else {
-		glog.V(3).Infof("No recommends data found in response")
-	}
-
-	// Extract pages data
-	if data.LatestData.Data.Pages != nil {
-		for _, pageData := range data.LatestData.Data.Pages {
-			if pageMap, ok := pageData.(map[string]interface{}); ok {
-				page := d.mapToPage(pageMap)
-				if page != nil {
-					others.Pages = append(others.Pages, page)
-				}
-			}
-		}
-	}
-
-	// Extract tops data
-	if data.LatestData.Data.Tops != nil {
-		for _, topData := range data.LatestData.Data.Tops {
-			if topMap, ok := topData.(map[string]interface{}); ok {
-				topItem := d.mapToTopItem(topMap)
-				if topItem != nil {
-					others.Tops = append(others.Tops, topItem)
-				}
-			}
-		}
-	}
-
-	// Extract latest data
-	if data.LatestData.Data.Latest != nil {
-		others.Latest = data.LatestData.Data.Latest
-	}
-
-	// Extract tags data - handle object format
-	if data.LatestData.Data.Tags != nil {
-		keys := make([]string, 0, len(data.LatestData.Data.Tags))
-		for k := range data.LatestData.Data.Tags {
-			keys = append(keys, k)
-		}
-		glog.V(3).Infof("Processing tags data, type: %T, keys: %v", data.LatestData.Data.Tags, keys)
-		for tagKey, tagData := range data.LatestData.Data.Tags {
-			if tagMap, ok := tagData.(map[string]interface{}); ok {
-				tag := d.mapToTag(tagMap)
-				if tag != nil {
-					others.Tags = append(others.Tags, tag)
-					glog.V(3).Infof("Added tag %s to others", tagKey)
-				}
-			}
-		}
-		glog.V(3).Infof("Extracted %d tags from response", len(others.Tags))
-	} else {
-		glog.V(3).Infof("No tags data found in response")
-	}
-
-	// Update Others in the cache for current source
-	if data.Cache != nil && data.MarketSource != nil {
-		d.updateOthersInCache(data, others)
-	}
-
-	glog.V(3).Infof("Extracted Others data: %d topics, %d topic lists, %d recommends, %d pages, %d tops, %d latest, %d tags",
-		len(others.Topics), len(others.TopicLists), len(others.Recommends), len(others.Pages), len(others.Tops), len(others.Latest), len(others.Tags))
-
-	// Log detailed summary of recommends data
-	if len(others.Recommends) > 0 {
-		glog.V(3).Infof("Final recommends summary - total: %d", len(others.Recommends))
-		for i, rec := range others.Recommends {
-			glog.V(3).Infof("Final recommend[%d] '%s', has Data: %v", i, rec.Name, rec.Data != nil)
-			if rec.Data != nil {
-				glog.V(3).Infof("Final recommend[%d] Data.Title count: %d, Data.Description count: %d",
-					i, len(rec.Data.Title), len(rec.Data.Description))
-			}
-		}
-	} else {
-		glog.V(3).Infof("No recommends data in final Others structure")
-	}
-}
-
-// mapToTopic converts a map to Topic struct
-func (d *DataFetchStep) mapToTopic(m map[string]interface{}) *types.Topic {
-	topic := &types.Topic{}
-
-	if id, ok := m["_id"].(string); ok {
-		topic.ID = id
-	}
-	if name, ok := m["name"].(string); ok {
-		topic.Name = name
-	}
-	if data, ok := m["data"].(map[string]interface{}); ok {
-		topic.Data = make(map[string]*types.TopicData)
-		for lang, topicDataInterface := range data {
-			if topicDataMap, ok := topicDataInterface.(map[string]interface{}); ok {
-				topicData := &types.TopicData{}
-
-				if group, ok := topicDataMap["group"].(string); ok {
-					topicData.Group = group
-				}
-				if title, ok := topicDataMap["title"].(string); ok {
-					topicData.Title = title
-				}
-				if des, ok := topicDataMap["des"].(string); ok {
-					topicData.Des = des
-				}
-				if iconImg, ok := topicDataMap["iconimg"].(string); ok {
-					topicData.IconImg = iconImg
-				}
-				if detailImg, ok := topicDataMap["detailimg"].(string); ok {
-					topicData.DetailImg = detailImg
-				}
-				if richText, ok := topicDataMap["richtext"].(string); ok {
-					topicData.RichText = richText
-				}
-				if mobileDetailImg, ok := topicDataMap["mobileDetailImg"].(string); ok {
-					topicData.MobileDetailImg = mobileDetailImg
-				}
-				if mobileRichText, ok := topicDataMap["mobileRichtext"].(string); ok {
-					topicData.MobileRichText = mobileRichText
-				}
-				if backgroundColor, ok := topicDataMap["backgroundColor"].(string); ok {
-					topicData.BackgroundColor = backgroundColor
-				}
-				if apps, ok := topicDataMap["apps"].(string); ok {
-					topicData.Apps = apps
-				}
-				if isDelete, ok := topicDataMap["isdelete"].(bool); ok {
-					topicData.IsDelete = isDelete
-				}
-
-				topic.Data[lang] = topicData
-			}
-		}
-	}
-	if source, ok := m["source"].(string); ok {
-		topic.Source = source
-	}
-	if createdAt, ok := m["createdAt"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
-			topic.CreatedAt = t
-		}
-	}
-	if updatedAt, ok := m["updated_at"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
-			topic.UpdatedAt = t
-		}
-	}
-
-	return topic
-}
-
-// mapToTopicList converts a map to TopicList struct
-func (d *DataFetchStep) mapToTopicList(m map[string]interface{}) *types.TopicList {
-	topicList := &types.TopicList{}
-
-	if name, ok := m["name"].(string); ok {
-		topicList.Name = name
-	}
-	if typ, ok := m["type"].(string); ok {
-		topicList.Type = typ
-	}
-	if description, ok := m["description"].(string); ok {
-		topicList.Description = description
-	}
-	if content, ok := m["content"].(string); ok {
-		topicList.Content = content
-	}
-	if title, ok := m["title"].(map[string]interface{}); ok {
-		topicList.Title = make(map[string]string)
-		for k, v := range title {
-			if str, ok := v.(string); ok {
-				topicList.Title[k] = str
-			}
-		}
-	}
-	if source, ok := m["source"].(string); ok {
-		topicList.Source = source
-	}
-	if createdAt, ok := m["createdAt"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
-			topicList.CreatedAt = t
-		}
-	}
-	if updatedAt, ok := m["updated_at"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
-			topicList.UpdatedAt = t
-		}
-	}
-
-	return topicList
-}
-
-// mapToRecommend converts a map to Recommend struct
-func (d *DataFetchStep) mapToRecommend(m map[string]interface{}) *types.Recommend {
-	recommend := &types.Recommend{}
-
-	if name, ok := m["name"].(string); ok {
-		recommend.Name = name
-	}
-	if description, ok := m["description"].(string); ok {
-		recommend.Description = description
-	}
-	if content, ok := m["content"].(string); ok {
-		recommend.Content = content
-	}
-	if createdAt, ok := m["createdAt"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
-			recommend.CreatedAt = t
-		}
-	}
-	if updatedAt, ok := m["updated_at"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
-			recommend.UpdatedAt = t
-		}
-	}
-
-	// Handle Data field
-	glog.V(3).Infof("mapToRecommend - checking for data field, available keys: %v", getMapKeys(m))
-	if dataField, ok := m["data"].(map[string]interface{}); ok {
-		glog.V(3).Infof("mapToRecommend - found data field, type: %T, keys: %v", dataField, getMapKeys(dataField))
-		recommend.Data = &types.RecommendData{}
-
-		if title, ok := dataField["title"].(map[string]interface{}); ok {
-			glog.V(3).Infof("mapToRecommend - found title field, keys: %v", getMapKeys(title))
-			recommend.Data.Title = make(map[string]string)
-			for k, v := range title {
-				if str, ok := v.(string); ok {
-					recommend.Data.Title[k] = str
-				} else {
-					glog.V(3).Infof("mapToRecommend - title[%s] is not string, type: %T, value: %v", k, v, v)
-				}
-			}
-			glog.V(3).Infof("mapToRecommend - processed title, count: %d", len(recommend.Data.Title))
-		} else {
-			glog.V(3).Infof("mapToRecommend - title field not found or not a map")
-		}
-
-		if description, ok := dataField["description"].(map[string]interface{}); ok {
-			glog.V(3).Infof("mapToRecommend - found description field, keys: %v", getMapKeys(description))
-			recommend.Data.Description = make(map[string]string)
-			for k, v := range description {
-				if str, ok := v.(string); ok {
-					recommend.Data.Description[k] = str
-				} else {
-					glog.V(3).Infof("mapToRecommend - description[%s] is not string, type: %T, value: %v", k, v, v)
-				}
-			}
-			glog.V(3).Infof("mapToRecommend - processed description, count: %d", len(recommend.Data.Description))
-		} else {
-			glog.V(3).Infof("mapToRecommend - description field not found or not a map")
-		}
-	} else {
-		glog.V(3).Infof("mapToRecommend - data field not found or not a map, type: %T", m["data"])
-	}
-
-	// Handle Source field
-	if source, ok := m["source"].(string); ok {
-		recommend.Source = source
-	}
-
-	glog.V(3).Infof("mapToRecommend - final result, has Data: %v", recommend.Data != nil)
-	return recommend
-}
-
-// mapToPage converts a map to Page struct
-func (d *DataFetchStep) mapToPage(m map[string]interface{}) *types.Page {
-	page := &types.Page{}
-
-	if category, ok := m["category"].(string); ok {
-		page.Category = category
-	}
-	if content, ok := m["content"].(string); ok {
-		page.Content = content
-	}
-	if createdAt, ok := m["createdAt"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
-			page.CreatedAt = t
-		}
-	}
-	if updatedAt, ok := m["updated_at"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
-			page.UpdatedAt = t
-		}
-	}
-
-	return page
-}
-
-// mapToTopItem converts a map to AppStoreTopItem struct
-func (d *DataFetchStep) mapToTopItem(m map[string]interface{}) *types.AppStoreTopItem {
-	topItem := &types.AppStoreTopItem{}
-
-	if appid, ok := m["appId"].(string); ok {
-		topItem.AppID = appid
-	}
-	if rank, ok := m["rank"].(float64); ok {
-		topItem.Rank = int(rank)
-	}
-
-	return topItem
-}
-
-// mapToTag converts a map to Tag struct
-func (d *DataFetchStep) mapToTag(m map[string]interface{}) *types.Tag {
-	tag := &types.Tag{}
-
-	if id, ok := m["_id"].(string); ok {
-		tag.ID = id
-	}
-	if name, ok := m["name"].(string); ok {
-		tag.Name = name
-	}
-	if title, ok := m["title"].(map[string]interface{}); ok {
-		tag.Title = make(map[string]string)
-		for k, v := range title {
-			if str, ok := v.(string); ok {
-				tag.Title[k] = str
-			}
-		}
-	}
-	if icon, ok := m["icon"].(string); ok {
-		tag.Icon = icon
-	}
-	if sort, ok := m["sort"].(float64); ok {
-		tag.Sort = int(sort)
-	}
-	if source, ok := m["source"].(string); ok {
-		tag.Source = source
-	}
-	if createdAt, ok := m["createdAt"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
-			tag.CreatedAt = t
-		}
-	}
-	if updatedAt, ok := m["updated_at"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
-			tag.UpdatedAt = t
-		}
-	}
-
-	return tag
-}
-
-// updateOthersInCache updates Others data in the cache for the current source
-func (d *DataFetchStep) updateOthersInCache(data *SyncContext, others *types.Others) {
-	// Get source ID from market source - use Name to match syncer.go behavior
-	sourceID := data.MarketSource.ID
-
-	if data.CacheManager != nil {
-		data.CacheManager.UpdateSourceOthers(sourceID, others)
-	} else {
-		glog.Warning("CacheManager not available, cannot update Others in cache")
-	}
-
-	glog.V(2).Infof("Successfully updated Others data for source %s", sourceID)
 }

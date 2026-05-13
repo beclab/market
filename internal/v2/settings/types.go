@@ -13,6 +13,7 @@ type MarketSource struct {
 	BaseURL     string    `json:"base_url" redis:"base_url"`   // Base URL of the market source
 	Priority    int       `json:"priority" redis:"priority"`   // Priority for selection (higher = more priority)
 	IsActive    bool      `json:"is_active" redis:"is_active"` // Whether this source is active
+	Nsfw        bool      `json:"nsfw" redis:"nsfw"`           // Whether this source serves NSFW content
 	UpdatedAt   time.Time `json:"updated_at" redis:"updated_at"`
 	Description string    `json:"description" redis:"description"` // Description of the source
 }
@@ -51,7 +52,10 @@ type RedisClient interface {
 }
 
 // Constants for Redis keys
+//
+// The market sources list moved to the PostgreSQL `market_sources` table;
+// the legacy Redis key `market:sources:config` is no longer read or
+// written. API endpoints config still lives in Redis.
 const (
-	RedisKeyMarketSources = "market:sources:config"
-	RedisKeyAPIEndpoints  = "market:api:endpoints"
+	RedisKeyAPIEndpoints = "market:api:endpoints"
 )

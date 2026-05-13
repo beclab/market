@@ -1,34 +1,33 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
-	"os"
-	"strings"
+
+	"market/internal/v2/appservice"
 
 	"github.com/golang/glog"
 )
 
-// UpgradeOptions represents the options for app upgrade.
-type UpgradeOptions struct {
-	RepoUrl      string      `json:"repoUrl,omitempty"`
-	Version      string      `json:"version,omitempty"`
-	User         string      `json:"x_market_user,omitempty"`
-	Source       string      `json:"source,omitempty"`
-	MarketSource string      `json:"x_market_source,omitempty"`
-	Images       []Image     `json:"images,omitempty"`
-	Envs         []AppEnvVar `json:"envs"`
-}
-
-// AppUpgrade upgrades an application using the app service.
+// AppUpgrade upgrades an application using the typed appservice client.
+// task.AppName is the wire-level app name — the clone alias for clone-app
+// upgrades, the original app name otherwise. The chart that gets upgraded
+// is always the original (clones share the chart), but the URL path uses
+// the wire name so app-service can route to the right install instance.
+//
+// Behaviour change vs the legacy hand-rolled HTTP path: when app-service
+// returns HTTP 200 + Code != 200, the typed client surfaces the response
+// as *appservice.OpError and AppUpgrade returns it as a hard failure.
+// The legacy code logged the bad code at info level and still returned
+// success, which silently masked upstream rejections — the new strict
+// behaviour matches AppInstall and lets the task pipeline mark the row
+// failed correctly.
 func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
-	// Use task.AppName which is the clone app name (e.g., windowstest) for clone apps
-	// or the original app name for regular apps
 	appName := task.AppName
 	user := task.User
 
-	// Check if this is a clone app upgrade
 	rawAppName, isCloneApp := task.Metadata["rawAppName"].(string)
 	if isCloneApp && rawAppName != "" {
 		glog.Infof("Starting clone app upgrade: cloneAppName=%s, rawAppName=%s, user=%s, task_id=%s", appName, rawAppName, user, task.ID)
@@ -42,16 +41,9 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
-	source, ok := task.Metadata["source"].(string)
-	if !ok {
+	source, _ := task.Metadata["source"].(string)
+	if source == "" {
 		glog.Warningf("undefine source for task: %s", task.ID)
-	}
-
-	// Get cfgType from metadata
-	// cfgType, ok := task.Metadata["cfgType"].(string)
-	if !ok {
-		glog.Warningf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
-		// cfgType = "app" // Default to app type
 	}
 
 	version, ok := task.Metadata["version"].(string)
@@ -66,95 +58,137 @@ func (tm *TaskModule) AppUpgrade(task *Task) (string, error) {
 	} else {
 		apiSource = "market"
 	}
+	glog.Infof("App source: %s, API source: %s for task: %s", source, apiSource, task.ID)
 
-	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	// Use appName (clone app name for clone apps, original app name for regular apps) in URL
-	var urlStr string
-	// if cfgType == "recommend" {
-	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/upgrade", appServiceHost, appServicePort, appName)
-	// 	glog.Infof("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
-	// } else {
-	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/upgrade", appServiceHost, appServicePort, appName)
-	if isCloneApp && rawAppName != "" {
-		glog.Infof("App service URL for clone app upgrade: %s (cloneAppName=%s, rawAppName=%s) for task: %s, version: %s", urlStr, appName, rawAppName, task.ID, version)
-	} else {
-		glog.Infof("App service URL: %s for task: %s, version: %s", urlStr, task.ID, version)
-	}
-
-	// }
-
-	glog.Infof("App source: %s, API source: %s: %s for task: %s", source, apiSource, task.ID)
-
-	// Get envs from metadata
 	var envs []AppEnvVar
 	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
 		envs, _ = envsData.([]AppEnvVar)
 		glog.Infof("Retrieved %d environment variables for task: %s", len(envs), task.ID)
 	}
 
-	upgradeInfo := &UpgradeOptions{
+	// Tolerant images extraction. The legacy code used a bare type
+	// assertion (task.Metadata["images"].([]Image)) that would panic
+	// when the field was absent or shaped differently; the comma-ok
+	// form here mirrors AppInstall's safe pattern.
+	var images []Image
+	if imagesData, ok := task.Metadata["images"]; ok && imagesData != nil {
+		if imagesSlice, ok := imagesData.([]Image); ok {
+			images = imagesSlice
+		}
+	}
+
+	// Field-for-field conversion to the appservice wire types. The
+	// duplicate task-package types (AppEnvVar / Image) are kept
+	// because pkg/v2/api/task.go still references them when assembling
+	// taskMetadata; once that handler migrates, the duplicates can
+	// retire in favour of the appservice types directly.
+	asEnvs := make([]appservice.AppEnvVar, len(envs))
+	for i, e := range envs {
+		asEnvs[i] = appservice.AppEnvVar{EnvName: e.EnvName, Value: e.Value}
+		if e.ValueFrom != nil {
+			asEnvs[i].ValueFrom = &appservice.AppEnvValueFrom{EnvName: e.ValueFrom.EnvName}
+		}
+	}
+	asImages := make([]appservice.Image, len(images))
+	for i, img := range images {
+		asImages[i] = appservice.Image{Name: img.Name, Size: img.Size}
+	}
+
+	opts := appservice.UpgradeOptions{
 		RepoUrl:      getRepoUrl(),
 		Version:      version,
 		User:         user,
 		Source:       apiSource,
 		MarketSource: source,
-		Images:       task.Metadata["images"].([]Image),
-		Envs:         envs,
+		Images:       asImages,
+		Envs:         asEnvs,
 	}
-	ms, err := json.Marshal(upgradeInfo)
-	if err != nil {
-		glog.Errorf("Failed to marshal upgrade info for task %s: %v", task.ID, err)
-		return "", err
-	}
-	glog.Infof("Upgrade request prepared: url=%s, upgradeInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
-
-	headers := map[string]string{
-		"Accept":          "*/*",
-		"X-Authorization": token,
-		"X-Bfl-User":      task.User,
-		"Content-Type":    "application/json",
-		"X-Market-User":   user,
-		"X-Market-Source": source,
+	hdr := appservice.OpHeaders{
+		Token:        token,
+		User:         task.User,
+		MarketUser:   user,
+		MarketSource: source,
 	}
 
-	// Send HTTP request and get response
-	glog.Infof("[APP] Sending HTTP request for app upgrade: task=%s, version=%s", task.ID, version)
-	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
-	if err != nil {
-		glog.Errorf("HTTP request failed for app upgrade: task=%s, error=%v", task.ID, err)
-		// Create detailed error result
-		errorResult := map[string]interface{}{
+	// baseEnvelope mirrors the legacy success / failure result shape
+	// so API-side consumers (sync wait + frontend backend_response
+	// viewer) keep the exact same field set as before the
+	// appservice.Client migration. The legacy "url" field is dropped
+	// (typed client owns transport).
+	baseEnvelope := func() map[string]interface{} {
+		return map[string]interface{}{
 			"operation": "upgrade",
 			"app_name":  appName,
 			"user":      user,
 			"source":    source,
 			"apiSource": apiSource,
 			"version":   version,
-			"url":       urlStr,
-			"error":     err.Error(),
-			"status":    "failed",
 		}
-		errorJSON, _ := json.Marshal(errorResult)
+	}
+
+	client, err := getAppServiceClient()
+	if err != nil {
+		glog.Errorf("App-service client unavailable for upgrade task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		errorJSON, _ := json.Marshal(envelope)
 		return string(errorJSON), err
 	}
 
-	glog.Infof("[APP] HTTP request completed successfully for app upgrade: task=%s, response_length=%d", task.ID, len(response))
-
-	// Create success result
-	successResult := map[string]interface{}{
-		"operation": "upgrade",
-		"app_name":  appName,
-		"user":      user,
-		"source":    source,
-		"apiSource": apiSource,
-		"version":   version,
-		"url":       urlStr,
-		"response":  response,
-		"status":    "success",
+	if isCloneApp && rawAppName != "" {
+		glog.Infof("[APP] Sending HTTP request for clone app upgrade: task=%s cloneAppName=%s rawAppName=%s version=%s",
+			task.ID, appName, rawAppName, version)
+	} else {
+		glog.Infof("[APP] Sending HTTP request for app upgrade: task=%s, version=%s", task.ID, version)
 	}
-	successJSON, _ := json.Marshal(successResult)
+
+	opResp, err := client.UpgradeApp(context.Background(), appName, opts, hdr)
+	if err != nil {
+		glog.Errorf("App-service upgrade failed for task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		var opErr *appservice.OpError
+		if errors.As(err, &opErr) {
+			backend := map[string]interface{}{
+				"code":    opErr.Code,
+				"message": opErr.Message,
+			}
+			switch {
+			case opResp != nil && len(opResp.DataRaw) > 0:
+				backend["data"] = json.RawMessage(opResp.DataRaw)
+			case opErr.OpID != "":
+				backend["data"] = map[string]interface{}{"opID": opErr.OpID}
+			}
+			envelope["backend_response"] = backend
+		}
+		errorJSON, _ := json.Marshal(envelope)
+		return string(errorJSON), err
+	}
+
+	if opResp != nil && opResp.Data != nil && opResp.Data.OpID != "" {
+		task.OpID = opResp.Data.OpID
+		glog.Infof("Successfully extracted opID: %s for upgrade task: %s", task.OpID, task.ID)
+		tm.linkStateOpID(task, appName, "upgrade")
+	} else {
+		glog.Infof("opID not found in response data for upgrade task: %s", task.ID)
+	}
+
+	envelope := baseEnvelope()
+	if opResp != nil {
+		backend := map[string]interface{}{
+			"code":    opResp.Code,
+			"message": opResp.Message,
+		}
+		if opResp.Data != nil && opResp.Data.OpID != "" {
+			backend["data"] = map[string]interface{}{"opID": opResp.Data.OpID}
+		}
+		envelope["backend_response"] = backend
+	}
+	envelope["opID"] = task.OpID
+	envelope["status"] = "success"
+	successJSON, _ := json.Marshal(envelope)
 	glog.Infof("App upgrade completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
 	return string(successJSON), nil
 }
