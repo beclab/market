@@ -69,7 +69,7 @@ func NewStatusCorrectionChecker(cacheManager *CacheManager) *StatusCorrectionChe
 
 	return &StatusCorrectionChecker{
 		cacheManager:   cacheManager,
-		checkInterval:  2 * time.Minute, // Check every 5 minutes
+		checkInterval:  2 * time.Minute, // Check every 2 minutes
 		appServiceHost: host,
 		appServicePort: port,
 		stopChan:       make(chan struct{}),
