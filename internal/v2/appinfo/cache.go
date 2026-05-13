@@ -590,6 +590,10 @@ func NewCacheManager(redisClient *RedisClient, userConfig *UserConfig) *CacheMan
 func (cm *CacheManager) Start() error {
 	glog.V(2).Infof("Starting cache manager")
 
+	cm.mutex.Lock()
+	cm.isRunning = true
+	cm.mutex.Unlock()
+
 	go cm.syncWorker()
 
 	return nil
