@@ -48,7 +48,6 @@ type Syncer struct {
 	currentSource       atomic.Value // string
 	lastSyncedAppCount  atomic.Int64
 	lastSyncDetails     atomic.Value // *SyncDetails
-	tryOnce             atomic.Bool
 }
 
 // NewSyncer creates a new syncer with the given steps
@@ -61,7 +60,6 @@ func NewSyncer(cache *CacheData, syncInterval time.Duration, settingsManager *se
 		stopChan:        make(chan struct{}),
 		isRunning:       atomic.Bool{}, // Initialize with false
 		settingsManager: settingsManager,
-		tryOnce:         atomic.Bool{},
 	}
 	// Initialize atomic values
 	s.lastSyncTime.Store(time.Time{})
@@ -110,11 +108,6 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 		return
 	}
 
-	flag := s.tryOnce.Load()
-	if flag {
-		// return
-	}
-
 	configChanged, reason := s.hasSyncRelevantConfigChanged()
 	throttled := !s.lastSyncExecuted.IsZero() && time.Since(s.lastSyncExecuted) < s.syncInterval
 
@@ -129,8 +122,6 @@ func (s *Syncer) SyncOnce(ctx context.Context) {
 	if err := s.executeSyncCycle(ctx); err != nil {
 		glog.Errorf("SyncOnce: sync cycle failed: %v", err)
 	}
-
-	s.tryOnce.Store(true)
 }
 
 
