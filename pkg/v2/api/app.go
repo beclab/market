@@ -460,25 +460,27 @@ func detailRowAsSimpleRow(row *store.AppDetailRow) *store.AppInfoSimpleRow {
 }
 
 // 3. Get rendered installation package for specific application (single app only)
+//
+// Business logic is not implemented yet. Respond with 501 instead of a
+// misleading 200 so callers do not assume a package was returned.
 func (s *Server) getAppPackage(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["id"]
-	glog.V(2).Infof("GET /api/v2/apps/%s/package - Getting rendered package for app", appID)
+	glog.V(2).Infof("GET /api/v2/apps/%s/package - not implemented", appID)
 
-	// TODO: Implement business logic for getting rendered app package
-
-	s.sendResponse(w, http.StatusOK, true, "App package retrieved successfully", nil)
+	s.sendResponse(w, http.StatusNotImplemented, false, "App package retrieval is not implemented yet", nil)
 }
 
 // 4. Update specific application render configuration (single app only)
+//
+// Business logic is not implemented yet. Respond with 501 instead of a
+// misleading 200 so callers do not assume their config was persisted.
 func (s *Server) updateAppConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["id"]
-	glog.V(2).Infof("PUT /api/v2/apps/%s/config - Updating app config", appID)
+	glog.V(2).Infof("PUT /api/v2/apps/%s/config - not implemented", appID)
 
-	// TODO: Parse request body and implement business logic for updating app config
-
-	s.sendResponse(w, http.StatusOK, true, "App config updated successfully", nil)
+	s.sendResponse(w, http.StatusNotImplemented, false, "App config update is not implemented yet", nil)
 }
 
 // 9. Upload application installation package
