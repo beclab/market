@@ -32,13 +32,13 @@ lint:
 	golint ./...
 
 market: tidy fmt vet ;$(info $(M)...Begin to build market.) @
-	go build -o output/market cmd/market/main.go
+	go build -o output/market cmd/market/v2/main.go
 
 linux: tidy fmt vet
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o market cmd/market/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o market cmd/market/v2/main.go
 
 run: fmt vet; $(info $(M)...Run market.)
-	go run cmd/market/main.go -v 4 --logtostderr
+	go run cmd/market/v2/main.go -v 4 --logtostderr
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
