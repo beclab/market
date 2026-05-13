@@ -9,10 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"market/internal/v2/appinfo/uploadevent"
 	"market/internal/v2/chartrepo"
 	"market/internal/v2/helper"
 	"market/internal/v2/store"
 	"market/internal/v2/types"
+	"market/internal/v2/watchers"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/golang/glog"
@@ -59,9 +61,10 @@ type StateChangesData struct {
 // DataWatcherRepo polls chart-repo's /state-changes endpoint and projects
 // the two event types it carries into PG:
 //
-//   - "app_upload_completed" → store.UpsertApplicationFromChartRepo on
-//     the applications table; the next pipeline cycle's hydration step
-//     picks up the row (it is a fresh / version-drift candidate).
+//   - "app_upload_completed" → uploadevent.FetchAndHandle on the
+//     applications + user_applications tables, plus a new_app_ready
+//     NATS push to the upload's user. See the uploadevent package for
+//     the projection contract; this loop only owns dispatch.
 //
 //   - "image_info_updated" → store.PatchImageAnalysisImage on
 //     user_applications.image_analysis JSONB; the patched users get a
@@ -87,7 +90,7 @@ type DataWatcherRepo struct {
 // NewDataWatcherRepo creates a new data watcher repository instance.
 // The cacheManager argument that previously fed the in-memory write
 // paths has been dropped: app_upload_completed now writes through
-// store.UpsertApplicationFromChartRepo and image_info_updated through
+// uploadevent.FetchAndHandle and image_info_updated through
 // store.PatchImageAnalysisImage, neither of which needs the cache.
 func NewDataWatcherRepo(redisClient *RedisClient, dataWatcher *DataWatcher, dataSender *DataSender) *DataWatcherRepo {
 	apiBaseURL := os.Getenv("CHART_REPO_SERVICE_HOST")
@@ -233,8 +236,7 @@ func (dwr *DataWatcherRepo) fetchStateChanges(afterID int64) ([]*chartrepo.State
 		return nil, err
 	}
 
-	fmt.Println("---1---", helper.ParseJson(scd))
-
+	glog.V(3).Infof("Fetched state changes payload: %s", helper.ParseJson(scd))
 	glog.V(2).Infof("Successfully fetched %d state changes, afterId: %d", scd.Count, scd.AfterID)
 
 	return scd.StateChanges, nil
@@ -258,18 +260,22 @@ func (dwr *DataWatcherRepo) processStateChange(change *chartrepo.StateChange) ([
 	}
 }
 
-// handleAppUploadCompleted fetches the freshly uploaded app's manifest
-// from chart-repo and upserts the applications row via the store layer.
-// User-level re-hydration is intentionally NOT triggered here: the
-// pipeline's next phaseHydrateApps cycle will pick the row up as a
-// version-drift / fresh candidate via store.ListRenderCandidates, which
-// is the canonical entry point.
+// handleAppUploadCompleted projects an app_upload_completed event onto
+// PG via the dedicated uploadevent package. The two-table write
+// (applications + user_applications), the canonical 8-char app_id
+// derivation (md5(metadata.appid)[:8]), and the new_app_ready NATS
+// push all live there — see internal/v2/appinfo/uploadevent/handler.go
+// for the orchestration. Keeping that logic out of this file means
+// the chart-repo state-change loop owns no event-specific decoding,
+// no PG schema knowledge, and no NATS payload composition.
 //
-// The returned slice contains every user_id who already has a
-// user_applications row on (source_id, app_id) — those users observe
-// the app today and should be flagged for the pipeline's affected-user
-// fan-out (hash recalc / push). Users who have not yet rendered the
-// app (no row) will discover it on the next hydration cycle anyway.
+// The returned slice is the canonical "affected users" set the
+// pipeline phaseDataWatcherRepo loop merges into its per-cycle
+// affected-user map. Today that is exactly [event.UserID] (the upload
+// is per-user from the event's perspective) — users who already
+// observe the same (source, app_id) will be refreshed by the next
+// phaseHydrateApps pass via store.ListRenderCandidates' version-drift
+// branch, the same way they were before this handler existed.
 func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *chartrepo.StateChange) ([]string, error) {
 	if change.AppData == nil {
 		return nil, fmt.Errorf("app_upload_completed without app_data")
@@ -277,29 +283,26 @@ func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *chartrepo.StateChan
 	glog.V(2).Infof("Handling app upload completed for app: %s, source: %s, user: %s",
 		change.AppData.AppName, change.AppData.Source, change.AppData.UserID)
 
-	appInfo, err := dwr.fetchAppInfoFromAPI(change.AppData.UserID, change.AppData.Source, change.AppData.AppName)
-	if err != nil {
-		return nil, fmt.Errorf("fetch app info: %w", err)
-	}
-
-	fmt.Println("---2---", helper.ParseJson(appInfo))
-
-	appID := pickAppIDFromPayload(appInfo, change.AppData.AppName)
-	if appID == "" {
-		return nil, fmt.Errorf("app payload missing usable id (source=%s appName=%s)", change.AppData.Source, change.AppData.AppName)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	affected, err := store.UpsertApplicationFromChartRepo(ctx, change.AppData.Source, appID, appInfo)
+	res, err := uploadevent.FetchAndHandle(ctx, dwr.apiBaseURL, uploadevent.EventData{
+		UserID:  change.AppData.UserID,
+		Source:  change.AppData.Source,
+		AppName: change.AppData.AppName,
+	}, uploadevent.HandleDeps{
+		Sender:     dwr.dataSender,
+		UserLookup: watchers.GetUserFromCache,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("upsert application (source=%s app=%s): %w", change.AppData.Source, appID, err)
+		return nil, err
 	}
 
-	glog.V(2).Infof("Upserted application from chart-repo: source=%s app=%s, affected users=%d",
-		change.AppData.Source, appID, len(affected))
-	return affected, nil
+	if res.AppID != "" {
+		glog.V(2).Infof("Handled upload event: source=%s app_id=%s affected_users=%d",
+			change.AppData.Source, res.AppID, len(res.AffectedUsers))
+	}
+	return res.AffectedUsers, nil
 }
 
 // handleImageInfoUpdated fetches the updated image info from chart-repo
@@ -341,58 +344,6 @@ func (dwr *DataWatcherRepo) handleImageInfoUpdated(change *chartrepo.StateChange
 	}
 
 	return affected, nil
-}
-
-// pickAppIDFromPayload mirrors the legacy "ID > AppID > Name" fallback
-// chain used by checkAppInCache: the chart-repo payload can carry the
-// id under any of three field names depending on origin. Returns an
-// empty string only when none of them are present.
-func pickAppIDFromPayload(appPayload map[string]interface{}, fallbackName string) string {
-	if appPayload == nil {
-		return fallbackName
-	}
-	if v, ok := appPayload["id"].(string); ok && v != "" {
-		return v
-	}
-	if v, ok := appPayload["appID"].(string); ok && v != "" {
-		return v
-	}
-	if v, ok := appPayload["app_id"].(string); ok && v != "" {
-		return v
-	}
-	if v, ok := appPayload["name"].(string); ok && v != "" {
-		return v
-	}
-	return fallbackName
-}
-
-// fetchAppInfoFromAPI fetches app information from the /apps API endpoint
-func (dwr *DataWatcherRepo) fetchAppInfoFromAPI(userID, sourceID, appName string) (map[string]interface{}, error) {
-	c, err := chartrepo.NewClient(chartrepo.WithBaseURL(dwr.apiBaseURL))
-	if err != nil {
-		return nil, err
-	}
-
-	var in = chartrepo.AppsRequest{
-		Apps: []chartrepo.AppsRequestItem{
-			chartrepo.AppsRequestItem{
-				AppID:          appName,
-				SourceDataName: sourceID,
-			},
-		},
-		UserID: userID,
-	}
-
-	apps, err := c.GetAppInfo(context.Background(), in)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(apps) == 0 {
-		return nil, fmt.Errorf("no app data found in API response for app: %s", appName)
-	}
-
-	return apps[0], nil
 }
 
 // SetDataWatcher sets the DataWatcher reference for hash calculation
