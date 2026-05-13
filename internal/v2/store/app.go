@@ -97,6 +97,31 @@ func upsertApplications(tx *gorm.DB, rows []*models.Application) error {
 	return nil
 }
 
+// UpsertApplicationRow upserts a single applications row built outside
+// the store package (e.g. by the upload-event handler, which assembles
+// the row from a chart-repo /apps response shape that differs from the
+// flat appMap the syncer feeds to buildApplicationRow). The OnConflict
+// behaviour is identical to upsertApplications — the (source_id, app_id)
+// row is inserted on first sight and its app_name / app_version /
+// app_type / app_entry / price columns are overwritten on every
+// subsequent call. Identity columns (source_id, app_id) are NOT in the
+// assignment list so a stable row id survives across upserts.
+//
+// Callers are responsible for the row's app_id derivation; this helper
+// trusts whatever value was assembled. The single-row contract avoids
+// exporting upsertApplications' []*models.Application surface, which
+// would invite ad-hoc batch use from outside the syncer.
+func UpsertApplicationRow(ctx context.Context, row *models.Application) error {
+	if row == nil {
+		return fmt.Errorf("UpsertApplicationRow: nil row")
+	}
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before UpsertApplicationRow")
+	}
+	return upsertApplications(gdb.WithContext(ctx), []*models.Application{row})
+}
+
 func buildApplicationRows(sourceID string, requestApps map[string]interface{}, appIDs []string) []*models.Application {
 	uniqueIDs := uniqueNonEmpty(appIDs)
 	if len(uniqueIDs) == 0 {
@@ -196,6 +221,15 @@ func normalizeAppType(raw interface{}) string {
 		return "middleware"
 	}
 	return "app"
+}
+
+// NormalizeAppType is the exported alias used by callers outside the
+// store package (currently the upload-event handler) to apply the same
+// "app" / "middleware" classification rule the syncer uses for
+// applications.app_type. Keeping a single normaliser ensures the two
+// writer paths cannot disagree on what value to persist.
+func NormalizeAppType(raw interface{}) string {
+	return normalizeAppType(raw)
 }
 
 func uniqueNonEmpty(values []string) []string {
