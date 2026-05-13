@@ -10,7 +10,6 @@ import (
 
 // CacheVersionGetter is an interface for getting app version from cache state
 type CacheVersionGetter interface {
-	GetAppVersionFromState(userID, sourceID, appName string) (version string, found bool)
 }
 
 var (

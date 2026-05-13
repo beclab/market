@@ -40,6 +40,42 @@ CREATE TABLE IF NOT EXISTS user_applications (
     price                       JSONB,
     purchase_info               JSONB,
 
+    -- i18n carries chart-repo's localised metadata bundle keyed by
+    -- locale ("zh-CN" / "en-US" / ...). Each value is itself a flat
+    -- {field -> string} object (title / description / ...). Sourced
+    -- directly from the chart-repo sync-app response, not derived
+    -- from raw_data_ex.
+    i18n                        JSONB,
+    -- version_history is the per-app changelog as emitted by chart-repo
+    -- (one entry per release: version / versionName / mergedAt /
+    -- upgradeDescription). Sourced directly from sync-app's
+    -- top-level version_history field, NOT spliced into spec.
+    version_history             JSONB,
+    -- image_analysis is chart-repo's per-app docker image analysis
+    -- result (types.ImageAnalysisResult: app_id / user_id / source_id /
+    -- analyzed_at / total_images / images map keyed by image name).
+    -- Sourced directly from the sync-app response top-level field
+    -- (sibling of raw_data_ex), NOT derived from raw_data_ex. Kept
+    -- nullable so the failure / never-rendered placeholder rows can
+    -- be inserted without a value, and so that legacy rows persisted
+    -- before this column existed surface as NULL until their next
+    -- successful render refreshes them.
+    image_analysis              JSONB,
+    -- raw_package / rendered_package are filesystem paths emitted by
+    -- chart-repo's sync-app response (siblings of raw_data_ex) that
+    -- point at the source / rendered chart packages on chart-repo's
+    -- filesystem. Persisted verbatim by UpsertRenderSuccess so the
+    -- API layer (installApp / upgradeApp / cloneApp) can derive the
+    -- chart_path argument it forwards to app-service without a
+    -- round-trip back to chart-repo or the in-memory cache. NOT NULL
+    -- DEFAULT '' mirrors the manifest_version / manifest_type style:
+    -- failure-only placeholder rows from MarkRenderFailed get the
+    -- empty default and successful renders overwrite both columns
+    -- in full (the OnConflict assignment list owns them, so a
+    -- subsequent re-render reflects chart-repo's latest paths).
+    raw_package                 TEXT         NOT NULL DEFAULT '',
+    rendered_package            TEXT         NOT NULL DEFAULT '',
+
     -- render_status reflects the result of the latest chart-repo render
     -- attempt for this user_application: 'pending' before the first attempt,
     -- 'success' once the render succeeded, 'failed' otherwise.
@@ -88,6 +124,12 @@ CREATE TABLE IF NOT EXISTS user_applications (
         CHECK (price IS NULL OR jsonb_typeof(price) = 'object'),
     CONSTRAINT ck_user_applications_purchase_info_object
         CHECK (purchase_info IS NULL OR jsonb_typeof(purchase_info) = 'object'),
+    CONSTRAINT ck_user_applications_i18n_object
+        CHECK (i18n IS NULL OR jsonb_typeof(i18n) = 'object'),
+    CONSTRAINT ck_user_applications_version_history_array
+        CHECK (version_history IS NULL OR jsonb_typeof(version_history) = 'array'),
+    CONSTRAINT ck_user_applications_image_analysis_object
+        CHECK (image_analysis IS NULL OR jsonb_typeof(image_analysis) = 'object'),
     CONSTRAINT ck_user_applications_render_status
         CHECK (render_status IN ('pending', 'success', 'failed'))
 );

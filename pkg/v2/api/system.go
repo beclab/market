@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -152,26 +153,33 @@ func (s *Server) addMarketSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Type == "" {
-		glog.V(3).Info("Market source Type is empty")
-		s.sendResponse(w, http.StatusBadRequest, false, "Market source Type cannot be empty", nil)
+	// This endpoint only adds remote market sources. Local sources
+	// (upload / studio / cli) are seeded by createDefaultMarketSources
+	// at startup and are not user-managed; accepting type="local" here
+	// would let a client mint shadow local rows that the rest of the
+	// system has no contract for. Reject anything other than "remote"
+	// (treating an empty body field as "default to remote" since the
+	// contract is single-purpose).
+	if req.Type != "" && req.Type != "remote" {
+		glog.V(3).Infof("Rejecting market source with non-remote type: %s", req.Type)
+		s.sendResponse(w, http.StatusBadRequest, false, "Market source Type must be 'remote'", nil)
 		return
 	}
 
-	if req.Type != "local" && req.Type != "remote" {
-		glog.V(3).Infof("Invalid market source Type: %s", req.Type)
-		s.sendResponse(w, http.StatusBadRequest, false, "Market source Type must be 'local' or 'remote'", nil)
-		return
-	}
-
-	// Create MarketSource struct
+	// Build the new source with is_active=false. Activation is owned
+	// by PUT /settings/market-settings (→ SwitchActiveRemoteAndSetNsfw),
+	// the only writer that may flip the partial unique index
+	// uq_market_sources_one_active_remote without violating its
+	// "at most one active remote" invariant. Setting IsActive=true
+	// here used to race the existing market.olares row through the
+	// startup-time bulk upsert and crash with a 23505 unique violation.
 	source := &settings.MarketSource{
 		ID:          req.ID,
 		Name:        req.Name,
-		Type:        req.Type,
+		Type:        "remote",
 		BaseURL:     req.BaseURL,
 		Description: req.Description,
-		IsActive:    true,
+		IsActive:    false,
 	}
 
 	if err := settingsManager.AddMarketSource(source); err != nil {
@@ -882,6 +890,19 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := settingsManager.UpdateMarketSettings(userID, &settings); err != nil {
+		// Map the sentinel errors from the settings/store layer onto
+		// fail-fast 4xx responses so the client distinguishes "you sent
+		// a bad source_id" from a real internal failure.
+		switch {
+		case errors.Is(err, marketSettingsErrSourceNotFound()):
+			glog.V(2).Infof("market settings update for user %s rejected: source not found (selected_source=%q)", userID, settings.SelectedSource)
+			s.sendResponse(w, http.StatusNotFound, false, "selected_source does not exist", nil)
+			return
+		case errors.Is(err, marketSettingsErrSourceNotRemote()):
+			glog.V(2).Infof("market settings update for user %s rejected: source is not remote (selected_source=%q)", userID, settings.SelectedSource)
+			s.sendResponse(w, http.StatusBadRequest, false, "selected_source must reference a remote source", nil)
+			return
+		}
 		glog.Errorf("Failed to update market settings for user %s: %v", userID, err)
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to update market settings", nil)
 		return
@@ -890,6 +911,14 @@ func (s *Server) updateMarketSettings(w http.ResponseWriter, r *http.Request) {
 	glog.V(2).Infof("Market settings updated successfully for user: %s", userID)
 	s.sendResponse(w, http.StatusOK, true, "Market settings updated successfully", settings)
 }
+
+// marketSettingsErrSourceNotFound / marketSettingsErrSourceNotRemote
+// indirect through the settings package so this file does not gain a
+// direct dependency on the store/marketsource package; all the
+// errors.Is comparisons above resolve through the same sentinels
+// the settings package re-exports.
+func marketSettingsErrSourceNotFound() error  { return settings.ErrSourceNotFound }
+func marketSettingsErrSourceNotRemote() error { return settings.ErrSourceNotRemote }
 
 // submitSignature handles POST /api/v2/payment/submit-signature
 func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
