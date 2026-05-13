@@ -50,20 +50,6 @@ type ChartRepoResponse struct {
 func SyncMarketSourceConfigWithChartRepo(redisClient RedisClient, settingsManager ...*SettingsManager) error {
 	glog.V(2).Info("=== Syncing market source configuration with chart repository service ===")
 
-	clearCache := os.Getenv("CLEAR_CACHE")
-	if clearCache == "true" {
-		glog.Info("CLEAR_CACHE is true, clearing settings Redis keys...")
-		// Only clear settings Redis keys for this module (skip if redisClient is nil)
-		if redisClient != nil {
-			if err := ClearSettingsRedis(redisClient); err != nil {
-				glog.Errorf("Failed to clear settings Redis: %v", err)
-				return fmt.Errorf("failed to clear settings Redis: %w", err)
-			}
-		} else {
-			glog.Info("Redis client not available, skipping clear Redis (public environment)")
-		}
-	}
-
 	// 0. Start systemenv watcher in background (best-effort). Already started in main; keep here as no-op if already running.
 	ctx := context.Background()
 	StartSystemEnvWatcher(ctx)

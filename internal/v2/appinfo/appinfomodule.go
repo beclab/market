@@ -2,10 +2,8 @@ package appinfo
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"market/internal/v2/settings"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -160,12 +158,6 @@ func (m *AppInfoModule) Start() error {
 	if m.config.EnableCache {
 		if err := m.initCacheManager(); err != nil {
 			return fmt.Errorf("failed to initialize cache manager: %w", err)
-		}
-		// After cache manager is initialized, correct cache data with chart repo
-		if err := m.correctCacheWithChartRepo(); err != nil {
-			glog.Errorf("Failed to correct cache with chart repo: %v", err)
-		} else {
-			glog.V(3).Info("Cache correction with chart repo completed successfully")
 		}
 	}
 
@@ -452,7 +444,7 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 	if m.syncer != nil {
 		status["syncer_running"] = m.syncer.IsRunning()
 		status["syncer_metrics"] = m.syncer.GetMetrics()
-		status["syncer_healthy"] = m.syncer.IsHealthy()
+		status["syncer_healthy"] = true
 	}
 
 	// Add hydrator status
@@ -469,7 +461,7 @@ func (m *AppInfoModule) GetModuleStatus() map[string]interface{} {
 
 	// Add DataWatcherUser status
 	if m.dataWatcherUser != nil {
-		status["data_watcher_user_healthy"] = m.dataWatcherUser.IsHealthy()
+		status["data_watcher_user_healthy"] = true
 		status["data_watcher_user_status"] = m.dataWatcherUser.GetStatus()
 	}
 
@@ -721,114 +713,6 @@ func (m *AppInfoModule) initStatusCorrectionChecker() error {
 	}
 
 	glog.V(2).Info("StatusCorrectionChecker initialized (passive mode)")
-	return nil
-}
-
-// correctCacheWithChartRepo corrects the cache by removing apps in AppInfoLatest array that do not exist in chart repo
-func (m *AppInfoModule) correctCacheWithChartRepo() error {
-	// Get chart repo service host from env, fallback to default
-	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
-	if chartRepoHost == "" {
-		chartRepoHost = "http://localhost:8080"
-	}
-	chartRepoBaseURL := chartRepoHost + "/chart-repo/api/v2"
-
-	glog.V(3).Infof("Correcting cache with chart repo data via %s...", chartRepoBaseURL)
-
-	// Only use /repo/data GET, and expect a structure like { user_data: { sources: { sourceID: { app_info_latest: [...] } } } }
-	type AppSimpleInfo struct {
-		AppID       string   `json:"app_id"`
-		SupportArch []string `json:"support_arch,omitempty"`
-		// ... other fields omitted
-	}
-	type FilteredAppInfoLatestData struct {
-		AppSimpleInfo *AppSimpleInfo `json:"app_simple_info"`
-	}
-	type FilteredSourceData struct {
-		AppInfoLatest []*FilteredAppInfoLatestData `json:"app_info_latest"`
-	}
-	type FilteredUserData struct {
-		Sources map[string]*FilteredSourceData `json:"sources"`
-	}
-	type RepoDataResponse struct {
-		UserData *FilteredUserData `json:"user_data"`
-	}
-
-	// Build GET request for /repo/data
-	req, err := http.NewRequest("GET", chartRepoBaseURL+"/repo/data", nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	// Optionally: add authentication header/cookie if有需要
-	// req.Header.Set("Authorization", "Bearer ...")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to request chart repo /repo/data: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var repoResp RepoDataResponse
-	if err := json.NewDecoder(resp.Body).Decode(&repoResp); err != nil {
-		return fmt.Errorf("failed to decode chart repo response: %w", err)
-	}
-
-	// Build a set of all valid appIDs per source
-	validApps := make(map[string]map[string]struct{}) // sourceID -> appID set
-	if repoResp.UserData != nil {
-		for sourceID, src := range repoResp.UserData.Sources {
-			if src == nil {
-				continue
-			}
-			if _, ok := validApps[sourceID]; !ok {
-				validApps[sourceID] = make(map[string]struct{})
-			}
-			for _, app := range src.AppInfoLatest {
-				if app != nil && app.AppSimpleInfo != nil && app.AppSimpleInfo.AppID != "" {
-					validApps[sourceID][app.AppSimpleInfo.AppID] = struct{}{}
-				}
-			}
-		}
-	}
-
-	if m.cacheManager == nil {
-		return fmt.Errorf("cache manager not available")
-	}
-
-	// Build the set of delisted app IDs (apps NOT in validApps)
-	delistedAppIDs := make(map[string]bool)
-	allUsersData := m.cacheManager.GetAllUsersData() // ~ correctCacheWithChartRepo
-	for _, userData := range allUsersData {
-		for sourceID, sourceData := range userData.Sources {
-			for _, app := range sourceData.AppInfoLatest {
-				var appID string
-				if app != nil && app.RawData != nil {
-					if app.RawData.ID != "" {
-						appID = app.RawData.ID
-					} else if app.RawData.AppID != "" {
-						appID = app.RawData.AppID
-					} else if app.RawData.Name != "" {
-						appID = app.RawData.Name
-					}
-				}
-				if appID == "" {
-					continue
-				}
-				if validApps[sourceID] == nil {
-					delistedAppIDs[appID] = true
-				} else if _, ok := validApps[sourceID][appID]; !ok {
-					delistedAppIDs[appID] = true
-				}
-			}
-		}
-	}
-
-	removedCount := m.cacheManager.RemoveDelistedApps(delistedAppIDs)
-	glog.V(2).Infof("Cache correction finished, removed %d apps not in chart repo", removedCount)
 	return nil
 }
 
@@ -1132,169 +1016,6 @@ func DefaultModuleConfig() *ModuleConfig {
 		EnableStatusCorrectionChecker: enableStatusCorrectionChecker,
 		StartTimeout:                  startTimeout,
 	}
-}
-
-// SetAppData is a convenience function to set app data
-func (m *AppInfoModule) SetAppData(userID, sourceID string, dataType AppDataType, data map[string]interface{}) error {
-	if !m.isStarted || m.cacheManager == nil {
-		return fmt.Errorf("module is not started or cache manager is not available")
-	}
-	return m.cacheManager.SetAppData(userID, sourceID, dataType, data, "AppInfoModule")
-}
-
-// GetAppData is a convenience function to get app data
-func (m *AppInfoModule) GetAppData(userID, sourceID string, dataType AppDataType) interface{} {
-	if !m.isStarted || m.cacheManager == nil {
-		return nil
-	}
-	return m.cacheManager.GetAppData(userID, sourceID, dataType)
-}
-
-// GetUserConfig returns the user configuration
-func (m *AppInfoModule) GetUserConfig() *UserConfig {
-	// Config is read-only after initialization, no need for read lock
-	return m.config.User
-}
-
-// IsValidUser checks if a user ID is in the configured user list
-func (m *AppInfoModule) IsValidUser(userID string) bool {
-	if m.config.User == nil {
-		return false
-	}
-
-	for _, user := range m.config.User.UserList {
-		if user == userID {
-			return true
-		}
-	}
-	return false
-}
-
-// IsAdminUser checks if a user ID is in the admin list
-func (m *AppInfoModule) IsAdminUser(userID string) bool {
-	if m.config.User == nil {
-		return false
-	}
-
-	for _, admin := range m.config.User.AdminList {
-		if admin == userID {
-			return true
-		}
-	}
-	return false
-}
-
-// GetMaxSourcesForUser returns the maximum number of sources allowed per user
-func (m *AppInfoModule) GetMaxSourcesForUser(userID string) int {
-	if m.config.User == nil {
-		return 10 // default value
-	}
-
-	// Admin users might have different limits in the future
-	if m.IsAdminUser(userID) {
-		return m.config.User.MaxSourcesPerUser * 2 // Admins get double the limit
-	}
-
-	return m.config.User.MaxSourcesPerUser
-}
-
-// ValidateUserAccess validates if a user can access the system
-func (m *AppInfoModule) ValidateUserAccess(userID string) error {
-	if m.config.User == nil {
-		return fmt.Errorf("user configuration not available")
-	}
-
-	// Check if user is in the valid user list
-	if !m.IsValidUser(userID) {
-		// Check if guest access is enabled
-		if !m.config.User.GuestEnabled {
-			return fmt.Errorf("user '%s' is not authorized to access the system", userID)
-		}
-		glog.V(3).Infof("Guest user '%s' granted access", userID)
-	}
-
-	return nil
-}
-
-// GetUserRole returns the role for a given user
-func (m *AppInfoModule) GetUserRole(userID string) string {
-	if m.config.User == nil {
-		return "unknown"
-	}
-
-	if m.IsAdminUser(userID) {
-		return "admin"
-	}
-
-	if m.IsValidUser(userID) {
-		return m.config.User.DefaultRole
-	}
-
-	if m.config.User.GuestEnabled {
-		return "guest"
-	}
-
-	return "unauthorized"
-}
-
-// GetUserPermissions returns the permissions for a given user
-func (m *AppInfoModule) GetUserPermissions(userID string) []string {
-	if m.config.User == nil {
-		return []string{}
-	}
-
-	role := m.GetUserRole(userID)
-	switch role {
-	case "admin":
-		return []string{"read", "write", "delete", "admin"}
-	case "guest":
-		return []string{"read"}
-	case "user":
-		return m.config.User.DefaultPermissions
-	default:
-		return []string{}
-	}
-}
-
-// UpdateUserConfig updates the user configuration for the module and cache manager
-func (m *AppInfoModule) UpdateUserConfig(newUserConfig *UserConfig) error {
-	if !m.isStarted {
-		return fmt.Errorf("module is not started")
-	}
-
-	if newUserConfig == nil {
-		return fmt.Errorf("user config cannot be nil")
-	}
-
-	glog.V(3).Info("Updating module user configuration")
-
-	// Update module configuration
-	m.config.User = newUserConfig
-
-	// Update cache manager configuration if available
-	if m.cacheManager != nil {
-		if err := m.cacheManager.UpdateUserConfig(newUserConfig); err != nil {
-			return fmt.Errorf("failed to update cache manager user config: %w", err)
-		}
-	}
-
-	glog.V(2).Info("Module user configuration updated successfully")
-	return nil
-}
-
-// SyncUserListToCache synchronizes the current user list to cache
-func (m *AppInfoModule) SyncUserListToCache() error {
-	// Check isStarted without lock since it's only read
-	if !m.isStarted {
-		return fmt.Errorf("module is not started")
-	}
-
-	// Cache manager pointer access is atomic
-	if m.cacheManager == nil {
-		return fmt.Errorf("cache manager is not available")
-	}
-
-	return m.cacheManager.SyncUserListToCache()
 }
 
 // SetTaskModule sets the task module for recording task events

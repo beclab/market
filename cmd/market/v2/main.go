@@ -20,7 +20,6 @@ import (
 	runtimestate "market/internal/v2/runtime"
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
-	"market/internal/v2/types"
 	"market/internal/v2/utils"
 	"market/internal/v2/watchers"
 	"market/pkg/v2/api"
@@ -49,33 +48,7 @@ func createAppInfoConfigWithUsers(users []string) *appinfo.ModuleConfig {
 // loadAppStateDataToUserSource loads app state data from pre-startup step into user's official source
 func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
 	// Get all user app state data from pre-startup step
-	allUserAppStateData := utils.GetAllUserAppStateData()
-
-	for userID, sourceData := range allUserAppStateData {
-		if len(sourceData) == 0 {
-			glog.V(2).Infof("No app state data found for user %s, skipping", userID)
-			continue
-		}
-
-		glog.V(2).Infof("Loading app state data for user %s (%d sources)", userID, len(sourceData))
-
-		// For each user, load their app state data into the official source
-		for sourceID, appStateDataList := range sourceData {
-			glog.V(2).Infof("Loading %d app states for user: %s, source: %s", len(appStateDataList), userID, sourceID)
-
-			// Set app state data for the user's official source
-			err := appInfoModule.SetAppData(userID, sourceID, types.AppStateLatest, map[string]interface{}{
-				"app_states": appStateDataList,
-			})
-
-			if err != nil {
-				glog.Errorf("Failed to load app state data for user %s: %v", userID, err)
-			} else {
-				glog.V(2).Infof("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
-			}
-		}
-	}
-
+	utils.GetAllUserAppStateData()
 }
 
 func main() {

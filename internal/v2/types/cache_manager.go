@@ -6,7 +6,6 @@ type CacheManagerInterface interface {
 	// Hierarchical read accessors
 	GetAllUsersData() map[string]*UserData
 	GetUserData(userID string) *UserData
-	GetSourceData(userID, sourceID string) *SourceData
 	GetUserIDs() []string
 
 	// Specific read queries

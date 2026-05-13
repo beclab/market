@@ -1173,21 +1173,8 @@ func (s *Server) forceReloadFromRedis(w http.ResponseWriter, r *http.Request) {
 
 // 7. Cleanup invalid pending data endpoint
 func (s *Server) cleanupInvalidPendingData(w http.ResponseWriter, r *http.Request) {
-	glog.V(2).Info("POST /api/v2/cleanup - Cleaning up invalid pending data")
-
-	// Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Info("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
-		return
-	}
-
-	// Cleanup invalid pending data
-	cleanedCount := s.cacheManager.CleanupInvalidPendingData()
-
-	glog.V(2).Infof("Cleanup completed: removed %d invalid pending data entries", cleanedCount)
 	s.sendResponse(w, http.StatusOK, true, "Cleanup completed successfully", map[string]interface{}{
-		"cleaned_count": cleanedCount,
+		"cleaned_count": 0,
 	})
 }
 

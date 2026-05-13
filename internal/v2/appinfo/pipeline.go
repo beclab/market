@@ -125,9 +125,6 @@ func (p *Pipeline) run(ctx context.Context) {
 
 	startTime := time.Now()
 
-	// add check current all users in cluster
-	p.cacheManager.RemoveDeletedUser()
-
 	// Phase 1-4: only modify data, no hash calculation or ForceSync.
 	//
 	// Phase ordering note: phaseDataWatcherRepo runs BEFORE phaseHydrateApps
@@ -139,8 +136,8 @@ func (p *Pipeline) run(ctx context.Context) {
 	// rows because ListRenderCandidates only selects rows in
 	// render_status != 'success' or with metadata->>'version' drift.
 	p.phaseSyncer(ctx)
-	repoUsers := p.phaseDataWatcherRepo(ctx)
 	hydrateUsers := p.phaseHydrateApps(ctx)
+	repoUsers := p.phaseDataWatcherRepo(ctx)
 	// statusUsers := p.phaseStatusCorrection(ctx) // + todo need to remove
 
 	// Phase 5: merge all affected users + dirty users, calculate hash once, sync once

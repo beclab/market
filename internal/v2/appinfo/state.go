@@ -11,6 +11,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/nats-io/nats.go"
 
+	"market/internal/v2/helper"
 	"market/internal/v2/store"
 	"market/internal/v2/types"
 )
@@ -109,11 +110,11 @@ type StateNotifier struct {
 func NewStateNotifier(dataSender *DataSender) *StateNotifier {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &StateNotifier{
-		subj:       getEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
-		natsHost:   getEnvOrDefault("NATS_HOST", "localhost"),
-		natsPort:   getEnvOrDefault("NATS_PORT", "4222"),
-		natsUser:   getEnvOrDefault("NATS_USERNAME", ""),
-		natsPass:   getEnvOrDefault("NATS_PASSWORD", ""),
+		subj:       helper.GetEnvOrDefault("NATS_SUBJECT_SYSTEM_APP_STATE", "os.application.*"),
+		natsHost:   helper.GetEnvOrDefault("NATS_HOST", "localhost"),
+		natsPort:   helper.GetEnvOrDefault("NATS_PORT", "4222"),
+		natsUser:   helper.GetEnvOrDefault("NATS_USERNAME", ""),
+		natsPass:   helper.GetEnvOrDefault("NATS_PASSWORD", ""),
 		queue:      make(chan stateEvent, stateQueueCapacity),
 		ctx:        ctx,
 		cancel:     cancel,

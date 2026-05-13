@@ -16,7 +16,6 @@ import (
 
 // CacheManager interface for updating cache when market sources change
 type CacheManager interface {
-	SyncMarketSourcesToCache(sources []*MarketSource) error
 	// Check if any user has non-empty state data for a specific source
 	HasUserStateDataForSource(sourceID string) bool
 }
@@ -41,17 +40,6 @@ func (sm *SettingsManager) GetRedisClient() RedisClient {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.redisClient
-}
-
-// syncMarketSourcesToCache synchronizes market sources to cache if cache manager is available
-func (sm *SettingsManager) syncMarketSourcesToCache() {
-	if sm.cacheManager != nil {
-		if err := sm.cacheManager.SyncMarketSourcesToCache(sm.marketSources.Sources); err != nil {
-			glog.Errorf("Failed to sync market sources to cache: %v", err)
-		} else {
-			glog.V(4).Infof("Successfully synced %d market sources to cache", len(sm.marketSources.Sources))
-		}
-	}
 }
 
 // Initialize initializes the settings manager
@@ -146,28 +134,9 @@ func (sm *SettingsManager) ReloadMarketSources() error {
 
 // initializeAPIEndpoints initializes API endpoints configuration
 func (sm *SettingsManager) initializeAPIEndpoints() error {
-	// Try to load from Redis first
-	config, err := sm.loadAPIEndpointsFromRedis()
-	if err != nil {
-		glog.Errorf("Failed to load API endpoints from Redis: %v", err)
+	config := sm.createDefaultAPIEndpoints()
 
-		// Create default configuration from environment variables
-		config = sm.createDefaultAPIEndpoints()
-
-		// Save default config to Redis
-		if err := sm.saveAPIEndpointsToRedis(config); err != nil {
-			glog.Errorf("Failed to save default API endpoints to Redis: %v", err)
-		}
-
-		glog.V(4).Info("Loaded default API endpoints from environment")
-	} else {
-		glog.V(4).Info("Loaded API endpoints from Redis")
-	}
-
-	// Set in memory
-	sm.mu.Lock()
 	sm.apiEndpoints = config
-	sm.mu.Unlock()
 
 	return nil
 }
@@ -535,9 +504,6 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 		return fmt.Errorf("failed to save market sources to PG: %w", err)
 	}
 
-	// Sync to cache
-	sm.syncMarketSourcesToCache()
-
 	glog.Infof("Deleted market source: %s", sourceID)
 	return nil
 }
@@ -637,9 +603,6 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	if err := sm.saveMarketSourcesToStore(sm.marketSources); err != nil {
 		return fmt.Errorf("failed to save market sources to PG: %w", err)
 	}
-
-	// Sync to cache
-	sm.syncMarketSourcesToCache()
 
 	glog.V(3).Infof("Added new market source: %s (%s)", source.Name, source.ID)
 	return nil

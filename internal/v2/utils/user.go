@@ -41,12 +41,6 @@ func GetUserInfoFromRequest(req *restful.Request) (string, error) {
 		return "admin", nil
 	}
 
-	// Check if it's development environment, return admin user directly
-	if helper.IsDevelopmentEnvironment() {
-		glog.Infof("Development environment detected, returning admin username")
-		return "admin", nil
-	}
-
 	if helper.IsAccountFromHeader() {
 		account := req.HeaderParameter("X-Bfl-User")
 		return account, nil
@@ -180,4 +174,3 @@ func GetTokenFromRequest(req *restful.Request) string {
 
 	return cookie.Value
 }
-
