@@ -126,7 +126,11 @@ func (dw *DataWatcher) GetMetrics() DataWatcherMetrics {
 		TotalAppsProcessed: atomic.LoadInt64(&dw.totalAppsProcessed),
 		TotalAppsMoved:     atomic.LoadInt64(&dw.totalAppsMoved),
 		LastRunTime:        time.Unix(atomic.LoadInt64(&dw.lastRunTime), 0),
-		Interval:           time.Duration(atomic.LoadInt64((*int64)(&dw.interval))),
+		// interval is set once in NewDataWatcher and never mutated, so a
+		// plain read is correct here. The previous atomic.LoadInt64 cast
+		// from *time.Duration to *int64 was misleading (not how the
+		// field is written) and gave no real memory-ordering guarantee.
+		Interval: dw.interval,
 	}
 }
 
