@@ -1,8 +1,11 @@
 package types
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/beclab/Olares/framework/oac"
 	"github.com/beclab/api/manifest"
@@ -92,6 +95,105 @@ func BuildUserAppManifest(cfg *oac.AppConfiguration) *UserAppManifest {
 	}
 
 	return m
+}
+
+// EnrichEntranceURLs fills in `url` on each entrance / shared-entrance map
+// of m, mirroring the URL scheme app-service applies at install time:
+//
+//   - 1 entrance:   "<appID>.<zone>"
+//   - N entrances:  "<appID><i>.<zone>"          (i = 0-based index)
+//   - shared (any): "<sharedPrefix><i>.<sharedZone>[:port]"
+//                   sharedPrefix = first 8 hex chars of md5(appID + "shared")
+//                   sharedZone   = zone with the first DNS label rewritten to "shared"
+//                   :<port>     appended only when the entrance carries port > 0
+//
+// appID is the user_applications.app_id of the row being rendered (for
+// clones this is md5(newAppName), not the original chart's app_id), so
+// every install / clone produces its own URL space — the same convention
+// app-service follows. Empty appID or zone makes the function a no-op:
+// the caller is in a state where it cannot deterministically derive a
+// URL and writing one anyway would mismatch what app-service later
+// computes from authoritative inputs.
+//
+// Mutates m in place. The defaultThirdLevelDomainConfig override
+// path that app-service consults is intentionally NOT replicated here:
+// the override is per-(app, entrance) and lives in app-service's own
+// settings; until we have a parallel surface for it on Market's side,
+// rewriting URLs Market doesn't know about would silently shadow the
+// app-service-computed value.
+func EnrichEntranceURLs(m *UserAppManifest, appID, zone string) {
+	if m == nil || appID == "" || zone == "" {
+		return
+	}
+
+	switch len(m.Entrances) {
+	case 0:
+		// nothing to do
+	case 1:
+		m.Entrances[0]["url"] = fmt.Sprintf("%s.%s", appID, zone)
+	default:
+		for i, e := range m.Entrances {
+			e["url"] = fmt.Sprintf("%s%d.%s", appID, i, zone)
+		}
+	}
+
+	if len(m.SharedEntrances) > 0 {
+		sharedZone := rewriteFirstLabel(zone, "shared")
+		prefix := sharedEntrancePrefix(appID)
+		for i, e := range m.SharedEntrances {
+			port := mapToInt(e["port"])
+			if port > 0 {
+				e["url"] = fmt.Sprintf("%s%d.%s:%d", prefix, i, sharedZone, port)
+			} else {
+				e["url"] = fmt.Sprintf("%s%d.%s", prefix, i, sharedZone)
+			}
+		}
+	}
+}
+
+// sharedEntrancePrefix mirrors app-service's AppName.SharedEntranceIdPrefix:
+// first 8 hex characters of md5(appID + "shared"). The appID is taken
+// verbatim because in our context AppName.GetAppID() resolves to
+// user_applications.app_id (clone rows carry their own app_id), so
+// callers pass that directly rather than re-running the AppName→AppID
+// derivation.
+func sharedEntrancePrefix(appID string) string {
+	sum := md5.Sum([]byte(appID + "shared"))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// rewriteFirstLabel returns zone with its first dot-separated label
+// replaced by replacement. "alice.olares.com" + "shared" -> "shared.olares.com".
+// Empty input returns empty; a single-label input is replaced wholesale,
+// matching strings.Split / strings.Join behaviour.
+func rewriteFirstLabel(zone, replacement string) string {
+	if zone == "" {
+		return ""
+	}
+	tokens := strings.Split(zone, ".")
+	tokens[0] = replacement
+	return strings.Join(tokens, ".")
+}
+
+// mapToInt extracts an integer from a JSONB-decoded map value. The
+// manifest's entrance maps come from a json.Marshal/Unmarshal round-trip
+// (see marshalSliceToMaps), so numeric fields surface as float64
+// regardless of their original Go type. We tolerate native ints for
+// callers that may construct the map directly in tests.
+func mapToInt(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	}
+	return 0
 }
 
 // buildResources extracts the 8 typed resource cap fields from cfg.Spec
@@ -255,6 +357,20 @@ type EntryScalars struct {
 	Version    string
 	CfgType    string
 	ApiVersion string
+
+	// I18n is the pre-shaped multi-language bundle the API contract
+	// expects on ApplicationInfoEntry (locale-major + nested by
+	// manifest block). API callers should run NestI18nForEntry on the
+	// flat field-major bundle stored in user_applications.i18n before
+	// passing it here. Hydration callers leave it nil; the persisted
+	// app_entry payload is unaffected.
+	I18n map[string]any
+
+	// VersionHistory mirrors the user_applications.version_history
+	// JSONB column. API callers pass it through verbatim so the
+	// composed ApplicationInfoEntry.VersionHistory carries the
+	// chart-repo-emitted changelog. nil leaves the field unset.
+	VersionHistory []*VersionInfo
 }
 
 // ComposeApplicationInfoEntry is the inverse of BuildUserAppManifest. It
@@ -344,5 +460,97 @@ func ComposeApplicationInfoEntry(m *UserAppManifest, scalars EntryScalars) (*App
 	entry.Version = scalars.Version
 	entry.CfgType = scalars.CfgType
 	entry.ApiVersion = scalars.ApiVersion
+	if scalars.I18n != nil {
+		entry.I18n = scalars.I18n
+	}
+	if len(scalars.VersionHistory) > 0 {
+		entry.VersionHistory = scalars.VersionHistory
+	}
 	return &entry, nil
+}
+
+// i18nFieldToBlock pins which manifest block each localisable field
+// belongs to. Drives NestI18nForEntry's locale-major + nested output
+// shape for the API contract; chart-repo's i18n top-level field is
+// stored field-major and this map is the inverse routing table.
+//
+// Add an entry here when chart-repo introduces a new localisable
+// field. Fields not listed here are ignored by NestI18nForEntry,
+// which keeps the output stable when storage shape and API contract
+// drift apart.
+var i18nFieldToBlock = map[string]string{
+	"title":              "metadata",
+	"description":        "metadata",
+	"fullDescription":    "spec",
+	"upgradeDescription": "spec",
+}
+
+// NestI18nForEntry transforms chart-repo's field-major i18n bundle
+// (as stored in user_applications.i18n) into the locale-major +
+// manifest-block-nested shape the /api/v2/apps wire contract expects
+// for ApplicationInfoEntry.I18n:
+//
+//	field-major (storage):
+//	  { "title":       {"en-US": "...", "zh-CN": "..."},
+//	    "description": {"en-US": "...", "zh-CN": "..."},
+//	    "fullDescription":    {"en-US": "...", "zh-CN": "..."},
+//	    "upgradeDescription": {"en-US": "...", "zh-CN": "..."} }
+//
+//	locale-major + nested (wire):
+//	  { "en-US": { "metadata": {"title": "...", "description": "..."},
+//	               "spec":     {"fullDescription": "...", "upgradeDescription": "..."},
+//	               "entrances": null },
+//	    "zh-CN": {...} }
+//
+// Empty values are dropped; locales that end up with no fields after
+// filtering are still present in the output (with all blocks empty
+// objects) only when at least one of their fields was carried; locales
+// that had zero non-empty values across every recognised field are
+// dropped entirely. The "entrances" key is emitted with a nil value
+// per locale to match the wire contract; per-entrance localisation
+// is not yet supported.
+//
+// Returns nil when the input is empty or no recognised fields are
+// present.
+func NestI18nForEntry(i18n map[string]map[string]string) map[string]any {
+	if len(i18n) == 0 {
+		return nil
+	}
+	// locale -> block -> field -> value
+	staged := map[string]map[string]map[string]string{}
+	for field, localeMap := range i18n {
+		block, ok := i18nFieldToBlock[field]
+		if !ok {
+			continue
+		}
+		for locale, value := range localeMap {
+			if value == "" {
+				continue
+			}
+			byBlock, ok := staged[locale]
+			if !ok {
+				byBlock = map[string]map[string]string{}
+				staged[locale] = byBlock
+			}
+			byField, ok := byBlock[block]
+			if !ok {
+				byField = map[string]string{}
+				byBlock[block] = byField
+			}
+			byField[field] = value
+		}
+	}
+	if len(staged) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(staged))
+	for locale, blocks := range staged {
+		slot := make(map[string]any, len(blocks)+1)
+		for k, v := range blocks {
+			slot[k] = v
+		}
+		slot["entrances"] = nil
+		out[locale] = slot
+	}
+	return out
 }

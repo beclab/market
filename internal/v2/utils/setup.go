@@ -64,12 +64,6 @@ func SetupAppServiceData() error {
 	// Initialize user app state data map
 	userAppStateData = make(map[string]map[string][]*types.AppStateLatestData)
 
-	// Check if we're in development environment
-	if isDevelopmentEnvironment() {
-		glog.Info("Development environment detected, reading from local app-state.json")
-		return readLocalAppState()
-	}
-
 	// Production environment - fetch from app-service
 	glog.Info("Production environment detected, fetching from app-service")
 	return fetchFromAppService()
@@ -93,35 +87,6 @@ func GetAllUserAppStateData() map[string]map[string][]*types.AppStateLatestData 
 		}
 	}
 	return userAppStateData
-}
-
-// isDevelopmentEnvironment checks if we're in development environment
-func isDevelopmentEnvironment() bool {
-	env := strings.ToLower(os.Getenv("GO_ENV"))
-	return env == "dev" || env == "development" || env == ""
-}
-
-// readLocalAppState reads and processes the local app-state.json file
-func readLocalAppState() error {
-	glog.Info("Reading local app-state.json file...")
-
-	file, err := os.Open("app-state.json")
-	if err != nil {
-		return fmt.Errorf("failed to open app-state.json: %v", err)
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return fmt.Errorf("failed to read app-state.json: %v", err)
-	}
-
-	var apps []AppServiceResponse
-	if err := json.Unmarshal(data, &apps); err != nil {
-		return fmt.Errorf("failed to parse app-state.json: %v", err)
-	}
-
-	return processAppData(apps)
 }
 
 // fetchFromAppService fetches app data from the app-service
@@ -462,19 +427,6 @@ func createMiddlewareStateLatestData(middleware struct {
 		"lastTransitionTime": middleware.UpdateTime, // Use UpdateTime as LastTransitionTime for middlewares
 		"version":            middleware.Version,
 	}
-
-	// // Create entrance statuses for middleware (simplified structure)
-	// entrances := make([]interface{}, 0, 1)
-	// entrances = append(entrances, map[string]interface{}{
-	// 	"id":         middleware.UUID, // Use UUID as ID
-	// 	"name":       middleware.Metadata.Name,
-	// 	"state":      middleware.ResourceStatus,
-	// 	"statusTime": middleware.UpdateTime,
-	// 	"reason":     "",
-	// 	"url":        "", // Middlewares don't have URLs like apps
-	// 	"invisible":  false,
-	// })
-	// data["entranceStatuses"] = entrances
 
 	return types.NewAppStateLatestData(data, middleware.User, task.LookupAppInfoLastInstalled)
 }

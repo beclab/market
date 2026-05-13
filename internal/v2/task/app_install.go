@@ -1,29 +1,45 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-
-	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
+
+	"market/internal/v2/appservice"
 
 	"github.com/golang/glog"
 )
 
-// InstallOptions represents the options for app installation
-type InstallOptions struct {
-	App          string      `json:"appName,omitempty"`
-	Dev          bool        `json:"devMode,omitempty"`
-	RepoUrl      string      `json:"repoUrl,omitempty"`
-	CfgUrl       string      `json:"cfgUrl,omitempty"`
-	Version      string      `json:"version,omitempty"`
-	Source       string      `json:"source,omitempty"`
-	User         string      `json:"x_market_user,omitempty"`
-	MarketSource string      `json:"x_market_source,omitempty"`
-	Images       []Image     `json:"images,omitempty"`
-	Envs         []AppEnvVar `json:"envs"`
+// appServiceClientOnce / appServiceClient / appServiceClientErr cache a
+// process-wide typed client built from APP_SERVICE_SERVICE_HOST/PORT.
+// All five task executors (install / clone / uninstall / upgrade /
+// cancel) now share this single client — the previous hand-rolled
+// http.Client + JSON-envelope parsing has been retired across the
+// package.
+//
+// WithTimeout is raised to 2 minutes (vs the package default of 30s)
+// because operations today return synchronously after app-service
+// acknowledges the request and assigns an OpID; under load that can
+// occasionally exceed 30s. Subsequent state transitions are NATS-driven
+// and do not flow through this client.
+var (
+	appServiceClient     appservice.Client
+	appServiceClientErr  error
+	appServiceClientOnce sync.Once
+)
+
+func getAppServiceClient() (appservice.Client, error) {
+	appServiceClientOnce.Do(func() {
+		appServiceClient, appServiceClientErr = appservice.NewClient(
+			appservice.WithTimeout(2 * time.Minute),
+		)
+	})
+	return appServiceClient, appServiceClientErr
 }
 
 type AppEnvVar struct {
@@ -103,26 +119,6 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 
 	glog.V(2).Infof("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
 
-	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	// Choose API endpoint based on cfgType
-	var urlStr string
-	// if cfgType == "middleware" {
-	// 	// Use middleware API for middleware type
-	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/%s/install", appServiceHost, appServicePort, appName)
-	// 	glog.Infof("Using middleware API for installation: %s", urlStr)
-	// } else if cfgType == "recommend" {
-	// 	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/recommends/%s/install", appServiceHost, appServicePort, appName)
-	// 	glog.Infof("Using middleware API for installation: %s", urlStr)
-	// } else {
-	// 	// Use regular app API for other types
-	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, appName)
-	glog.V(3).Infof("Using regular app API for installation: %s", urlStr)
-	// }
-
-	glog.V(2).Infof("App service URL: %s for task: %s", urlStr, task.ID)
-
 	// Get envs from metadata
 	var envs []AppEnvVar
 	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
@@ -177,181 +173,146 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		}
 	}
 
-	installInfo := &InstallOptions{
+	// Convert task-package wire types to the appservice client's
+	// counterparts. Field-for-field copies; the duplicate types in
+	// this package are kept in place because pkg/v2/api/task.go and
+	// the other four executors still reference them. Once those
+	// callers migrate, the duplicates can be retired in favour of
+	// the appservice types directly.
+	asEnvs := make([]appservice.AppEnvVar, len(envs))
+	for i, e := range envs {
+		asEnvs[i] = appservice.AppEnvVar{EnvName: e.EnvName, Value: e.Value}
+		if e.ValueFrom != nil {
+			asEnvs[i].ValueFrom = &appservice.AppEnvValueFrom{EnvName: e.ValueFrom.EnvName}
+		}
+	}
+	asImages := make([]appservice.Image, len(images))
+	for i, img := range images {
+		asImages[i] = appservice.Image{Name: img.Name, Size: img.Size}
+	}
+
+	opts := appservice.InstallOptions{
 		RepoUrl:      getRepoUrl(),
-		Source:       apiSource, // Use converted API source
+		Source:       apiSource,
 		User:         user,
 		MarketSource: appSource,
-		Images:       images,
-		Envs:         envs,
+		Images:       asImages,
+		Envs:         asEnvs,
 	}
-	ms, err := json.Marshal(installInfo)
-	if err != nil {
-		glog.Errorf("Failed to marshal install info for task %s: %v", task.ID, err)
-		return "", err
-	}
-	glog.V(2).Infof("Install request prepared: url=%s, installInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
-
-	headers := map[string]string{
-		"X-Authorization": token,
-		"X-Bfl-User":      task.User,
-		"Content-Type":    "application/json",
-		"X-Market-User":   user,
-		"X-Market-Source": appSource,
+	hdr := appservice.OpHeaders{
+		Token:        token,
+		User:         task.User,
+		MarketUser:   user,
+		MarketSource: appSource,
 	}
 
-	// Send HTTP request and get response
-	glog.Infof("[APP] Sending HTTP request for app installation: task=%s, data: %s", task.ID, string(ms))
-	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
-	if err != nil {
-		glog.Errorf("HTTP request failed for app installation: task=%s, error=%v", task.ID, err)
-		// Create detailed error result
-		errorResult := map[string]interface{}{
+	// Compose a base envelope shared by every return path so the wire
+	// shape stays compatible with the legacy raw-map projection that
+	// the API layer and frontend already consume. The legacy "url"
+	// field is no longer emitted: it duplicated the host/port that
+	// appservice.Client resolves itself, with no internal consumer
+	// (the API layer ships task_records.result through to the wire
+	// without inspecting it). Failure diagnostics live on the typed
+	// error path now.
+	baseEnvelope := func() map[string]interface{} {
+		return map[string]interface{}{
 			"operation":  "install",
 			"app_name":   appName,
 			"user":       user,
-			"app_source": appSource, // Log original app source
-			"api_source": apiSource, // Log converted API source
-			"cfgType":    cfgType,   // Log cfgType
-			"url":        urlStr,
-			"error":      err.Error(),
-			"status":     "failed",
+			"app_source": appSource,
+			"api_source": apiSource,
+			"cfgType":    cfgType,
 		}
-		errorJSON, _ := json.Marshal(errorResult)
+	}
+
+	client, err := getAppServiceClient()
+	if err != nil {
+		glog.Errorf("App-service client unavailable for install task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		errorJSON, _ := json.Marshal(envelope)
 		return string(errorJSON), err
 	}
 
-	glog.Infof("[APP] HTTP request completed successfully for app installation: task=%s, response_length=%d, resp=%s", task.ID, len(response), response)
-
-	// Parse response to extract opID if installation is successful
-	var responseData map[string]interface{}
-	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
-		glog.Errorf("Failed to parse response JSON for task %s: %v, resp: %s", task.ID, err, string([]byte(response)))
-		// Create error result for JSON parsing failure
-		errorResult := map[string]interface{}{
-			"operation":    "install",
-			"app_name":     appName,
-			"user":         user,
-			"app_source":   appSource,
-			"api_source":   apiSource,
-			"cfgType":      cfgType,
-			"url":          urlStr,
-			"raw_response": response,
-			"error":        fmt.Sprintf("Failed to parse response JSON: %v", err),
-			"status":       "failed",
-		}
-		errorJSON, _ := json.Marshal(errorResult)
-		return string(errorJSON), fmt.Errorf("failed to parse response JSON: %v", err)
-	}
-
-	// Check if installation was successful by checking code field
-	if code, ok := responseData["code"].(float64); ok && code == 200 {
-		if data, ok := responseData["data"].(map[string]interface{}); ok {
-			if opID, ok := data["opID"].(string); ok && opID != "" {
-				task.OpID = opID
-				glog.V(3).Infof("Successfully extracted opID: %s for task: %s", opID, task.ID)
-			} else {
-				glog.V(3).Infof("opID not found in response data for task: %s", task.ID)
-				// Return backend response with additional context
-				errorResult := map[string]interface{}{
-					"operation":        "install",
-					"app_name":         appName,
-					"user":             user,
-					"app_source":       appSource,
-					"api_source":       apiSource,
-					"cfgType":          cfgType,
-					"url":              urlStr,
-					"backend_response": responseData,
-					"error":            "opID not found in response data",
-					"status":           "failed",
-				}
-				errorJSON, _ := json.Marshal(errorResult)
-				return string(errorJSON), fmt.Errorf("opID not found in response data")
+	glog.Infof("[APP] Sending HTTP request for app installation: task=%s", task.ID)
+	opResp, err := client.InstallApp(context.Background(), appName, opts, hdr)
+	if err != nil {
+		glog.Errorf("App-service install failed for task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		// Surface the upstream business code/message envelope when we
+		// have one (HTTP 200 + Code != 200 path); transport-level
+		// failures (5xx / network) carry no useful body to expose.
+		var opErr *appservice.OpError
+		if errors.As(err, &opErr) {
+			backend := map[string]interface{}{
+				"code":    opErr.Code,
+				"message": opErr.Message,
 			}
-		} else {
-			glog.V(3).Infof("Data field not found or not a map in response for task: %s", task.ID)
-			// Return backend response with additional context
-			errorResult := map[string]interface{}{
-				"operation":        "install",
-				"app_name":         appName,
-				"user":             user,
-				"app_source":       appSource,
-				"api_source":       apiSource,
-				"cfgType":          cfgType,
-				"url":              urlStr,
-				"backend_response": responseData,
-				"error":            "Data field not found or not a map in response",
-				"status":           "failed",
+			// Prefer the upstream's full `data` envelope when present
+			// (e.g. install's 422 + appenv missingValues schema). The
+			// raw bytes are preserved verbatim by OpResponse.DataRaw —
+			// passing them as json.RawMessage keeps field ordering and
+			// case sensitivity ("Data" vs "data") intact for the
+			// frontend's backend_response.data view. The opID-only
+			// fallback covers older app-service builds that ship code/
+			// message without a data block.
+			switch {
+			case opResp != nil && len(opResp.DataRaw) > 0:
+				backend["data"] = json.RawMessage(opResp.DataRaw)
+			case opErr.OpID != "":
+				backend["data"] = map[string]interface{}{"opID": opErr.OpID}
 			}
-			errorJSON, _ := json.Marshal(errorResult)
-			return string(errorJSON), fmt.Errorf("data field not found or not a map in response")
+			envelope["backend_response"] = backend
 		}
-	} else {
-		glog.V(3).Infof("Installation code is not 200 for task: %s, code: %v", task.ID, code)
-		// Return backend response with additional context
-		errorResult := map[string]interface{}{
-			"operation":        "install",
-			"app_name":         appName,
-			"user":             user,
-			"app_source":       appSource,
-			"api_source":       apiSource,
-			"cfgType":          cfgType,
-			"url":              urlStr,
-			"backend_response": responseData,
-			"error":            fmt.Sprintf("Installation failed with code: %v", code),
-			"status":           "failed",
-		}
-		errorJSON, _ := json.Marshal(errorResult)
-		return string(errorJSON), fmt.Errorf("installation failed with code: %v", code)
+		errorJSON, _ := json.Marshal(envelope)
+		return string(errorJSON), err
 	}
 
-	// Return backend response with additional context on success
-	successResult := map[string]interface{}{
-		"operation":        "install",
-		"app_name":         appName,
-		"user":             user,
-		"app_source":       appSource,
-		"api_source":       apiSource,
-		"cfgType":          cfgType,
-		"url":              urlStr,
-		"backend_response": responseData,
-		"opID":             task.OpID,
-		"status":           "success",
+	// HTTP 200 + Code 200. Validate that the upstream actually shipped
+	// an OpID; legacy code returned this as a failure with backend
+	// envelope, preserve that semantic.
+	if opResp == nil || opResp.Data == nil || opResp.Data.OpID == "" {
+		glog.V(3).Infof("opID not found in install response for task: %s", task.ID)
+		envelope := baseEnvelope()
+		backend := map[string]interface{}{}
+		if opResp != nil {
+			backend["code"] = opResp.Code
+			backend["message"] = opResp.Message
+		}
+		envelope["backend_response"] = backend
+		envelope["error"] = "opID not found in response data"
+		envelope["status"] = "failed"
+		errorJSON, _ := json.Marshal(envelope)
+		return string(errorJSON), fmt.Errorf("opID not found in response data")
 	}
-	successJSON, _ := json.Marshal(successResult)
+
+	task.OpID = opResp.Data.OpID
+	glog.V(3).Infof("Successfully extracted opID: %s for task: %s", opResp.Data.OpID, task.ID)
+	tm.linkStateOpID(task, appName, "install")
+
+	envelope := baseEnvelope()
+	envelope["backend_response"] = map[string]interface{}{
+		"code":    opResp.Code,
+		"message": opResp.Message,
+		"data":    map[string]interface{}{"opID": opResp.Data.OpID},
+	}
+	envelope["opID"] = task.OpID
+	envelope["status"] = "success"
+	successJSON, _ := json.Marshal(envelope)
 	glog.V(2).Infof("App installation completed successfully: task=%s, result_length=%d, result=%s", task.ID, len(successJSON), string(successJSON))
 	return string(successJSON), nil
 }
 
-// getRepoUrl returns the repository URL
+// getRepoUrl returns the repository URL passed through to app-service in
+// install / upgrade / clone request bodies as RepoUrl. Sourced from the
+// REPO_URL_HOST / REPO_URL_PORT env vars set by the chart-repo K8s
+// service. Kept as a package-level helper because all four operation
+// executors share it (and pkg/v2/api/task.go does not).
 func getRepoUrl() string {
 	repoServiceHost := os.Getenv("REPO_URL_HOST")
 	repoStoreServicePort := os.Getenv("REPO_URL_PORT")
 	return fmt.Sprintf("http://%s:%s/", repoServiceHost, repoStoreServicePort)
-}
-
-// sendHttpRequest sends an HTTP request with the given token
-func sendHttpRequest(method, urlStr string, headers map[string]string, body io.Reader) (string, error) {
-	req, err := http.NewRequest(method, urlStr, body)
-	if err != nil {
-		return "", err
-	}
-
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(bodyBytes), nil
 }

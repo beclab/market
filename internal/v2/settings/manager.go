@@ -1,9 +1,12 @@
 package settings
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"market/internal/v2/db/models"
 	"market/internal/v2/helper"
+	"market/internal/v2/store/marketsource"
 	"os"
 	"strings"
 	"time"
@@ -13,7 +16,6 @@ import (
 
 // CacheManager interface for updating cache when market sources change
 type CacheManager interface {
-	SyncMarketSourcesToCache(sources []*MarketSource) error
 	// Check if any user has non-empty state data for a specific source
 	HasUserStateDataForSource(sourceID string) bool
 }
@@ -40,17 +42,6 @@ func (sm *SettingsManager) GetRedisClient() RedisClient {
 	return sm.redisClient
 }
 
-// syncMarketSourcesToCache synchronizes market sources to cache if cache manager is available
-func (sm *SettingsManager) syncMarketSourcesToCache() {
-	if sm.cacheManager != nil {
-		if err := sm.cacheManager.SyncMarketSourcesToCache(sm.marketSources.Sources); err != nil {
-			glog.Errorf("Failed to sync market sources to cache: %v", err)
-		} else {
-			glog.V(4).Infof("Successfully synced %d market sources to cache", len(sm.marketSources.Sources))
-		}
-	}
-}
-
 // Initialize initializes the settings manager
 func (sm *SettingsManager) Initialize() error {
 	glog.Info("Initializing settings manager...")
@@ -68,32 +59,43 @@ func (sm *SettingsManager) Initialize() error {
 	return nil
 }
 
-// initializeMarketSources initializes market sources configuration
+// initializeMarketSources initializes market sources configuration.
+//
+// Storage backend is PostgreSQL (`market_sources` table). Bootstrap policy:
+//
+//   - PG empty (or unreachable / public env) → seed the in-memory config
+//     from createDefaultMarketSources, persist it back so the syncer can
+//     pick up the rows.
+//   - PG already has rows → merge with the default list (so a newly added
+//     hardcoded default is auto-inserted into existing deployments) and
+//     persist the merged result via UpsertSources, which preserves the
+//     `data` JSONB column on already-rendered rows.
 func (sm *SettingsManager) initializeMarketSources() error {
-	// Try to load from Redis first
-	config, err := sm.loadMarketSourcesFromRedis()
-	if err != nil {
-		glog.Errorf("Failed to load market sources from Redis: %v", err)
+	config, err := sm.loadMarketSourcesFromStore()
+	if err != nil || config == nil || len(config.Sources) == 0 {
+		if err != nil {
+			glog.Errorf("Failed to load market sources from PG: %v", err)
+		} else {
+			glog.V(2).Info("market_sources table is empty; seeding defaults")
+		}
 
 		// Create default configuration from environment variables
 		config = sm.createDefaultMarketSources()
 
-		// Save default config to Redis
-		if err := sm.saveMarketSourcesToRedis(config); err != nil {
-			glog.Errorf("Failed to save Official Market Sources to Redis: %v", err)
+		if saveErr := sm.saveMarketSourcesToStore(config); saveErr != nil {
+			glog.Errorf("Failed to save default market sources to PG: %v", saveErr)
 		}
 
 		glog.V(4).Info("Loaded Official Market Sources from environment")
 	} else {
-		glog.V(4).Infof("Loaded market sources from Redis: %d sources", len(config.Sources))
+		glog.V(4).Infof("Loaded market sources from PG: %d sources", len(config.Sources))
 
-		// Merge default configuration with existing Redis configuration
-		// This ensures new default sources (like "local") are added to existing config
+		// Merge default configuration with existing PG configuration so
+		// newly added hardcoded defaults flow into existing deployments.
 		config = sm.mergeWithDefaultConfig(config)
 
-		// Save merged config back to Redis if there were changes
-		if err := sm.saveMarketSourcesToRedis(config); err != nil {
-			glog.Errorf("Failed to save merged market sources to Redis: %v", err)
+		if saveErr := sm.saveMarketSourcesToStore(config); saveErr != nil {
+			glog.Errorf("Failed to save merged market sources to PG: %v", saveErr)
 		}
 	}
 
@@ -105,14 +107,17 @@ func (sm *SettingsManager) initializeMarketSources() error {
 	return nil
 }
 
-// ReloadMarketSources reloads market sources from Redis into memory
+// ReloadMarketSources reloads market sources from PG into memory.
 // This is useful after syncing sources from chartrepo
 func (sm *SettingsManager) ReloadMarketSources() error {
-	glog.V(4).Info("Reloading market sources from Redis...")
-	config, err := sm.loadMarketSourcesFromRedis()
+	glog.V(4).Info("Reloading market sources from PG...")
+	config, err := sm.loadMarketSourcesFromStore()
 	if err != nil {
-		glog.Errorf("Failed to reload market sources from Redis: %v", err)
+		glog.Errorf("Failed to reload market sources from PG: %v", err)
 		return err
+	}
+	if config == nil {
+		config = &MarketSourcesConfig{}
 	}
 
 	// Merge with default config to ensure default sources are preserved
@@ -123,34 +128,15 @@ func (sm *SettingsManager) ReloadMarketSources() error {
 	sm.marketSources = config
 	sm.mu.Unlock()
 
-	glog.V(4).Infof("Successfully reloaded %d market sources from Redis", len(config.Sources))
+	glog.V(4).Infof("Successfully reloaded %d market sources from PG", len(config.Sources))
 	return nil
 }
 
 // initializeAPIEndpoints initializes API endpoints configuration
 func (sm *SettingsManager) initializeAPIEndpoints() error {
-	// Try to load from Redis first
-	config, err := sm.loadAPIEndpointsFromRedis()
-	if err != nil {
-		glog.Errorf("Failed to load API endpoints from Redis: %v", err)
+	config := sm.createDefaultAPIEndpoints()
 
-		// Create default configuration from environment variables
-		config = sm.createDefaultAPIEndpoints()
-
-		// Save default config to Redis
-		if err := sm.saveAPIEndpointsToRedis(config); err != nil {
-			glog.Errorf("Failed to save default API endpoints to Redis: %v", err)
-		}
-
-		glog.V(4).Info("Loaded default API endpoints from environment")
-	} else {
-		glog.V(4).Info("Loaded API endpoints from Redis")
-	}
-
-	// Set in memory
-	sm.mu.Lock()
 	sm.apiEndpoints = config
-	sm.mu.Unlock()
 
 	return nil
 }
@@ -206,6 +192,11 @@ func (sm *SettingsManager) createDefaultMarketSources() *MarketSourcesConfig {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	glog.Infof("Base URL after trimming: %s", baseURL)
 
+	// market.olares is the default active remote on first deploy. The
+	// IsActive=true here only takes effect on the very first INSERT
+	// (clean market_sources table); subsequent startups go through
+	// UpsertSources.DoUpdates which excludes is_active, so any later
+	// switch via PUT /settings/market-settings survives restarts.
 	defaultSource := &MarketSource{
 		ID:          "market.olares",
 		Name:        "market.olares",
@@ -495,13 +486,23 @@ func (sm *SettingsManager) DeleteMarketSource(sourceID string) error {
 	// Update the in-memory config with merged result
 	sm.marketSources = mergedConfig
 
-	// Save merged config to Redis
-	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
-		return fmt.Errorf("failed to save market sources to Redis: %w", err)
+	// Drop the row in PG. mergeWithDefaultConfig may have re-inserted
+	// the same id back into Sources if it is a hardcoded default — in
+	// that case the subsequent UpsertSources call re-creates the row,
+	// so the order Delete→Upsert matches the user-visible behaviour.
+	if !helper.IsPublicEnvironment() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if delErr := marketsource.DeleteSourceByID(ctx, sourceID); delErr != nil {
+			cancel()
+			return fmt.Errorf("failed to delete market source %s from PG: %w", sourceID, delErr)
+		}
+		cancel()
 	}
 
-	// Sync to cache
-	sm.syncMarketSourcesToCache()
+	// Save merged config to PG
+	if err := sm.saveMarketSourcesToStore(sm.marketSources); err != nil {
+		return fmt.Errorf("failed to save market sources to PG: %w", err)
+	}
 
 	glog.Infof("Deleted market source: %s", sourceID)
 	return nil
@@ -598,13 +599,10 @@ func (sm *SettingsManager) AddMarketSource(source *MarketSource) error {
 	// Update the in-memory config with merged result
 	sm.marketSources = mergedConfig
 
-	// Save merged config to Redis
-	if err := sm.saveMarketSourcesToRedis(sm.marketSources); err != nil {
-		return fmt.Errorf("failed to save market sources to Redis: %w", err)
+	// Save merged config to PG
+	if err := sm.saveMarketSourcesToStore(sm.marketSources); err != nil {
+		return fmt.Errorf("failed to save market sources to PG: %w", err)
 	}
-
-	// Sync to cache
-	sm.syncMarketSourcesToCache()
 
 	glog.V(3).Infof("Added new market source: %s (%s)", source.Name, source.ID)
 	return nil
@@ -627,43 +625,117 @@ func (sm *SettingsManager) UpdateAPIEndpoints(endpoints *APIEndpointsConfig) err
 	return nil
 }
 
-// loadMarketSourcesFromRedis loads market sources from Redis
-func (sm *SettingsManager) loadMarketSourcesFromRedis() (*MarketSourcesConfig, error) {
-
+// loadMarketSourcesFromStore loads market sources from PostgreSQL.
+//
+// Public environment short-circuits to (nil, nil) so the caller falls
+// through to createDefaultMarketSources (mirrors the legacy Redis-path
+// behaviour where loadMarketSourcesFromRedis returned an error in
+// public mode and the caller treated that as "use defaults").
+//
+// IsActive is not persisted in the `market_sources` schema; rows read
+// from PG are surfaced with IsActive=true so the in-memory contract
+// stays compatible with the rest of the settings package.
+func (sm *SettingsManager) loadMarketSourcesFromStore() (*MarketSourcesConfig, error) {
 	if helper.IsPublicEnvironment() {
-		return nil, fmt.Errorf("in public environment, no need to load market sources from Redis")
+		return nil, nil
 	}
 
-	data, err := sm.redisClient.Get(RedisKeyMarketSources)
+	rows, err := marketsource.GetMarketSources()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get market sources from Redis: %w", err)
+		return nil, fmt.Errorf("failed to get market sources from PG: %w", err)
 	}
 
-	if data == "" {
-		return nil, fmt.Errorf("no market sources config found in Redis")
+	sources := make([]*MarketSource, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		sources = append(sources, modelToSetting(row))
 	}
 
-	var config MarketSourcesConfig
-	if err := json.Unmarshal([]byte(data), &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal market sources config: %w", err)
-	}
-
-	return &config, nil
+	return &MarketSourcesConfig{
+		Sources:   sources,
+		UpdatedAt: time.Now(),
+	}, nil
 }
 
-// saveMarketSourcesToRedis saves market sources to Redis
-func (sm *SettingsManager) saveMarketSourcesToRedis(config *MarketSourcesConfig) error {
-
+// saveMarketSourcesToStore persists market sources to PostgreSQL via an
+// upsert keyed by source_id. The `data` JSONB column is intentionally
+// not part of the upsert payload (see UpsertSources comment) so this
+// path never clobbers a freshly-rendered catalogue snapshot.
+//
+// Public environment is a silent no-op (mirrors the legacy
+// saveMarketSourcesToRedis behaviour).
+func (sm *SettingsManager) saveMarketSourcesToStore(config *MarketSourcesConfig) error {
 	if helper.IsPublicEnvironment() {
 		return nil
 	}
-
-	data, err := json.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal market sources config: %w", err)
+	if config == nil {
+		return nil
 	}
 
-	return sm.redisClient.Set(RedisKeyMarketSources, string(data), 0)
+	rows := make([]*models.MarketSource, 0, len(config.Sources))
+	for _, src := range config.Sources {
+		if src == nil {
+			continue
+		}
+		rows = append(rows, settingToModel(src))
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return marketsource.UpsertSources(ctx, rows)
+}
+
+// modelToSetting maps the persisted PG row shape onto the settings
+// package's in-memory MarketSource.
+func modelToSetting(m *models.MarketSource) *MarketSource {
+	if m == nil {
+		return nil
+	}
+	return &MarketSource{
+		ID:          m.SourceID,
+		Name:        m.SourceTitle,
+		Type:        m.SourceType,
+		BaseURL:     m.SourceURL,
+		Priority:    m.Priority,
+		IsActive:    m.IsActive,
+		Nsfw:        m.Nsfw,
+		UpdatedAt:   m.UpdatedAt,
+		Description: m.Description,
+	}
+}
+
+// settingToModel maps the in-memory MarketSource onto the persisted
+// PG row shape. The Data JSONB column is left nil — UpsertSources
+// excludes it from DoUpdates, so existing payloads are preserved on
+// upsert and new rows are simply created with NULL data (the syncer
+// fills it in on its next cycle).
+//
+// Nsfw and IsActive are propagated so that the FIRST INSERT (clean
+// PG, no existing row) seeds them from createDefaultMarketSources
+// (e.g. market.olares is seeded with IsActive=true). On subsequent
+// startups the row already exists and ON CONFLICT routes to the
+// UPDATE path, where UpsertSources.DoUpdates excludes both columns —
+// so values flipped via PUT /settings/market-settings survive
+// service restarts.
+func settingToModel(s *MarketSource) *models.MarketSource {
+	if s == nil {
+		return nil
+	}
+	return &models.MarketSource{
+		SourceID:    s.ID,
+		SourceTitle: s.Name,
+		SourceURL:   s.BaseURL,
+		SourceType:  s.Type,
+		Description: s.Description,
+		Priority:    s.Priority,
+		Nsfw:        s.Nsfw,
+		IsActive:    s.IsActive,
+	}
 }
 
 // loadAPIEndpointsFromRedis loads API endpoints from Redis
@@ -760,16 +832,32 @@ func (sm *SettingsManager) mergeWithDefaultConfig(config *MarketSourcesConfig) *
 	return config
 }
 
+// ClearSettingsRedis is the CLEAR_CACHE=true wipe path. Source state is
+// now in PostgreSQL, so the source-list portion runs against the
+// `market_sources` table; the API endpoints config still lives in Redis
+// and is wiped there. The function name is kept for callsite stability.
+//
+// PG truncate is more destructive than the previous Redis-only clear:
+// the JSONB `data` column lives on the same row, so the syncer has to
+// refetch every catalogue payload after the next startup. That matches
+// the spirit of CLEAR_CACHE (force a full reseed) but operators should
+// be aware of the larger blast radius.
 func ClearSettingsRedis(redisClient RedisClient) error {
-
-	if err := redisClient.Del(RedisKeyMarketSources); err != nil {
-		return fmt.Errorf("failed to delete market sources from Redis: %w", err)
+	if !helper.IsPublicEnvironment() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := marketsource.TruncateAll(ctx); err != nil {
+			cancel()
+			return fmt.Errorf("failed to truncate market_sources in PG: %w", err)
+		}
+		cancel()
 	}
 
-	if err := redisClient.Del(RedisKeyAPIEndpoints); err != nil {
-		return fmt.Errorf("failed to delete API endpoints from Redis: %w", err)
+	if redisClient != nil {
+		if err := redisClient.Del(RedisKeyAPIEndpoints); err != nil {
+			return fmt.Errorf("failed to delete API endpoints from Redis: %w", err)
+		}
 	}
-	glog.Info("Settings Redis keys cleared successfully")
+	glog.Info("Settings store cleared successfully (market_sources truncated; API endpoints removed from Redis)")
 	return nil
 }
 

@@ -21,8 +21,8 @@ package payload
 // Entrance plus the URL assigned by the cluster after install / upgrade.
 type RuntimeEntrance struct{}
 
-// StatusEntrances backs user_application_states.status_entrances. Stored as
-// a JSON object (not an array) — the exact shape is defined by the
-// upstream NATS message and is left empty here until the wire format is
-// finalised.
-type StatusEntrances struct{}
+// StatusEntrance backs one element of user_application_states.status_entrances.
+// The column itself is a JSON array of objects (one element per entrance)
+// matching the upstream NATS msg.entranceStatuses shape; the exact field
+// set is left empty here until the wire format is finalised.
+type StatusEntrance struct{}

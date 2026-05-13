@@ -42,9 +42,13 @@ type syncAppData struct {
 // syncAppPayload is the per-app render artefact. RawDataEx is the input
 // we split into the user_applications JSONB columns. RawPackage and
 // RenderedPackage are file paths to the source / rendered chart packages
-// on chart-repo's filesystem — kept here for diagnostic logging even
-// though the database does not have columns for them. AppInfo includes
-// the same app_entry plus image_analysis (which is not persisted).
+// on chart-repo's filesystem; they are persisted to the homonymous
+// user_applications.{raw_package, rendered_package} columns via
+// UpsertRenderSuccess so the API layer can derive the chart_path argument
+// for app-service without a cache round-trip. AppInfo includes the same
+// app_entry; the previous "image_analysis lives only inside AppInfo"
+// arrangement is gone now that chart-repo emits a typed ImageAnalysis
+// block at this level (see ImageAnalysis below) and Market persists it.
 //
 // Migration plan: RawData is the legacy flat-map field kept on the wire
 // only during chart-repo's gradual rollout of the typed payload. Market
@@ -58,6 +62,21 @@ type syncAppPayload struct {
 	Version         string                `json:"version"`
 	RawData         map[string]any        `json:"raw_data"`
 	RawDataEx       *oac.AppConfiguration `json:"raw_data_ex"`
+	// ImageAnalysis is chart-repo's per-app docker image analysis,
+	// emitted at the same level as RawDataEx. We persist it verbatim
+	// to user_applications.image_analysis via UpsertRenderSuccess so
+	// /api/v2/apps callers can render image-level details (size,
+	// architecture, download progress) without round-tripping back
+	// to chart-repo. nil here is normal for older chart-repo builds
+	// that pre-date this field — the column stays NULL until the
+	// next render with the new chart-repo refreshes it.
+	ImageAnalysis *types.ImageAnalysisResult `json:"image_analysis"`
+	// I18n / VersionHistory live at the same level as RawDataEx on
+	// the chart-repo wire and are persisted to dedicated JSONB columns
+	// on user_applications (see store.UpsertRenderSuccess); they are
+	// NOT split into the manifest payload anymore.
+	I18n           map[string]map[string]string `json:"i18n"`
+	VersionHistory []types.VersionInfo          `json:"version_history"`
 	RawPackage      string                `json:"raw_package"`
 	RenderedPackage string                `json:"rendered_package"`
 	Values          []any                 `json:"values"`
@@ -166,20 +185,13 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 	rawData := apiResponse.Data.AppData.RawDataEx
 	manifest := types.BuildUserAppManifest(rawData)
 
-	// VersionHistory comes from the catalog row (applications.app_entry),
-	// not from chart-repo's per-render raw_data_ex. Splice it into spec
-	// before the RenderedManifest assignment so:
-	//   * user_applications.spec persisted by UpsertRenderSuccess below
-	//     carries it (direct PG readers see it under spec.versionHistory);
-	//   * the NATS "new_app_ready" push composed by notifyRenderSuccess
-	//     from task.RenderedManifest also carries it (same pointer, no
-	//     follow-up read needed).
-	if task.AppEntry != nil && len(task.AppEntry.VersionHistory) > 0 {
-		if manifest.Spec == nil {
-			manifest.Spec = map[string]any{}
-		}
-		manifest.Spec["versionHistory"] = task.AppEntry.VersionHistory
-	}
+	// Inject entrance / shared-entrance URLs while we still have the
+	// per-render context. zone was carried in from Pipeline.phaseHydrateApps
+	// (sourced from the User CR's bytetrade.io/zone annotation); appID is
+	// the clone-aware app_id (clones carry md5(newAppName) here, matching
+	// what app-service uses to compose URLs at install time). Empty zone
+	// is fine — EnrichEntranceURLs no-ops in that case.
+	types.EnrichEntranceURLs(manifest, task.AppID, task.UserZone)
 
 	task.RenderedManifest = manifest
 
@@ -187,6 +199,25 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 	// has no AppEntry (legacy cache-driven path); on that path the cache
 	// write is the source of truth for render outcome.
 	if task.AppEntry != nil {
+		// VersionHistory is sourced from the catalog-side AppEntry
+		// (loaded by store.ListRenderCandidates from
+		// applications.app_entry) rather than from chart-repo's
+		// sync-app response. Storage uses []types.VersionInfo while
+		// the catalog projection uses []*types.VersionInfo, so the
+		// pointer slice is dereffed into a value slice here. Mirror
+		// of the value→pointer conversion in pkg/v2/api/app.go's
+		// detail-row composer; both sides keep their own layer's
+		// convention and the conversion stays local.
+		var versionHistory []types.VersionInfo
+		if len(task.AppEntry.VersionHistory) > 0 {
+			versionHistory = make([]types.VersionInfo, 0, len(task.AppEntry.VersionHistory))
+			for _, vi := range task.AppEntry.VersionHistory {
+				if vi != nil {
+					versionHistory = append(versionHistory, *vi)
+				}
+			}
+		}
+
 		in := store.UpsertRenderSuccessInput{
 			UserID:          task.UserID,
 			SourceID:        task.SourceID,
@@ -198,6 +229,11 @@ func (s *TaskForApiStep) Execute(ctx context.Context, task *HydrationTask) error
 			ManifestType:    rawData.ConfigType,
 			APIVersion:      rawData.APIVersion,
 			Manifest:        manifest,
+			I18n:            apiResponse.Data.AppData.I18n,
+			VersionHistory:  versionHistory,
+			ImageAnalysis:   apiResponse.Data.AppData.ImageAnalysis,
+			RawPackage:      apiResponse.Data.AppData.RawPackage,
+			RenderedPackage: apiResponse.Data.AppData.RenderedPackage,
 		}
 		if err := store.UpsertRenderSuccess(ctx, in); err != nil {
 			return fmt.Errorf("persist render success to user_applications: %w", err)
