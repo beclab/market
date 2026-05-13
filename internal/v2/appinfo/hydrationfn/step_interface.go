@@ -25,8 +25,15 @@ type HydrationStep interface {
 
 // HydrationTask represents a single app hydration task
 type HydrationTask struct {
-	ID          string                 `json:"id"`           // Unique task ID
-	UserID      string                 `json:"user_id"`      // User ID
+	ID     string `json:"id"`      // Unique task ID
+	UserID string `json:"user_id"` // User ID
+	// UserZone mirrors UserDataInfo.Zone (bytetrade.io/zone annotation),
+	// injected by Pipeline.phaseHydrateApps so steps that derive
+	// per-user URLs (TaskForApiStep -> types.EnrichEntranceURLs) do not
+	// have to re-resolve it from the watchers cache. Empty when the
+	// user has no zone configured yet — consumers must treat it as
+	// "skip URL rewriting".
+	UserZone    string                 `json:"user_zone"`
 	SourceID    string                 `json:"source_id"`    // Source ID
 	SourceType  string                 `json:"source_type"`  // Source type
 	AppID       string                 `json:"app_id"`       // Application ID
@@ -205,6 +212,11 @@ func NewHydrationTaskWithManager(userID, sourceID, appID string, appData map[str
 // callers on this path must not depend on the in-memory cache.
 type HydrationTaskInput struct {
 	UserID, SourceID, SourceType string
+	// UserZone is the per-instance domain suffix from the User CR's
+	// bytetrade.io/zone annotation; passed through to HydrationTask.UserZone
+	// so EnrichEntranceURLs can derive entrance URLs without going back
+	// through the watchers cache. Empty is OK (URL rewriting becomes a no-op).
+	UserZone                     string
 	AppID, AppName, AppVersion   string
 	AppType                      string
 	AppEntry                     *types.ApplicationInfoEntry
@@ -220,6 +232,7 @@ func NewHydrationTaskFromInput(in HydrationTaskInput) *HydrationTask {
 	return &HydrationTask{
 		ID:                 generateTaskID(in.UserID, in.SourceID, in.AppID),
 		UserID:             in.UserID,
+		UserZone:           in.UserZone,
 		SourceID:           in.SourceID,
 		SourceType:         in.SourceType,
 		AppID:              in.AppID,

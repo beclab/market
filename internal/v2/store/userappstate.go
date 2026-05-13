@@ -37,13 +37,22 @@ var ErrUserApplicationStateNotFound = errors.New("user_applications row not foun
 // upgrade / clone / cancel / stop / resume). State is typically "pending"
 // at this point but is exposed as an input so future call sites (e.g. an
 // admin debug endpoint) can override it.
+//
+// Version anchors installed_version / target_version at row creation time.
+// Install + clone set it to the chart version being deployed so the
+// uninstall handler's LookupInstalledApp can later JOIN on
+// installed_version to lock onto the same row. Uninstall / cancel /
+// upgrade leave Version empty: the SQL's NULLIF + COALESCE preserves the
+// installed_version committed by the original install/clone across the
+// subsequent op_type refresh.
 type PendingStateInput struct {
 	UserID   string
 	SourceID string
 	AppID    string
 
-	State  string // "pending" by default for the M3 path
-	OpType string
+	State   string // "pending" by default for the M3 path
+	OpType  string
+	Version string
 }
 
 // StateNATSUpdate captures the projection of an AppStateMessage that the
@@ -154,22 +163,34 @@ func UpsertPendingState(ctx context.Context, in PendingStateInput) error {
 		return fmt.Errorf("postgres not initialised; db.Open must run before user application state store usage")
 	}
 
+	// installed_version / target_version semantics match
+	// upsertPendingStateInTx (the in-TX twin used by CreateTask):
+	//   - INSERT path: NULLIF turns the "" caller default into SQL NULL
+	//     so non-install/clone callers leave both columns null, matching
+	//     the legacy schema-default behaviour. Install / clone supply a
+	//     non-empty Version so both columns start out as the chart
+	//     version being deployed — the uninstall handler later joins on
+	//     installed_version to find this exact row.
+	//   - UPDATE path: COALESCE(NULLIF(EXCLUDED.x, ''), uas.x) preserves
+	//     the existing value when the new caller carries no Version, so
+	//     uninstall / cancel pending-row writes never erase the version
+	//     install committed at task-creation time.
 	const query = `
 INSERT INTO user_application_states (
-    user_application_id, state, op_type, event_create_time
+    user_application_id, state, op_type, event_create_time,
+    installed_version, target_version
 )
-SELECT ua.id, '', $1, NOW()
+SELECT ua.id, '', $1, NOW(), NULLIF($2, ''), NULLIF($3, '')
 FROM user_applications ua
-WHERE ua.user_id = $2 AND ua.source_id = $3 AND ua.app_id = $4
+WHERE ua.user_id = $4 AND ua.source_id = $5 AND ua.app_id = $6
 ON CONFLICT (user_application_id) DO UPDATE SET
     op_type           = COALESCE(NULLIF(EXCLUDED.op_type, ''), user_application_states.op_type),
-    event_create_time = EXCLUDED.event_create_time
+    event_create_time = EXCLUDED.event_create_time,
+    installed_version = COALESCE(NULLIF(EXCLUDED.installed_version, ''), user_application_states.installed_version),
+    target_version    = COALESCE(NULLIF(EXCLUDED.target_version, ''), user_application_states.target_version)
     -- state / reason / message / progress / entrances /
     -- shared_entrances / status_entrances are owned by the NATS
     -- pipeline and intentionally not touched here.
-    --
-    -- installed_version / target_version are owned by CompleteTask /
-    -- FailTask and intentionally not touched here.
     --
     -- op_id is not known at pending-row write time; preserve the
     -- existing value so the executor's LinkOpID call can fill it in
@@ -178,6 +199,7 @@ ON CONFLICT (user_application_id) DO UPDATE SET
 
 	res := gdb.WithContext(ctx).Exec(query,
 		truncate(in.OpType, stateOpTypeMaxLen),
+		strings.TrimSpace(in.Version), strings.TrimSpace(in.Version),
 		in.UserID, in.SourceID, in.AppID,
 	)
 	if err := res.Error; err != nil {

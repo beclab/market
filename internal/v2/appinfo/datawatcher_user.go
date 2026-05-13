@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"os"
 	"strings"
 	"time"
@@ -62,12 +61,6 @@ func (dw *DataWatcherUser) Start(ctx context.Context) error {
 	// Check if history module is available
 	if dw.historyModule == nil {
 		glog.V(3).Infof("Warning: History module not available in DataWatcherUser, some functionality may be limited")
-	}
-
-	if dw.isDev {
-		glog.V(3).Infof("Running in development mode, NATS connection disabled")
-		go dw.simulateMessages(ctx)
-		return nil
 	}
 
 	if err := dw.connectToNATS(); err != nil {
@@ -208,65 +201,12 @@ func (dw *DataWatcherUser) processMessage(data []byte) {
 	}
 }
 
-// simulateMessages generates random messages every 30 seconds in development mode
-func (dw *DataWatcherUser) simulateMessages(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	eventTypes := []string{"app_install", "app_uninstall", "app_start", "app_stop", "app_update"}
-	usernames := []string{"admin", "user1"}
-
-	// Generate initial message immediately
-	dw.generateRandomMessage(eventTypes, usernames)
-
-	for {
-		select {
-		case <-ctx.Done():
-			glog.V(4).Info("Stopping message simulation")
-			return
-		case <-ticker.C:
-			dw.generateRandomMessage(eventTypes, usernames)
-		}
-	}
-}
-
-// generateRandomMessage creates and processes a random message for development
-func (dw *DataWatcherUser) generateRandomMessage(eventTypes, usernames []string) {
-	message := UserStateMessage{
-		EventType: eventTypes[rand.Intn(len(eventTypes))],
-		Username:  usernames[rand.Intn(len(usernames))],
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-
-	messageData, err := json.Marshal(message)
-	if err != nil {
-		glog.Errorf("Error marshaling simulated message: %v", err)
-		return
-	}
-
-	glog.V(2).Info("Simulated message generated")
-	dw.processMessage(messageData)
-}
-
-// IsHealthy checks if the data watcher is healthy
-func (dw *DataWatcherUser) IsHealthy() bool {
-	if dw.isDev {
-		return true // Always healthy in dev mode
-	}
-
-	if dw.conn == nil {
-		return false
-	}
-
-	return dw.conn.IsConnected()
-}
-
 // GetStatus returns the current status of the data watcher
 func (dw *DataWatcherUser) GetStatus() map[string]interface{} {
 	status := map[string]interface{}{
 		"is_dev":  dw.isDev,
 		"subject": dw.subject,
-		"healthy": dw.IsHealthy(),
+		"healthy": true,
 	}
 
 	if !dw.isDev && dw.conn != nil {

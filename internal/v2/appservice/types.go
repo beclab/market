@@ -1,6 +1,8 @@
 package appservice
 
 import (
+	"encoding/json"
+
 	"market/internal/v2/types"
 )
 
@@ -236,10 +238,84 @@ type AppEntrance struct {
 // app-service does not document the full code space; preserving the
 // raw value lets diagnostic logs print whatever app-service sent
 // without lossy translation.
+//
+// DataRaw preserves the original bytes of the `data` field. Two
+// scenarios make it necessary:
+//
+//  1. Business-error payloads. On HTTP 200 + Code != 200, app-service
+//     may return a `data` block whose shape does NOT match OpResult,
+//     e.g. install's 422 response carries
+//     `data: {"type":"appenv","Data":{"missingValues":[...],...}}`.
+//     The Data field above can't represent that — its strict OpResult
+//     type silently drops the structured payload. DataRaw captures the
+//     bytes verbatim so callers (today: app_install / app_upgrade /
+//     ... in internal/v2/task) can forward them to the API layer's
+//     `backend_response.data` without a lossy interface{} → map →
+//     marshal round-trip that would also lose field ordering and
+//     case sensitivity (the upstream literally uses both `data` and
+//     `Data` as keys at adjacent nesting levels).
+//
+//  2. Forward compatibility on the success path. When app-service
+//     starts emitting additional fields alongside `opID` (warnings,
+//     hints, ...), DataRaw preserves them automatically without
+//     requiring an OpResult schema change.
+//
+// DataRaw is populated by the custom UnmarshalJSON below; the
+// json:"-" tag suppresses the field on the marshal side so a re-
+// serialised OpResponse keeps the wire shape clean.
 type OpResponse struct {
-	Code    int       `json:"code"`
-	Message string    `json:"message,omitempty"`
-	Data    *OpResult `json:"data,omitempty"`
+	Code    int             `json:"code"`
+	Message string          `json:"message,omitempty"`
+	Data    *OpResult       `json:"data,omitempty"`
+	DataRaw json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON parses the upstream envelope and, in a single pass,
+// (a) stores the raw bytes of the `data` field on DataRaw and (b) makes
+// a best-effort decode of the same bytes into OpResult so the legacy
+// `opResp.Data.OpID` access pattern keeps working unchanged.
+//
+// "Best effort" because OpResult only declares the `opID` field — Go's
+// json.Unmarshal tolerates unknown keys without error, so a 422
+// appenv-shaped payload still produces a non-nil Data (with OpID="")
+// rather than a hard parse failure. Callers therefore continue to
+// guard on `opResp.Data != nil && opResp.Data.OpID != ""` exactly as
+// before, and consult DataRaw for the structured business-error body.
+//
+// Why a custom UnmarshalJSON rather than fixing doOp:
+//
+//   - Encapsulates the dual decoding inside the type. Every consumer
+//     (live callers + tests + future endpoints) gets the behaviour
+//     automatically, without each having to remember to capture raw
+//     bytes side-by-side.
+//   - doOp stays free of envelope-decoding details and keeps its
+//     focus on HTTP transport classification.
+func (r *OpResponse) UnmarshalJSON(b []byte) error {
+	type alias struct {
+		Code    int             `json:"code"`
+		Message string          `json:"message,omitempty"`
+		Data    json.RawMessage `json:"data,omitempty"`
+	}
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	r.Code = a.Code
+	r.Message = a.Message
+	// `null` and empty are normalised to "no data" so callers can use
+	// `len(opResp.DataRaw) > 0` as the sentinel without further string
+	// comparisons against the literal "null".
+	if len(a.Data) > 0 && string(a.Data) != "null" {
+		r.DataRaw = a.Data
+		var or OpResult
+		// Unknown fields are tolerated; the decode succeeds with
+		// OpID="" when the upstream `data` does not carry an opID
+		// (typical for business-error payloads).
+		if err := json.Unmarshal(a.Data, &or); err == nil {
+			r.Data = &or
+		}
+	}
+	return nil
 }
 
 // OpResult is the inner block of OpResponse that carries the OpID. We

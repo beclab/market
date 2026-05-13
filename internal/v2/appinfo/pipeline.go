@@ -125,13 +125,19 @@ func (p *Pipeline) run(ctx context.Context) {
 
 	startTime := time.Now()
 
-	// add check current all users in cluster
-	p.cacheManager.RemoveDeletedUser()
-
-	// Phase 1-4: only modify data, no hash calculation or ForceSync
+	// Phase 1-4: only modify data, no hash calculation or ForceSync.
+	//
+	// Phase ordering note: phaseDataWatcherRepo runs BEFORE phaseHydrateApps
+	// so that "app_upload_completed" events land in the applications table
+	// in time for the same cycle's hydration step to pick them up as a
+	// fresh / version-drift candidate via store.ListRenderCandidates.
+	// "image_info_updated" events patch user_applications.image_analysis
+	// directly; the subsequent hydration step does NOT overwrite those
+	// rows because ListRenderCandidates only selects rows in
+	// render_status != 'success' or with metadata->>'version' drift.
 	p.phaseSyncer(ctx)
 	hydrateUsers := p.phaseHydrateApps(ctx)
-	// repoUsers := p.phaseDataWatcherRepo(ctx) // + todo
+	repoUsers := p.phaseDataWatcherRepo(ctx)
 	// statusUsers := p.phaseStatusCorrection(ctx) // + todo need to remove
 
 	// Phase 5: merge all affected users + dirty users, calculate hash once, sync once
@@ -139,9 +145,9 @@ func (p *Pipeline) run(ctx context.Context) {
 	for u := range hydrateUsers {
 		allAffected[u] = true
 	}
-	// for u := range repoUsers {
-	// 	allAffected[u] = true
-	// }
+	for u := range repoUsers {
+		allAffected[u] = true
+	}
 	// for u := range statusUsers {
 	// 	allAffected[u] = true
 	// }
@@ -151,8 +157,6 @@ func (p *Pipeline) run(ctx context.Context) {
 	// 		allAffected[u] = true
 	// 	}
 	// }
-
-	// p.phaseHashAndSync(allAffected)
 
 	// cahedData := p.cacheManager.GetCachedData()
 
@@ -194,16 +198,22 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 		return affectedUsers
 	}
 
-	users := watchers.GetUserIDs() //p.cacheManager.GetOrCreateUserIDs("system")
+	// GetUsers (instead of GetUserIDs) so the per-user UserDataInfo —
+	// crucially Zone — is available at iteration time and can be
+	// injected into each RenderCandidate without a second sync.Map
+	// lookup later. Downstream EnrichEntranceURLs (run inside
+	// TaskForApiStep) needs the zone to compute entrance URLs the
+	// same way app-service does at install time.
+	users := watchers.GetUsers()
 	if len(users) == 0 {
 		glog.V(2).Info("Pipeline Phase 2: no users available, skipping hydration")
 		return affectedUsers
 	}
 
-	glog.V(2).Infof("Pipeline Phase 2: users list: %v", users)
+	glog.V(2).Infof("Pipeline Phase 2: users list (count=%d)", len(users))
 
 	candidates := make([]store.RenderCandidate, 0)
-	for _, userID := range users {
+	for _, u := range users {
 		select {
 		case <-ctx.Done():
 			return affectedUsers
@@ -211,13 +221,19 @@ func (p *Pipeline) phaseHydrateApps(ctx context.Context) map[string]bool {
 			return affectedUsers
 		default:
 		}
-		userCandidates, err := store.ListRenderCandidates(ctx, userID, hydrationCandidateLimitPerUser)
+		userCandidates, err := store.ListRenderCandidates(ctx, u.Name, hydrationCandidateLimitPerUser)
 		if err != nil {
-			glog.Errorf("Pipeline Phase 2: list render candidates for user %s failed: %v", userID, err)
+			glog.Errorf("Pipeline Phase 2: list render candidates for user %s failed: %v", u.Name, err)
 			continue
 		}
+		// Inject Zone so it travels with the candidate down to the
+		// HydrationTask and ultimately to TaskForApiStep. Empty zone
+		// is OK — EnrichEntranceURLs no-ops in that case.
+		for i := range userCandidates {
+			userCandidates[i].UserZone = u.Zone
+		}
 		if len(userCandidates) > 0 {
-			glog.V(3).Infof("Pipeline Phase 2: user=%s, %d candidate(s)", userID, len(userCandidates))
+			glog.V(3).Infof("Pipeline Phase 2: user=%s zone=%q, %d candidate(s)", u.Name, u.Zone, len(userCandidates))
 		}
 		candidates = append(candidates, userCandidates...)
 	}
@@ -366,9 +382,6 @@ func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate, task *hydrationf
 
 // phaseDataWatcherRepo processes chart-repo state changes
 func (p *Pipeline) phaseDataWatcherRepo(ctx context.Context) map[string]bool {
-	if p.dataWatcherRepo == nil {
-		return nil
-	}
 	select {
 	case <-ctx.Done():
 		return nil
@@ -378,41 +391,6 @@ func (p *Pipeline) phaseDataWatcherRepo(ctx context.Context) map[string]bool {
 	}
 	glog.V(2).Info("Pipeline Phase 3: DataWatcherRepo")
 	return p.dataWatcherRepo.ProcessOnce()
-}
-
-// phaseStatusCorrection corrects app running statuses
-func (p *Pipeline) phaseStatusCorrection(ctx context.Context) map[string]bool {
-	if p.statusCorrectionChecker == nil {
-		return nil
-	}
-	select {
-	case <-ctx.Done():
-		return nil
-	case <-p.stopChan:
-		return nil
-	default:
-	}
-	glog.V(2).Info("Pipeline Phase 4: StatusCorrectionChecker")
-	return p.statusCorrectionChecker.PerformStatusCheckOnce()
-}
-
-// phaseHashAndSync calculates user hashes for all affected users and syncs to Redis.
-// This is the single point where hash calculation and ForceSync happen per Pipeline cycle.
-func (p *Pipeline) phaseHashAndSync(affectedUsers map[string]bool) {
-	if p.dataWatcher != nil && len(affectedUsers) > 0 {
-		glog.V(2).Infof("Pipeline Phase 5: calculating hash for %d affected users", len(affectedUsers))
-		for userID := range affectedUsers {
-			userData := p.cacheManager.GetUserData(userID)
-			if userData != nil {
-				p.dataWatcher.CalculateAndSetUserHashDirect(userID, userData)
-			}
-		}
-	}
-	if p.cacheManager != nil {
-		if err := p.cacheManager.ForceSync(); err != nil {
-			glog.Errorf("Pipeline Phase 5: ForceSync rate limited: %v", err)
-		}
-	}
 }
 
 // HydrateSingleApp runs hydration steps for a single PG-sourced candidate.
@@ -432,20 +410,16 @@ func (h *Hydrator) HydrateSingleApp(ctx context.Context, c store.RenderCandidate
 		RawData: c.AppEntry,
 	}
 
-	// sourceType := ""
-	// if h.settingsManager != nil {
-	// 	for _, s := range h.settingsManager.GetActiveMarketSources() {
-	// 		if s.ID == c.SourceID {
-	// 			sourceType = string(s.Type)
-	// 			break
-	// 		}
-	// 	}
-	// }
-
+	// SourceType is sourced from market_sources via store.ListRenderCandidates'
+	// INNER JOIN, so c.SourceType is guaranteed non-empty here. No fallback to
+	// the settings manager is needed; doing one would mask an invariant
+	// violation (applications.source_id without a matching market_sources row)
+	// rather than letting it surface as a missing-candidate error.
 	task := hydrationfn.NewHydrationTaskFromInput(hydrationfn.HydrationTaskInput{
 		UserID:          c.UserID,
+		UserZone:        c.UserZone,
 		SourceID:        c.SourceID,
-		SourceType:      "remote", // + todo sourceType,
+		SourceType:      c.SourceType,
 		AppID:           c.AppID,
 		AppName:         c.AppName,
 		AppVersion:      c.AppVersion,

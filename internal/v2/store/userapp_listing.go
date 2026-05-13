@@ -61,6 +61,22 @@ type AppStateLatestRow struct {
 	Entrances       *models.JSONB[[]types.AppStateLatestDataEntrances] `gorm:"column:entrances"`
 	SharedEntrances *models.JSONB[[]types.AppStateLatestDataEntrances] `gorm:"column:shared_entrances"`
 	StatusEntrances *models.JSONB[[]types.AppStateLatestDataEntrances] `gorm:"column:status_entrances"`
+
+	// UAEntrances is the manifest-side entrance declaration projected
+	// from user_applications.entrances (NOT from user_application_states).
+	// It carries the declarative fields a frontend needs to render an
+	// entrance card (name / host / port / icon / title / authLevel /
+	// url / openMethod / invisible / ...). The runtime triplet
+	// (state / statusTime / reason) is then overlaid from
+	// StatusEntrances by ToWireData via mergeEntranceStatuses, using
+	// positional matching: status[i] describes manifest[i].
+	//
+	// Aliased to ua_entrances in the SELECT projection to avoid
+	// colliding with uas.entrances (also surfaced through this struct
+	// as the Entrances field above). nil when the user_applications
+	// row predates the entrances column being populated, in which
+	// case mergeEntranceStatuses falls back to the raw status slice.
+	UAEntrances *models.JSONB[[]types.AppStateLatestDataEntrances] `gorm:"column:ua_entrances"`
 }
 
 // ListAppInfoLatestForUser returns one AppInfoSimpleRow per
@@ -273,7 +289,8 @@ func ListUserAppStateLatest(ctx context.Context, userID string, sourceIDs []stri
 		        uas.updated_at AS uas_updated_at,
 		        uas.entrances,
 		        uas.shared_entrances,
-		        uas.status_entrances`).
+		        uas.status_entrances,
+		        ua.entrances AS ua_entrances`).
 		Where("ua.user_id = ?", userID).
 		Where("ua.source_id IN ?", sourceIDs).
 		Order("ua.source_id, ua.app_id").
@@ -384,6 +401,131 @@ LIMIT 1
 	return rows[0], nil
 }
 
+// GetAppUpgradeRow resolves the user_applications row that the
+// upgradeApp handler must dispatch a chart-upgrade against. Unlike
+// GetAppInstallRow, the wire-level app_name supplied by the client
+// may legitimately be either:
+//
+//   1. the original app's name (app_id == app_raw_id row), or
+//   2. a clone alias (app_id != app_raw_id row, where app_raw_name
+//      points at the underlying chart row).
+//
+// In both cases the chart that gets upgraded is the original row, so
+// the SQL self-joins user_applications onto itself: the inner alias
+// ("matched") locates the row whose app_name == appName in (user,
+// source); the outer alias ("orig") follows app_raw_id back to the
+// row with app_id = app_raw_id, which is the chart row the API
+// handler actually consumes (manifest_type, rendered_package,
+// image_analysis, etc.).
+//
+// Both sides require render_status='success' — the matched row must
+// be a live install/clone and the original row must hold a usable
+// rendered chart.
+//
+// version is matched against the original row's metadata->>'version'
+// (NOT the matched row's), because the chart is the original's and
+// its version is the canonical one. Empty version is rejected: every
+// upgradeApp request carries a version on the wire and downstream
+// chart_path construction needs it.
+//
+// Returns (row, matchedAppName, matchedAppID, nil). matchedAppName /
+// matchedAppID are the user_applications.app_name / app_id of the
+// inner alias — i.e. the original app's identity when the client
+// passed the original, or the clone alias's identity when the client
+// passed a clone. Callers:
+//
+//   - compare matchedAppName to row.AppName to decide whether the
+//     request was a clone upgrade (matchedAppName != row.AppName) and
+//     surface rawAppName in task metadata accordingly;
+//   - put matchedAppID into task metadata as realAppID so the
+//     downstream upsertPendingStateInTx anchors on the SAME
+//     user_applications row the user clicked on (not the original
+//     chart row, which lives at row.AppID). For non-clone upgrades
+//     matchedAppID == row.AppID so callers can use it unconditionally.
+//
+// Returns (nil, "", "", nil) when no matching pair is found; the
+// caller should respond 404.
+func GetAppUpgradeRow(ctx context.Context, userID, sourceID, appName, version string) (*AppInstallRow, string, string, error) {
+	userID = strings.TrimSpace(userID)
+	sourceID = strings.TrimSpace(sourceID)
+	appName = strings.TrimSpace(appName)
+	version = strings.TrimSpace(version)
+	if userID == "" || sourceID == "" || appName == "" || version == "" {
+		return nil, "", "", fmt.Errorf("GetAppUpgradeRow: empty userID/sourceID/appName/version")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, "", "", fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+	}
+
+	const query = `
+SELECT orig.source_id,
+       orig.app_id,
+       orig.app_raw_id,
+       orig.app_name,
+       orig.app_raw_name,
+       orig.manifest_type,
+       COALESCE(orig.metadata->>'version', '') AS app_version,
+       orig.rendered_package,
+       orig.price,
+       orig.image_analysis,
+       matched.app_name                        AS matched_app_name,
+       matched.app_id                          AS matched_app_id
+FROM user_applications matched
+JOIN user_applications orig
+        ON orig.user_id    = matched.user_id
+       AND orig.source_id  = matched.source_id
+       AND orig.app_raw_id = matched.app_raw_id
+       AND orig.app_id     = orig.app_raw_id
+WHERE matched.user_id        = ?
+  AND matched.source_id      = ?
+  AND matched.app_name       = ?
+  AND matched.render_status  = 'success'
+  AND orig.render_status     = 'success'
+  AND orig.metadata->>'version' = ?
+ORDER BY orig.updated_at DESC
+LIMIT 1
+`
+
+	type row struct {
+		SourceID        string                                   `gorm:"column:source_id"`
+		AppID           string                                   `gorm:"column:app_id"`
+		AppRawID        string                                   `gorm:"column:app_raw_id"`
+		AppName         string                                   `gorm:"column:app_name"`
+		AppRawName      string                                   `gorm:"column:app_raw_name"`
+		ManifestType    string                                   `gorm:"column:manifest_type"`
+		AppVersion      string                                   `gorm:"column:app_version"`
+		RenderedPackage string                                   `gorm:"column:rendered_package"`
+		Price           *models.JSONB[types.PriceConfig]         `gorm:"column:price"`
+		ImageAnalysis   *models.JSONB[types.ImageAnalysisResult] `gorm:"column:image_analysis"`
+		MatchedAppName  string                                   `gorm:"column:matched_app_name"`
+		MatchedAppID    string                                   `gorm:"column:matched_app_id"`
+	}
+
+	var rows []*row
+	if err := gdb.WithContext(ctx).Raw(query, userID, sourceID, appName, version).Scan(&rows).Error; err != nil {
+		return nil, "", "", fmt.Errorf("get app upgrade row (user=%s source=%s app=%s version=%s): %w",
+			userID, sourceID, appName, version, err)
+	}
+	if len(rows) == 0 {
+		return nil, "", "", nil
+	}
+	r := rows[0]
+	return &AppInstallRow{
+		SourceID:        r.SourceID,
+		AppID:           r.AppID,
+		AppRawID:        r.AppRawID,
+		AppName:         r.AppName,
+		AppRawName:      r.AppRawName,
+		ManifestType:    r.ManifestType,
+		AppVersion:      r.AppVersion,
+		RenderedPackage: r.RenderedPackage,
+		Price:           r.Price,
+		ImageAnalysis:   r.ImageAnalysis,
+	}, r.MatchedAppName, r.MatchedAppID, nil
+}
+
 // AppLocatorRow is the projection LookupAppLocator yields. It carries
 // the minimum fields cancelInstall / uninstallApp need to pivot from
 // an app_name (which is what the wire contract gives them) to the
@@ -448,6 +590,82 @@ LIMIT 1
 	var rows []*AppLocatorRow
 	if err := gdb.WithContext(ctx).Raw(query, userID, appName, appName).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("lookup app locator (user=%s app=%s): %w", userID, appName, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+// LookupInstalledApp finds the user_applications row for an app that
+// has actually been installed for this user, scoped by app_name AND
+// installed_version. The JOIN against user_application_states serves
+// two purposes:
+//
+//   - Existence proof: the state row's presence means an install task
+//     has run (upsertPendingStateInTx writes the row at install task
+//     creation) — no state row, no install. Returning nil here lets
+//     uninstall surface a clean 404 instead of dispatching against
+//     nothing.
+//
+//   - Version-anchored disambiguation: install writes the chart version
+//     into installed_version at task creation. Filtering uninstall on
+//     (app_name, installed_version) locks onto the SAME row install
+//     populated, eliminating the multi-source / clone-vs-original
+//     ambiguity that the older LookupAppLocator (no source filter, OR
+//     across app_name/app_raw_name, no version) was prone to. The
+//     downstream upsertPendingStateInTx then ON CONFLICTs cleanly on
+//     the existing user_application_id rather than INSERTing a sibling
+//     state row.
+//
+// app_name is matched exactly (NOT app_name OR app_raw_name): clones
+// have their own app_name on the wire (rawAppName+hash) and write
+// their own state row; uninstalling a clone passes the clone's wire
+// name and naturally lands on its own row. Falling back to
+// app_raw_name would re-introduce the original-vs-clone collision
+// LookupAppLocator suffered from.
+//
+// render_status='success' filters out the failure / pending-render
+// placeholder rows, matching every other action-side helper in this
+// file.
+//
+// Returns (nil, nil) when no row matches; the caller surfaces 404.
+// Empty userID / appName / version are caller bugs and return an
+// error rather than a silent miss.
+func LookupInstalledApp(ctx context.Context, userID, appName, version string) (*AppLocatorRow, error) {
+	userID = strings.TrimSpace(userID)
+	appName = strings.TrimSpace(appName)
+	version = strings.TrimSpace(version)
+	if userID == "" || appName == "" || version == "" {
+		return nil, fmt.Errorf("LookupInstalledApp: empty userID/appName/version")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before user application store usage")
+	}
+
+	const query = `
+SELECT ua.source_id,
+       ua.app_id,
+       ua.app_raw_id,
+       ua.app_raw_name,
+       ua.manifest_type
+FROM user_applications ua
+JOIN user_application_states uas
+       ON uas.user_application_id = ua.id
+WHERE ua.user_id            = ?
+  AND ua.app_name           = ?
+  AND uas.installed_version = ?
+  AND ua.render_status      = 'success'
+ORDER BY ua.updated_at DESC
+LIMIT 1
+`
+
+	var rows []*AppLocatorRow
+	if err := gdb.WithContext(ctx).Raw(query, userID, appName, version).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lookup installed app (user=%s app=%s version=%s): %w",
+			userID, appName, version, err)
 	}
 	if len(rows) == 0 {
 		return nil, nil
@@ -599,9 +817,15 @@ func (r *AppStateLatestRow) ToWireData(userID, sourceID string) *types.AppStateL
 		},
 		Tailscale: map[string]interface{}{},
 	}
-	if r.StatusEntrances != nil {
-		spec.EntranceStatuses = r.StatusEntrances.Data
+	var manifestEntrances, statusEntrances []types.AppStateLatestDataEntrances
+	if r.UAEntrances != nil {
+		manifestEntrances = r.UAEntrances.Data
 	}
+	if r.StatusEntrances != nil {
+		statusEntrances = r.StatusEntrances.Data
+	}
+	spec.EntranceStatuses = mergeEntranceStatuses(manifestEntrances, statusEntrances)
+
 	if r.SharedEntrances != nil {
 		spec.SharedEntrances = r.SharedEntrances.Data
 	}
@@ -611,6 +835,47 @@ func (r *AppStateLatestRow) ToWireData(userID, sourceID string) *types.AppStateL
 		Version: r.InstalledVersion,
 		Status:  spec,
 	}
+}
+
+// mergeEntranceStatuses overlays NATS-delivered runtime status onto the
+// manifest entrance declarations to produce the EntranceStatuses payload
+// the wire contract expects. Match is positional (index-based), NOT by
+// Name: the upstream NATS msg.EntranceStatuses is guaranteed to be in
+// the same order as the manifest entrances, so status[i] always
+// describes manifest[i].
+//
+// Only three fields are taken from status: State, StatusTime, Reason.
+// Everything else (Name / Host / Port / Icon / Title / AuthLevel / Url /
+// OpenMethod / Invisible / WindowPushState / Skip) is copied verbatim
+// from the manifest declaration — manifest is the source of truth for
+// declarative fields, including the URL that EnrichEntranceURLs writes
+// at hydration time.
+//
+// Length handling:
+//   - manifest empty (e.g. ua.entrances NULL on a legacy / partially
+//     rendered row): return status as-is, so callers still see the
+//     runtime triplet without losing the event.
+//   - len(status) < len(manifest): manifest entries beyond status
+//     length keep zero State/StatusTime/Reason (runtime simply has
+//     not reported on them yet).
+//   - len(status) > len(manifest): excess status entries are dropped;
+//     manifest is authoritative for the entrance LIST and any extra
+//     status entries indicate an upstream/manifest drift that should
+//     not silently surface in the wire payload.
+func mergeEntranceStatuses(manifest, status []types.AppStateLatestDataEntrances) []types.AppStateLatestDataEntrances {
+	if len(manifest) == 0 {
+		return status
+	}
+	out := make([]types.AppStateLatestDataEntrances, len(manifest))
+	for i, m := range manifest {
+		out[i] = m
+		if i < len(status) {
+			out[i].State = status[i].State
+			out[i].StatusTime = status[i].StatusTime
+			out[i].Reason = status[i].Reason
+		}
+	}
+	return out
 }
 
 // GetUserAppStateLatest reads a single user_application_states JOIN
@@ -662,7 +927,8 @@ func GetUserAppStateLatest(ctx context.Context, userID, sourceID, appName, appRa
 		        uas.updated_at AS uas_updated_at,
 		        uas.entrances,
 		        uas.shared_entrances,
-		        uas.status_entrances`).
+		        uas.status_entrances,
+		        ua.entrances AS ua_entrances`).
 		Where("ua.user_id = ?", userID).
 		Where("ua.source_id = ?", sourceID).
 		Where("ua.app_name = ?", appName).

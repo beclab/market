@@ -2,7 +2,6 @@ package helper
 
 import (
 	"os"
-	"strings"
 )
 
 // IsPublicEnvironment reports whether the binary runs in the "public"
@@ -11,14 +10,6 @@ import (
 // initialisation.
 func IsPublicEnvironment() bool {
 	return os.Getenv("isPublic") == "true"
-}
-
-// IsDevelopmentEnvironment reports whether the binary runs locally in a
-// developer environment. The default (unset) is treated as development so
-// that fresh checkouts behave the same as `GO_ENV=dev`.
-func IsDevelopmentEnvironment() bool {
-	env := strings.ToLower(os.Getenv("GO_ENV"))
-	return env == "dev" || env == "development" || env == ""
 }
 
 // IsAccountFromHeader reports whether the user account should be sourced

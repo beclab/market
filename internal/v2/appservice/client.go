@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"market/internal/v2/helper"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 // Client is the interface every consumer of app-service should depend
@@ -313,6 +316,9 @@ func (c *httpClient) CancelApp(ctx context.Context, appName string, hdr OpHeader
 // human-readable verb used in OpError; payload may be nil (cancel) and
 // is JSON-encoded otherwise.
 func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload interface{}, hdr OpHeaders) (*OpResponse, error) {
+
+	glog.Infof("[appservice] request path: %s, op: %s, payload: %s, hdr: %s", path, opName, helper.ParseJson(payload), helper.ParseJson(hdr))
+
 	var body io.Reader
 	if payload != nil {
 		buf, err := json.Marshal(payload)
@@ -327,24 +333,38 @@ func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload 
 		return nil, err
 	}
 
-	// Transport-level failure has priority. Skip strict envelope
-	// decoding when status != 200 — upstream sidecars may ship
-	// arbitrary plain text on 5xx (e.g. "Internal Server Error\n"
-	// from a generic reverse proxy) and forcing a JSON decode here
-	// would mask the real classification with ErrInvalidResponse.
+	// Non-200 path. Two sub-shapes possible:
+	//   a) Plain-text body (sidecar 5xx, "Internal Server Error\n",
+	//      reverse-proxy default pages). The envelope decode fails
+	//      silently, op stays zero-valued, and we fall through to
+	//      the bare HTTP classification — same as before.
+	//   b) Structured business-error envelope. app-service uses this
+	//      shape for HTTP 422 + body {code, data} on validation
+	//      failures (e.g. install's appenv missingValues schema). We
+	//      MUST return the OpResponse so opResp.DataRaw can carry the
+	//      structured payload up to the install handler's
+	//      backend_response forwarding path, AND surface the error as
+	//      *OpError so callers' errors.As(err, &opErr) matches the
+	//      same shape as the HTTP-200-business-error branch below.
+	//      This makes the two non-success paths symmetric.
 	if status != http.StatusOK {
-		// Best-effort: if the body happens to be a structured error
-		// envelope, surface its Code/Message alongside the HTTP
-		// classification for diagnostics. Decode errors are
-		// intentionally swallowed here.
 		var op OpResponse
 		_ = json.Unmarshal(respBody, &op)
 
-		hcErr := classifyHTTPStatus(status)
-		if op.Code != 0 || op.Message != "" {
-			return nil, fmt.Errorf("%w (upstream code=%d message=%q)", hcErr, op.Code, op.Message)
+		if op.Code != 0 || op.Message != "" || len(op.DataRaw) > 0 {
+			c.metrics.ObserveRequest(ep, status, 0, errKindBusinessError)
+			opID := ""
+			if op.Data != nil {
+				opID = op.Data.OpID
+			}
+			return &op, &OpError{
+				Op:      opName,
+				Code:    op.Code,
+				Message: op.Message,
+				OpID:    opID,
+			}
 		}
-		return nil, hcErr
+		return nil, classifyHTTPStatus(status)
 	}
 
 	// HTTP 200: decode the envelope strictly. A decode failure now

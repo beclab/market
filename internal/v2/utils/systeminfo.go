@@ -28,12 +28,6 @@ func GetTerminusVersionValue() (string, error) {
 		}
 	}
 
-	// Check development environment
-	if helper.IsDevelopmentEnvironment() {
-		glog.Infof("Development environment detected, returning version: 1.12.3")
-		return "1.12.3", nil
-	}
-
 	// Get version from service
 	versionResponse, err := getTerminusVersionFromService()
 	if err != nil {
