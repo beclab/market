@@ -1,17 +1,16 @@
 package appinfo
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
 
+	"market/internal/v2/chartrepo"
+	"market/internal/v2/helper"
 	"market/internal/v2/store"
 	"market/internal/v2/types"
 
@@ -153,18 +152,11 @@ func (dwr *DataWatcherRepo) StartWithOptions() error {
 // user_ids whose user_applications rows were touched, so Pipeline can
 // fold them into the affected-users set fed to phaseHashAndSync.
 func (dwr *DataWatcherRepo) ProcessOnce() map[string]bool {
-	if !dwr.isRunning {
-		return nil
-	}
 	return dwr.processStateChanges()
 }
 
 // Stop stops the periodic state checking process
 func (dwr *DataWatcherRepo) Stop() error {
-	if !dwr.isRunning {
-		return fmt.Errorf("data watcher is not running")
-	}
-
 	if dwr.ticker != nil {
 		dwr.ticker.Stop()
 	}
@@ -176,11 +168,6 @@ func (dwr *DataWatcherRepo) Stop() error {
 
 	glog.V(3).Info("Data watcher stopped")
 	return nil
-}
-
-// IsRunning returns whether the data watcher is currently running
-func (dwr *DataWatcherRepo) IsRunning() bool {
-	return dwr.isRunning
 }
 
 // processStateChanges fetches and processes new state changes. Returns
@@ -235,43 +222,29 @@ func (dwr *DataWatcherRepo) processStateChanges() map[string]bool {
 }
 
 // fetchStateChanges calls the /state-changes API to get new state changes
-func (dwr *DataWatcherRepo) fetchStateChanges(afterID int64) ([]*StateChange, error) {
-	url := fmt.Sprintf("http://%s/chart-repo/api/v2/state-changes?after_id=%d&limit=1000", dwr.apiBaseURL, afterID)
-
-	glog.V(2).Infof("Fetching state changes from: %s", url)
-
-	resp, err := http.Get(url)
+func (dwr *DataWatcherRepo) fetchStateChanges(afterID int64) ([]*chartrepo.StateChange, error) {
+	c, err := chartrepo.NewClient(chartrepo.WithBaseURL(dwr.apiBaseURL))
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
+		return nil, err
 	}
 
-	var apiResponse StateChangesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode API response: %w", err)
+	scd, err := c.GetStateChanges(context.Background(), afterID, 1000)
+	if err != nil {
+		return nil, err
 	}
 
-	if !apiResponse.Success {
-		return nil, fmt.Errorf("API request failed: %s", apiResponse.Message)
-	}
+	fmt.Println("---1---", helper.ParseJson(scd))
 
-	if apiResponse.Data == nil {
-		return nil, fmt.Errorf("API response data is nil")
-	}
+	glog.V(2).Infof("Successfully fetched %d state changes, afterId: %d", scd.Count, scd.AfterID)
 
-	glog.V(2).Infof("Successfully fetched %d state changes", apiResponse.Data.Count)
-	return apiResponse.Data.StateChanges, nil
+	return scd.StateChanges, nil
 }
 
 // processStateChange dispatches a single state change to the matching
 // handler. Returns the list of user_ids the handler reports as affected
 // (empty for handlers that don't have user-level fan-out, or for events
 // that no user currently observes).
-func (dwr *DataWatcherRepo) processStateChange(change *StateChange) ([]string, error) {
+func (dwr *DataWatcherRepo) processStateChange(change *chartrepo.StateChange) ([]string, error) {
 	glog.V(3).Infof("Processing state change ID %d, type: %s", change.ID, change.Type)
 
 	switch change.Type {
@@ -297,7 +270,7 @@ func (dwr *DataWatcherRepo) processStateChange(change *StateChange) ([]string, e
 // the app today and should be flagged for the pipeline's affected-user
 // fan-out (hash recalc / push). Users who have not yet rendered the
 // app (no row) will discover it on the next hydration cycle anyway.
-func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *StateChange) ([]string, error) {
+func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *chartrepo.StateChange) ([]string, error) {
 	if change.AppData == nil {
 		return nil, fmt.Errorf("app_upload_completed without app_data")
 	}
@@ -308,6 +281,8 @@ func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *StateChange) ([]str
 	if err != nil {
 		return nil, fmt.Errorf("fetch app info: %w", err)
 	}
+
+	fmt.Println("---2---", helper.ParseJson(appInfo))
 
 	appID := pickAppIDFromPayload(appInfo, change.AppData.AppName)
 	if appID == "" {
@@ -332,7 +307,7 @@ func (dwr *DataWatcherRepo) handleAppUploadCompleted(change *StateChange) ([]str
 // references the image. Each affected user gets a direct
 // image_state_change push so the frontend can refresh without waiting
 // for the next pipeline cycle's hash recalc.
-func (dwr *DataWatcherRepo) handleImageInfoUpdated(change *StateChange) ([]string, error) {
+func (dwr *DataWatcherRepo) handleImageInfoUpdated(change *chartrepo.StateChange) ([]string, error) {
 	if change.ImageData == nil || change.ImageData.ImageName == "" {
 		return nil, fmt.Errorf("image_info_updated without image_name")
 	}
@@ -393,68 +368,31 @@ func pickAppIDFromPayload(appPayload map[string]interface{}, fallbackName string
 
 // fetchAppInfoFromAPI fetches app information from the /apps API endpoint
 func (dwr *DataWatcherRepo) fetchAppInfoFromAPI(userID, sourceID, appName string) (map[string]interface{}, error) {
-	requestPayload := map[string]interface{}{
-		"apps": []map[string]string{
-			{
-				"appid":          appName,
-				"sourceDataName": sourceID,
+	c, err := chartrepo.NewClient(chartrepo.WithBaseURL(dwr.apiBaseURL))
+	if err != nil {
+		return nil, err
+	}
+
+	var in = chartrepo.AppsRequest{
+		Apps: []chartrepo.AppsRequestItem{
+			chartrepo.AppsRequestItem{
+				AppID:          appName,
+				SourceDataName: sourceID,
 			},
 		},
-		"userid": userID,
+		UserID: userID,
 	}
 
-	jsonData, err := json.Marshal(requestPayload)
+	apps, err := c.GetAppInfo(context.Background(), in)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request payload: %w", err)
+		return nil, err
 	}
 
-	url := fmt.Sprintf("http://%s/chart-repo/api/v2/apps", dwr.apiBaseURL)
-	glog.V(3).Infof("Fetching app info from API: %s for app: %s, user: %s, source: %s", url, appName, userID, sourceID)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d for app: %s", resp.StatusCode, appName)
+	if len(apps) == 0 {
+		return nil, fmt.Errorf("no app data found in API response for app: %s", appName)
 	}
 
-	var apiResponse struct {
-		Success bool                   `json:"success"`
-		Message string                 `json:"message"`
-		Data    map[string]interface{} `json:"data,omitempty"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode API response for app %s: %w", appName, err)
-	}
-
-	if !apiResponse.Success {
-		return nil, fmt.Errorf("API request failed for app %s: %s", appName, apiResponse.Message)
-	}
-
-	if appsData, ok := apiResponse.Data["apps"]; ok {
-		if apps, ok := appsData.([]interface{}); ok && len(apps) > 0 {
-			if appInfo, ok := apps[0].(map[string]interface{}); ok {
-				glog.V(3).Infof("Successfully fetched app info from API for app: %s", appName)
-				return appInfo, nil
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("no app data found in API response for app: %s", appName)
+	return apps[0], nil
 }
 
 // SetDataWatcher sets the DataWatcher reference for hash calculation
@@ -495,48 +433,21 @@ func (dwr *DataWatcherRepo) SetApiBaseURL(url string) {
 
 // fetchImageInfoFromAPI fetches image information from the /images API endpoint with query parameter
 func (dwr *DataWatcherRepo) fetchImageInfoFromAPI(imageName string) (map[string]interface{}, error) {
-	url := fmt.Sprintf("http://%s/chart-repo/api/v2/images?imageName=%s", dwr.apiBaseURL, imageName)
-	glog.V(3).Infof("Fetching image info from API: %s for image: %s", url, imageName)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	c, err := chartrepo.NewClient(chartrepo.WithBaseURL(dwr.apiBaseURL))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		return nil, err
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := c.GetImageInfo(context.Background(), imageName)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
+		return nil, err
 	}
 
-	var apiResponse map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode API response: %w", err)
+	if resp == nil {
+		return nil, fmt.Errorf("invalid API response format: missing image_info data")
 	}
 
-	if success, ok := apiResponse["success"].(bool); !ok || !success {
-		message := "unknown error"
-		if msg, ok := apiResponse["message"].(string); ok {
-			message = msg
-		}
-		return nil, fmt.Errorf("API request failed: %s", message)
-	}
-
-	if data, ok := apiResponse["data"].(map[string]interface{}); ok {
-		if imageInfo, ok := data["image_info"].(map[string]interface{}); ok {
-			return imageInfo, nil
-		}
-	}
-
-	return nil, fmt.Errorf("invalid API response format: missing image_info data")
+	return resp, nil
 }
 
 // sendImageStateChangeToUser sends image state change message to a specific user

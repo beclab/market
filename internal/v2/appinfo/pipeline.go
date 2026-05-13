@@ -158,8 +158,6 @@ func (p *Pipeline) run(ctx context.Context) {
 	// 	}
 	// }
 
-	// p.phaseHashAndSync(allAffected)
-
 	// cahedData := p.cacheManager.GetCachedData()
 
 	// glog.V(2).Infof("Pipeline: [LOOP] cycle completed in %v, cached: %s", time.Since(startTime), cahedData)
@@ -384,9 +382,6 @@ func (p *Pipeline) notifyRenderSuccess(c store.RenderCandidate, task *hydrationf
 
 // phaseDataWatcherRepo processes chart-repo state changes
 func (p *Pipeline) phaseDataWatcherRepo(ctx context.Context) map[string]bool {
-	if p.dataWatcherRepo == nil {
-		return nil
-	}
 	select {
 	case <-ctx.Done():
 		return nil
@@ -396,41 +391,6 @@ func (p *Pipeline) phaseDataWatcherRepo(ctx context.Context) map[string]bool {
 	}
 	glog.V(2).Info("Pipeline Phase 3: DataWatcherRepo")
 	return p.dataWatcherRepo.ProcessOnce()
-}
-
-// phaseStatusCorrection corrects app running statuses
-func (p *Pipeline) phaseStatusCorrection(ctx context.Context) map[string]bool {
-	if p.statusCorrectionChecker == nil {
-		return nil
-	}
-	select {
-	case <-ctx.Done():
-		return nil
-	case <-p.stopChan:
-		return nil
-	default:
-	}
-	glog.V(2).Info("Pipeline Phase 4: StatusCorrectionChecker")
-	return p.statusCorrectionChecker.PerformStatusCheckOnce()
-}
-
-// phaseHashAndSync calculates user hashes for all affected users and syncs to Redis.
-// This is the single point where hash calculation and ForceSync happen per Pipeline cycle.
-func (p *Pipeline) phaseHashAndSync(affectedUsers map[string]bool) {
-	if p.dataWatcher != nil && len(affectedUsers) > 0 {
-		glog.V(2).Infof("Pipeline Phase 5: calculating hash for %d affected users", len(affectedUsers))
-		for userID := range affectedUsers {
-			userData := p.cacheManager.GetUserData(userID)
-			if userData != nil {
-				p.dataWatcher.CalculateAndSetUserHashDirect(userID, userData)
-			}
-		}
-	}
-	if p.cacheManager != nil {
-		if err := p.cacheManager.ForceSync(); err != nil {
-			glog.Errorf("Pipeline Phase 5: ForceSync rate limited: %v", err)
-		}
-	}
 }
 
 // HydrateSingleApp runs hydration steps for a single PG-sourced candidate.

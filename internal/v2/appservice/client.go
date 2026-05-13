@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"market/internal/v2/helper"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 // Client is the interface every consumer of app-service should depend
@@ -313,6 +316,9 @@ func (c *httpClient) CancelApp(ctx context.Context, appName string, hdr OpHeader
 // human-readable verb used in OpError; payload may be nil (cancel) and
 // is JSON-encoded otherwise.
 func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload interface{}, hdr OpHeaders) (*OpResponse, error) {
+
+	glog.Infof("[appservice] request path: %s, op: %s, payload: %s, hdr: %s", path, opName, helper.ParseJson(payload), helper.ParseJson(hdr))
+
 	var body io.Reader
 	if payload != nil {
 		buf, err := json.Marshal(payload)

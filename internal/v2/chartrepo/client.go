@@ -7,12 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"market/internal/v2/helper"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 // Client is the interface every consumer of chart-repo should depend
@@ -45,7 +48,7 @@ type Client interface {
 	// path in appinfomodule.
 	GetRepoData(ctx context.Context) (*RepoData, error)
 	GetStateChanges(ctx context.Context, afterID int64, limit int) (*StateChangesData, error)
-	GetAppInfo(ctx context.Context, in AppsRequest) ([]map[string]any, error)
+	GetAppInfo(ctx context.Context, in AppsRequest) ([]map[string]interface{}, error)
 	GetImageInfo(ctx context.Context, imageName string) (map[string]any, error)
 
 	// Download history — single-row lookup used by the install
@@ -222,7 +225,7 @@ func (c *httpClient) GetStateChanges(ctx context.Context, afterID int64, limit i
 // []map[string]any payload chart-repo nests under
 // envelope.data.apps. Returns an empty slice (not error) when the
 // upstream replies with success=true but an empty apps array.
-func (c *httpClient) GetAppInfo(ctx context.Context, in AppsRequest) ([]map[string]any, error) {
+func (c *httpClient) GetAppInfo(ctx context.Context, in AppsRequest) ([]map[string]interface{}, error) {
 	const ep = "get_app_info"
 	var out AppsResponseData
 	if err := c.doJSONPost(ctx, ep, "/apps", in, &out); err != nil {
@@ -234,7 +237,7 @@ func (c *httpClient) GetAppInfo(ctx context.Context, in AppsRequest) ([]map[stri
 // GetImageInfo fetches chart-repo's analysis for a single image. The
 // imageName is URL-query-escaped to handle the colons/slashes typical
 // in OCI references (e.g. "registry.io/foo/bar:v1.2.3").
-func (c *httpClient) GetImageInfo(ctx context.Context, imageName string) (map[string]any, error) {
+func (c *httpClient) GetImageInfo(ctx context.Context, imageName string) (map[string]interface{}, error) {
 	const ep = "get_image_info"
 	if strings.TrimSpace(imageName) == "" {
 		return nil, fmt.Errorf("chartrepo: GetImageInfo called with empty imageName")
@@ -569,6 +572,9 @@ func (c *httpClient) doRequest(
 	headers map[string]string,
 	body io.Reader,
 ) (responseBody []byte, status int, err error) {
+
+	glog.Infof("[chartrepo] request path: %s, method: %s, headers: %s", path, method, helper.ParseJson(headers))
+
 	start := time.Now()
 
 	// Apply default timeout if the caller's context has no deadline of

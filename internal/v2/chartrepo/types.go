@@ -162,7 +162,7 @@ type AppsRequest struct {
 // origin. Pick out fields you need via map keys rather than declaring
 // a struct that would silently drop unknown fields.
 type AppsResponseData struct {
-	Apps []map[string]any `json:"apps"`
+	Apps []map[string]interface{} `json:"apps"`
 }
 
 // ----------------------------------------------------------------------
@@ -172,7 +172,7 @@ type AppsResponseData struct {
 // ImagesResponseData is the unwrapped data field of GET /images.
 // ImageInfo is opaque (map[string]any) for the same reason AppsResponseData.Apps is.
 type ImagesResponseData struct {
-	ImageInfo map[string]any `json:"image_info"`
+	ImageInfo map[string]interface{} `json:"image_info"`
 }
 
 // ----------------------------------------------------------------------
@@ -327,11 +327,11 @@ const (
 // this client, the parallel definitions in runtime/types.go can be
 // thinned to type aliases or removed.
 type Status struct {
-	System     *SystemStatus     `json:"system,omitempty"`
-	Apps       []*AppState       `json:"apps,omitempty"`
-	Images     []*ImageState     `json:"images,omitempty"`
-	Tasks      *TasksStatus      `json:"tasks,omitempty"`
-	LastUpdate time.Time         `json:"last_update"`
+	System     *SystemStatus `json:"system,omitempty"`
+	Apps       []*AppState   `json:"apps,omitempty"`
+	Images     []*ImageState `json:"images,omitempty"`
+	Tasks      *TasksStatus  `json:"tasks,omitempty"`
+	LastUpdate time.Time     `json:"last_update"`
 }
 
 // SystemStatus is the system block of /status. Components and
@@ -449,22 +449,22 @@ type TaskState struct {
 }
 
 type ImageAnalyzerStatus struct {
-	IsRunning           bool                         `json:"is_running"`
-	HealthStatus        string                       `json:"health_status"`
-	LastCheck           time.Time                    `json:"last_check"`
-	QueueLength         int                          `json:"queue_length"`
-	ActiveWorkers       int                          `json:"active_workers"`
-	CachedImages        int                          `json:"cached_images"`
-	AnalyzingCount      int                          `json:"analyzing_count"`
-	QueuedTasks         []*ImageAnalysisTaskDetail   `json:"queued_tasks,omitempty"`
-	ProcessingTasks     []*ImageAnalysisTaskDetail   `json:"processing_tasks,omitempty"`
-	RecentCompleted     []*ImageAnalysisTaskDetail   `json:"recent_completed,omitempty"`
-	RecentFailed        []*ImageAnalysisTaskDetail   `json:"recent_failed,omitempty"`
-	TotalAnalyzed       int64                        `json:"total_analyzed"`
-	SuccessfulAnalyzed  int64                        `json:"successful_analyzed"`
-	FailedAnalyzed      int64                        `json:"failed_analyzed"`
-	AverageAnalysisTime time.Duration                `json:"average_analysis_time"`
-	ErrorMessage        string                       `json:"error_message,omitempty"`
+	IsRunning           bool                       `json:"is_running"`
+	HealthStatus        string                     `json:"health_status"`
+	LastCheck           time.Time                  `json:"last_check"`
+	QueueLength         int                        `json:"queue_length"`
+	ActiveWorkers       int                        `json:"active_workers"`
+	CachedImages        int                        `json:"cached_images"`
+	AnalyzingCount      int                        `json:"analyzing_count"`
+	QueuedTasks         []*ImageAnalysisTaskDetail `json:"queued_tasks,omitempty"`
+	ProcessingTasks     []*ImageAnalysisTaskDetail `json:"processing_tasks,omitempty"`
+	RecentCompleted     []*ImageAnalysisTaskDetail `json:"recent_completed,omitempty"`
+	RecentFailed        []*ImageAnalysisTaskDetail `json:"recent_failed,omitempty"`
+	TotalAnalyzed       int64                      `json:"total_analyzed"`
+	SuccessfulAnalyzed  int64                      `json:"successful_analyzed"`
+	FailedAnalyzed      int64                      `json:"failed_analyzed"`
+	AverageAnalysisTime time.Duration              `json:"average_analysis_time"`
+	ErrorMessage        string                     `json:"error_message,omitempty"`
 }
 
 type ImageAnalysisTaskDetail struct {
