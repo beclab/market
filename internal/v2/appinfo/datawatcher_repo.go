@@ -107,7 +107,9 @@ func NewDataWatcherRepo(redisClient *RedisClient, dataWatcher *DataWatcher, data
 		stopChannel: make(chan bool),
 	}
 
-	repo.initializeLastProcessedID()
+	if err := repo.initializeLastProcessedID(); err != nil {
+		glog.Errorf("DataWatcherRepo: failed to initialize last_processed_id from Redis, defaulting to 0: %v", err)
+	}
 	return repo
 }
 
