@@ -4,105 +4,36 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"market/internal/v2/utils"
-	"os"
 	"time"
 
+	"market/internal/v2/db"
+	"market/internal/v2/helper"
+
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
 )
 
-// TaskStore manages persistence for task records
+// TaskStore manages persistence for task records.
 type TaskStore struct {
 	db *sqlx.DB
 }
 
-// NewTaskStore initializes a new TaskStore instance with PostgreSQL backend
+// NewTaskStore returns a TaskStore that runs against the shared PostgreSQL
+// pool managed by package db. It does NOT open a new connection: the
+// underlying *sql.DB is borrowed from db.GlobalSqlxDB() so the existing CRUD
+// code paths continue to work unchanged.
+//
+// Schema (table + indexes) is owned by internal/v2/db migrations (see
+// migrations/00006_init_task_records.sql) and is applied during application
+// startup before this constructor runs.
 func NewTaskStore() (*TaskStore, error) {
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil, fmt.Errorf("task store is disabled in public environment")
 	}
-
-	dbHost := os.Getenv("POSTGRES_HOST")
-	if dbHost == "" {
-		dbHost = "localhost"
+	xdb := db.GlobalSqlxDB()
+	if xdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before NewTaskStore")
 	}
-
-	dbPort := os.Getenv("POSTGRES_PORT")
-	if dbPort == "" {
-		dbPort = "5432"
-	}
-
-	dbName := os.Getenv("POSTGRES_DB")
-	if dbName == "" {
-		dbName = "history"
-	}
-
-	dbUser := os.Getenv("POSTGRES_USER")
-	if dbUser == "" {
-		dbUser = "postgres"
-	}
-
-	dbPassword := os.Getenv("POSTGRES_PASSWORD")
-	if dbPassword == "" {
-		dbPassword = "password"
-	}
-
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
-
-	db, err := sqlx.Connect("postgres", connStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to PostgreSQL: %w", err)
-	}
-
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping PostgreSQL: %w", err)
-	}
-
-	store := &TaskStore{db: db}
-	if err := store.initSchema(); err != nil {
-		return nil, err
-	}
-
-	return store, nil
-}
-
-// initSchema ensures the task_records table exists with required indexes
-func (ts *TaskStore) initSchema() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS task_records (
-		id BIGSERIAL PRIMARY KEY,
-		task_id VARCHAR(128) UNIQUE NOT NULL,
-		type INTEGER NOT NULL,
-		status INTEGER NOT NULL,
-		app_name VARCHAR(255) NOT NULL,
-		user_account VARCHAR(255) NOT NULL DEFAULT '',
-		op_id VARCHAR(255) NOT NULL DEFAULT '',
-		metadata TEXT NOT NULL DEFAULT '{}',
-		result TEXT NOT NULL DEFAULT '',
-		error_msg TEXT NOT NULL DEFAULT '',
-		created_at TIMESTAMP NOT NULL,
-		started_at TIMESTAMP NULL,
-		completed_at TIMESTAMP NULL,
-		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	);`
-
-	if _, err := ts.db.Exec(schema); err != nil {
-		return fmt.Errorf("failed to create task_records table: %w", err)
-	}
-
-	indexes := `
-	CREATE INDEX IF NOT EXISTS idx_task_records_status ON task_records(status);
-	CREATE INDEX IF NOT EXISTS idx_task_records_created_at ON task_records(created_at);
-	CREATE INDEX IF NOT EXISTS idx_task_records_completed_at ON task_records(completed_at);
-	`
-
-	if _, err := ts.db.Exec(indexes); err != nil {
-		return fmt.Errorf("failed to create task_records indexes: %w", err)
-	}
-
-	return nil
+	return &TaskStore{db: xdb}, nil
 }
 
 // UpsertTask stores or updates a task record in the database
@@ -440,10 +371,7 @@ func (ts *TaskStore) GetLatestCompletedTaskByAppNameAndUser(appName, user string
 	return "", "", false, nil
 }
 
-// Close releases the underlying database connection
-func (ts *TaskStore) Close() error {
-	if ts == nil || ts.db == nil {
-		return nil
-	}
-	return ts.db.Close()
-}
+// Close is a no-op: the underlying *sql.DB is owned by package db and
+// closed once during graceful shutdown in main.go. Closing it here would
+// tear down the pool shared with history and any other consumer.
+func (ts *TaskStore) Close() error { return nil }

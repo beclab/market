@@ -234,10 +234,7 @@ func createSafeRecommendCopy(recommend *types.Recommend) map[string]interface{} 
 		}
 	}
 
-	// Add Source field if present
-	if recommend.Source != "" {
-		copy["source"] = recommend.Source
-	}
+	copy["source"] = recommend.Source
 
 	return copy
 }

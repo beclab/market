@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"market/internal/v2/helper"
+	"market/internal/v2/task"
 	"market/internal/v2/types"
 
 	"github.com/Masterminds/semver/v3"
@@ -26,92 +28,22 @@ type AppServiceResponse struct {
 		UID       string `json:"uid"`
 		Namespace string `json:"namespace"`
 	} `json:"metadata"`
-	Spec struct {
-		Name       string `json:"name"`
-		RawAppName string `json:"rawAppName"`
-		AppID      string `json:"appid"`
-		IsSysApp   bool   `json:"isSysApp"`
-		Owner      string `json:"owner"`
-		Icon       string `json:"icon"`
-		Title      string `json:"title"`
-		Source     string `json:"source"`
-		Entrances  []struct {
-			Name      string `json:"name"`
-			Url       string `json:"url"`
-			Invisible bool   `json:"invisible"`
-		} `json:"entrances"`
-		Settings struct {
-			ClusterScoped   string `json:"clusterScoped"`
-			MobileSupported string `json:"mobileSupported"`
-			Policy          string `json:"policy"`
-			RequiredGPU     string `json:"requiredGPU"`
-			Source          string `json:"source"`
-			MarketSource    string `json:"market_source"`
-			Target          string `json:"target"`
-			Title           string `json:"title"`
-			Version         string `json:"version"`
-		} `json:"settings"`
-	} `json:"spec"`
-	Status struct {
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	Spec   *AppServiceResponseSpec         `json:"spec"`
+	Status *types.AppStateLatestDataStatus `json:"status"`
+}
+
+type AppServiceResponseSpec struct {
+	types.AppStateLatestDataSpecMetadata
+	EntranceStatuses []types.AppStateLatestDataEntrances `json:"entrances"`
+	SharedEntrances  []types.AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
+	Settings         *types.AppStateLatestDataSettings   `json:"settings,omitempty"`
 }
 
 // AppInfo represents the extracted app information
 type AppInfo struct {
-	User   string `json:"user"`
-	App    string `json:"app"`
-	Status struct {
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	User   string                          `json:"user"`
+	App    string                          `json:"app"`
+	Status *types.AppStateLatestDataStatus `json:"status"`
 }
 
 // Global variable to store extracted users
@@ -123,7 +55,7 @@ var userAppStateData map[string]map[string][]*types.AppStateLatestData
 // SetupAppServiceData fetches app data from app-service or reads from local file in development
 func SetupAppServiceData() error {
 
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil
 	}
 
@@ -132,12 +64,6 @@ func SetupAppServiceData() error {
 	// Initialize user app state data map
 	userAppStateData = make(map[string]map[string][]*types.AppStateLatestData)
 
-	// Check if we're in development environment
-	if isDevelopmentEnvironment() {
-		glog.Info("Development environment detected, reading from local app-state.json")
-		return readLocalAppState()
-	}
-
 	// Production environment - fetch from app-service
 	glog.Info("Production environment detected, fetching from app-service")
 	return fetchFromAppService()
@@ -145,7 +71,7 @@ func SetupAppServiceData() error {
 
 // GetExtractedUsers returns the list of users extracted from app service data
 func GetExtractedUsers() []string {
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return []string{"admin"}
 	}
 	return extractedUsers
@@ -153,7 +79,7 @@ func GetExtractedUsers() []string {
 
 // GetAllUserAppStateData returns all user app state data
 func GetAllUserAppStateData() map[string]map[string][]*types.AppStateLatestData {
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return map[string]map[string][]*types.AppStateLatestData{
 			"admin": {
 				"app": {},
@@ -161,35 +87,6 @@ func GetAllUserAppStateData() map[string]map[string][]*types.AppStateLatestData 
 		}
 	}
 	return userAppStateData
-}
-
-// isDevelopmentEnvironment checks if we're in development environment
-func isDevelopmentEnvironment() bool {
-	env := strings.ToLower(os.Getenv("GO_ENV"))
-	return env == "dev" || env == "development" || env == ""
-}
-
-// readLocalAppState reads and processes the local app-state.json file
-func readLocalAppState() error {
-	glog.Info("Reading local app-state.json file...")
-
-	file, err := os.Open("app-state.json")
-	if err != nil {
-		return fmt.Errorf("failed to open app-state.json: %v", err)
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return fmt.Errorf("failed to read app-state.json: %v", err)
-	}
-
-	var apps []AppServiceResponse
-	if err := json.Unmarshal(data, &apps); err != nil {
-		return fmt.Errorf("failed to parse app-state.json: %v", err)
-	}
-
-	return processAppData(apps)
 }
 
 // fetchFromAppService fetches app data from the app-service
@@ -531,20 +428,7 @@ func createMiddlewareStateLatestData(middleware struct {
 		"version":            middleware.Version,
 	}
 
-	// // Create entrance statuses for middleware (simplified structure)
-	// entrances := make([]interface{}, 0, 1)
-	// entrances = append(entrances, map[string]interface{}{
-	// 	"id":         middleware.UUID, // Use UUID as ID
-	// 	"name":       middleware.Metadata.Name,
-	// 	"state":      middleware.ResourceStatus,
-	// 	"statusTime": middleware.UpdateTime,
-	// 	"reason":     "",
-	// 	"url":        "", // Middlewares don't have URLs like apps
-	// 	"invisible":  false,
-	// })
-	// data["entranceStatuses"] = entrances
-
-	return types.NewAppStateLatestData(data, middleware.User, GetAppInfoLastInstalled)
+	return types.NewAppStateLatestData(data, middleware.User, task.LookupAppInfoLastInstalled)
 }
 
 // FetchAppEntranceUrls fetches entrance URLs for a specific app from app-service
@@ -590,7 +474,7 @@ func FetchAppEntranceUrls(appName string, user string) (map[string]string, error
 	entranceUrls := make(map[string]string)
 	for _, app := range apps {
 		if app.Spec.Name == appName && app.Spec.Owner == user {
-			for _, entrance := range app.Spec.Entrances {
+			for _, entrance := range app.Spec.EntranceStatuses {
 				if entrance.Url != "" {
 					entranceUrls[entrance.Name] = entrance.Url
 				}
@@ -619,7 +503,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 	// Create a map of entrance URLs and invisible flags from spec.entrances
 	entranceUrls := make(map[string]string)
 	entranceInvisible := make(map[string]bool)
-	for _, entrance := range app.Spec.Entrances {
+	for _, entrance := range app.Spec.EntranceStatuses {
 		entranceUrls[entrance.Name] = entrance.Url
 		entranceInvisible[entrance.Name] = entrance.Invisible
 	}
@@ -694,7 +578,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 				"title":           se.Title,
 				"authLevel":       se.AuthLevel,
 				"invisible":       se.Invisible,
-				"url":             se.URL,
+				"url":             se.Url,
 				"openMethod":      se.OpenMethod,
 				"windowPushState": se.WindowPushState,
 				"skip":            se.Skip,
@@ -703,7 +587,7 @@ func createAppStateLatestData(app AppServiceResponse, isStartupProcess bool) (*t
 		data["sharedEntrances"] = sharedEntrances
 	}
 
-	return types.NewAppStateLatestData(data, app.Spec.Owner, GetAppInfoLastInstalled)
+	return types.NewAppStateLatestData(data, app.Spec.Owner, task.LookupAppInfoLastInstalled)
 }
 
 // DependencyServiceResponse represents the response structure from dependency service

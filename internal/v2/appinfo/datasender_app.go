@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/helper"
 	"market/internal/v2/types"
-	"market/internal/v2/utils"
 
 	"github.com/golang/glog"
 	"github.com/nats-io/nats.go"
@@ -38,7 +38,7 @@ func NewDataSender() (*DataSender, error) {
 		return &DataSender{enabled: false}, nil
 	}
 
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		glog.V(2).Info("Public environment detected, NATS data sender disabled")
 		return &DataSender{enabled: false}, nil
 	}
@@ -87,11 +87,11 @@ func NewDataSender() (*DataSender, error) {
 // loadConfig loads NATS configuration from environment variables
 func loadConfig() Config {
 	return Config{
-		Host:     utils.GetEnvOrDefault("NATS_HOST", "localhost"),
-		Port:     utils.GetEnvOrDefault("NATS_PORT", "4222"),
-		Username: utils.GetEnvOrDefault("NATS_USERNAME", ""),
-		Password: utils.GetEnvOrDefault("NATS_PASSWORD", ""),
-		Subject:  utils.GetEnvOrDefault("NATS_SUBJECT_SYSTEM_MARKET_STATE", "os.market"),
+		Host:     helper.GetEnvOrDefault("NATS_HOST", "localhost"),
+		Port:     helper.GetEnvOrDefault("NATS_PORT", "4222"),
+		Username: helper.GetEnvOrDefault("NATS_USERNAME", ""),
+		Password: helper.GetEnvOrDefault("NATS_PASSWORD", ""),
+		Subject:  helper.GetEnvOrDefault("NATS_SUBJECT_SYSTEM_MARKET_STATE", "os.market"),
 	}
 }
 

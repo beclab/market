@@ -59,13 +59,13 @@ func (l *Watchers) Run(workers int) error {
 		}
 	}
 
-	glog.V(2).Info("Starting workers")
+	glog.V(3).Info("Starting workers")
 	// Launch two workers to process Foo resources
 	for i := 0; i < workers; i++ {
 		go wait.Until(l.runWorker, time.Second, l.ctx.Done())
 	}
 
-	glog.V(2).Info("Started workers")
+	glog.V(3).Info("Started workers")
 	<-l.ctx.Done()
 
 	return nil

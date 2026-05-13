@@ -3,7 +3,6 @@ package types
 import (
 	"encoding/json"
 	"market/internal/v2/client"
-	"reflect"
 	"strings"
 	"time"
 
@@ -56,7 +55,7 @@ type Recommend struct {
 	Description string         `json:"description"`
 	Content     string         `json:"content"` // Comma-separated app names
 	Data        *RecommendData `json:"data,omitempty"`
-	Source      string         `json:"source,omitempty"` // Data source identifier
+	Source      int            `json:"source,omitempty"` // Data source identifier
 	CreatedAt   time.Time      `json:"createdAt"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
@@ -65,6 +64,7 @@ type Recommend struct {
 type Page struct {
 	Category  string    `json:"category"`
 	Content   string    `json:"content"` // JSON string of page content
+	Source    int       `json:"source"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -89,7 +89,7 @@ type Topic struct {
 	ID        string                `json:"_id"`
 	Name      string                `json:"name"`
 	Data      map[string]*TopicData `json:"data"` // i18n data by language
-	Source    string                `json:"source"`
+	Source    int                   `json:"source"`
 	UpdatedAt time.Time             `json:"updated_at"`
 	CreatedAt time.Time             `json:"createdAt"`
 }
@@ -101,7 +101,7 @@ type TopicList struct {
 	Description string            `json:"description"`
 	Content     string            `json:"content"` // Comma-separated topic IDs
 	Title       map[string]string `json:"title"`   // i18n title mapping
-	Source      string            `json:"source"`
+	Source      int               `json:"source"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 	CreatedAt   time.Time         `json:"createdAt"`
 }
@@ -119,7 +119,7 @@ type Tag struct {
 	Title     map[string]string `json:"title"` // i18n title mapping
 	Icon      string            `json:"icon"`
 	Sort      int               `json:"sort"` // sort order for tag
-	Source    string            `json:"source"`
+	Source    int               `json:"source"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	CreatedAt time.Time         `json:"createdAt"`
 }
@@ -135,6 +135,15 @@ type Others struct {
 	Tops       []*AppStoreTopItem `json:"tops"`
 	Latest     []string           `json:"latest"`
 	Tags       []*Tag             `json:"tags"`
+}
+
+// MarketSourceData backs market_sources.data. Embeds Others so the
+// curated lists (topics / pages / tops / ...) sit alongside the
+// per-source mutable bits (apps catalogue snapshot, last-updated stamp).
+type MarketSourceData struct {
+	Apps        []string `json:"apps"`
+	LastUpdated string   `json:"last_updated"`
+	Others
 }
 
 // AppData contains the actual data and metadata
@@ -155,43 +164,70 @@ type AppInfoHistoryData struct {
 
 // AppStateLatestData contains latest app state data
 type AppStateLatestData struct {
-	Type    AppDataType `json:"type"`
-	Version string      `json:"version"` // Version field, cannot be empty
-	Status  struct {
-		Name               string `json:"name"`
-		RawAppName         string `json:"rawAppName"`
-		Title              string `json:"title"`
-		State              string `json:"state"`
-		UpdateTime         string `json:"updateTime"`
-		StatusTime         string `json:"statusTime"`
-		LastTransitionTime string `json:"lastTransitionTime"`
-		Progress           string `json:"progress"`
-		OpType             string `json:"opType,omitempty"` // Operation type: install, upgrade, uninstall, etc.
-		Message            string `json:"message"`
-		Reason             string `json:"reason"`
-		EntranceStatuses   []struct {
-			ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-			Name       string `json:"name"`
-			State      string `json:"state"`
-			StatusTime string `json:"statusTime"`
-			Reason     string `json:"reason"`
-			Url        string `json:"url"`
-			Invisible  bool   `json:"invisible"`
-		} `json:"entranceStatuses"`
-		SharedEntrances []struct {
-			Name            string `json:"name"`
-			Host            string `json:"host"`
-			Port            int32  `json:"port"`
-			Icon            string `json:"icon,omitempty"`
-			Title           string `json:"title,omitempty"`
-			AuthLevel       string `json:"authLevel,omitempty"`
-			Invisible       bool   `json:"invisible,omitempty"`
-			URL             string `json:"url,omitempty"`
-			OpenMethod      string `json:"openMethod,omitempty"`
-			WindowPushState bool   `json:"windowPushState,omitempty"`
-			Skip            bool   `json:"skip,omitempty"`
-		} `json:"sharedEntrances,omitempty"`
-	} `json:"status"`
+	Type    AppDataType             `json:"type"`
+	Version string                  `json:"version"` // Version field, cannot be empty
+	Status  *AppStateLatestDataSpec `json:"status"`
+}
+
+type AppStateLatestDataSpec struct {
+	AppStateLatestDataSpecMetadata
+	EntranceStatuses []AppStateLatestDataEntrances `json:"entranceStatuses"`
+	SharedEntrances  []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
+	Tailscale        map[string]interface{}        `json:"tailscale"`
+	Settings         *AppStateLatestDataSettings   `json:"settings,omitempty"`
+}
+
+type AppStateLatestDataSpecMetadata struct {
+	Name               string `json:"name"`
+	RawAppName         string `json:"rawAppName"`
+	AppID              string `json:"appid,omitempty"`
+	IsSysApp           bool   `json:"isSysApp"`
+	Owner              string `json:"owner,omitempty"`
+	Icon               string `json:"icon,omitempty"`
+	Source             string `json:"source,omitempty"`
+	Title              string `json:"title"`
+	State              string `json:"state"`
+	UpdateTime         string `json:"updateTime"`
+	StatusTime         string `json:"statusTime"`
+	LastTransitionTime string `json:"lastTransitionTime"`
+	Progress           string `json:"progress,omitempty"`
+	OpType             string `json:"opType,omitempty"` // Operation type: install, upgrade, uninstall, etc.
+	Message            string `json:"message,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+}
+
+type AppStateLatestDataEntrances struct {
+	ID              string `json:"id,omitempty"` // ID extracted from URL's first segment after splitting by "."
+	Name            string `json:"name"`
+	Host            string `json:"host,omitempty"`
+	Port            int32  `json:"port"`
+	Icon            string `json:"icon,omitempty"`
+	Title           string `json:"title,omitempty"`
+	AuthLevel       string `json:"authLevel,omitempty"`
+	Invisible       bool   `json:"invisible"`
+	Url             string `json:"url,omitempty"`
+	OpenMethod      string `json:"openMethod,omitempty"`
+	WindowPushState bool   `json:"windowPushState,omitempty"`
+	Skip            bool   `json:"skip,omitempty"`
+	State           string `json:"state,omitempty"`
+	StatusTime      string `json:"statusTime,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+type AppStateLatestDataSettings struct {
+	Title string `json:"title"`
+	AppStateLatestDataSettingsMapping
+}
+
+type AppStateLatestDataSettingsMapping map[string]interface{}
+
+type AppStateLatestDataStatus struct {
+	State              string                        `json:"state"`
+	UpdateTime         string                        `json:"updateTime"`
+	StatusTime         string                        `json:"statusTime"`
+	LastTransitionTime string                        `json:"lastTransitionTime"`
+	EntranceStatuses   []AppStateLatestDataEntrances `json:"entranceStatuses"`
+	SharedEntrances    []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
 }
 
 // AppInfoLatestData contains latest app info data
@@ -250,6 +286,10 @@ type ApplicationInfoEntry struct {
 	SupportArch        []string                 `json:"supportArch"`
 	RequiredGPU        string                   `json:"requiredGPU,omitempty"`
 	RequiredCPU        string                   `json:"requiredCPU"`
+	LimitedMemory      string                   `json:"limitedMemory,omitempty"`
+	LimitedDisk        string                   `json:"limitedDisk,omitempty"`
+	LimitedCPU         string                   `json:"limitedCPU,omitempty"`
+	LimitedGPU         string                   `json:"limitedGPU,omitempty"`
 	Rating             float32                  `json:"rating"`
 	Target             string                   `json:"target"`
 	Permission         map[string]interface{}   `json:"permission"`          // Using interface{} for flexibility
@@ -287,7 +327,12 @@ type ApplicationInfoEntry struct {
 	// Legacy fields for backward compatibility
 	Screenshots []string               `json:"screenshots"`
 	Tags        []string               `json:"tags"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	// Metadata is in-memory only: chart-repo's parser metadata
+	// ({config_type, config_version, parsed_at, ...}) and the previous
+	// "source_data" mirror used to land here, neither of which the JSONB
+	// columns on applications / user_applications need to persist.
+	// Excluded from JSON so the persisted app_entry payload stays clean.
+	Metadata    map[string]interface{} `json:"-"`
 	UpdatedAt   string                 `json:"updated_at"`
 }
 
@@ -680,15 +725,7 @@ func NewAppInfoHistoryData(data map[string]interface{}) *AppInfoHistoryData {
 func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFunc func(string, string) (string, string, error)) (*AppStateLatestData, string) {
 	// Extract status information from data
 	var name, rawAppName, title, state, updateTime, statusTime, lastTransitionTime, progress, opType string
-	var entranceStatuses []struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		State      string `json:"state"`
-		StatusTime string `json:"statusTime"`
-		Reason     string `json:"reason"`
-		Url        string `json:"url"`
-		Invisible  bool   `json:"invisible"`
-	}
+	var entranceStatuses []AppStateLatestDataEntrances
 
 	var statusReason = ""
 	var statusMessage = ""
@@ -747,19 +784,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	}
 
 	// Extract SharedEntrances
-	var sharedEntrances []struct {
-		Name            string `json:"name"`
-		Host            string `json:"host"`
-		Port            int32  `json:"port"`
-		Icon            string `json:"icon,omitempty"`
-		Title           string `json:"title,omitempty"`
-		AuthLevel       string `json:"authLevel,omitempty"`
-		Invisible       bool   `json:"invisible,omitempty"`
-		URL             string `json:"url,omitempty"`
-		OpenMethod      string `json:"openMethod,omitempty"`
-		WindowPushState bool   `json:"windowPushState,omitempty"`
-		Skip            bool   `json:"skip,omitempty"`
-	}
+	var sharedEntrances []AppStateLatestDataEntrances
 
 	// Handle entranceStatuses - support both []interface{} and []EntranceStatus
 	if entranceStatusesVal, ok := data["entranceStatuses"]; ok && entranceStatusesVal != nil {
@@ -769,15 +794,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		case []interface{}:
 			glog.V(3).Infof("NewAppStateLatestData - handling []interface{} case, length: %d", len(v))
 			// Handle []interface{} case (from map[string]interface{})
-			entranceStatuses = make([]struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			}, len(v))
+			entranceStatuses = make([]AppStateLatestDataEntrances, len(v))
 
 			for i, entrance := range v {
 				glog.V(3).Infof("NewAppStateLatestData - processing entrance[%d], type: %T, value: %+v", i, entrance, entrance)
@@ -816,15 +833,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		case []map[string]interface{}:
 			glog.V(3).Infof("NewAppStateLatestData - handling []map[string]interface{} case, length: %d", len(v))
 			// Handle []map[string]interface{} case (direct conversion)
-			entranceStatuses = make([]struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			}, len(v))
+			entranceStatuses = make([]AppStateLatestDataEntrances, len(v))
 
 			for i, entranceMap := range v {
 				glog.V(3).Infof("NewAppStateLatestData - processing entranceMap[%d]: %+v", i, entranceMap)
@@ -873,19 +882,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 		switch v := sharedEntrancesVal.(type) {
 		case []interface{}:
 			glog.V(3).Infof("NewAppStateLatestData - handling sharedEntrances []interface{} case, length: %d", len(v))
-			sharedEntrances = make([]struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			}, len(v))
+			sharedEntrances = make([]AppStateLatestDataEntrances, len(v))
 
 			for i, entrance := range v {
 				if entranceMap, ok := entrance.(map[string]interface{}); ok {
@@ -911,7 +908,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 						sharedEntrances[i].Invisible = invisible
 					}
 					if url, ok := entranceMap["url"].(string); ok {
-						sharedEntrances[i].URL = url
+						sharedEntrances[i].Url = url
 					}
 					if openMethod, ok := entranceMap["openMethod"].(string); ok {
 						sharedEntrances[i].OpenMethod = openMethod
@@ -926,19 +923,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 			}
 		case []map[string]interface{}:
 			glog.V(3).Infof("NewAppStateLatestData - handling sharedEntrances []map[string]interface{} case, length: %d", len(v))
-			sharedEntrances = make([]struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			}, len(v))
+			sharedEntrances = make([]AppStateLatestDataEntrances, len(v))
 
 			for i, entranceMap := range v {
 				if name, ok := entranceMap["name"].(string); ok {
@@ -963,7 +948,7 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 					sharedEntrances[i].Invisible = invisible
 				}
 				if url, ok := entranceMap["url"].(string); ok {
-					sharedEntrances[i].URL = url
+					sharedEntrances[i].Url = url
 				}
 				if openMethod, ok := entranceMap["openMethod"].(string); ok {
 					sharedEntrances[i].OpenMethod = openMethod
@@ -1008,58 +993,25 @@ func NewAppStateLatestData(data map[string]interface{}, userID string, getInfoFu
 	// 	return nil
 	// }
 
+	var status = &AppStateLatestDataSpec{}
+	status.Name = name
+	status.RawAppName = rawAppName
+	status.Title = title
+	status.State = state
+	status.UpdateTime = updateTime
+	status.StatusTime = statusTime
+	status.LastTransitionTime = lastTransitionTime
+	status.Progress = progress
+	status.OpType = opType
+	status.Message = statusMessage
+	status.Reason = statusReason
+	status.EntranceStatuses = entranceStatuses
+	status.SharedEntrances = sharedEntrances
+
 	return &AppStateLatestData{
 		Type:    AppStateLatest,
 		Version: version,
-		Status: struct {
-			Name               string `json:"name"`
-			RawAppName         string `json:"rawAppName"`
-			Title              string `json:"title"`
-			State              string `json:"state"`
-			UpdateTime         string `json:"updateTime"`
-			StatusTime         string `json:"statusTime"`
-			LastTransitionTime string `json:"lastTransitionTime"`
-			Progress           string `json:"progress"`
-			OpType             string `json:"opType,omitempty"`
-			Message            string `json:"message"`
-			Reason             string `json:"reason"`
-			EntranceStatuses   []struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				State      string `json:"state"`
-				StatusTime string `json:"statusTime"`
-				Reason     string `json:"reason"`
-				Url        string `json:"url"`
-				Invisible  bool   `json:"invisible"`
-			} `json:"entranceStatuses"`
-			SharedEntrances []struct {
-				Name            string `json:"name"`
-				Host            string `json:"host"`
-				Port            int32  `json:"port"`
-				Icon            string `json:"icon,omitempty"`
-				Title           string `json:"title,omitempty"`
-				AuthLevel       string `json:"authLevel,omitempty"`
-				Invisible       bool   `json:"invisible,omitempty"`
-				URL             string `json:"url,omitempty"`
-				OpenMethod      string `json:"openMethod,omitempty"`
-				WindowPushState bool   `json:"windowPushState,omitempty"`
-				Skip            bool   `json:"skip,omitempty"`
-			} `json:"sharedEntrances,omitempty"`
-		}{
-			Name:               name,
-			RawAppName:         rawAppName,
-			Title:              title,
-			State:              state,
-			UpdateTime:         updateTime,
-			StatusTime:         statusTime,
-			LastTransitionTime: lastTransitionTime,
-			Progress:           progress,
-			OpType:             opType,
-			Message:            statusMessage,
-			Reason:             statusReason,
-			EntranceStatuses:   entranceStatuses,
-			SharedEntrances:    sharedEntrances,
-		},
+		Status:  status,
 	}, source
 }
 
@@ -1731,6 +1683,18 @@ func mapAllApplicationInfoEntryFields(sourceData map[string]interface{}, entry *
 	if val, ok := sourceData["requiredCPU"].(string); ok && val != "" {
 		entry.RequiredCPU = val
 	}
+	if val, ok := sourceData["limitedMemory"].(string); ok && val != "" {
+		entry.LimitedMemory = val
+	}
+	if val, ok := sourceData["limitedDisk"].(string); ok && val != "" {
+		entry.LimitedDisk = val
+	}
+	if val, ok := sourceData["limitedCPU"].(string); ok && val != "" {
+		entry.LimitedCPU = val
+	}
+	if val, ok := sourceData["limitedGPU"].(string); ok && val != "" {
+		entry.LimitedGPU = val
+	}
 	if val, ok := sourceData["target"].(string); ok && val != "" {
 		entry.Target = val
 	}
@@ -2002,104 +1966,7 @@ func NewApplicationInfoEntry(sourceData map[string]interface{}) *ApplicationInfo
 	// Validate and fix AppLabels if needed
 	ValidateAndFixAppLabels(sourceData, entry)
 
-	// Store a safe copy of source data in metadata to avoid circular references
-	// Create a deep copy of source data without potential circular references
-	safeSourceData := createSafeSourceDataCopy(sourceData)
-	entry.Metadata["source_data"] = safeSourceData
-	entry.Metadata["creation_method"] = "NewApplicationInfoEntry"
-
 	return entry
-}
-
-// createSafeSourceDataCopy creates a safe copy of source data to avoid circular references
-func createSafeSourceDataCopy(sourceData map[string]interface{}) map[string]interface{} {
-	if sourceData == nil {
-		return nil
-	}
-
-	safeCopy := make(map[string]interface{})
-	visited := make(map[uintptr]bool)
-
-	for key, value := range sourceData {
-		// Skip potential circular reference keys
-		if key == "source_data" || key == "raw_data" || key == "app_info" ||
-			key == "parent" || key == "self" || key == "circular_ref" ||
-			key == "back_ref" || key == "loop" {
-			continue
-		}
-
-		safeCopy[key] = deepCopyValue(value, visited)
-	}
-
-	return safeCopy
-}
-
-// deepCopyValue performs a deep copy of a value while avoiding circular references
-func deepCopyValue(value interface{}, visited map[uintptr]bool) interface{} {
-	if value == nil {
-		return nil
-	}
-
-	switch v := value.(type) {
-	case string, int, int64, float64, bool:
-		return v
-	case []string:
-		return append([]string{}, v...)
-	case []interface{}:
-		// Only copy simple types from interface slice
-		safeSlice := make([]interface{}, 0, len(v))
-		for _, item := range v {
-			switch item.(type) {
-			case string, int, int64, float64, bool:
-				safeSlice = append(safeSlice, item)
-			default:
-				// Skip complex slice items to avoid circular references
-			}
-		}
-		return safeSlice
-	case map[string]interface{}:
-		// Check for circular references using pointer
-		ptr := reflect.ValueOf(v).Pointer()
-		if visited[ptr] {
-			return nil // Skip circular reference
-		}
-		visited[ptr] = true
-		defer delete(visited, ptr)
-
-		safeMap := make(map[string]interface{})
-		for k, val := range v {
-			// Skip potential circular reference keys
-			if k == "source_data" || k == "raw_data" || k == "app_info" ||
-				k == "parent" || k == "self" || k == "circular_ref" ||
-				k == "back_ref" || k == "loop" {
-				continue
-			}
-			safeMap[k] = deepCopyValue(val, visited)
-		}
-		return safeMap
-	case map[interface{}]interface{}:
-		// 新增: 支持 map[interface{}]interface{} 转 map[string]interface{}
-		safeMap := make(map[string]interface{})
-		for k, val := range v {
-			if ks, ok := k.(string); ok {
-				safeMap[ks] = deepCopyValue(val, visited)
-			}
-		}
-		return safeMap
-	case []map[string]interface{}:
-		safeSlice := make([]map[string]interface{}, 0, len(v))
-		for _, item := range v {
-			if itemCopy := deepCopyValue(item, visited); itemCopy != nil {
-				if itemMap, ok := itemCopy.(map[string]interface{}); ok {
-					safeSlice = append(safeSlice, itemMap)
-				}
-			}
-		}
-		return safeSlice
-	default:
-		// For other types, return nil to avoid potential circular references
-		return nil
-	}
 }
 
 // ValidateAndFixAppLabels ensures AppLabels are properly set and not lost
