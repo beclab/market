@@ -690,10 +690,9 @@ func (s *Server) getMarketHash(w http.ResponseWriter, r *http.Request) {
 		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to retrieve market hash", nil)
 		return
 	}
-	_ = hash
 
 	glog.V(3).Infof("Market hash retrieved successfully for user: %s", userID)
-	s.sendResponse(w, http.StatusOK, true, "Market hash retrieved successfully", map[string]string{"hash": helper.GenerateRandomHash()})
+	s.sendResponse(w, http.StatusOK, true, "Market hash retrieved successfully", map[string]string{"hash": hash})
 }
 
 // getMarketState handles GET /api/v2/market/state and returns the
