@@ -7,84 +7,8 @@ import (
 	"strings"
 
 	"market/internal/v2/db"
-	"market/internal/v2/db/models"
 	"market/internal/v2/types"
 )
-
-// UpsertApplicationFromChartRepo upserts a single applications row out of
-// a chart-repo "app_upload_completed" event payload and returns the
-// list of user_ids that already have a user_applications row for the
-// same (source_id, app_id) — i.e. the users whose dashboards observe
-// this app and therefore need to be notified / re-hydrated.
-//
-// This is the event-driven counterpart to SyncBatchApps. The two
-// helpers deliberately do not share an entry point:
-//
-//   - SyncBatchApps owns the syncer's full-catalog refresh contract
-//     (caller has pre-computed added vs changed splits and trusts the
-//     batch as a coherent snapshot of the source).
-//
-//   - UpsertApplicationFromChartRepo owns the chart-repo push contract
-//     (single-app authoritative update, never delists, never assumes
-//     the rest of the source is in sync).
-//
-// They share buildApplicationRow / upsertApplications as primitives so
-// the appMap → models.Application field mapping (version / cfgType /
-// app_entry / price) cannot drift between the two paths.
-//
-// Returns:
-//   - affectedUsers: distinct user_ids whose user_applications row
-//     references this (source_id, app_id). May be empty if no user has
-//     rendered the app yet — caller's responsibility to decide whether
-//     that case warrants any further action (typically a no-op).
-//   - err: non-nil only on PG / serialization errors; a malformed
-//     payload (missing version) yields (nil, nil) so the pipeline can
-//     log and move on without aborting the batch of state-changes.
-func UpsertApplicationFromChartRepo(
-	ctx context.Context,
-	sourceID, appID string,
-	appPayload map[string]interface{},
-) (affectedUsers []string, err error) {
-	sourceID = strings.TrimSpace(sourceID)
-	appID = strings.TrimSpace(appID)
-	if sourceID == "" || appID == "" {
-		return nil, fmt.Errorf("UpsertApplicationFromChartRepo: empty sourceID/appID")
-	}
-	if appPayload == nil {
-		return nil, nil
-	}
-
-	row := buildApplicationRow(sourceID, appID, appPayload)
-	if row == nil {
-		// Caller delivered a payload without a usable "version" field —
-		// match SyncBatchApps' silent-skip semantics.
-		return nil, nil
-	}
-
-	gdb := db.Global()
-	if gdb == nil {
-		return nil, fmt.Errorf("postgres not initialised; db.Open must run before UpsertApplicationFromChartRepo")
-	}
-
-	tx := gdb.WithContext(ctx)
-	if err := upsertApplications(tx, []*models.Application{row}); err != nil {
-		return nil, err
-	}
-
-	// Find every user already observing this (source_id, app_id).
-	// DISTINCT is defensive — the (user_id, source_id, app_id) unique
-	// constraint should already guarantee uniqueness, but DISTINCT
-	// makes the contract self-evident at the call site.
-	var userIDs []string
-	if err := tx.Raw(`
-SELECT DISTINCT user_id
-FROM user_applications
-WHERE source_id = ? AND app_id = ?`,
-		sourceID, appID).Scan(&userIDs).Error; err != nil {
-		return nil, fmt.Errorf("list affected users for (source=%s app=%s): %w", sourceID, appID, err)
-	}
-	return userIDs, nil
-}
 
 // PatchImageAnalysisImage replaces image_analysis -> 'images' -> imageName
 // across every user_applications row that already references this image,
