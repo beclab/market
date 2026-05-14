@@ -459,7 +459,7 @@ func (tm *TaskModule) start() {
 	tm.executorTicker = time.NewTicker(2 * time.Second)
 	go tm.taskExecutor()
 
-	// Start status checker (every 10 seconds)
+	// Start status checker (every 30 seconds)
 	tm.statusTicker = time.NewTicker(30 * time.Second)
 	go tm.statusChecker()
 }
