@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"market/internal/v2/appinfo"
@@ -261,6 +262,24 @@ func (s *Server) Start() error {
 	}
 	listener.Close()
 	glog.V(3).Infof("Port %s is available", s.port)
+
+	// Recover from panics in any downstream handler so a single bad
+	// request cannot crash the whole HTTP server process.
+	s.router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					glog.Errorf("panic recovered in handler %s %s: %v\n%s",
+						r.Method, r.URL.Path, rec, debug.Stack())
+					if w.Header().Get("Content-Type") == "" {
+						s.sendResponse(w, http.StatusInternalServerError, false,
+							"Internal server error", nil)
+					}
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// Add middleware for request logging
 	s.router.Use(func(next http.Handler) http.Handler {
