@@ -225,8 +225,8 @@ func AddToWatchers[R any](w *Watchers, gvr schema.GroupVersionResource, handler 
 		}
 		_, err := informer.Informer().AddEventHandler(newHandler)
 		if err != nil {
-			glog.Error("add to subscriber to watchers error, ", err, ", ", gvr.String())
-			panic(err)
+			glog.Errorf("add to subscriber to watchers error, gvr=%s: %v", gvr.String(), err)
+			return fmt.Errorf("add event handler for %s: %w", gvr.String(), err)
 		}
 	}
 

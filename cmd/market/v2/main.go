@@ -248,7 +248,9 @@ func main() {
 	if !helper.IsPublicEnvironment() {
 		// 1. Init user watch
 		var w = watchers.NewWatchers(context.Background(), client.Factory.Config())
-		watchers.AddToWatchers[client.User](w, client.UserGVR, watchers.UserHandlerEvent())
+		if err := watchers.AddToWatchers[client.User](w, client.UserGVR, watchers.UserHandlerEvent()); err != nil {
+			glog.Errorf("Failed to register user watcher: %v; continuing startup", err)
+		}
 		go w.Run(1)
 
 		// 2. Initialize History Module
