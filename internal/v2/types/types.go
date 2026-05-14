@@ -173,11 +173,11 @@ type AppStateLatestDataSpec struct {
 	AppStateLatestDataSpecMetadata
 	EntranceStatuses []AppStateLatestDataEntrances `json:"entranceStatuses"`
 	SharedEntrances  []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
-	Tailscale        map[string]interface{}        `json:"tailscale"`
+	Tailscale        map[string]interface{}        `json:"tailscale,omitempty"`
 	Settings         *AppStateLatestDataSettings   `json:"settings,omitempty"`
 }
 
-type AppStateLatestDataSpecMetadata struct {
+type AppStateLatestDataSpecMetadata struct { // + app state
 	Name               string `json:"name"`
 	RawAppName         string `json:"rawAppName"`
 	AppID              string `json:"appid,omitempty"`
@@ -215,11 +215,16 @@ type AppStateLatestDataEntrances struct {
 }
 
 type AppStateLatestDataSettings struct {
-	Title string `json:"title"`
-	AppStateLatestDataSettingsMapping
+	Title           string `json:"title"`
+	Source          string `json:"source"`
+	MarketSource    string `json:"market_source"`
+	Version         string `json:"version"`
+	ClusterAppRef   string `json:"clusterAppRef"`
+	ClusterScoped   string `json:"clusterScoped"`
+	MobileSupported string `json:"mobileSupported"`
+	Policy          string `json:"policy"`
+	Target          string `json:"target"`
 }
-
-type AppStateLatestDataSettingsMapping map[string]interface{}
 
 type AppStateLatestDataStatus struct {
 	State              string                        `json:"state"`
@@ -325,15 +330,15 @@ type ApplicationInfoEntry struct {
 	VersionHistory []*VersionInfo `json:"versionHistory,omitempty"`
 
 	// Legacy fields for backward compatibility
-	Screenshots []string               `json:"screenshots"`
-	Tags        []string               `json:"tags"`
+	Screenshots []string `json:"screenshots"`
+	Tags        []string `json:"tags"`
 	// Metadata is in-memory only: chart-repo's parser metadata
 	// ({config_type, config_version, parsed_at, ...}) and the previous
 	// "source_data" mirror used to land here, neither of which the JSONB
 	// columns on applications / user_applications need to persist.
 	// Excluded from JSON so the persisted app_entry payload stays clean.
-	Metadata    map[string]interface{} `json:"-"`
-	UpdatedAt   string                 `json:"updated_at"`
+	Metadata  map[string]interface{} `json:"-"`
+	UpdatedAt string                 `json:"updated_at"`
 }
 
 // VersionInfo represents version information from gitbot

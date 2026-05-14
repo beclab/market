@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"market/internal/v2/helper"
+	"market/internal/v2/types"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,8 +37,8 @@ type Client interface {
 	// Read endpoints — used by SCC, hydration, status checks. None of
 	// them require a per-call token because the upstream endpoints
 	// today are unauthenticated cluster-internal calls.
-	GetAllApps(ctx context.Context) ([]*App, error)
-	GetMiddlewares(ctx context.Context) ([]*Middleware, error)
+	GetAllApps(ctx context.Context) ([]*types.AppServiceResponse, error)
+	GetMiddlewares(ctx context.Context) ([]types.MiddlewareStatusResponseData, error)
 	GetTerminusVersion(ctx context.Context) (string, error)
 
 	// User-info uses the per-user token because app-service decodes
@@ -133,7 +134,7 @@ func NewClient(opts ...Option) (Client, error) {
 //
 // Returns []*App so callers can mutate slice elements without
 // affecting the upstream cache (we always decode fresh per call).
-func (c *httpClient) GetAllApps(ctx context.Context) ([]*App, error) {
+func (c *httpClient) GetAllApps(ctx context.Context) ([]*types.AppServiceResponse, error) {
 	const ep = "get_all_apps"
 	body, status, err := c.doRequest(ctx, ep, http.MethodGet, "/app-service/v1/all/apps", nil, nil)
 	if err != nil {
@@ -143,7 +144,7 @@ func (c *httpClient) GetAllApps(ctx context.Context) ([]*App, error) {
 		return nil, classifyHTTPStatus(status)
 	}
 
-	var apps []*App
+	var apps []*types.AppServiceResponse
 	if err := json.Unmarshal(body, &apps); err != nil {
 		c.metrics.ObserveRequest(ep, status, 0, errKindDecode)
 		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
@@ -154,7 +155,7 @@ func (c *httpClient) GetAllApps(ctx context.Context) ([]*App, error) {
 // GetMiddlewares fetches the middleware status list. Distinct
 // endpoint, distinct response shape from GetAllApps (see Middleware
 // in types.go for why they are not unified).
-func (c *httpClient) GetMiddlewares(ctx context.Context) ([]*Middleware, error) {
+func (c *httpClient) GetMiddlewares(ctx context.Context) ([]types.MiddlewareStatusResponseData, error) {
 	const ep = "get_middlewares"
 	body, status, err := c.doRequest(ctx, ep, http.MethodGet, "/app-service/v1/middlewares/status", nil, nil)
 	if err != nil {
@@ -164,17 +165,12 @@ func (c *httpClient) GetMiddlewares(ctx context.Context) ([]*Middleware, error) 
 		return nil, classifyHTTPStatus(status)
 	}
 
-	// Upstream wraps the array in {code, data: [...]} — model the
-	// envelope locally so we keep the public type clean.
-	var resp struct {
-		Code int           `json:"code"`
-		Data []*Middleware `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	var middlewares *types.MiddlewareStatusResponse
+	if err := json.Unmarshal(body, &middlewares); err != nil {
 		c.metrics.ObserveRequest(ep, status, 0, errKindDecode)
 		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 	}
-	return resp.Data, nil
+	return middlewares.Data, nil
 }
 
 // GetTerminusVersion returns the app-service-reported Terminus
@@ -319,7 +315,7 @@ func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload 
 
 	glog.Infof("[appservice] request path: %s, op: %s, payload: %s, hdr: %s", path, opName, helper.ParseJson(payload), helper.ParseJson(hdr))
 
-	var body io.Reader
+	var body io.Reader = nil
 	if payload != nil {
 		buf, err := json.Marshal(payload)
 		if err != nil {
@@ -428,7 +424,15 @@ func (c *httpClient) doRequest(
 		defer cancel()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	var req *http.Request
+	req, err = http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+
+	// if body == nil {
+	// 	req, err = http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	// } else {
+
+	// }
+
 	if err != nil {
 		c.metrics.ObserveRequest(ep, 0, time.Since(start), errKindNetwork)
 		return nil, 0, fmt.Errorf("appservice: build request: %w", err)
@@ -436,9 +440,8 @@ func (c *httpClient) doRequest(
 
 	// Default headers; per-call headers may override.
 	req.Header.Set("Accept", "*/*")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	req.Header.Set("Content-Type", "application/json")
+
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"market/internal/v2/db"
+	"market/internal/v2/db/models"
+	"market/internal/v2/types"
+
+	"gorm.io/gorm"
 )
 
 // stateReasonMaxLen / stateProgressMaxLen mirror the user_application_states
@@ -435,4 +439,96 @@ LIMIT 1
 		return "", nil
 	}
 	return versions[0], nil
+}
+
+type AppState struct {
+	UserAppID        int64  `gorm:"column:user_app_id"`
+	AppSourceId      string `gorm:"column:app_source_id"`
+	AppUserId        string `gorm:"column:app_user_id"`
+	AppId            string `gorm:"column:app_id"`
+	AppRawId         string `gorm:"column:app_raw_id"`
+	AppName          string `gorm:"column:app_name"`
+	AppRawName       string `gorm:"column:app_raw_name"`
+	UserAppStateId   int64  `gorm:"column:user_app_state_id"`
+	InstalledVersion string `gorm:"column:installed_version"`
+	TargetVersion    string `gorm:"column:target_version"`
+	IsSysApp         bool   `gorm:"column:is_sys_app"`
+	State            string `gorm:"column:state"`
+}
+
+func GetExistsAppStateRecords(ctx context.Context) ([]*AppState, error) {
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before user application state store usage")
+	}
+
+	var rows []*AppState
+	err := gdb.WithContext(ctx).Table("user_applications AS ua").
+		Joins("RIGHT JOIN user_application_states AS uas ON ua.id = uas.user_application_id").
+		Select(`ua.id AS user_app_id,
+						ua.source_id AS app_source_id,
+						ua.user_id AS app_user_id,
+						ua.app_id AS app_id,
+						ua.app_raw_id AS app_raw_id,
+						ua.app_name AS app_name,
+						ua.app_raw_name AS app_raw_name,
+						uas.id AS user_app_state_id,
+						uas.installed_version AS installed_version,
+						uas.target_version AS target_version,
+						uas.is_sys_app AS is_sys_app,
+						uas.state AS state`).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return rows, nil
+}
+
+func UpdateAppStates(in map[int64]*types.AppServiceResponse, delUas []int64) error {
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before CreateTask")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if len(in) > 0 {
+			for id, item := range in {
+				var tailscale, settings, entrance any
+				if len(item.Spec.Tailscale) > 0 {
+					tailscale = models.NewJSONB(item.Spec.Tailscale)
+				} else {
+					tailscale = map[string]interface{}{}
+				}
+
+				if item.Spec.Settings != nil {
+					settings = models.NewJSONB(item.Spec.Settings)
+				} else {
+					settings = &types.AppStateLatestDataSettings{}
+				}
+
+				if len(item.Status.EntranceStatuses) > 0 {
+					entrance = models.NewJSONB(item.Status.EntranceStatuses)
+				} else {
+					entrance = []types.AppStateLatestDataEntrances{}
+				}
+
+				const updateStateQuery = `UPDATE user_application_states SET state = ?, tailscale = ?, settings = ?, entrances = ? WHERE id = ?`
+				if err := tx.Exec(updateStateQuery, item.Status.State, tailscale, settings, entrance, id); err.Error != nil {
+					return fmt.Errorf("UpdateAppStates: update user_application_states id: %d, appId: %s, appName: %s, error: %v", id, item.Spec.AppID, item.Spec.Name, err.Error)
+				}
+			}
+		}
+		if len(delUas) > 0 {
+			for _, id := range delUas {
+				if err := tx.Exec(`DELETE FROM user_application_states WHERE id = ?`, id); err.Error != nil {
+					return fmt.Errorf("UpdateAppStates: delete uas id: %d, error: %v", id, err.Error)
+				}
+			}
+		}
+
+		return nil
+	})
 }

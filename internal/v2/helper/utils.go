@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
 )
@@ -22,4 +23,9 @@ func GenerateRandomHash() string {
 		return ""
 	}
 	return hex.EncodeToString(b)
+}
+
+func Md5(v string) string {
+	sum := md5.Sum([]byte(v))
+	return hex.EncodeToString(sum[:])[:8]
 }

@@ -26,11 +26,12 @@ type Server struct {
 	historyModule       *history.HistoryModule
 	taskModule          *task.TaskModule
 	localRepo           *appinfo.LocalRepo
+	statusChecker       *appinfo.StatusCorrectionChecker
 	runtimeStateService *runtime.RuntimeStateService
 }
 
 // NewServer creates a new server instance
-func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinfo.Hydrator, taskModule *task.TaskModule, historyModule *history.HistoryModule, runtimeStateService *runtime.RuntimeStateService) *Server {
+func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinfo.Hydrator, taskModule *task.TaskModule, historyModule *history.HistoryModule, runtimeStateService *runtime.RuntimeStateService, statusChecker *appinfo.StatusCorrectionChecker) *Server {
 	glog.V(2).Infof("Creating new server instance with port: %s", port)
 	glog.V(3).Infof("Cache manager provided: %v", cacheManager != nil)
 	glog.V(3).Infof("Hydrator provided: %v", hydrator != nil)
@@ -53,6 +54,7 @@ func NewServer(port string, cacheManager *appinfo.CacheManager, hydrator *appinf
 		historyModule:       historyModule,
 		taskModule:          taskModule,
 		localRepo:           localRepo,
+		statusChecker:       statusChecker,
 		runtimeStateService: runtimeStateService,
 	}
 

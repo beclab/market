@@ -58,11 +58,11 @@ type syncAppData struct {
 // RawDataEx renamed to RawData (with `json:"raw_data"`); no other logic
 // changes needed.
 type syncAppPayload struct {
-	Type            string                `json:"type"`
-	Timestamp       int64                 `json:"timestamp"`
-	Version         string                `json:"version"`
-	RawData         map[string]any        `json:"raw_data"`
-	RawDataEx       *oac.AppConfiguration `json:"raw_data_ex"`
+	Type      string                `json:"type"`
+	Timestamp int64                 `json:"timestamp"`
+	Version   string                `json:"version"`
+	RawData   map[string]any        `json:"raw_data"`
+	RawDataEx *oac.AppConfiguration `json:"raw_data_ex"`
 	// ImageAnalysis is chart-repo's per-app docker image analysis,
 	// emitted at the same level as RawDataEx. We persist it verbatim
 	// to user_applications.image_analysis via UpsertRenderSuccess so
@@ -76,13 +76,13 @@ type syncAppPayload struct {
 	// the chart-repo wire and are persisted to dedicated JSONB columns
 	// on user_applications (see store.UpsertRenderSuccess); they are
 	// NOT split into the manifest payload anymore.
-	I18n           map[string]map[string]string `json:"i18n"`
-	VersionHistory []types.VersionInfo          `json:"version_history"`
-	RawPackage      string                `json:"raw_package"`
-	RenderedPackage string                `json:"rendered_package"`
-	Values          []any                 `json:"values"`
-	AppInfo         map[string]any        `json:"app_info"`
-	AppSimpleInfo   map[string]any        `json:"app_simple_info"`
+	I18n            map[string]map[string]string `json:"i18n"`
+	VersionHistory  []types.VersionInfo          `json:"version_history"`
+	RawPackage      string                       `json:"raw_package"`
+	RenderedPackage string                       `json:"rendered_package"`
+	Values          []any                        `json:"values"`
+	AppInfo         map[string]any               `json:"app_info"`
+	AppSimpleInfo   map[string]any               `json:"app_simple_info"`
 }
 
 type TaskForApiStep struct {
