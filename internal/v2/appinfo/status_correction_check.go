@@ -412,17 +412,23 @@ func (scc *StatusCorrectionChecker) ReconcileAppStatusesStartup() {
 	// +        to sync it back to the local system.)
 	// +    ---> Therefore, this case can be repaired during the pipeline stage.
 	for _, dbAppState := range dbAppStates {
+		matched := false
 		for _, app := range apps {
 			if app.Spec.IsSysApp {
 				continue
 			}
 
-			if dbAppState.AppUserId == app.Spec.Owner && dbAppState.AppId == app.Spec.AppID && dbAppState.AppSourceId == app.Spec.Settings.MarketSource {
+			if dbAppState.AppUserId == app.Spec.Owner &&
+				dbAppState.AppId == app.Spec.AppID &&
+				dbAppState.AppSourceId == app.Spec.Settings.MarketSource {
 				in[dbAppState.UserAppStateId] = app
+				matched = true
 				break
 			}
 		}
-		delUas = append(delUas, dbAppState.UserAppStateId)
+		if !matched {
+			delUas = append(delUas, dbAppState.UserAppStateId)
+		}
 	}
 
 	glog.Infof("Reconcile, sync pg, update: %d, del: %d", len(in), len(delUas))
