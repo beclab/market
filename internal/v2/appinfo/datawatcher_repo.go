@@ -199,7 +199,10 @@ func (dwr *DataWatcherRepo) processStateChanges() map[string]bool {
 
 	glog.V(2).Info("State changes sorted by ID, processing in order...")
 
-	var lastProcessedID int64
+	// Inherit the current cursor so a batch where every change fails
+	// does not overwrite dwr.lastProcessedID (and Redis) with 0, which
+	// would force the next tick to replay the full history from ID 0.
+	lastProcessedID := dwr.lastProcessedID
 	for _, change := range stateChanges {
 		users, err := dwr.processStateChange(change)
 		if err != nil {
@@ -212,6 +215,13 @@ func (dwr *DataWatcherRepo) processStateChanges() map[string]bool {
 			}
 		}
 		lastProcessedID = change.ID
+	}
+
+	if lastProcessedID == dwr.lastProcessedID {
+		// No change advanced the cursor; skip the Redis write to avoid
+		// pointless traffic and keep the existing value as a tombstone
+		// of the last successful progress.
+		return affectedUsers
 	}
 
 	dwr.lastProcessedID = lastProcessedID
