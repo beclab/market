@@ -244,7 +244,11 @@ func (s *StateNotifier) handleNATSMessage(msg *nats.Msg) {
 		return
 	}
 
-	glog.Infof("[state] NATS subject: %s, payload: %s", msg.Subject, string(msg.Data))
+	// NATS payloads can be large and may contain user-facing fields; log
+	// only the subject + payload size at default verbosity. Full payload
+	// stays available at V(4) when debugging.
+	glog.V(2).Infof("[state] NATS subject: %s, payload_size: %d", msg.Subject, len(msg.Data))
+	glog.V(4).Infof("[state] NATS subject: %s, payload: %s", msg.Subject, string(msg.Data))
 	s.EnqueueState(ev, "nats")
 }
 
