@@ -1,6 +1,9 @@
 package appservice
 
-import "context"
+import (
+	"context"
+	"market/internal/v2/types"
+)
 
 // MockClient is a hand-written test double for Client. It is in the
 // production package (rather than a separate testing/ subpackage) so
@@ -29,8 +32,8 @@ import "context"
 // add their own synchronization (or use sync/atomic counters).
 type MockClient struct {
 	// Read endpoints
-	GetAllAppsFunc         func(ctx context.Context) ([]*App, error)
-	GetMiddlewaresFunc     func(ctx context.Context) ([]*Middleware, error)
+	GetAllAppsFunc         func(ctx context.Context) ([]*types.AppServiceResponse, error)
+	GetMiddlewaresFunc     func(ctx context.Context) ([]*types.MiddlewareStatusResponseData, error)
 	GetTerminusVersionFunc func(ctx context.Context) (string, error)
 	GetUserInfoFunc        func(ctx context.Context, token string) (*UserInfo, error)
 	GetAppEntranceURLsFunc func(ctx context.Context, appName, user string) (map[string]string, error)
@@ -64,7 +67,7 @@ var _ Client = (*MockClient)(nil)
 
 // ----- Client interface implementation -----
 
-func (m *MockClient) GetAllApps(ctx context.Context) ([]*App, error) {
+func (m *MockClient) GetAllApps(ctx context.Context) ([]*types.AppServiceResponse, error) {
 	m.GetAllAppsCalls++
 	if m.GetAllAppsFunc != nil {
 		return m.GetAllAppsFunc(ctx)
@@ -72,7 +75,7 @@ func (m *MockClient) GetAllApps(ctx context.Context) ([]*App, error) {
 	return nil, nil
 }
 
-func (m *MockClient) GetMiddlewares(ctx context.Context) ([]*Middleware, error) {
+func (m *MockClient) GetMiddlewares(ctx context.Context) ([]*types.MiddlewareStatusResponseData, error) {
 	m.GetMiddlewaresCalls++
 	if m.GetMiddlewaresFunc != nil {
 		return m.GetMiddlewaresFunc(ctx)

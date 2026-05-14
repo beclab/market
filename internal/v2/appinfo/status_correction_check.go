@@ -1,20 +1,21 @@
 package appinfo
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"market/internal/v2/appservice"
 	"market/internal/v2/helper"
 	"market/internal/v2/history"
 	"market/internal/v2/task"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
+	"market/internal/v2/watchers"
 
 	"github.com/golang/glog"
 )
@@ -33,6 +34,8 @@ type StatusCorrectionChecker struct {
 
 	historyModule *history.HistoryModule
 	taskModule    *task.TaskModule
+
+	userSystemApps sync.Map
 }
 
 // StatusChange represents a detected status change
@@ -150,64 +153,83 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 		return result
 	}
 
-	glog.V(3).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), helper.ParseJson(latestStatus))
+	users := watchers.GetUsers()
+	for _, u := range users {
+		var us []*types.AppStateLatestData
 
-	cachedStatus := scc.getCachedStatus()
-	if len(cachedStatus) == 0 {
-		glog.Error("[UserChanged] No cached status found, skipping comparison")
-		return result
-	}
-
-	glog.V(3).Infof("[UserChanged] Found cached status for %d applications and middlewares: %s", len(cachedStatus), helper.ParseJson(cachedStatus))
-
-	changes := scc.compareStatus(latestStatus, cachedStatus)
-
-	glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v, app: %d, middlewares: %d", changes, len(latestStatus), len(cachedStatus))
-
-	if len(changes) > 0 {
-		glog.V(2).Infof("[UserChanged] Detected %d status changes, applying corrections, changes: %s", len(changes), helper.ParseJson(changes))
-		scc.applyCorrections(changes, latestStatus)
-
-		// Apply UserInfo changes and collect affected users.
-		// Hash calculation and ForceSync are deferred to Pipeline Phase 5.
-		changesByUser := make(map[string]*StatusChange)
-		for _, change := range changes {
-			changesByUser[change.UserID] = &change
-		}
-		for userID, cs := range changesByUser {
-			userData := scc.cacheManager.GetUserData(userID)
-			if userData == nil {
-				glog.Warningf("StatusCorrectionChecker: userData not found for user %s", userID)
+		for _, s := range latestStatus {
+			if s.Spec.Owner != u.Name {
+				continue
+			}
+			if !s.Spec.IsSysApp {
 				continue
 			}
 
-			if userData.UserInfo != nil {
-				glog.V(2).Infof("[UserChanged] userId: %s, appName: %s, changeType: %s, newState: %s", cs.UserID, cs.AppName, cs.ChangeType, cs.NewState)
-				if cs.AppName == "olares-app" && cs.ChangeType == "app_disappeared" && cs.NewState == "unknown" {
-					userData.UserInfo.Exists = false
-				} else if cs.AppName == "olares-app" && cs.ChangeType == "app_appeared" && cs.NewState == "running" {
-					userData.UserInfo.Exists = true
-				}
-			} else {
-				glog.V(2).Infof("[UserChanged] userId: %s, userInfo is null", cs.UserID)
-			}
-
-			result[userID] = true
+			state := types.ConvertSystemAppToAppLatest(s)
+			us = append(us, state)
 		}
 
-		scc.correctionCount.Add(int64(len(changes)))
-	} else {
-		glog.V(3).Info("No status changes detected")
+		scc.userSystemApps.Swap(u.Id, us)
 	}
 
-	scc.checkAndCorrectTaskStatuses(latestStatus)
+	glog.V(3).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), helper.ParseJson(latestStatus))
 
-	glog.V(2).Infof("Status check cycle #%d completed in %v", cycle, time.Since(startTime))
+	// cachedStatus := scc.getCachedStatus()
+	// if len(cachedStatus) == 0 {
+	// 	glog.Error("[UserChanged] No cached status found, skipping comparison")
+	// 	return result
+	// }
+
+	// glog.V(3).Infof("[UserChanged] Found cached status for %d applications and middlewares: %s", len(cachedStatus), helper.ParseJson(cachedStatus))
+
+	// changes := scc.compareStatus(latestStatus, cachedStatus)
+
+	// glog.V(2).Infof("[UserChanged] Found cached status, changed: %+v, app: %d, middlewares: %d", changes, len(latestStatus), len(cachedStatus))
+
+	// if len(changes) > 0 {
+	// 	glog.V(2).Infof("[UserChanged] Detected %d status changes, applying corrections, changes: %s", len(changes), helper.ParseJson(changes))
+	// 	scc.applyCorrections(changes, latestStatus)
+
+	// 	// Apply UserInfo changes and collect affected users.
+	// 	// Hash calculation and ForceSync are deferred to Pipeline Phase 5.
+	// 	changesByUser := make(map[string]*StatusChange)
+	// 	for _, change := range changes {
+	// 		changesByUser[change.UserID] = &change
+	// 	}
+	// 	for userID, cs := range changesByUser {
+	// 		userData := scc.cacheManager.GetUserData(userID)
+	// 		if userData == nil {
+	// 			glog.Warningf("StatusCorrectionChecker: userData not found for user %s", userID)
+	// 			continue
+	// 		}
+
+	// 		if userData.UserInfo != nil {
+	// 			glog.V(2).Infof("[UserChanged] userId: %s, appName: %s, changeType: %s, newState: %s", cs.UserID, cs.AppName, cs.ChangeType, cs.NewState)
+	// 			if cs.AppName == "olares-app" && cs.ChangeType == "app_disappeared" && cs.NewState == "unknown" {
+	// 				userData.UserInfo.Exists = false
+	// 			} else if cs.AppName == "olares-app" && cs.ChangeType == "app_appeared" && cs.NewState == "running" {
+	// 				userData.UserInfo.Exists = true
+	// 			}
+	// 		} else {
+	// 			glog.V(2).Infof("[UserChanged] userId: %s, userInfo is null", cs.UserID)
+	// 		}
+
+	// 		result[userID] = true
+	// 	}
+
+	// 	scc.correctionCount.Add(int64(len(changes)))
+	// } else {
+	// 	glog.V(3).Info("No status changes detected")
+	// }
+
+	// scc.checkAndCorrectTaskStatuses(latestStatus)
+
+	// glog.V(2).Infof("Status check cycle #%d completed in %v", cycle, time.Since(startTime))
 	return result
 }
 
 // fetchLatestStatus fetches the latest status from app-service
-func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]*utils.AppServiceResponse, error) {
+func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]*types.AppServiceResponse, error) {
 	// Fetch apps status
 	appsStatus, err := scc.fetchLatestAppsStatus()
 	if err != nil {
@@ -217,9 +239,7 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]*utils.AppServiceResp
 	// Fetch middlewares status
 	middlewaresStatus, err := scc.fetchLatestMiddlewaresStatus()
 	if err != nil {
-		// Log warning but don't fail the entire operation
 		glog.Warningf("Failed to fetch middlewares status: %v", err)
-		// Return only apps status if middlewares fetch fails
 		return appsStatus, nil
 	}
 
@@ -230,11 +250,11 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]*utils.AppServiceResp
 		}
 	}
 
-	glog.Infof("[SCC] fetch latest appStatus: %s", helper.ParseJson(printf))
+	glog.V(3).Infof("[SCC] fetch latest appStatus: %s", helper.ParseJson(printf))
 
 	// Combine apps and middlewares status
 	// Convert middlewares to AppServiceResponse format and merge with apps
-	allStatus := make([]*utils.AppServiceResponse, 0, len(appsStatus)+len(middlewaresStatus))
+	allStatus := make([]*types.AppServiceResponse, 0, len(appsStatus)+len(middlewaresStatus))
 
 	// Add apps status
 	allStatus = append(allStatus, appsStatus...)
@@ -242,148 +262,86 @@ func (scc *StatusCorrectionChecker) fetchLatestStatus() ([]*utils.AppServiceResp
 	// Add middlewares status (already converted to AppServiceResponse format)
 	allStatus = append(allStatus, middlewaresStatus...)
 
-	glog.Infof("Combined status: %d apps + %d middlewares = %d total",
+	glog.Infof("[SCC] Combined status: %d apps + %d middlewares = %d total",
 		len(appsStatus), len(middlewaresStatus), len(allStatus))
 
 	return allStatus, nil
 }
 
 // fetchLatestAppsStatus fetches the latest apps status from app-service
-func (scc *StatusCorrectionChecker) fetchLatestAppsStatus() ([]*utils.AppServiceResponse, error) {
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/all/apps", scc.appServiceHost, scc.appServicePort)
-
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Get(url)
+func (scc *StatusCorrectionChecker) fetchLatestAppsStatus() ([]*types.AppServiceResponse, error) {
+	c, err := appservice.NewClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch from app-service: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("app-service returned status: %d", resp.StatusCode)
+		return nil, err
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	apps, err := c.GetAllApps(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	var apps []*utils.AppServiceResponse
-	if err := json.Unmarshal(data, &apps); err != nil {
-		return nil, fmt.Errorf("failed to parse app-service response: %v", err)
+		return nil, err
 	}
 
 	return apps, nil
 }
 
-// MiddlewareStatusResponse represents the response structure from middleware status endpoint
-type MiddlewareStatusResponse struct {
-	Code int `json:"code"`
-	Data []struct {
-		UUID           string `json:"uuid"`
-		Namespace      string `json:"namespace"`
-		User           string `json:"user"`
-		ResourceStatus string `json:"resourceStatus"`
-		ResourceType   string `json:"resourceType"`
-		CreateTime     string `json:"createTime"`
-		UpdateTime     string `json:"updateTime"`
-		Metadata       struct {
-			Name string `json:"name"`
-		} `json:"metadata"`
-		Version string `json:"version"`
-		Title   string `json:"title"`
-	} `json:"data"`
-}
-
 // fetchLatestMiddlewaresStatus fetches the latest middlewares status from app-service
-func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]*utils.AppServiceResponse, error) {
-	url := fmt.Sprintf("http://%s:%s/app-service/v1/middlewares/status", scc.appServiceHost, scc.appServicePort)
+func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]*types.AppServiceResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Get(url)
+	c, err := appservice.NewClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch middlewares from app-service: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("app-service middleware endpoint returned status: %d", resp.StatusCode)
+		return nil, err
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	resp, err := c.GetMiddlewares(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read middleware response body: %v", err)
+		return nil, err
 	}
 
-	var middlewareResp MiddlewareStatusResponse
-	if err := json.Unmarshal(data, &middlewareResp); err != nil {
-		return nil, fmt.Errorf("failed to parse middleware response: %v", err)
+	if len(resp) == 0 {
+		return nil, nil
 	}
 
-	// Convert middleware response to AppServiceResponse format for compatibility
-	// This allows us to reuse existing comparison logic
-	var convertedResponses []*utils.AppServiceResponse
+	var convertedResponses []*types.AppServiceResponse
 
-	for _, middleware := range middlewareResp.Data {
-		// Convert middleware to AppServiceResponse format
-		var converted = &utils.AppServiceResponse{
-			Spec:   &utils.AppServiceResponseSpec{},
+	for _, r := range resp {
+		var converted = &types.AppServiceResponse{
+			Metadata: &types.AppServiceResponseMetadata{},
+			Spec: &types.AppServiceResponseSpec{
+				Settings: &types.AppStateLatestDataSettings{},
+			},
 			Status: &types.AppStateLatestDataStatus{},
 		}
-		converted.Metadata.Name = middleware.Metadata.Name
-		converted.Metadata.UID = middleware.UUID
-		converted.Metadata.Namespace = middleware.Namespace
-		converted.Spec.Name = middleware.Metadata.Name
-		converted.Spec.AppID = middleware.Metadata.Name
-		converted.Spec.Owner = middleware.User
-		converted.Spec.Title = middleware.Title
-		converted.Spec.Source = "middleware"
-		converted.Status.State = middleware.ResourceStatus
-		converted.Status.UpdateTime = middleware.UpdateTime
-		converted.Status.StatusTime = middleware.UpdateTime
-		converted.Status.LastTransitionTime = middleware.UpdateTime
+		converted.Metadata.Name = r.Metadata.Name
+
+		converted.Spec.Name = r.Metadata.Name // + todo
+		// converted.Spec.RawAppName = r.Metadata.Name // + todo
+		converted.Spec.AppID = helper.Md5(r.Metadata.Name)
+		converted.Spec.Owner = r.User
+		converted.Spec.Title = r.Title
+		converted.Spec.Source = "middleware" // + todo
+		converted.Spec.State = r.ResourceStatus
+		converted.Spec.UpdateTime = r.UpdateTime
+		converted.Spec.StatusTime = r.UpdateTime
+		converted.Spec.LastTransitionTime = r.UpdateTime
+
+		converted.Spec.Settings.Title = r.Title
+		converted.Spec.Settings.Source = "" // + todo
+		converted.Spec.Settings.MarketSource = r.MarketSource
+		converted.Spec.Settings.Version = r.Version
+
+		converted.Status.State = r.ResourceStatus
+		converted.Status.UpdateTime = r.UpdateTime
+		converted.Status.StatusTime = r.UpdateTime
+		converted.Status.LastTransitionTime = r.UpdateTime
 
 		convertedResponses = append(convertedResponses, converted)
 	}
 
 	return convertedResponses, nil
-}
-
-// getCachedStatus retrieves current status from cache
-func (scc *StatusCorrectionChecker) getCachedStatus() map[string]*types.AppStateLatestData {
-	// Get all users data from cache
-	allUsersData := scc.cacheManager.GetAllUsersData()
-
-	cachedStatus := make(map[string]*types.AppStateLatestData)
-
-	for userID, userData := range allUsersData {
-		for sourceID, sourceData := range userData.Sources {
-			for _, appState := range sourceData.AppStateLatest {
-				if appState != nil && appState.Status.Name != "" {
-					// Create a unique key: user:source:app
-					key := fmt.Sprintf("%s:%s:%s", userID, sourceID, appState.Status.Name)
-					cachedStatus[key] = appState
-				}
-			}
-		}
-	}
-
-	var printf = make(map[string]interface{})
-	for k, v := range cachedStatus {
-		if !strings.HasSuffix(k, "olares-app") {
-			printf[k] = v
-		}
-	}
-
-	glog.Infof("[SCC] fetch cached appStatus: %s", helper.ParseJson(printf))
-
-	return cachedStatus
 }
 
 // getExistingEntranceInvisibleMap collects cached invisible flags for the specified app.
@@ -558,84 +516,6 @@ func (scc *StatusCorrectionChecker) compareStatus(latestStatus []*utils.AppServi
 			}
 		}
 	}
-
-	// 4) Prune duplicates: same user+app across multiple sources -> keep only the latest-installed
-	// for key, entries := range cachedAppsByUserAndName {
-	// 	if len(entries) <= 1 {
-	// 		continue
-	// 	}
-
-	// 	parts := strings.SplitN(key, ":", 2)
-	// 	if len(parts) != 2 {
-	// 		continue
-	// 	}
-	// 	userID, appName := parts[0], parts[1]
-
-	// 	// Prefer the source recorded by GetAppInfoLastInstalled as latest-installed
-	// 	preferredSource := ""
-	// 	if _, src, err := task.LookupAppInfoLastInstalled(userID, appName); err == nil && src != "" {
-	// 		preferredSource = src
-	// 	}
-
-	// 	// Fallback: use newest StatusTime when no record found
-	// 	if preferredSource == "" {
-	// 		sort.Slice(entries, func(i, j int) bool {
-	// 			return entries[i].statusTime.After(entries[j].statusTime)
-	// 		})
-	// 		preferredSource = entries[0].sourceID
-	// 	}
-
-	// 	for _, entry := range entries {
-	// 		if entry.sourceID == preferredSource || entry.appState == nil {
-	// 			continue
-	// 		}
-
-	// 		change := StatusChange{
-	// 			UserID:     userID,
-	// 			SourceID:   entry.sourceID,
-	// 			AppName:    appName,
-	// 			ChangeType: "duplicate_prune",
-	// 			OldState:   entry.appState.Status.State,
-	// 			NewState:   "removed",
-	// 			Timestamp:  time.Now(),
-	// 		}
-	// 		changes = append(changes, change)
-
-	// 		glog.Infof("Duplicate app detected (user=%s, app=%s): keep source=%s, prune source=%s (state=%s)",
-	// 			userID, appName, preferredSource, entry.sourceID, entry.appState.Status.State)
-	// 	}
-	// }
-
-	// 5. Check for state inconsistency (all entrances running but app state is not running)
-	// for _, app := range latestStatus {
-	// 	userID := app.Spec.Owner
-	// 	appName := app.Spec.Name
-	// 	key := fmt.Sprintf("%s:%s", userID, appName)
-
-	// 	entries := cachedAppsByUserAndName[key]
-	// 	if len(entries) == 0 {
-	// 		continue
-	// 	}
-
-	// 	// // Check for state inconsistency
-	// 	// for _, entry := range entries {
-	// 	// 	if entry.appState == nil {
-	// 	// 		continue
-	// 	// 	}
-	// 	// 	if scc.isStateInconsistent(app) {
-	// 	// 		change := StatusChange{
-	// 	// 			UserID:     userID,
-	// 	// 			SourceID:   entry.sourceID,
-	// 	// 			AppName:    appName,
-	// 	// 			ChangeType: "state_inconsistency",
-	// 	// 			OldState:   entry.appState.Status.State,
-	// 	// 			NewState:   "running",
-	// 	// 			Timestamp:  time.Now(),
-	// 	// 		}
-	// 	// 		changes = append(changes, change)
-	// 	// 	}
-	// 	// }
-	// }
 
 	return changes
 }

@@ -138,7 +138,7 @@ func (p *Pipeline) run(ctx context.Context) {
 	p.phaseSyncer(ctx)
 	hydrateUsers := p.phaseHydrateApps(ctx)
 	repoUsers := p.phaseDataWatcherRepo(ctx)
-	// statusUsers := p.phaseStatusCorrection(ctx) // + todo need to remove
+	statusUsers := p.phaseStatusCorrection(ctx)
 
 	// Phase 5: merge all affected users + dirty users, calculate hash once, sync once
 	allAffected := make(map[string]bool)
@@ -148,9 +148,9 @@ func (p *Pipeline) run(ctx context.Context) {
 	for u := range repoUsers {
 		allAffected[u] = true
 	}
-	// for u := range statusUsers {
-	// 	allAffected[u] = true
-	// }
+	for u := range statusUsers {
+		allAffected[u] = true
+	}
 	// Collect dirty users from event-driven paths (DataWatcherState)
 	// if p.dataWatcher != nil {
 	// 	for u := range p.dataWatcher.CollectAndClearDirtyUsers() {
@@ -391,6 +391,22 @@ func (p *Pipeline) phaseDataWatcherRepo(ctx context.Context) map[string]bool {
 	}
 	glog.V(2).Info("Pipeline Phase 3: DataWatcherRepo")
 	return p.dataWatcherRepo.ProcessOnce()
+}
+
+// phaseStatusCorrection corrects app running statuses
+func (p *Pipeline) phaseStatusCorrection(ctx context.Context) map[string]bool {
+	if p.statusCorrectionChecker == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-p.stopChan:
+		return nil
+	default:
+	}
+	glog.V(2).Info("Pipeline Phase 4: StatusCorrectionChecker")
+	return p.statusCorrectionChecker.PerformStatusCheckOnce()
 }
 
 // HydrateSingleApp runs hydration steps for a single PG-sourced candidate.
