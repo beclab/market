@@ -665,8 +665,12 @@ func (cm *CacheManager) GetUserData(userID string) *UserData {
 	return cm.cache.Users[userID]
 }
 
-// getUserData internal method to get user data without external locking
+// getUserData returns the cached UserData for the given userID, taking
+// the read lock to stay race-free with writers. Mirrors getSourceData's
+// locking; the only caller (processSyncRequest) does not hold the lock.
 func (cm *CacheManager) getUserData(userID string) *UserData {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
 	return cm.cache.Users[userID]
 }
 
