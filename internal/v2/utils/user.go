@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"market/internal/v2/helper"
+
 	"github.com/emicklei/go-restful/v3"
 	"github.com/golang/glog"
 )
@@ -35,17 +37,11 @@ func isPublicEnv() bool {
 
 // GetUserInfoFromRequest extracts username from request
 func GetUserInfoFromRequest(req *restful.Request) (string, error) {
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return "admin", nil
 	}
 
-	// Check if it's development environment, return admin user directly
-	if IsDevelopmentEnvironment() {
-		glog.Infof("Development environment detected, returning admin username")
-		return "admin", nil
-	}
-
-	if IsAccountFromHeader() {
+	if helper.IsAccountFromHeader() {
 		account := req.HeaderParameter("X-Bfl-User")
 		return account, nil
 	}
@@ -178,4 +174,3 @@ func GetTokenFromRequest(req *restful.Request) string {
 
 	return cookie.Value
 }
-

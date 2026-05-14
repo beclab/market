@@ -1,0 +1,253 @@
+package store
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"market/internal/v2/db"
+	"market/internal/v2/db/models"
+	"market/internal/v2/types"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+func QueryAppsByIDs(ctx context.Context, sourceID string, ids []string) ([]*models.Application, error) {
+	if sourceID == "" || len(ids) == 0 {
+		return []*models.Application{}, nil
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	uniqueIDs := uniqueNonEmpty(ids)
+	if len(uniqueIDs) == 0 {
+		return []*models.Application{}, nil
+	}
+
+	var apps []*models.Application
+	result := gdb.WithContext(ctx).
+		Where("source_id = ? AND app_id IN ?", sourceID, uniqueIDs).
+		Find(&apps)
+	if result.Error != nil {
+		return nil, fmt.Errorf("query applications error: %w", result.Error)
+	}
+
+	return apps, nil
+}
+
+type BatchSyncInput struct {
+	SourceID      string
+	RequestApps   map[string]interface{}
+	AddedAppIDs   []string
+	ChangedAppIDs []string
+}
+
+// SyncBatchApps applies added/version-changed app updates in one transaction.
+func SyncBatchApps(ctx context.Context, in BatchSyncInput) error {
+	if in.SourceID == "" {
+		return nil
+	}
+	if len(in.AddedAppIDs) == 0 && len(in.ChangedAppIDs) == 0 {
+		return nil
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before market source store usage")
+	}
+
+	allIDs := append([]string{}, in.AddedAppIDs...)
+	allIDs = append(allIDs, in.ChangedAppIDs...)
+	allRows := buildApplicationRows(in.SourceID, in.RequestApps, allIDs)
+	if len(allRows) == 0 {
+		return nil
+	}
+
+	return upsertApplications(gdb.WithContext(ctx), allRows)
+}
+
+func upsertApplications(tx *gorm.DB, rows []*models.Application) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	if err := tx.
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "source_id"},
+				{Name: "app_id"},
+			},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"app_name",
+				"app_version",
+				"app_type",
+				"app_entry",
+				"price",
+			}),
+		}).
+		Create(&rows).Error; err != nil {
+		return fmt.Errorf("upsert applications error: %w", err)
+	}
+
+	return nil
+}
+
+// UpsertApplicationRow upserts a single applications row built outside
+// the store package (e.g. by the upload-event handler, which assembles
+// the row from a chart-repo /apps response shape that differs from the
+// flat appMap the syncer feeds to buildApplicationRow). The OnConflict
+// behaviour is identical to upsertApplications — the (source_id, app_id)
+// row is inserted on first sight and its app_name / app_version /
+// app_type / app_entry / price columns are overwritten on every
+// subsequent call. Identity columns (source_id, app_id) are NOT in the
+// assignment list so a stable row id survives across upserts.
+//
+// Callers are responsible for the row's app_id derivation; this helper
+// trusts whatever value was assembled. The single-row contract avoids
+// exporting upsertApplications' []*models.Application surface, which
+// would invite ad-hoc batch use from outside the syncer.
+func UpsertApplicationRow(ctx context.Context, row *models.Application) error {
+	if row == nil {
+		return fmt.Errorf("UpsertApplicationRow: nil row")
+	}
+	gdb := db.Global()
+	if gdb == nil {
+		return fmt.Errorf("postgres not initialised; db.Open must run before UpsertApplicationRow")
+	}
+	return upsertApplications(gdb.WithContext(ctx), []*models.Application{row})
+}
+
+func buildApplicationRows(sourceID string, requestApps map[string]interface{}, appIDs []string) []*models.Application {
+	uniqueIDs := uniqueNonEmpty(appIDs)
+	if len(uniqueIDs) == 0 {
+		return nil
+	}
+
+	rows := make([]*models.Application, 0, len(uniqueIDs))
+	for _, appID := range uniqueIDs {
+		raw, ok := requestApps[appID]
+		if !ok {
+			continue
+		}
+		appMap, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if row := buildApplicationRow(sourceID, appID, appMap); row != nil {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+// buildApplicationRow maps one chart-repo app payload onto the
+// applications-table row shape. It is the single point where the
+// field-extraction conventions ("version" required, "name" defaulted to
+// appID, cfgType normalised, AppEntry / price decoded from the nested
+// JSON object) live, so the batch syncer (buildApplicationRows) and the
+// event-driven single-app writer (chartrepo_event.go) cannot drift.
+//
+// Returns nil when the payload is missing the mandatory version field —
+// every caller treats the row as a tolerable skip rather than an error,
+// matching the legacy syncer behaviour where a malformed entry would
+// previously be filtered out silently.
+func buildApplicationRow(sourceID, appID string, appMap map[string]interface{}) *models.Application {
+	appVersion, _ := appMap["version"].(string)
+	appVersion = strings.TrimSpace(appVersion)
+	if appVersion == "" {
+		return nil
+	}
+
+	appName, _ := appMap["name"].(string)
+	appName = strings.TrimSpace(appName)
+	if appName == "" {
+		appName = appID
+	}
+
+	row := &models.Application{
+		SourceID:   sourceID,
+		AppID:      appID,
+		AppName:    appName,
+		AppVersion: appVersion,
+		AppType:    normalizeAppType(appMap["cfgType"]),
+	}
+
+	if appEntry := types.NewApplicationInfoEntry(appMap); appEntry != nil {
+		entryJSON := models.NewJSONB(*appEntry)
+		row.AppEntry = &entryJSON
+	}
+
+	if price := parsePriceConfig(appMap["price"]); price != nil {
+		priceJSON := models.NewJSONB(*price)
+		row.Price = &priceJSON
+	}
+
+	return row
+}
+
+func parsePriceConfig(raw interface{}) *types.PriceConfig {
+	switch v := raw.(type) {
+	case *types.PriceConfig:
+		return v
+	case types.PriceConfig:
+		return &v
+	case map[string]interface{}:
+		if len(v) == 0 {
+			return nil
+		}
+		payload, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+		var out types.PriceConfig
+		if err := json.Unmarshal(payload, &out); err != nil {
+			return nil
+		}
+		return &out
+	default:
+		return nil
+	}
+}
+
+func normalizeAppType(raw interface{}) string {
+	cfgType, _ := raw.(string)
+	cfgType = strings.ToLower(strings.TrimSpace(cfgType))
+	if strings.Contains(cfgType, "middleware") {
+		return "middleware"
+	}
+	return "app"
+}
+
+// NormalizeAppType is the exported alias used by callers outside the
+// store package (currently the upload-event handler) to apply the same
+// "app" / "middleware" classification rule the syncer uses for
+// applications.app_type. Keeping a single normaliser ensures the two
+// writer paths cannot disagree on what value to persist.
+func NormalizeAppType(raw interface{}) string {
+	return normalizeAppType(raw)
+}
+
+func uniqueNonEmpty(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}

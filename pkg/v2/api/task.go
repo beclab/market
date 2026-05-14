@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -16,10 +18,60 @@ import (
 	"github.com/golang/glog"
 	"github.com/gorilla/mux"
 
+	"market/internal/v2/store"
 	"market/internal/v2/task"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
 )
+
+// opType* are the user_application_states.op_type values written by API
+// handlers at pending-row creation. The strings are persisted verbatim and
+// match the operation kinds NATS msg.OpType uses, so a NATS event can
+// overwrite the value cleanly without a translation table.
+const (
+	opTypeInstall   = "install"
+	opTypeUninstall = "uninstall"
+	opTypeUpgrade   = "upgrade"
+	opTypeClone     = "clone"
+	opTypeCancel    = "cancel"
+)
+
+// writePendingState writes the initial user_application_states pending row
+// for an app operation, before TaskModule.AddTask is invoked. Failures are
+// logged but never block task creation: the legacy cache + NATS path
+// continues to drive client-visible behaviour during phase 1; the PG row
+// is observability-only until later phases wire readers against it.
+//
+// sourceID may legitimately be empty for handlers (cancelInstall,
+// uninstallApp) that look up app metadata across all of a user's sources
+// and happen not to find the app — in that case the call is a no-op
+// rather than a fabrication of source. Same for ErrUserApplicationStateNotFound,
+// which fires when no user_applications row exists for the (user, source,
+// app) tuple (clones, or apps removed from catalog mid-flight). Both are
+// logged at V(3) so they are visible during phase-1 monitoring without
+// polluting normal logs.
+func (s *Server) writePendingState(ctx context.Context, userID, sourceID, appID, opType string) {
+	if sourceID == "" || appID == "" {
+		glog.V(3).Infof("writePendingState: skipping (user=%s source=%q app=%q op=%s) — missing source or app",
+			userID, sourceID, appID, opType)
+		return
+	}
+	if err := store.UpsertPendingState(ctx, store.PendingStateInput{
+		UserID:   userID,
+		SourceID: sourceID,
+		AppID:    appID,
+		OpType:   opType,
+	}); err != nil {
+		switch {
+		case errors.Is(err, store.ErrUserApplicationStateNotFound):
+			glog.V(3).Infof("writePendingState: no user_applications row for (user=%s source=%s app=%s op=%s); skipping pending state write",
+				userID, sourceID, appID, opType)
+		default:
+			glog.Errorf("writePendingState: persist pending state failed (user=%s source=%s app=%s op=%s): %v",
+				userID, sourceID, appID, opType, err)
+		}
+	}
+}
 
 const syncTaskHardTimeout = 30 * time.Minute
 
@@ -95,6 +147,19 @@ type CancelInstallRequest struct {
 	Sync bool `json:"sync"` // Whether this is a synchronous request
 }
 
+// cloneAppIDFromName derives the user_applications.app_id for a clone
+// row from its wire-level app_name (rawAppName + requestHash). MD5 is
+// used because its hex digest is exactly 32 characters — the
+// user_applications.app_id column is VARCHAR(32). The choice is for
+// fixed-width fit, NOT for cryptographic strength: collision resistance
+// is irrelevant here because the input (newAppName) is already unique
+// per (rawAppName, requestHash) and the (user_id, source_id, app_id)
+// UNIQUE constraint catches any pathological collision at write time.
+func cloneAppIDFromName(newAppName string) string {
+	sum := md5.Sum([]byte(newAppName))
+	return hex.EncodeToString(sum[:])
+}
+
 // calculateCloneRequestHash calculates SHA256 hash of the entire clone request (excluding Sync field) and returns first 6 characters
 // The hash is based on: Source, AppName, Title, Envs, and Entrances
 func calculateCloneRequestHash(request CloneAppRequest) string {
@@ -155,30 +220,31 @@ func calculateCloneRequestHash(request CloneAppRequest) string {
 	return hashStr
 }
 
-// extractInstallProductMetadata returns productID & developerName to help VC injection
-func extractInstallProductMetadata(appInfo *types.AppInfo) (string, string) {
-	if appInfo == nil {
-		return "", ""
-	}
-
+// extractInstallProductMetadata returns productID & developerName to
+// help VC injection. Inputs are sourced from user_applications
+// (price column + app_id column) so the helper does not depend on the
+// applications.app_entry catalogue projection.
+//
+// fallbackAppID is the user_applications.app_id of the row being
+// installed — used as the productID fallback when the price config
+// does not carry an explicit ProductID.
+func extractInstallProductMetadata(price *types.PriceConfig, fallbackAppID string) (string, string) {
 	var productID string
 	var developerName string
 
-	if appInfo.Price != nil {
-		developerName = strings.TrimSpace(appInfo.Price.Developer)
+	if price != nil {
+		developerName = strings.TrimSpace(price.Developer)
 
-		if appInfo.Price.Paid != nil {
-			if pid := strings.TrimSpace(appInfo.Price.Paid.ProductID); pid != "" {
+		if price.Paid != nil {
+			if pid := strings.TrimSpace(price.Paid.ProductID); pid != "" {
 				productID = pid
-			} else if len(appInfo.Price.Paid.Price) > 0 {
-				if appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
-					productID = appInfo.AppEntry.ID
-				}
+			} else if len(price.Paid.Price) > 0 && fallbackAppID != "" {
+				productID = fallbackAppID
 			}
 		}
 
 		if productID == "" {
-			for _, product := range appInfo.Price.Products {
+			for _, product := range price.Products {
 				if pid := strings.TrimSpace(product.ProductID); pid != "" {
 					productID = pid
 					break
@@ -187,8 +253,8 @@ func extractInstallProductMetadata(appInfo *types.AppInfo) (string, string) {
 		}
 	}
 
-	if productID == "" && appInfo.AppEntry != nil && appInfo.AppEntry.ID != "" {
-		productID = appInfo.AppEntry.ID
+	if productID == "" && fallbackAppID != "" {
+		productID = fallbackAppID
 	}
 
 	return productID, developerName
@@ -225,60 +291,31 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(4).Infof("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+	// Step 4: Resolve the user's rendered manifest from PG. App
+	// operations only consume per-user data (user_applications); the
+	// catalogue (applications) is intentionally not joined.
+	row, err := store.GetAppInstallRow(r.Context(), userID, request.Source, request.AppName, request.Version)
+	if err != nil {
+		glog.Errorf("installApp: failed to load user_applications row for app=%s source=%s user=%s: %v",
+			request.AppName, request.Source, userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to load app data", nil)
 		return
 	}
-
-	// Step 5: Get user data from cache
-	userData := s.cacheManager.GetUserData(userID)
-	if userData == nil {
-		glog.V(4).Infof("User data not found for user: %s", userID)
-		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-		return
-	}
-
-	// Step 6: Get source data
-	sourceData := userData.Sources[request.Source]
-	if sourceData == nil {
-		glog.V(4).Infof("Source data not found: %s for user: %s", request.Source, userID)
-		s.sendResponse(w, http.StatusNotFound, false, "Source data not found", nil)
-		return
-	}
-
-	// Step 7: Find the app in AppInfoLatest
-	var targetApp *types.AppInfoLatestData
-	for _, appInfoData := range sourceData.AppInfoLatest {
-		if appInfoData == nil || appInfoData.RawData == nil {
-			continue
-		}
-
-		// Check if app matches the requested name and version
-		if appInfoData.RawData.Name == request.AppName && appInfoData.RawData.Version == request.Version {
-			targetApp = appInfoData
-			break
-		}
-	}
-
-	if targetApp == nil {
+	if row == nil {
 		glog.V(4).Infof("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
 		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
 		return
 	}
 
-	if targetApp.AppInfo == nil {
-		glog.V(2).Infof("installApp: targetApp.AppInfo is nil for app=%s, source=%s", request.AppName, request.Source)
-	} else if targetApp.AppInfo.Price == nil {
-		glog.V(2).Infof("installApp: targetApp.AppInfo.Price is nil for app=%s, source=%s", request.AppName, request.Source)
+	if row.Price == nil {
+		glog.V(2).Infof("installApp: row.Price is nil for app=%s, source=%s", request.AppName, request.Source)
 	} else {
-		glog.V(2).Infof("installApp: targetApp.AppInfo.Price detected for app=%s, source=%s", request.AppName, request.Source)
+		glog.V(2).Infof("installApp: row.Price detected for app=%s, source=%s", request.AppName, request.Source)
 	}
 
-	// Step 8: Verify chart package exists
+	// Step 5: Verify chart package exists
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, request.Version)
-	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
+	chartPath := filepath.Join(row.RenderedPackage, chartFilename)
 
 	// if _, err := os.Stat(chartPath); err != nil {
 	// 	glog.Errorf("Chart package not found at path: %s", chartPath)
@@ -286,19 +323,18 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 	// 	return
 	// }
 
-	// Step 9: Get app cfgType from cache
-	var cfgType string
-	if targetApp != nil && targetApp.RawData != nil {
-		cfgType = targetApp.RawData.CfgType
-		glog.V(2).Infof("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
+	// Step 6: Resolve cfgType from manifest_type, defaulting when empty
+	cfgType := row.ManifestType
+	if cfgType == "" {
+		glog.V(2).Infof("Warning: manifest_type empty for app: %s, using default 'app'", request.AppName)
+		cfgType = "app"
 	} else {
-		glog.V(2).Infof("Warning: Could not retrieve cfgType for app: %s, using default", request.AppName)
-		cfgType = "app" // Default to app type
+		glog.V(2).Infof("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
 	}
 
 	images := []task.Image{}
-	if targetApp.AppInfo != nil && targetApp.AppInfo.ImageAnalysis != nil {
-		for _, image := range targetApp.AppInfo.ImageAnalysis.Images {
+	if row.ImageAnalysis != nil {
+		for _, image := range row.ImageAnalysis.Data.Images {
 			images = append(images, task.Image{
 				Name: image.Name,
 				Size: image.TotalSize,
@@ -306,18 +342,24 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	productID, developerName := extractInstallProductMetadata(targetApp.AppInfo)
+	// realAppID is the user_applications.app_id of the row being
+	// installed — the manifest's id, equivalent to the legacy
+	// AppInfo.AppEntry.ID for non-clone rows (which is all install
+	// targets). Falling back to request.AppName mirrors the legacy
+	// path when both manifest ids are blank.
+	appId := row.AppID
+
+	var price *types.PriceConfig
+	if row.Price != nil {
+		p := row.Price.Data
+		price = &p
+	}
+	productID, developerName := extractInstallProductMetadata(price, appId)
 	glog.V(2).Infof("installApp: extracted product metadata app=%s, source=%s, productID=%s, developer=%s", request.AppName, request.Source, productID, developerName)
 
-	realAppID := request.AppName
-	if targetApp.AppInfo != nil && targetApp.AppInfo.AppEntry != nil && targetApp.AppInfo.AppEntry.ID != "" {
-		realAppID = targetApp.AppInfo.AppEntry.ID
-	} else if targetApp.RawData != nil && targetApp.RawData.AppID != "" {
-		realAppID = targetApp.RawData.AppID
-	}
-	glog.V(2).Infof("installApp: resolved realAppID=%s for app=%s, source=%s, sync=%v", realAppID, request.AppName, request.Source, request.Sync)
+	glog.V(2).Infof("installApp: resolved appId=%s for app=%s, source=%s, sync=%v", appId, request.AppName, request.Source, request.Sync)
 
-	// Step 10: Create installation task
+	// Step 7: Create installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"source":     request.Source,
@@ -337,13 +379,17 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 		taskMetadata["developerName"] = developerName
 		glog.V(2).Infof("installApp: added developerName=%s to metadata for app=%s, source=%s", developerName, request.AppName, request.Source)
 	}
-	if realAppID != "" {
-		taskMetadata["realAppID"] = realAppID
-		glog.V(2).Infof("installApp: added realAppID=%s to metadata for app=%s, source=%s", realAppID, request.AppName, request.Source)
-	}
+
+	taskMetadata["realAppID"] = appId
+
+	// user_application_states pending row is established by
+	// taskModule.AddTask → store.CreateTask in the same transaction
+	// as task_records, so the state side-effect cannot diverge from
+	// the task creation. realAppID + source live in taskMetadata for
+	// CreateTask to locate the row.
 
 	// Handle synchronous requests with proper blocking
-	if request.Sync {
+	if request.Sync { // +
 		callback, wait := waitForSyncTask(r.Context())
 
 		t, err := s.taskModule.AddTask(task.InstallApp, request.AppName, userID, taskMetadata, callback)
@@ -440,97 +486,81 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Info("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+	// Step 4: Resolve the user's rendered manifest from PG. cloneApp
+	// only acts on the original chart row (app_id == app_raw_id);
+	// GetAppInstallRow with version="" returns the latest successful
+	// render of that row. The catalogue (applications) is intentionally
+	// not joined.
+	row, err := store.GetAppInstallRow(r.Context(), userID, request.Source, request.AppName, "")
+	if err != nil {
+		glog.Errorf("cloneApp: failed to load user_applications row for app=%s source=%s user=%s: %v",
+			request.AppName, request.Source, userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to load app data", nil)
 		return
 	}
-
-	// Step 5: Get user data from cache
-	userData := s.cacheManager.GetUserData(userID)
-	if userData == nil {
-		glog.V(3).Info("User data not found for user: %s", userID)
-		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-		return
-	}
-
-	// Step 6: Get source data
-	sourceData := userData.Sources[request.Source]
-	if sourceData == nil {
-		glog.V(3).Info("Source data not found: %s for user: %s", request.Source, userID)
-		s.sendResponse(w, http.StatusNotFound, false, "Source data not found", nil)
-		return
-	}
-
-	// Step 7: Find the app in AppInfoLatest (by name only, no version check)
-	var targetApp *types.AppInfoLatestData
-	for _, appInfoData := range sourceData.AppInfoLatest {
-		if appInfoData == nil || appInfoData.RawData == nil {
-			continue
-		}
-
-		// Check if app matches the requested name (use latest version found)
-		if appInfoData.RawData.Name == request.AppName {
-			targetApp = appInfoData
-			break
-		}
-	}
-
-	if targetApp == nil {
+	if row == nil {
 		glog.V(3).Infof("App not found: %s in source: %s", request.AppName, request.Source)
 		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
 		return
 	}
 
-	// Step 8: Get rawAppName from app info (应用信息中的名字)
-	rawAppName := targetApp.RawData.Name
+	// Step 5: rawAppName is the original chart's manifest name. The
+	// SQL filters app_id = app_raw_id so row.AppName == row.AppRawName
+	// for the row returned here; either field is correct.
+	rawAppName := row.AppRawName
 	if rawAppName == "" {
 		glog.V(3).Infof("Raw app name not found for app: %s", request.AppName)
 		s.sendResponse(w, http.StatusBadRequest, false, "Raw app name not found", nil)
 		return
 	}
 
-	// Step 9: Calculate hash suffix from entire clone request and construct new app name: rawAppName + hash
+	// Step 6: Calculate hash suffix from entire clone request and
+	// construct new app name + app_id. newAppID is md5(newAppName) so
+	// the clone has its own (user, source, app_id) identity in
+	// user_applications, independent of the original chart's app_id.
 	requestHash := calculateCloneRequestHash(request)
 	newAppName := rawAppName + requestHash
+	newAppID := cloneAppIDFromName(newAppName)
 
-	// For clone app, get version from installed original app's state
-	// Clone operation requires the original app to be installed
-	var appVersion string
-	if s.cacheManager == nil {
-		glog.V(3).Infof("Cache manager not available, cannot verify installed original app")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+	// Step 7: Read the original app's installed version from PG. Clone
+	// requires the original to already be installed; an empty result
+	// means no user_application_states row exists for the (user,
+	// source, rawAppName) tuple, which is the legitimate "not
+	// installed" 404.
+	appVersion, err := store.GetInstalledAppVersion(r.Context(), userID, request.Source, rawAppName)
+	if err != nil {
+		glog.Errorf("cloneApp: failed to read installed version for app=%s source=%s user=%s: %v",
+			rawAppName, request.Source, userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to read installed app version", nil)
 		return
 	}
-
-	stateVersion, found := s.cacheManager.GetAppVersionFromState(userID, request.Source, rawAppName)
-	if !found || stateVersion == "" {
+	if appVersion == "" {
 		glog.V(3).Infof("Original app not found in installed state: %s in source: %s for user: %s", rawAppName, request.Source, userID)
 		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("Original app %s is not installed in source %s", rawAppName, request.Source), nil)
 		return
 	}
 
-	appVersion = stateVersion
-	glog.V(2).Infof("Cloning app: rawAppName=%s, requestHash=%s, title=%s, newAppName=%s, version=%s (from installed original app)", rawAppName, requestHash, request.Title, newAppName, appVersion)
+	glog.V(2).Infof("Cloning app: rawAppName=%s, requestHash=%s, title=%s, newAppName=%s, version=%s (from installed original app)",
+		rawAppName, requestHash, request.Title, newAppName, appVersion)
 
-	// Step 10: Verify chart package exists (use version from targetApp)
+	// Step 8: Build chart_path using the original chart's
+	// rendered_package directory and the freshly resolved version.
 	chartFilename := fmt.Sprintf("%s-%s.tgz", request.AppName, appVersion)
-	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
+	chartPath := filepath.Join(row.RenderedPackage, chartFilename)
 
-	// Step 11: Get app cfgType from cache
-	var cfgType string
-	if targetApp != nil && targetApp.RawData != nil {
-		cfgType = targetApp.RawData.CfgType
-		glog.V(2).Infof("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
+	// Step 9: cfgType comes from manifest_type; fall back to "app" the
+	// same way installApp does when manifest_type is empty.
+	cfgType := row.ManifestType
+	if cfgType == "" {
+		glog.V(3).Infof("Warning: manifest_type empty for app: %s, using default 'app'", request.AppName)
+		cfgType = "app"
 	} else {
-		glog.V(3).Infof("Warning: Could not retrieve cfgType for app: %s, using default", request.AppName)
-		cfgType = "app" // Default to app type
+		glog.V(2).Infof("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
 	}
 
 	images := []task.Image{}
-	if targetApp.AppInfo != nil && targetApp.AppInfo.ImageAnalysis != nil {
-		for _, image := range targetApp.AppInfo.ImageAnalysis.Images {
+	if row.ImageAnalysis != nil {
+		for _, image := range row.ImageAnalysis.Data.Images {
 			images = append(images, task.Image{
 				Name: image.Name,
 				Size: image.TotalSize,
@@ -538,7 +568,34 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 12: Create clone installation task
+	// Step 10: Materialise the clone's user_applications row is
+	// DEFERRED to the task executor (internal/v2/task/app_clone.go),
+	// which runs it ONLY after app-service has accepted the clone
+	// request and returned an opID. Writing the row here used to be
+	// the source of "ghost clone rows": app-service can reject a
+	// clone with HTTP 422 when the request is missing required envs
+	// / entrances, the user fills in the form, retries with slightly
+	// different parameters, and each retry produces a fresh
+	// (newAppName, newAppID) — md5(rawAppName + sha256(request)[:6])
+	// is deterministic per-request, so every distinct request body
+	// hashes to a distinct app_id and bypasses the
+	// (user_id, source_id, app_id) UNIQUE constraint.
+	//
+	// Tradeoff: AddTask's pendingStateFromMetadata still emits a
+	// PendingTaskState targeting newAppID below, so CreateTask
+	// attempts the user_application_states upsert in-transaction
+	// with task_records; the upsert soft-skips on
+	// ErrUserApplicationStateNotFound (no user_applications row yet)
+	// and the task_records insert still commits. The clone's state
+	// row is materialised in the same executor step as the
+	// user_applications row, after the opID is known.
+
+	// Step 11: Create clone installation task. realAppID is the
+	// clone row's app_id (md5(newAppName)) — the executor uses it
+	// to call CloneUserApplication + UpsertPendingState after
+	// app-service success. Version is also propagated so
+	// installed_version / target_version land the same way they do
+	// for install.
 	taskMetadata := map[string]interface{}{
 		"user_id":     userID,
 		"source":      request.Source,
@@ -552,6 +609,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		"rawAppName":  rawAppName,    // Pass rawAppName in metadata
 		"requestHash": requestHash,   // Pass requestHash in metadata
 		"title":       request.Title, // Pass title in metadata (for display purposes)
+		"realAppID":   newAppID,      // Anchor the state row to the clone's user_applications.app_id
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -646,53 +704,54 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 3: Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Infof("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+	// Step 3: Resolve (source, app_id, manifest_type) from PG.
+	// cancelInstall receives only app_name on the wire; LookupAppLocator
+	// pivots to the user_applications row across all of this user's
+	// sources. stateSourceID + stateAppID feed the user_application_states
+	// write that taskModule.AddTask performs in the same transaction
+	// as task_records — the state column itself is owned by the NATS
+	// pipeline; AddTask only refreshes op_type so the frontend sees
+	// "running (canceling)" immediately. When no locator row matches
+	// (empty stateSourceID / stateAppID), AddTask soft-skips the state
+	// write and the task is still created — matching the legacy
+	// best-effort semantics that a cancel must not be rejected because
+	// the catalogue view is unavailable.
+	var cfgType, stateSourceID, stateAppID string
+	loc, err := store.LookupAppLocator(r.Context(), userID, appName)
+	if err != nil {
+		glog.Errorf("cancelInstall: failed to look up user_applications row for app=%s user=%s: %v",
+			appName, userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to load app data", nil)
 		return
 	}
-
-	// Step 4: Get user data from cache
-	userData := s.cacheManager.GetUserData(userID)
-	if userData == nil {
-		glog.V(3).Infof("User data not found for user: %s", userID)
-		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-		return
+	if loc != nil {
+		stateSourceID = loc.SourceID
+		stateAppID = loc.AppID
+		cfgType = loc.ManifestType
+		glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s (app_id=%s)", cfgType, appName, stateSourceID, stateAppID)
 	}
-
-	// Step 5: Get app cfgType from cache
-	var cfgType string
-	// Try to find the app in user data to get cfgType
-	if userData != nil {
-		// Search through all sources to find the app
-		for sourceID, sourceData := range userData.Sources {
-			if sourceData != nil {
-				for _, appInfoData := range sourceData.AppInfoLatest {
-					if appInfoData != nil && appInfoData.RawData != nil && appInfoData.RawData.Name == appName {
-						cfgType = appInfoData.RawData.CfgType
-						glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s", cfgType, appName, sourceID)
-						break
-					}
-				}
-				if cfgType != "" {
-					break
-				}
-			}
-		}
-	}
-
 	if cfgType == "" {
-		glog.V(3).Infof("Warning: Could not retrieve cfgType for app: %s, using default 'app'", appName)
-		cfgType = "app" // Default to app type
+		glog.V(3).Infof("Warning: cfgType not resolved for app: %s, using default 'app'", appName)
+		cfgType = "app"
 	}
 
-	// Step 6: Create cancel installation task
+	// Step 4: Create cancel installation task
 	taskMetadata := map[string]interface{}{
 		"user_id":  userID,
 		"app_name": appName,
 		"token":    utils.GetTokenFromRequest(restfulReq),
 		"cfgType":  cfgType, // Use retrieved cfgType
+	}
+	// Push the resolved (source, app_id) into task metadata so
+	// AddTask's PG transaction can find the user_application_states
+	// row by (user, source, app_id), and so the executor's
+	// linkStateOpID can later patch op_id onto the same row when
+	// app-service returns it.
+	if stateSourceID != "" {
+		taskMetadata["source"] = stateSourceID
+	}
+	if stateAppID != "" {
+		taskMetadata["realAppID"] = stateAppID
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -778,11 +837,12 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	}
 	glog.V(2).Infof("Retrieved user ID for uninstall request: %s", userID)
 
-	// Step 2: Parse request body for sync parameter and all parameter
+	// Step 2: Parse request body for sync / all / deleteData / version
 	var requestBody map[string]interface{}
 	var sync bool
 	var all bool
 	var deleteData bool
+	var version string
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err == nil {
 			if syncVal, ok := requestBody["sync"].(bool); ok {
@@ -794,58 +854,70 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 			if deleteDataVal, ok := requestBody["deleteData"].(bool); ok {
 				deleteData = deleteDataVal
 			}
-		}
-	}
-
-	// Step 3: Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Infof("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
-		return
-	}
-
-	// Step 4: Get user data from cache
-	userData := s.cacheManager.GetUserData(userID)
-	if userData == nil {
-		glog.V(3).Infof("User data not found for user: %s", userID)
-		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-		return
-	}
-
-	// Step 5: Get app cfgType from cache
-	var cfgType string
-	// Try to find the app in user data to get cfgType
-	if userData != nil {
-		// Search through all sources to find the app
-		for sourceID, sourceData := range userData.Sources {
-			if sourceData != nil {
-				for _, appInfoData := range sourceData.AppInfoLatest {
-					if appInfoData != nil && appInfoData.RawData != nil && appInfoData.RawData.Name == appName {
-						cfgType = appInfoData.RawData.CfgType
-						glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s", cfgType, appName, sourceID)
-						break
-					}
-				}
-				if cfgType != "" {
-					break
-				}
+			if versionVal, ok := requestBody["version"].(string); ok {
+				version = strings.TrimSpace(versionVal)
 			}
 		}
 	}
 
-	if cfgType == "" {
-		glog.V(3).Infof("Warning: Could not retrieve cfgType for app: %s, using default 'app'", appName)
-		cfgType = "app" // Default to app type
+	// Step 3: Validate required fields. version is the anchor that
+	// LookupInstalledApp uses to JOIN user_application_states and
+	// pivot to the exact (user_applications) row install populated;
+	// missing it would force a fall back to a fuzzy lookup and
+	// re-introduce the multi-source / clone collision bugs.
+	if version == "" {
+		glog.V(3).Infof("uninstallApp: missing required field 'version' for app=%s user=%s", appName, userID)
+		s.sendResponse(w, http.StatusBadRequest, false, "Missing required field: version", nil)
+		return
 	}
 
-	// Step 6: Create uninstallation task
+	// Step 4: Resolve (source, app_id, manifest_type) from PG via the
+	// installed-app helper. The JOIN against user_application_states
+	// guarantees this app has actually been installed (state row present)
+	// and the installed_version filter locks onto the exact row install
+	// committed at task-creation time. A nil result means "this app is
+	// not installed at the requested version" — surfaced as 404 rather
+	// than dispatching an uninstall against an unknown row.
+	loc, err := store.LookupInstalledApp(r.Context(), userID, appName, version)
+	if err != nil {
+		glog.Errorf("uninstallApp: failed to look up installed app=%s version=%s user=%s: %v",
+			appName, version, userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to load app data", nil)
+		return
+	}
+	if loc == nil {
+		glog.V(3).Infof("uninstallApp: app not installed (or version mismatch): app=%s version=%s user=%s",
+			appName, version, userID)
+		s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("App %s version %s is not installed", appName, version), nil)
+		return
+	}
+	stateSourceID := loc.SourceID
+	stateAppID := loc.AppID
+	cfgType := loc.ManifestType
+	if cfgType == "" {
+		glog.V(3).Infof("Warning: cfgType not resolved for app: %s, using default 'app'", appName)
+		cfgType = "app"
+	} else {
+		glog.V(3).Infof("Retrieved cfgType: %s for app: %s from source: %s (app_id=%s, version=%s)",
+			cfgType, appName, stateSourceID, stateAppID, version)
+	}
+
+	// Step 5: Create uninstallation task. (source, realAppID) are
+	// guaranteed non-empty here — LookupInstalledApp returned a row,
+	// otherwise we 404'd above. AddTask's PG transaction uses them
+	// to ON CONFLICT-update the same user_application_states row
+	// install populated; the executor's linkStateOpID likewise pivots
+	// on (source, realAppID) when the op_id arrives back from
+	// app-service.
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"app_name":   appName,
 		"token":      utils.GetTokenFromRequest(restfulReq),
-		"cfgType":    cfgType,    // Use retrieved cfgType
-		"all":        all,        // Add all parameter to metadata
-		"deleteData": deleteData, // Add delete userData
+		"cfgType":    cfgType,
+		"all":        all,
+		"deleteData": deleteData,
+		"source":     stateSourceID,
+		"realAppID":  stateAppID,
 	}
 
 	// Handle synchronous requests with proper blocking
@@ -946,127 +1018,70 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Check if cache manager is available
-	if s.cacheManager == nil {
-		glog.V(3).Infof("Cache manager is not initialized")
-		s.sendResponse(w, http.StatusInternalServerError, false, "Cache manager not available", nil)
+	// Step 4: Resolve the user's rendered manifest from PG.
+	// GetAppUpgradeRow handles both direct upgrade (request.AppName is
+	// the original chart's name) and clone upgrade (request.AppName is
+	// a clone alias) in a single round-trip, returning:
+	//   - row: the ORIGINAL chart row (where the chart artefacts live)
+	//   - matchedAppName: app_name of the row the wire request resolved
+	//     to (== row.AppName for direct, == clone alias for clone)
+	//   - matchedAppID: app_id of that same matched row — for direct it
+	//     equals row.AppID, for clones it is the clone row's own app_id
+	//     (md5 of newAppName, written by cloneApp). This is the value
+	//     that goes into task metadata as realAppID so the state-row
+	//     UPSERT lands on the row the user clicked on, not on the
+	//     original chart row.
+	row, matchedAppName, matchedAppID, err := store.GetAppUpgradeRow(r.Context(), userID, request.Source, request.AppName, request.Version)
+	if err != nil {
+		glog.Errorf("upgradeApp: failed to load user_applications row for app=%s version=%s source=%s user=%s: %v",
+			request.AppName, request.Version, request.Source, userID, err)
+		s.sendResponse(w, http.StatusInternalServerError, false, "Failed to load app data", nil)
+		return
+	}
+	if row == nil {
+		glog.V(3).Infof("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
+		s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
 		return
 	}
 
-	// Step 5: Get user data from cache
-	userData := s.cacheManager.GetUserData(userID)
-	if userData == nil {
-		glog.V(3).Infof("User data not found for user: %s", userID)
-		s.sendResponse(w, http.StatusNotFound, false, "User data not found", nil)
-		return
-	}
-
-	// Step 6: Get source data
-	sourceData := userData.Sources[request.Source]
-	if sourceData == nil {
-		glog.V(3).Infof("Source data not found: %s for user: %s", request.Source, userID)
-		s.sendResponse(w, http.StatusNotFound, false, "Source data not found", nil)
-		return
-	}
-
-	// Step 7: Find the app in AppInfoLatest
-	var targetApp *types.AppInfoLatestData
 	var rawAppName string
-	for _, appInfoData := range sourceData.AppInfoLatest {
-		if appInfoData == nil || appInfoData.RawData == nil {
-			continue
-		}
-
-		// Check if app matches the requested name and version
-		if appInfoData.RawData.Name == request.AppName && appInfoData.RawData.Version == request.Version {
-			targetApp = appInfoData
-			break
-		}
+	if matchedAppName != "" && matchedAppName != row.AppName {
+		rawAppName = row.AppName
+		glog.V(3).Infof("Resolved clone upgrade: cloneAlias=%s -> rawAppName=%s, version=%s", matchedAppName, rawAppName, request.Version)
 	}
 
-	// If not found in AppInfoLatest, check AppStateLatest for clone apps
-	if targetApp == nil {
-		glog.V(3).Infof("App not found in AppInfoLatest: %s version %s in source: %s, checking AppStateLatest", request.AppName, request.Version, request.Source)
+	// Step 5: Build chart_path. row.AppName == row.AppRawName because
+	// GetAppUpgradeRow's outer alias filters app_id = app_raw_id.
+	chartFilename := fmt.Sprintf("%s-%s.tgz", row.AppName, request.Version)
+	chartPath := filepath.Join(row.RenderedPackage, chartFilename)
 
-		// Search in AppStateLatest for clone apps
-		var foundStateApp *types.AppStateLatestData
-		for _, appStateData := range sourceData.AppStateLatest {
-			if appStateData == nil {
-				continue
-			}
-
-			// Check if app name matches and has rawAppName (indicating it's a clone app)
-			if appStateData.Status.Name == request.AppName && appStateData.Status.RawAppName != "" {
-				foundStateApp = appStateData
-				rawAppName = appStateData.Status.RawAppName
-				glog.V(3).Infof("Found clone app in AppStateLatest: %s with rawAppName: %s", request.AppName, rawAppName)
-				break
-			}
-		}
-
-		// If found in AppStateLatest with rawAppName, search for the original app in AppInfoLatest
-		if foundStateApp != nil && rawAppName != "" {
-			glog.V(3).Infof("Searching for original app in AppInfoLatest: rawAppName=%s, version=%s", rawAppName, request.Version)
-
-			// Search for the original app using rawAppName
-			for _, appInfoData := range sourceData.AppInfoLatest {
-				if appInfoData == nil || appInfoData.RawData == nil {
-					continue
-				}
-
-				// Check if app matches the rawAppName and version
-				if appInfoData.RawData.Name == rawAppName && appInfoData.RawData.Version == request.Version {
-					targetApp = appInfoData
-					glog.V(3).Infof("Found original app in AppInfoLatest: %s version %s for clone app: %s", rawAppName, request.Version, request.AppName)
-					break
-				}
-			}
-
-			// If still not found, return error
-			if targetApp == nil {
-				glog.V(3).Infof("Original app not found: %s version %s in source: %s for clone app: %s", rawAppName, request.Version, request.Source, request.AppName)
-				s.sendResponse(w, http.StatusNotFound, false, fmt.Sprintf("Original app not found: %s version %s", rawAppName, request.Version), nil)
-				return
-			}
-		} else {
-			// Not found in AppStateLatest either
-			glog.V(3).Infof("App not found: %s version %s in source: %s", request.AppName, request.Version, request.Source)
-			s.sendResponse(w, http.StatusNotFound, false, "App not found", nil)
-			return
-		}
-	}
-
-	// Step 8: Verify chart package exists
-	// Use targetApp.RawData.Name for chart filename (handles both direct and clone apps)
-	chartAppName := targetApp.RawData.Name
-	chartFilename := fmt.Sprintf("%s-%s.tgz", chartAppName, request.Version)
-	chartPath := filepath.Join(targetApp.RenderedPackage, chartFilename)
-
-	// if _, err := os.Stat(chartPath); err != nil {
-	// 	glog.Errorf("Chart package not found at path: %s", chartPath)
-	// 	s.sendResponse(w, http.StatusNotFound, false, "Chart package not found", nil)
-	// 	return
-	// }
-
-	// Step 9: Get app cfgType from cache
-	var cfgType string
-	if targetApp != nil && targetApp.RawData != nil {
-		cfgType = targetApp.RawData.CfgType
-		glog.V(3).Infof("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
+	// Step 6: cfgType comes from manifest_type with the standard "app"
+	// fallback when empty.
+	cfgType := row.ManifestType
+	if cfgType == "" {
+		glog.V(3).Infof("Warning: manifest_type empty for app: %s, using default 'app'", request.AppName)
+		cfgType = "app"
 	} else {
-		glog.V(3).Infof("Warning: Could not retrieve cfgType for app: %s, using default", request.AppName)
-		cfgType = "app" // Default to app type
+		glog.V(3).Infof("Retrieved cfgType: %s for app: %s", cfgType, request.AppName)
 	}
 
 	images := []task.Image{}
-	for _, image := range targetApp.AppInfo.ImageAnalysis.Images {
-		images = append(images, task.Image{
-			Name: image.Name,
-			Size: image.TotalSize,
-		})
+	if row.ImageAnalysis != nil {
+		for _, image := range row.ImageAnalysis.Data.Images {
+			images = append(images, task.Image{
+				Name: image.Name,
+				Size: image.TotalSize,
+			})
+		}
 	}
 
-	// Step 10: Create upgrade task
+	// Step 7: Create upgrade task. realAppID is matchedAppID — the
+	// app_id of the row the user actually clicked on (clone row's
+	// own app_id for clone upgrades, original's app_id for direct
+	// upgrades). Without this, pendingStateFromMetadata would fall
+	// back to app_name and upsertPendingStateInTx's WHERE app_id=?
+	// would not match either row, silently soft-skipping the state
+	// write.
 	taskMetadata := map[string]interface{}{
 		"user_id":    userID,
 		"source":     request.Source,
@@ -1077,6 +1092,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		"cfgType":    cfgType, // Add cfgType to metadata
 		"images":     images,
 		"envs":       request.Envs,
+		"realAppID":  matchedAppID,
 	}
 
 	// If this is a clone app, add rawAppName to metadata
@@ -1084,6 +1100,12 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		taskMetadata["rawAppName"] = rawAppName
 		glog.V(3).Infof("Adding rawAppName to upgrade task metadata: %s for clone app: %s", rawAppName, request.AppName)
 	}
+
+	// Refresh the pending row before AddTask. Upgrade rows must already
+	// exist (the app is currently installed), so writePendingState should
+	// always find a matching user_applications row — log on miss for
+	// observability.
+	s.writePendingState(r.Context(), userID, request.Source, request.AppName, opTypeUpgrade)
 
 	// Handle synchronous requests with proper blocking
 	if request.Sync {

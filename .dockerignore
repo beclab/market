@@ -1,3 +1,25 @@
-#directories
+# VCS / repo metadata
 .git
+.github
+
+# Helm chart workspaces (never shipped in image)
 charts
+chartsTmp
+
+# Local dev / runtime artifacts
+dev.env
+output/
+data/
+.gocache/
+
+# OS / IDE noise
+.DS_Store
+.vscode/
+.idea/
+
+# Test binaries / coverage
+*.test
+*.out
+
+# Local-only Dockerfile variants
+Dockerfile.server.local

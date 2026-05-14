@@ -6,7 +6,6 @@ type CacheManagerInterface interface {
 	// Hierarchical read accessors
 	GetAllUsersData() map[string]*UserData
 	GetUserData(userID string) *UserData
-	GetSourceData(userID, sourceID string) *SourceData
 	GetUserIDs() []string
 
 	// Specific read queries
@@ -18,5 +17,4 @@ type CacheManagerInterface interface {
 	// Write operations
 	UpdateSourceOthers(sourceID string, others *Others)
 	RemoveAppFromAllSources(appName, sourceID string) int
-	CopyPendingVersionHistory(userID, sourceID, appID, appName string, latestData *AppInfoLatestData) error
 }

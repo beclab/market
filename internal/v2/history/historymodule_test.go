@@ -1,37 +1,70 @@
 package history
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
+
+	"market/internal/v2/db"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// setupTestDB sets up test database environment variables
-func setupTestDB() {
-	// Use test database configuration
+// testDBOnce guards a single db.Open / db.SetGlobal across the whole test
+// binary; opening per test would create N pools against the test database.
+var testDBOnce sync.Once
+
+// setupTestDB primes the env that db.LoadConfigFromEnv reads and (once per
+// process) initialises the shared *gorm.DB so NewHistoryModule can borrow
+// the underlying *sql.DB. Tests skip themselves if the database is not
+// reachable, mirroring the legacy behaviour of NewHistoryModule.
+func setupTestDB(tb testing.TB) {
 	os.Setenv("POSTGRES_HOST", "localhost")
 	os.Setenv("POSTGRES_PORT", "5432")
 	os.Setenv("POSTGRES_DB", "history_test")
 	os.Setenv("POSTGRES_USER", "postgres")
 	os.Setenv("POSTGRES_PASSWORD", "password")
-	os.Setenv("HISTORY_CLEANUP_INTERVAL_HOURS", "1") // 1 hour for testing
+	os.Setenv("HISTORY_CLEANUP_INTERVAL_HOURS", "1")
+
+	var initErr error
+	testDBOnce.Do(func() {
+		gormDB, err := db.Open(context.Background(), db.LoadConfigFromEnv())
+		if err != nil {
+			initErr = err
+			return
+		}
+		db.SetGlobal(gormDB)
+		// Ensure the schema exists before any test touches the tables.
+		if err := db.Migrate(context.Background(), gormDB, db.MigrateOptions{
+			Direction:   db.MigrateUp,
+			LockTimeout: 30 * time.Second,
+		}); err != nil {
+			initErr = err
+			return
+		}
+	})
+	if initErr != nil {
+		tb.Skipf("Skipping test - PostgreSQL not available: %v", initErr)
+	}
+	if db.Global() == nil {
+		tb.Skip("Skipping test - PostgreSQL not initialised")
+	}
 }
 
 // cleanupTestDB cleans up test data
 func cleanupTestDB(hm *HistoryModule) {
 	if hm != nil && hm.db != nil {
-		// Clean up test data
 		hm.db.Exec("DELETE FROM history_records WHERE app LIKE 'test%'")
 	}
 }
 
 func TestNewHistoryModule(t *testing.T) {
-	setupTestDB()
+	setupTestDB(t)
 
 	// Test creating new history module
 	hm, err := NewHistoryModule()
@@ -52,7 +85,7 @@ func TestNewHistoryModule(t *testing.T) {
 }
 
 func TestStoreRecord(t *testing.T) {
-	setupTestDB()
+	setupTestDB(t)
 
 	hm, err := NewHistoryModule()
 	if err != nil {
@@ -99,7 +132,7 @@ func TestStoreRecord(t *testing.T) {
 }
 
 func TestQueryRecords(t *testing.T) {
-	setupTestDB()
+	setupTestDB(t)
 
 	hm, err := NewHistoryModule()
 	if err != nil {
@@ -226,7 +259,7 @@ func TestQueryRecords(t *testing.T) {
 }
 
 func TestGetRecordCount(t *testing.T) {
-	setupTestDB()
+	setupTestDB(t)
 
 	hm, err := NewHistoryModule()
 	if err != nil {
@@ -315,7 +348,7 @@ func TestHistoryTypes(t *testing.T) {
 }
 
 func TestRecordValidation(t *testing.T) {
-	setupTestDB()
+	setupTestDB(t)
 
 	hm, err := NewHistoryModule()
 	if err != nil {
@@ -359,7 +392,7 @@ func TestRecordValidation(t *testing.T) {
 }
 
 func TestCleanupFunctionality(t *testing.T) {
-	setupTestDB()
+	setupTestDB(t)
 
 	hm, err := NewHistoryModule()
 	if err != nil {
@@ -412,7 +445,7 @@ func TestCleanupFunctionality(t *testing.T) {
 
 // BenchmarkStoreRecord benchmarks the store operation
 func BenchmarkStoreRecord(b *testing.B) {
-	setupTestDB()
+	setupTestDB(b)
 
 	hm, err := NewHistoryModule()
 	if err != nil {
@@ -440,7 +473,7 @@ func BenchmarkStoreRecord(b *testing.B) {
 
 // BenchmarkQueryRecords benchmarks the query operation
 func BenchmarkQueryRecords(b *testing.B) {
-	setupTestDB()
+	setupTestDB(b)
 
 	hm, err := NewHistoryModule()
 	if err != nil {

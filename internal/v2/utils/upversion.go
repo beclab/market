@@ -9,6 +9,8 @@ import (
 
 	"context"
 
+	"market/internal/v2/helper"
+
 	"github.com/go-redis/redis/v8"
 	"github.com/golang/glog"
 )
@@ -46,18 +48,18 @@ type RedisClient interface {
 	ScanAllKeys(pattern string, count int) ([]string, error)
 }
 
-// UpgradeFlow 执行升级流程 - 作为程序启动前的预执行功能
-// 此功能不依赖任何其他组件，在程序初始化之前执行
+// UpgradeFlow performs the upgrade flow - executed as a pre-startup function before the program runs
+// This function does not depend on any other components and runs before program initialization
 func UpgradeFlow() error {
 	glog.Info("=== Starting upgrade flow ===")
 
-	// 1. 检查并更新market source配置
+	// 1. Check and update market source configuration
 	if err := checkAndUpdateMarketSourceConfig(); err != nil {
 		glog.Errorf("Failed to check and update market source config: %v", err)
 		return err
 	}
 
-	// 2. 检查并更新缓存数据
+	// 2. Check and update cache data
 	if err := checkAndUpdateCacheData(); err != nil {
 		glog.Errorf("Failed to check and update cache data: %v", err)
 		return err
@@ -67,96 +69,96 @@ func UpgradeFlow() error {
 	return nil
 }
 
-// checkAndUpdateMarketSourceConfig 检查并更新market source配置
+// checkAndUpdateMarketSourceConfig checks and updates the market source configuration
 func checkAndUpdateMarketSourceConfig() error {
 	glog.Info("Checking and updating market source configuration...")
 
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		glog.Info("Public environment detected, skipping market source config update")
 		return nil
 	}
 
-	// 创建Redis客户端
+	// Create Redis client
 	redisClient, err := createRedisClient()
 	if err != nil {
 		glog.Errorf("Failed to create Redis client: %v, skipping market source config update", err)
 		return nil
 	}
 
-	// 1. 更新所有用户的SelectedSource (Official-Market-Sources -> market.olares)
+	// 1. Update SelectedSource for all users (Official-Market-Sources -> market.olares)
 	if err := updateAllUsersSelectedSource(redisClient); err != nil {
 		glog.Errorf("Failed to update users' SelectedSource: %v", err)
-		// 不返回错误，继续执行其他升级步骤
+		// Do not return the error; continue with other upgrade steps
 	}
 
-	// 1.x 清理配置中的 default 源（统一在此处处理一次）
+	// 1.x Clean up the 'default' source in the configuration (handled once here)
 	if err := removeDefaultSourceInConfig(redisClient); err != nil {
 		glog.Errorf("Failed to remove 'default' source from config: %v", err)
 	}
 
-	// 1.1 更新所有用户的SelectedSource (market-local -> upload)
+	// 1.1 Update SelectedSource for all users (market-local -> upload)
 	if err := updateAllUsersSelectedSourceFromLocal(redisClient); err != nil {
 		glog.Errorf("Failed to update users' SelectedSource from local: %v", err)
-		// 不返回错误，继续执行其他升级步骤
+		// Do not return the error; continue with other upgrade steps
 	}
 
-	// 1.2 更新所有用户的SelectedSource (dev-local -> studio)
+	// 1.2 Update SelectedSource for all users (dev-local -> studio)
 	if err := updateAllUsersSelectedSourceFromDevLocal(redisClient); err != nil {
 		glog.Errorf("Failed to update users' SelectedSource from dev-local: %v", err)
-		// 不返回错误，继续执行其他升级步骤
+		// Do not return the error; continue with other upgrade steps
 	}
 
-	// 2. 更新MarketSource配置 (Official-Market-Sources -> market.olares)
+	// 2. Update MarketSource configuration (Official-Market-Sources -> market.olares)
 	if err := updateMarketSourceConfig(redisClient); err != nil {
 		glog.Errorf("Failed to update market source config: %v", err)
-		// 不返回错误，继续执行其他升级步骤
+		// Do not return the error; continue with other upgrade steps
 	}
 
-	// 3. 更新MarketSource配置 (market-local -> upload)
+	// 3. Update MarketSource configuration (market-local -> upload)
 	if err := updateMarketSourceConfigFromLocal(redisClient); err != nil {
 		glog.Errorf("Failed to update market source config from local: %v", err)
-		// 不返回错误，继续执行其他升级步骤
+		// Do not return the error; continue with other upgrade steps
 	}
 
-	// 4. 更新MarketSource配置 (dev-local -> studio)
+	// 4. Update MarketSource configuration (dev-local -> studio)
 	if err := updateMarketSourceConfigFromDevLocal(redisClient); err != nil {
 		glog.Errorf("Failed to update market source config from dev-local: %v", err)
-		// 不返回错误，继续执行其他升级步骤
+		// Do not return the error; continue with other upgrade steps
 	}
 
-	// 5. 更新所有用户的SelectedSource (local -> upload)
+	// 5. Update SelectedSource for all users (local -> upload)
 	if err := updateAllUsersSelectedSourceFromLocal2(redisClient); err != nil {
 		glog.Errorf("Failed to update users' SelectedSource from local: %v", err)
-		// 不返回错误，继续执行其他升级步骤
+		// Do not return the error; continue with other upgrade steps
 	}
 
-	// 6. 更新MarketSource配置 (local -> upload)
+	// 6. Update MarketSource configuration (local -> upload)
 	if err := updateMarketSourceConfigFromLocal2(redisClient); err != nil {
 		glog.Errorf("Failed to update market source config from local: %v", err)
-		// 不返回错误，继续执行其他升级步骤
+		// Do not return the error; continue with other upgrade steps
 	}
 
 	glog.Info("Market source configuration check completed")
 	return nil
 }
 
-// checkAndUpdateCacheData 检查并更新缓存数据
+// checkAndUpdateCacheData checks and updates cache data
 func checkAndUpdateCacheData() error {
 	glog.Info("Checking and updating cache data...")
 
-	if IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		glog.Info("Public environment detected, skipping cache data update")
 		return nil
 	}
 
-	// 创建Redis客户端
+	// Create Redis client
 	redisClient, err := createRedisClient()
 	if err != nil {
 		glog.Errorf("Failed to create Redis client: %v, skipping cache data update", err)
 		return nil
 	}
 
-	// 追加：迁移 appinfo 键空间的源数据（旧 -> 新），并清理旧键
+	// Additional: migrate source data in the appinfo keyspace (old -> new) and clean up old keys
 	if err := migrateAppinfoSources(redisClient, "Official-Market-Sources", "market.olares"); err != nil {
 		glog.Errorf("Failed to migrate appinfo sources from 'Official-Market-Sources' to 'market.olares': %v", err)
 	}
@@ -187,9 +189,9 @@ func checkAndUpdateCacheData() error {
 	return nil
 }
 
-// migrateAppinfoSources 迁移 appinfo 键空间中某个源到新源
-// 将 appinfo:user:<uid>:source:<old>:(app-info-history|app-state-latest|app-info-latest|app-info-latest-pending|app-render-failed)
-// 迁移为对应的新源键，并在合并后删除旧键。
+// migrateAppinfoSources migrates a source in the appinfo keyspace to a new source
+// It migrates appinfo:user:<uid>:source:<old>:(app-info-history|app-state-latest|app-info-latest|app-info-latest-pending|app-render-failed)
+// to the corresponding new source keys and deletes the old keys after merging.
 func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID string) error {
 	if redisClient == nil {
 		glog.Info("Redis client not available, skipping appinfo source migration")
@@ -201,14 +203,14 @@ func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID str
 
 	glog.Infof("Migrating appinfo sources from '%s' to '%s'...", oldSourceID, newSourceID)
 
-	// 全量扫描所有键，再在程序中精确过滤，避免依赖 Redis MATCH
+	// Scan all keys and filter precisely in the program to avoid relying on Redis MATCH
 	keys, err := redisClient.ScanAllKeys("*", 5000)
 	if err != nil {
 		return fmt.Errorf("failed to scan keys: %w", err)
 	}
 	glog.Infof("Found %d keys to migrate", len(keys))
 
-	// 支持的数据段后缀
+	// Supported data segment suffixes
 	dataSuffixes := []string{
 		":app-info-history", ":app_state_history",
 		":app-state-latest", ":app_state_latest",
@@ -219,18 +221,18 @@ func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID str
 
 	migratedUsers := make(map[string]bool)
 	for _, oldKey := range keys {
-		// 仅限 appinfo 键空间，且包含指定旧源段
+		// Limit to the appinfo keyspace and keys containing the specified old source segment
 		if !strings.HasPrefix(oldKey, "appinfo:user:") {
 			continue
 		}
 		if !strings.Contains(oldKey, ":source:"+oldSourceID+":") {
 			continue
 		}
-		// oldKey 形如 appinfo:user:<uid>:source:<oldSourceID>[:suffix]
-		// 计算基础新key前缀
+		// oldKey looks like appinfo:user:<uid>:source:<oldSourceID>[:suffix]
+		// Compute the base new-key prefix
 		newBase := strings.Replace(oldKey, ":source:"+oldSourceID, ":source:"+newSourceID, 1)
 
-		// 检查是否是具体数据段键，否则跳过
+		// Check whether it is a concrete data segment key; otherwise skip
 		isDataKey := false
 		for _, suffix := range dataSuffixes {
 			if strings.HasSuffix(oldKey, suffix) {
@@ -239,20 +241,20 @@ func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID str
 			}
 		}
 		if !isDataKey {
-			// 可能是用户标记等，跳过
+			// May be a user marker, etc.; skip
 			continue
 		}
 
-		// 读取旧值
+		// Read the old value
 		val, err := redisClient.Get(oldKey)
 		if err != nil {
 			continue
 		}
 
-		// 合并策略：如果新键有值，按 JSON 合并（数组拼接去重），否则直接写入
-		// 先确定新键名
+		// Merge strategy: if the new key has a value, merge as JSON (array concat with dedup); otherwise write directly
+		// Determine the new key name first
 		newKey := newBase
-		// 读取新值（可能不存在）
+		// Read the new value (may not exist)
 		newVal, err := redisClient.Get(newKey)
 		if err == nil && newVal != "" {
 			merged := mergeJSONArraysIfNeeded(newKey, newVal, val)
@@ -265,14 +267,14 @@ func migrateAppinfoSources(redisClient RedisClient, oldSourceID, newSourceID str
 			}
 		}
 
-		// 删除旧键
+		// Delete the old key
 		if err := redisClient.Del(oldKey); err != nil {
 			glog.Errorf("Warning: failed to delete old key %s: %v", oldKey, err)
 		}
 
-		// 标记该用户已迁移
-		// 提取 userID
-		// 形如 appinfo:user:<uid>:source:...
+		// Mark this user as migrated
+		// Extract userID
+		// Looks like appinfo:user:<uid>:source:...
 		parts := strings.Split(oldKey, ":")
 		if len(parts) >= 3 {
 			migratedUsers[parts[2]] = true
@@ -346,12 +348,12 @@ func mergeJSONArraysIfNeeded(key string, existing, incoming string) string {
 	return string(out)
 }
 
-// normalizeSourceID 规范化源ID（小写+去首尾空白）
+// normalizeSourceID normalizes a source ID (lowercase + trim leading/trailing whitespace)
 func normalizeSourceID(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// migrateAppinfoSourcesAuto 扫描 appinfo 键空间，按规范化后的源名映射做迁移
+// migrateAppinfoSourcesAuto scans the appinfo keyspace and migrates based on the normalized source-name mapping
 func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]string) error {
 	if redisClient == nil || len(mapping) == 0 {
 		return nil
@@ -359,7 +361,7 @@ func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]strin
 
 	glog.Info("Auto-migrating appinfo sources by normalized mapping...")
 
-	// 仅扫描包含 app* 段的数据键（兼容 app-*/app_*），避免非数据键，使用 SCAN
+	// Only scan data keys containing the app* segment (compatible with app-*/app_*) to avoid non-data keys, using SCAN
 	keys, err := redisClient.ScanAllKeys("appinfo:user:*:source:*:app*", 2000)
 	if err != nil {
 		return fmt.Errorf("failed to list appinfo data keys: %w", err)
@@ -372,7 +374,7 @@ func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]strin
 	migratedUsers := make(map[string]bool)
 	for _, oldKey := range keys {
 		parts := strings.Split(oldKey, ":")
-		// 期待格式 appinfo:user:<uid>:source:<sourceID>:<segment>
+		// Expected format: appinfo:user:<uid>:source:<sourceID>:<segment>
 		if len(parts) < 6 || parts[0] != "appinfo" || parts[1] != "user" || parts[3] != "source" {
 			continue
 		}
@@ -384,7 +386,7 @@ func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]strin
 			continue
 		}
 
-		// 构造新键（仅替换 :source:<old>：带冒号避免部分匹配）
+		// Build the new key (only replace :source:<old>: with surrounding colons to avoid partial matches)
 		needle := ":source:" + sourceID + ":"
 		replacement := ":source:" + newSourceID + ":"
 		if !strings.Contains(oldKey, needle) {
@@ -392,13 +394,13 @@ func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]strin
 		}
 		newKey := strings.Replace(oldKey, needle, replacement, 1)
 
-		// 读取旧值
+		// Read the old value
 		oldVal, err := redisClient.Get(oldKey)
 		if err != nil {
 			continue
 		}
 
-		// 读取新值并合并（数组JSON走合并）
+		// Read the new value and merge (array JSON is merged)
 		if newVal, err := redisClient.Get(newKey); err == nil && newVal != "" {
 			merged := mergeJSONArraysIfNeeded(newKey, newVal, oldVal)
 			if err := redisClient.Set(newKey, merged, 0); err != nil {
@@ -410,7 +412,7 @@ func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]strin
 			}
 		}
 
-		// 删除旧键
+		// Delete the old key
 		if err := redisClient.Del(oldKey); err != nil {
 			glog.Errorf("Warning: failed to delete old key %s: %v", oldKey, err)
 		}
@@ -426,7 +428,7 @@ func migrateAppinfoSourcesAuto(redisClient RedisClient, mapping map[string]strin
 	return nil
 }
 
-// removeDefaultSourceInConfig 读取并清理 market sources 配置中的 id == "default" 的源
+// removeDefaultSourceInConfig reads and removes sources whose id == "default" from the market sources configuration
 func removeDefaultSourceInConfig(redisClient RedisClient) error {
 	if redisClient == nil {
 		return nil
@@ -436,7 +438,7 @@ func removeDefaultSourceInConfig(redisClient RedisClient) error {
 	data, err := redisClient.Get(configKey)
 	if err != nil {
 		if err.Error() == "key not found" {
-			// 配置不存在，跳过
+			// Configuration does not exist; skip
 			return nil
 		}
 		return fmt.Errorf("failed to get market sources config: %w", err)
@@ -483,13 +485,13 @@ func removeDefaultSourceInConfig(redisClient RedisClient) error {
 	return nil
 }
 
-// createRedisClient 创建Redis客户端
+// createRedisClient creates a Redis client
 func createRedisClient() (RedisClient, error) {
-	// 获取Redis连接参数
-	redisHost := GetEnvOrDefault("REDIS_HOST", "localhost")
-	redisPort := GetEnvOrDefault("REDIS_PORT", "6379")
-	redisPassword := GetEnvOrDefault("REDIS_PASSWORD", "")
-	redisDBStr := GetEnvOrDefault("REDIS_DB", "0")
+	// Get Redis connection parameters
+	redisHost := helper.GetEnvOrDefault("REDIS_HOST", "localhost")
+	redisPort := helper.GetEnvOrDefault("REDIS_PORT", "6379")
+	redisPassword := helper.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDBStr := helper.GetEnvOrDefault("REDIS_DB", "0")
 	redisDB, err := strconv.Atoi(redisDBStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid REDIS_DB value: %w", err)
@@ -497,14 +499,14 @@ func createRedisClient() (RedisClient, error) {
 
 	glog.Errorf("Creating Redis client for upgrade flow: %s:%s, DB: %d", redisHost, redisPort, redisDB)
 
-	// 创建真正的Redis客户端
+	// Create the real Redis client
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%s", redisHost, redisPort),
 		Password: redisPassword,
 		DB:       redisDB,
 	})
 
-	// 测试连接
+	// Test the connection
 	ctx := context.Background()
 	_, err = rdb.Ping(ctx).Result()
 	if err != nil {
@@ -513,20 +515,20 @@ func createRedisClient() (RedisClient, error) {
 
 	glog.Info("Redis client connected successfully")
 
-	// 返回包装的Redis客户端
+	// Return the wrapped Redis client
 	return &RedisClientWrapper{
 		client: rdb,
 		ctx:    ctx,
 	}, nil
 }
 
-// RedisClientWrapper Redis客户端包装器，实现真正的Redis操作
+// RedisClientWrapper wraps a Redis client and implements the real Redis operations
 type RedisClientWrapper struct {
 	client *redis.Client
 	ctx    context.Context
 }
 
-// Get 获取Redis键值
+// Get retrieves the value for a Redis key
 func (c *RedisClientWrapper) Get(key string) (string, error) {
 	result, err := c.client.Get(c.ctx, key).Result()
 	if err == redis.Nil {
@@ -535,17 +537,17 @@ func (c *RedisClientWrapper) Get(key string) (string, error) {
 	return result, err
 }
 
-// Set 设置Redis键值
+// Set sets the value for a Redis key
 func (c *RedisClientWrapper) Set(key string, value interface{}, expiration time.Duration) error {
 	return c.client.Set(c.ctx, key, value, expiration).Err()
 }
 
-// Keys 获取匹配模式的键列表
+// Keys returns the list of keys matching a pattern
 func (c *RedisClientWrapper) Keys(pattern string) ([]string, error) {
 	return c.client.Keys(c.ctx, pattern).Result()
 }
 
-// Del 删除一个或多个键
+// Del deletes one or more keys
 func (c *RedisClientWrapper) Del(keys ...string) error {
 	if len(keys) == 0 {
 		return nil
@@ -553,7 +555,7 @@ func (c *RedisClientWrapper) Del(keys ...string) error {
 	return c.client.Del(c.ctx, keys...).Err()
 }
 
-// ScanAllKeys 使用 SCAN 游标遍历收集所有匹配的键
+// ScanAllKeys collects all matching keys by iterating with the SCAN cursor
 func (c *RedisClientWrapper) ScanAllKeys(pattern string, count int) ([]string, error) {
 	var (
 		cursor uint64
@@ -578,7 +580,7 @@ func (c *RedisClientWrapper) ScanAllKeys(pattern string, count int) ([]string, e
 	return all, nil
 }
 
-// updateAllUsersSelectedSource 更新所有用户的SelectedSource
+// updateAllUsersSelectedSource updates the SelectedSource for all users
 func updateAllUsersSelectedSource(redisClient RedisClient) error {
 	if redisClient == nil {
 		glog.Info("Redis client not available, skipping user settings update")
@@ -587,7 +589,7 @@ func updateAllUsersSelectedSource(redisClient RedisClient) error {
 
 	glog.Info("Updating all users' SelectedSource from 'Official-Market-Sources' to 'market.olares'...")
 
-	// 获取所有用户设置键
+	// Get all user settings keys
 	pattern := "market:settings:*"
 	keys, err := redisClient.Keys(pattern)
 	if err != nil {
@@ -596,7 +598,7 @@ func updateAllUsersSelectedSource(redisClient RedisClient) error {
 
 	updatedCount := 0
 	for _, key := range keys {
-		// 获取当前设置
+		// Get the current settings
 		data, err := redisClient.Get(key)
 		if err != nil {
 			if err.Error() == "key not found" {
@@ -605,23 +607,23 @@ func updateAllUsersSelectedSource(redisClient RedisClient) error {
 			return fmt.Errorf("failed to get settings for key %s: %w", key, err)
 		}
 
-		// 解析设置
+		// Parse the settings
 		var settings MarketSettings
 		if err := json.Unmarshal([]byte(data), &settings); err != nil {
 			return fmt.Errorf("failed to unmarshal settings for key %s: %w", key, err)
 		}
 
-		// 检查是否需要更新
+		// Check whether an update is needed
 		if settings.SelectedSource == "Official-Market-Sources" {
 			settings.SelectedSource = "market.olares"
 
-			// 序列化更新后的设置
+			// Serialize the updated settings
 			updatedData, err := json.Marshal(settings)
 			if err != nil {
 				return fmt.Errorf("failed to marshal updated settings for key %s: %w", key, err)
 			}
 
-			// 保存回Redis
+			// Save back to Redis
 			if err := redisClient.Set(key, string(updatedData), 0); err != nil {
 				return fmt.Errorf("failed to save updated settings for key %s: %w", key, err)
 			}
@@ -639,7 +641,7 @@ func updateAllUsersSelectedSource(redisClient RedisClient) error {
 	return nil
 }
 
-// updateMarketSourceConfig 更新MarketSource配置
+// updateMarketSourceConfig updates the MarketSource configuration
 func updateMarketSourceConfig(redisClient RedisClient) error {
 	if redisClient == nil {
 		glog.Info("Redis client not available, skipping market source config update")
@@ -648,7 +650,7 @@ func updateMarketSourceConfig(redisClient RedisClient) error {
 
 	glog.Info("Updating market source configuration...")
 
-	// 获取market sources配置
+	// Get the market sources configuration
 	configKey := "market:sources:config"
 	data, err := redisClient.Get(configKey)
 	if err != nil {
@@ -659,7 +661,7 @@ func updateMarketSourceConfig(redisClient RedisClient) error {
 		return fmt.Errorf("failed to get market sources config: %w", err)
 	}
 
-	// 解析配置
+	// Parse the configuration
 	var config MarketSourcesConfig
 	if err := json.Unmarshal([]byte(data), &config); err != nil {
 		return fmt.Errorf("failed to unmarshal market sources config: %w", err)
@@ -667,7 +669,7 @@ func updateMarketSourceConfig(redisClient RedisClient) error {
 
 	updated := false
 
-	// 更新sources中的deprecated条目
+	// Update deprecated entries in sources
 	for _, source := range config.Sources {
 		if source.ID == "Official-Market-Sources" {
 			glog.Infof("Updating deprecated source: %s -> market.olares", source.ID)
@@ -677,7 +679,7 @@ func updateMarketSourceConfig(redisClient RedisClient) error {
 		}
 	}
 
-	// 更新default source
+	// Update default source
 	if config.DefaultSource == "Official-Market-Sources" {
 		glog.Infof("Updating default source: %s -> market.olares", config.DefaultSource)
 		config.DefaultSource = "market.olares"
@@ -685,16 +687,16 @@ func updateMarketSourceConfig(redisClient RedisClient) error {
 	}
 
 	if updated {
-		// 更新时间戳
+		// Update timestamp
 		config.UpdatedAt = time.Now()
 
-		// 序列化更新后的配置
+		// Serialize the updated configuration
 		updatedData, err := json.Marshal(config)
 		if err != nil {
 			return fmt.Errorf("failed to marshal updated market sources config: %w", err)
 		}
 
-		// 保存回Redis
+		// Save back to Redis
 		if err := redisClient.Set(configKey, string(updatedData), 0); err != nil {
 			return fmt.Errorf("failed to save updated market sources config: %w", err)
 		}
@@ -707,11 +709,11 @@ func updateMarketSourceConfig(redisClient RedisClient) error {
 	return nil
 }
 
-// updateAllUsersSelectedSourceFromLocal 更新所有用户的SelectedSource从market-local到upload
+// updateAllUsersSelectedSourceFromLocal updates the SelectedSource for all users from market-local to upload
 func updateAllUsersSelectedSourceFromLocal(redisClient RedisClient) error {
 	glog.Info("Updating all users' SelectedSource from 'market-local' to 'upload'...")
 
-	// 获取所有market settings的键
+	// Get all market settings keys
 	keys, err := redisClient.Keys("market:settings:*")
 	if err != nil {
 		return fmt.Errorf("failed to get market settings keys: %w", err)
@@ -719,7 +721,7 @@ func updateAllUsersSelectedSourceFromLocal(redisClient RedisClient) error {
 
 	updatedCount := 0
 	for _, key := range keys {
-		// 获取用户设置
+		// Get the user settings
 		data, err := redisClient.Get(key)
 		if err != nil {
 			glog.Errorf("Failed to get settings for key %s: %v", key, err)
@@ -732,11 +734,11 @@ func updateAllUsersSelectedSourceFromLocal(redisClient RedisClient) error {
 			continue
 		}
 
-		// 检查是否需要更新
+		// Check whether an update is needed
 		if settings.SelectedSource == "market-local" {
 			settings.SelectedSource = "upload"
 
-			// 更新设置
+			// Update the settings
 			updatedData, err := json.Marshal(settings)
 			if err != nil {
 				glog.Errorf("Failed to marshal updated settings for key %s: %v", key, err)
@@ -762,11 +764,11 @@ func updateAllUsersSelectedSourceFromLocal(redisClient RedisClient) error {
 	return nil
 }
 
-// updateMarketSourceConfigFromLocal 更新MarketSource配置，将market-local改为upload
+// updateMarketSourceConfigFromLocal updates the MarketSource configuration, changing market-local to upload
 func updateMarketSourceConfigFromLocal(redisClient RedisClient) error {
 	glog.Info("Updating market source configuration from 'market-local' to 'upload'...")
 
-	// 获取market sources配置
+	// Get the market sources configuration
 	configData, err := redisClient.Get("market:sources:config")
 	if err != nil {
 		if err.Error() == "key not found" {
@@ -782,7 +784,7 @@ func updateMarketSourceConfigFromLocal(redisClient RedisClient) error {
 	}
 
 	updated := false
-	// 查找并更新market-local源
+	// Find and update the market-local source
 	for _, source := range config.Sources {
 		if source.ID == "market-local" {
 			glog.Infof("Found deprecated market source: %s (%s), updating to 'upload'", source.Name, source.ID)
@@ -799,7 +801,7 @@ func updateMarketSourceConfigFromLocal(redisClient RedisClient) error {
 		return nil
 	}
 
-	// 保存更新后的配置
+	// Save the updated configuration
 	updatedData, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated market sources config: %w", err)
@@ -813,11 +815,11 @@ func updateMarketSourceConfigFromLocal(redisClient RedisClient) error {
 	return nil
 }
 
-// updateAllUsersSelectedSourceFromDevLocal 更新所有用户的SelectedSource从dev-local到studio
+// updateAllUsersSelectedSourceFromDevLocal updates the SelectedSource for all users from dev-local to studio
 func updateAllUsersSelectedSourceFromDevLocal(redisClient RedisClient) error {
 	glog.Info("Updating all users' SelectedSource from 'dev-local' to 'studio'...")
 
-	// 获取所有market settings的键
+	// Get all market settings keys
 	keys, err := redisClient.Keys("market:settings:*")
 	if err != nil {
 		return fmt.Errorf("failed to get market settings keys: %w", err)
@@ -825,7 +827,7 @@ func updateAllUsersSelectedSourceFromDevLocal(redisClient RedisClient) error {
 
 	updatedCount := 0
 	for _, key := range keys {
-		// 获取用户设置
+		// Get the user settings
 		data, err := redisClient.Get(key)
 		if err != nil {
 			glog.Errorf("Failed to get settings for key %s: %v", key, err)
@@ -838,11 +840,11 @@ func updateAllUsersSelectedSourceFromDevLocal(redisClient RedisClient) error {
 			continue
 		}
 
-		// 检查是否需要更新
+		// Check whether an update is needed
 		if settings.SelectedSource == "dev-local" {
 			settings.SelectedSource = "studio"
 
-			// 更新设置
+			// Update the settings
 			updatedData, err := json.Marshal(settings)
 			if err != nil {
 				glog.Errorf("Failed to marshal updated settings for key %s: %v", key, err)
@@ -868,11 +870,11 @@ func updateAllUsersSelectedSourceFromDevLocal(redisClient RedisClient) error {
 	return nil
 }
 
-// updateMarketSourceConfigFromDevLocal 更新MarketSource配置，将dev-local改为studio
+// updateMarketSourceConfigFromDevLocal updates the MarketSource configuration, changing dev-local to studio
 func updateMarketSourceConfigFromDevLocal(redisClient RedisClient) error {
 	glog.Info("Updating market source configuration from 'dev-local' to 'studio'...")
 
-	// 获取market sources配置
+	// Get the market sources configuration
 	configData, err := redisClient.Get("market:sources:config")
 	if err != nil {
 		if err.Error() == "key not found" {
@@ -888,7 +890,7 @@ func updateMarketSourceConfigFromDevLocal(redisClient RedisClient) error {
 	}
 
 	updated := false
-	// 查找并更新dev-local源
+	// Find and update the dev-local source
 	for _, source := range config.Sources {
 		if source.ID == "dev-local" {
 			glog.Infof("Found deprecated market source: %s (%s), updating to 'studio'", source.Name, source.ID)
@@ -905,7 +907,7 @@ func updateMarketSourceConfigFromDevLocal(redisClient RedisClient) error {
 		return nil
 	}
 
-	// 保存更新后的配置
+	// Save the updated configuration
 	updatedData, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated market sources config: %w", err)
@@ -919,11 +921,11 @@ func updateMarketSourceConfigFromDevLocal(redisClient RedisClient) error {
 	return nil
 }
 
-// updateAllUsersSelectedSourceFromLocal2 更新所有用户的SelectedSource从local到upload
+// updateAllUsersSelectedSourceFromLocal2 updates the SelectedSource for all users from local to upload
 func updateAllUsersSelectedSourceFromLocal2(redisClient RedisClient) error {
 	glog.Info("Updating all users' SelectedSource from 'local' to 'upload'...")
 
-	// 获取所有market settings的键
+	// Get all market settings keys
 	keys, err := redisClient.Keys("market:settings:*")
 	if err != nil {
 		return fmt.Errorf("failed to get market settings keys: %w", err)
@@ -931,7 +933,7 @@ func updateAllUsersSelectedSourceFromLocal2(redisClient RedisClient) error {
 
 	updatedCount := 0
 	for _, key := range keys {
-		// 获取用户设置
+		// Get the user settings
 		data, err := redisClient.Get(key)
 		if err != nil {
 			glog.Errorf("Failed to get settings for key %s: %v", key, err)
@@ -944,11 +946,11 @@ func updateAllUsersSelectedSourceFromLocal2(redisClient RedisClient) error {
 			continue
 		}
 
-		// 检查是否需要更新
+		// Check whether an update is needed
 		if settings.SelectedSource == "local" {
 			settings.SelectedSource = "upload"
 
-			// 更新设置
+			// Update the settings
 			updatedData, err := json.Marshal(settings)
 			if err != nil {
 				glog.Errorf("Failed to marshal updated settings for key %s: %v", key, err)
@@ -974,11 +976,11 @@ func updateAllUsersSelectedSourceFromLocal2(redisClient RedisClient) error {
 	return nil
 }
 
-// updateMarketSourceConfigFromLocal2 更新MarketSource配置，将local改为upload
+// updateMarketSourceConfigFromLocal2 updates the MarketSource configuration, changing local to upload
 func updateMarketSourceConfigFromLocal2(redisClient RedisClient) error {
 	glog.Info("Updating market source configuration from 'local' to 'upload'...")
 
-	// 获取market sources配置
+	// Get the market sources configuration
 	configData, err := redisClient.Get("market:sources:config")
 	if err != nil {
 		if err.Error() == "key not found" {
@@ -994,7 +996,7 @@ func updateMarketSourceConfigFromLocal2(redisClient RedisClient) error {
 	}
 
 	updated := false
-	// 查找并更新local源
+	// Find and update the local source
 	for _, source := range config.Sources {
 		if source.ID == "local" {
 			glog.Infof("Found deprecated market source: %s (%s), updating to 'upload'", source.Name, source.ID)
@@ -1011,7 +1013,7 @@ func updateMarketSourceConfigFromLocal2(redisClient RedisClient) error {
 		return nil
 	}
 
-	// 保存更新后的配置
+	// Save the updated configuration
 	updatedData, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated market sources config: %w", err)

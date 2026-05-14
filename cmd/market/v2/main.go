@@ -13,17 +13,19 @@ import (
 
 	"market/internal/v2/appinfo"
 	"market/internal/v2/client"
+	"market/internal/v2/db"
+	"market/internal/v2/helper"
 	"market/internal/v2/history"
 	"market/internal/v2/paymentnew"
 	runtimestate "market/internal/v2/runtime"
 	"market/internal/v2/settings"
 	"market/internal/v2/task"
-	"market/internal/v2/types"
 	"market/internal/v2/utils"
 	"market/internal/v2/watchers"
 	"market/pkg/v2/api"
 
 	"github.com/golang/glog"
+	"gorm.io/gorm"
 )
 
 // createAppInfoConfigWithUsers creates AppInfo module configuration with extracted users
@@ -46,33 +48,7 @@ func createAppInfoConfigWithUsers(users []string) *appinfo.ModuleConfig {
 // loadAppStateDataToUserSource loads app state data from pre-startup step into user's official source
 func loadAppStateDataToUserSource(appInfoModule *appinfo.AppInfoModule) {
 	// Get all user app state data from pre-startup step
-	allUserAppStateData := utils.GetAllUserAppStateData()
-
-	for userID, sourceData := range allUserAppStateData {
-		if len(sourceData) == 0 {
-			glog.V(2).Infof("No app state data found for user %s, skipping", userID)
-			continue
-		}
-
-		glog.V(2).Infof("Loading app state data for user %s (%d sources)", userID, len(sourceData))
-
-		// For each user, load their app state data into the official source
-		for sourceID, appStateDataList := range sourceData {
-			glog.V(2).Infof("Loading %d app states for user: %s, source: %s", len(appStateDataList), userID, sourceID)
-
-			// Set app state data for the user's official source
-			err := appInfoModule.SetAppData(userID, sourceID, types.AppStateLatest, map[string]interface{}{
-				"app_states": appStateDataList,
-			})
-
-			if err != nil {
-				glog.Errorf("Failed to load app state data for user %s: %v", userID, err)
-			} else {
-				glog.V(2).Infof("Successfully loaded %d app states for user %s", len(appStateDataList), userID)
-			}
-		}
-	}
-
+	utils.GetAllUserAppStateData()
 }
 
 func main() {
@@ -119,17 +95,17 @@ func main() {
 	glog.V(2).Info("=== End pre-execution upgrade flow ===")
 
 	// 0. Initialize Settings Module (Required for API)
-	redisHost := utils.GetEnvOrDefault("REDIS_HOST", "localhost")
-	redisPort := utils.GetEnvOrDefault("REDIS_PORT", "6379")
-	redisPassword := utils.GetEnvOrDefault("REDIS_PASSWORD", "")
-	redisDBStr := utils.GetEnvOrDefault("REDIS_DB", "0")
+	redisHost := helper.GetEnvOrDefault("REDIS_HOST", "localhost")
+	redisPort := helper.GetEnvOrDefault("REDIS_PORT", "6379")
+	redisPassword := helper.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDBStr := helper.GetEnvOrDefault("REDIS_DB", "0")
 	redisDB, err := strconv.Atoi(redisDBStr)
 	if err != nil {
 		glog.Exitf("Invalid REDIS_DB value: %v", err)
 	}
 
 	var redisClient settings.RedisClient
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		redisClient, err = settings.NewRedisClient(redisHost, redisPort, redisPassword, redisDB)
 		if err != nil {
 			glog.Exitf("Failed to create Redis client: %v", err)
@@ -137,6 +113,31 @@ func main() {
 	}
 
 	// utils.SetRedisClient(redisClient.GetRawClient())
+
+	// Initialize PostgreSQL connection and apply pending schema migrations.
+	// History / Task modules below assume their tables already exist.
+	var gormDB *gorm.DB
+	if !helper.IsPublicEnvironment() {
+		dbCtx := context.Background()
+		gormDB, err = db.Open(dbCtx, db.LoadConfigFromEnv())
+		if err != nil {
+			glog.Exitf("Failed to open PostgreSQL: %v", err)
+		}
+		db.SetGlobal(gormDB)
+		if err := db.Migrate(dbCtx, gormDB, db.MigrateOptions{
+			Direction:   db.MigrateUp,
+			LockTimeout: 30 * time.Second,
+		}); err != nil {
+			glog.Exitf("PostgreSQL migration failed: %v", err)
+		}
+		glog.V(2).Info("PostgreSQL schema is up to date")
+		// Wire the chart-repo download fallback used by
+		// task.LookupAppInfoLastInstalled. Injecting the function here
+		// (instead of importing utils from the task package) keeps the
+		// task -> utils dependency edge gone, so utils can freely import
+		// task without forming a cycle.
+		task.SetDownloadRecordLookup(utils.GetAppInfoFromDownloadRecord)
+	}
 
 	// Pre-startup step: Setup app service data with retry mechanism
 	glog.V(2).Info("=== Pre-startup: Setting up app service data ===")
@@ -151,7 +152,7 @@ func main() {
 		extractedUsers := utils.GetExtractedUsers()
 		allUserAppStateData := utils.GetAllUserAppStateData()
 
-		if !utils.IsPublicEnvironment() {
+		if !helper.IsPublicEnvironment() {
 
 			userCount := len(extractedUsers)
 			appCount := 0
@@ -244,10 +245,12 @@ func main() {
 
 	var taskModule *task.TaskModule
 	var historyModule *history.HistoryModule
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		// 1. Init user watch
 		var w = watchers.NewWatchers(context.Background(), client.Factory.Config())
-		watchers.AddToWatchers[client.User](w, client.UserGVR, cacheManager.HandlerEvent())
+		if err := watchers.AddToWatchers[client.User](w, client.UserGVR, watchers.UserHandlerEvent()); err != nil {
+			glog.Errorf("Failed to register user watcher: %v; continuing startup", err)
+		}
 		go w.Run(1)
 
 		// 2. Initialize History Module
@@ -304,7 +307,7 @@ func main() {
 
 	// Initialize Runtime State Service
 	var runtimeStateService *runtimestate.RuntimeStateService
-	// if !utils.IsPublicEnvironment() {
+	// if !helper.IsPublicEnvironment() {
 	glog.V(2).Info("=== Initializing Runtime State Service ===")
 	stateStore := runtimestate.NewStateStore()
 	stateCollector := runtimestate.NewStateCollector(stateStore)
@@ -360,10 +363,10 @@ func main() {
 		}
 	}()
 
-	glog.V(2).Info("HTTP server startup initiated")
-	glog.V(2).Info("Waiting for server to be ready...")
+	glog.V(3).Info("HTTP server startup initiated")
+	glog.V(3).Info("Waiting for server to be ready...")
 	time.Sleep(2 * time.Second) // Give the server a moment to start
-	glog.V(2).Info("Server startup sequence completed")
+	glog.V(3).Info("Server startup sequence completed")
 
 	glog.V(2).Info("Starting server on port 8080")
 
@@ -380,11 +383,11 @@ func main() {
 	glog.V(3).Info("  POST   /api/v2/apps/upload               - Upload application installation package")
 	glog.V(3).Info("  GET    /api/v2/settings/market-source    - Get market source configuration")
 	glog.V(3).Info("  PUT    /api/v2/settings/market-source    - Set market source configuration")
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		glog.V(3).Info("  GET    /api/v2/runtime/state            - Get runtime state (apps, tasks, components)")
 	}
 
-	if !utils.IsPublicEnvironment() {
+	if !helper.IsPublicEnvironment() {
 		// Add history record for successful market setup
 		glog.V(3).Info("Recording market setup completion in history...")
 		historyRecord := &history.HistoryRecord{
@@ -477,6 +480,13 @@ func main() {
 				if err := closer.Close(); err != nil {
 					glog.Errorf("Error stopping Redis client: %v", err)
 				}
+			}
+		}
+
+		if gormDB != nil {
+			glog.V(3).Info("Closing PostgreSQL connection...")
+			if err := db.Close(gormDB); err != nil {
+				glog.Errorf("Error closing PostgreSQL connection: %v", err)
 			}
 		}
 

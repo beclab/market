@@ -1,50 +1,52 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
-	"os"
-	"strings"
+
+	"market/internal/v2/appservice"
+	"market/internal/v2/store"
 
 	"github.com/golang/glog"
 )
 
-// AppEntrance represents an entrance configuration for cloned app
+// AppEntrance represents an entrance configuration for a cloned app.
+// Carried in task.Metadata["entrances"] from pkg/v2/api/task.go's
+// CloneAppRequest. Distinct from appservice.AppEntrance only because
+// the API handler still references this type when validating /
+// hashing the wire request (see calculateCloneRequestHash); once that
+// migrates, this duplicate can retire in favour of appservice.AppEntrance.
 type AppEntrance struct {
 	Name  string `json:"name"`
 	Title string `json:"title"`
 }
 
-// CloneOptions represents the options for app clone installation
-type CloneOptions struct {
-	App          string        `json:"appName,omitempty"`
-	Dev          bool          `json:"devMode,omitempty"`
-	RepoUrl      string        `json:"repoUrl,omitempty"`
-	CfgUrl       string        `json:"cfgUrl,omitempty"`
-	Version      string        `json:"version,omitempty"`
-	Source       string        `json:"source,omitempty"`
-	User         string        `json:"x_market_user,omitempty"`
-	MarketSource string        `json:"x_market_source,omitempty"`
-	Images       []Image       `json:"images,omitempty"`
-	Envs         []AppEnvVar   `json:"envs"`
-	Entrances    []AppEntrance `json:"entrances,omitempty"`
-	RawAppName   string        `json:"rawAppName,omitempty"`  // Raw app name for clone operations
-	RequestHash  string        `json:"requestHash,omitempty"` // Hash of entire clone request (first 6 chars of SHA256 hash of source, app_name, title, envs, and entrances)
-	Title        string        `json:"title,omitempty"`       // Title for clone operations (for display purposes)
-}
-
-// AppClone clones an application using the app service
+// AppClone clones an application using the typed appservice client.
+// The wire-level URL path uses rawAppName + requestHash so app-service
+// can disambiguate the clone from the original chart at install time;
+// see CloneOptions / cloneAppIDFromName in the API layer for how the
+// pieces are derived. RawAppName / RequestHash / Title also ride in the
+// request body so app-service can populate display-side metadata.
+//
+// Behaviour change vs the legacy hand-rolled HTTP path: HTTP 200 +
+// Code != 200 now surfaces as a hard failure (the typed client maps
+// it to *appservice.OpError). The legacy path returned a "failed"
+// envelope with the upstream payload attached on the same condition,
+// so user-visible behaviour is preserved — only the in-process error
+// signal is now strongly typed.
 func (tm *TaskModule) AppClone(task *Task) (string, error) {
 	appName := task.AppName
 	user := task.User
 
 	glog.Infof("Starting app clone: app=%s, user=%s, task_id=%s", appName, user, task.ID)
 
-	// Check if there's already a running or pending clone task for the same app
+	// Reject duplicate clone tasks for the same app to mirror
+	// AppInstall's pre-flight guard. This is a best-effort window —
+	// two near-simultaneous clicks may still slip through but the PG
+	// path's ON CONFLICT keeps state consistent regardless.
 	tm.mu.RLock()
-
-	// Check running tasks
 	for _, runningTask := range tm.runningTasks {
 		if runningTask.Type == CloneApp && runningTask.AppName == appName && runningTask.ID != task.ID {
 			tm.mu.RUnlock()
@@ -61,7 +63,6 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 			return string(errorJSON), fmt.Errorf("another clone task is already running for app: %s", appName)
 		}
 	}
-
 	tm.mu.RUnlock()
 
 	token, ok := task.Metadata["token"].(string)
@@ -70,21 +71,18 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		return "", fmt.Errorf("missing token in task metadata")
 	}
 
-	// Get app source from metadata
 	appSource, ok := task.Metadata["source"].(string)
 	if !ok {
 		glog.Warningf("Missing source in task metadata for task: %s", task.ID)
 		return "", fmt.Errorf("missing source in task metadata")
 	}
 
-	// Get cfgType from metadata
 	cfgType, ok := task.Metadata["cfgType"].(string)
 	if !ok {
 		glog.Warningf("Missing cfgType in task metadata for task: %s, using default 'app'", task.ID)
-		cfgType = "app" // Default to app type
+		cfgType = "app"
 	}
 
-	// Get rawAppName and requestHash from metadata
 	rawAppName, ok := task.Metadata["rawAppName"].(string)
 	if !ok || rawAppName == "" {
 		glog.Warningf("Missing rawAppName in task metadata for task: %s", task.ID)
@@ -97,42 +95,28 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		return "", fmt.Errorf("missing requestHash in task metadata")
 	}
 
-	// Get title from metadata (optional, for display purposes)
 	title, _ := task.Metadata["title"].(string)
 
-	// Construct URL app name: rawAppName + requestHash (not rawAppName + Title)
+	// urlAppName is the path segment app-service uses to address the
+	// clone — concatenation of the original chart's name and the
+	// per-request hash. Same value as the API layer's newAppName.
 	urlAppName := rawAppName + requestHash
 	glog.Infof("Clone operation: rawAppName=%s, requestHash=%s, title=%s, urlAppName=%s for task: %s", rawAppName, requestHash, title, urlAppName, task.ID)
 
-	// Convert app source to API source parameter
 	var apiSource string
 	if appSource == "upload" {
 		apiSource = "custom"
 	} else {
 		apiSource = "market"
 	}
-
 	glog.Infof("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
 
-	appServiceHost := os.Getenv("APP_SERVICE_SERVICE_HOST")
-	appServicePort := os.Getenv("APP_SERVICE_SERVICE_PORT")
-
-	// Choose API endpoint based on cfgType
-	var urlStr string
-	// Use rawAppName+requestHash for URL in clone operations
-	urlStr = fmt.Sprintf("http://%s:%s/app-service/v1/apps/%s/install", appServiceHost, appServicePort, urlAppName)
-	glog.Infof("Using app API for clone installation: %s", urlStr)
-
-	glog.Infof("App service URL: %s for task: %s", urlStr, task.ID)
-
-	// Get envs from metadata
 	var envs []AppEnvVar
 	if envsData, ok := task.Metadata["envs"]; ok && envsData != nil {
 		envs, _ = envsData.([]AppEnvVar)
 		glog.Infof("Retrieved %d environment variables for task: %s", len(envs), task.ID)
 	}
 
-	// Get entrances from metadata
 	var entrances []AppEntrance
 	if entrancesData, ok := task.Metadata["entrances"]; ok && entrancesData != nil {
 		if entrancesSlice, ok := entrancesData.([]AppEntrance); ok {
@@ -141,15 +125,17 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		glog.Infof("Retrieved %d entrances for task: %s", len(entrances), task.ID)
 	}
 
-	// Get VC from purchase receipt using rawAppName and inject into environment variables
+	// VC injection: clone uses rawAppName for receipt lookup since
+	// the clone alias is not the productID app-service / payment
+	// modules know about. The injected envvar overwrites any caller-
+	// supplied value with the same name to guarantee the receipt-side
+	// VC is the one app-service receives.
 	tm.mu.RLock()
 	settingsManager := tm.settingsManager
 	tm.mu.RUnlock()
-
 	if settingsManager != nil {
 		vc := getVCForClone(settingsManager, user, rawAppName, task.Metadata)
 		if vc != "" {
-			// Check if VERIFIABLE_CREDENTIAL already exists in envs
 			vcExists := false
 			for i := range envs {
 				if envs[i].EnvName == "VERIFIABLE_CREDENTIAL" {
@@ -159,7 +145,6 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 					break
 				}
 			}
-			// If not exists, add it
 			if !vcExists {
 				envs = append(envs, AppEnvVar{
 					EnvName: "VERIFIABLE_CREDENTIAL",
@@ -174,7 +159,6 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		glog.Infof("Settings manager not available, skipping VC injection for task: %s", task.ID)
 	}
 
-	// Get images from metadata
 	var images []Image
 	if imagesData, ok := task.Metadata["images"]; ok && imagesData != nil {
 		if imagesSlice, ok := imagesData.([]Image); ok {
@@ -182,170 +166,184 @@ func (tm *TaskModule) AppClone(task *Task) (string, error) {
 		}
 	}
 
-	// Create clone options with rawAppName, requestHash, and Title
-	cloneInfo := &CloneOptions{
+	// Field-for-field conversion to the appservice wire types. Same
+	// pattern as AppInstall / AppUpgrade: the duplicate task-package
+	// types stay because pkg/v2/api/task.go still references them
+	// when assembling taskMetadata.
+	asEnvs := make([]appservice.AppEnvVar, len(envs))
+	for i, e := range envs {
+		asEnvs[i] = appservice.AppEnvVar{EnvName: e.EnvName, Value: e.Value}
+		if e.ValueFrom != nil {
+			asEnvs[i].ValueFrom = &appservice.AppEnvValueFrom{EnvName: e.ValueFrom.EnvName}
+		}
+	}
+	asImages := make([]appservice.Image, len(images))
+	for i, img := range images {
+		asImages[i] = appservice.Image{Name: img.Name, Size: img.Size}
+	}
+	asEntrances := make([]appservice.AppEntrance, len(entrances))
+	for i, e := range entrances {
+		asEntrances[i] = appservice.AppEntrance{Name: e.Name, Title: e.Title}
+	}
+
+	opts := appservice.CloneOptions{
 		RepoUrl:      getRepoUrl(),
 		Source:       apiSource,
 		User:         user,
 		MarketSource: appSource,
-		Images:       images,
-		Envs:         envs,
-		Entrances:    entrances,
-		RawAppName:   rawAppName,  // Pass rawAppName
-		RequestHash:  requestHash, // Pass requestHash
-		Title:        title,       // Pass title (for display purposes)
+		Images:       asImages,
+		Envs:         asEnvs,
+		Entrances:    asEntrances,
+		RawAppName:   rawAppName,
+		RequestHash:  requestHash,
+		Title:        title,
+	}
+	hdr := appservice.OpHeaders{
+		Token:        token,
+		User:         task.User,
+		MarketUser:   user,
+		MarketSource: appSource,
 	}
 
-	ms, err := json.Marshal(cloneInfo)
-	if err != nil {
-		glog.Errorf("Failed to marshal clone info for task %s: %v", task.ID, err)
-		return "", err
-	}
-	glog.Infof("Clone request prepared: url=%s, cloneInfo=%s, task_id=%s", urlStr, string(ms), task.ID)
-
-	headers := map[string]string{
-		"X-Authorization": token,
-		"X-Bfl-User":      task.User,
-		"Content-Type":    "application/json",
-		"X-Market-User":   user,
-		"X-Market-Source": appSource,
-	}
-
-	// Send HTTP request and get response
-	glog.Infof("[APP] Sending HTTP request for app clone: task=%s", task.ID)
-	response, err := sendHttpRequest(http.MethodPost, urlStr, headers, strings.NewReader(string(ms)))
-	if err != nil {
-		glog.Errorf("HTTP request failed for app clone: task=%s, error=%v", task.ID, err)
-		// Create detailed error result
-		errorResult := map[string]interface{}{
+	// baseEnvelope mirrors the legacy success / failure result shape
+	// so API-side consumers (sync wait + frontend backend_response
+	// viewer) keep the exact same field set as before the migration.
+	// The legacy "url" field is dropped (typed client owns transport).
+	baseEnvelope := func() map[string]interface{} {
+		return map[string]interface{}{
 			"operation":   "clone",
 			"app_name":    urlAppName,
 			"user":        user,
 			"app_source":  appSource,
 			"api_source":  apiSource,
 			"cfgType":     cfgType,
-			"url":         urlStr,
 			"rawAppName":  rawAppName,
 			"requestHash": requestHash,
 			"title":       title,
-			"error":       err.Error(),
-			"status":      "failed",
 		}
-		errorJSON, _ := json.Marshal(errorResult)
+	}
+
+	client, err := getAppServiceClient()
+	if err != nil {
+		glog.Errorf("App-service client unavailable for clone task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		errorJSON, _ := json.Marshal(envelope)
 		return string(errorJSON), err
 	}
 
-	glog.Infof("HTTP request completed successfully for app clone: task=%s, response_length=%d", task.ID, len(response))
-
-	// Parse response to extract opID if clone is successful
-	var responseData map[string]interface{}
-	if err := json.Unmarshal([]byte(response), &responseData); err != nil {
-		glog.Errorf("Failed to parse response JSON for task %s: %v", task.ID, err)
-		// Create error result for JSON parsing failure
-		errorResult := map[string]interface{}{
-			"operation":    "clone",
-			"app_name":     urlAppName,
-			"user":         user,
-			"app_source":   appSource,
-			"api_source":   apiSource,
-			"cfgType":      cfgType,
-			"url":          urlStr,
-			"rawAppName":   rawAppName,
-			"requestHash":  requestHash,
-			"title":        title,
-			"raw_response": response,
-			"error":        fmt.Sprintf("Failed to parse response JSON: %v", err),
-			"status":       "failed",
+	glog.Infof("[APP] Sending HTTP request for app clone: task=%s urlAppName=%s", task.ID, urlAppName)
+	opResp, err := client.CloneApp(context.Background(), urlAppName, opts, hdr)
+	if err != nil {
+		glog.Errorf("App-service clone failed for task=%s: %v", task.ID, err)
+		envelope := baseEnvelope()
+		envelope["error"] = err.Error()
+		envelope["status"] = "failed"
+		var opErr *appservice.OpError
+		if errors.As(err, &opErr) {
+			backend := map[string]interface{}{
+				"code":    opErr.Code,
+				"message": opErr.Message,
+			}
+			switch {
+			case opResp != nil && len(opResp.DataRaw) > 0:
+				backend["data"] = json.RawMessage(opResp.DataRaw)
+			case opErr.OpID != "":
+				backend["data"] = map[string]interface{}{"opID": opErr.OpID}
+			}
+			envelope["backend_response"] = backend
 		}
-		errorJSON, _ := json.Marshal(errorResult)
-		return string(errorJSON), fmt.Errorf("failed to parse response JSON: %v", err)
+		errorJSON, _ := json.Marshal(envelope)
+		return string(errorJSON), err
 	}
 
-	// Check if clone was successful by checking code field
-	if code, ok := responseData["code"].(float64); ok && code == 200 {
-		if data, ok := responseData["data"].(map[string]interface{}); ok {
-			if opID, ok := data["opID"].(string); ok && opID != "" {
-				task.OpID = opID
-				glog.Infof("Successfully extracted opID: %s for task: %s", opID, task.ID)
-			} else {
-				glog.Infof("opID not found in response data for task: %s", task.ID)
-				// Return backend response with additional context
-				errorResult := map[string]interface{}{
-					"operation":        "clone",
-					"app_name":         urlAppName,
-					"user":             user,
-					"app_source":       appSource,
-					"api_source":       apiSource,
-					"cfgType":          cfgType,
-					"url":              urlStr,
-					"rawAppName":       rawAppName,
-					"requestHash":      requestHash,
-					"title":            title,
-					"backend_response": responseData,
-					"error":            "opID not found in response data",
-					"status":           "failed",
-				}
-				errorJSON, _ := json.Marshal(errorResult)
-				return string(errorJSON), fmt.Errorf("opID not found in response data")
-			}
-		} else {
-			glog.Infof("Data field not found or not a map in response for task: %s", task.ID)
-			// Return backend response with additional context
-			errorResult := map[string]interface{}{
-				"operation":        "clone",
-				"app_name":         urlAppName,
-				"user":             user,
-				"app_source":       appSource,
-				"api_source":       apiSource,
-				"cfgType":          cfgType,
-				"url":              urlStr,
-				"rawAppName":       rawAppName,
-				"requestHash":      requestHash,
-				"backend_response": responseData,
-				"error":            "Data field not found or not a map in response",
-				"status":           "failed",
-			}
-			errorJSON, _ := json.Marshal(errorResult)
-			return string(errorJSON), fmt.Errorf("data field not found or not a map in response")
+	// Mirror AppInstall's strict opID check: clone success WITHOUT an
+	// opID is treated as a failure, matching the legacy code's
+	// "opID not found in response data" branch which already returned
+	// the same shape.
+	if opResp == nil || opResp.Data == nil || opResp.Data.OpID == "" {
+		glog.Infof("opID not found in response data for task: %s", task.ID)
+		envelope := baseEnvelope()
+		backend := map[string]interface{}{}
+		if opResp != nil {
+			backend["code"] = opResp.Code
+			backend["message"] = opResp.Message
 		}
+		envelope["backend_response"] = backend
+		envelope["error"] = "opID not found in response data"
+		envelope["status"] = "failed"
+		errorJSON, _ := json.Marshal(envelope)
+		return string(errorJSON), fmt.Errorf("opID not found in response data")
+	}
+
+	task.OpID = opResp.Data.OpID
+	glog.Infof("Successfully extracted opID: %s for task: %s", opResp.Data.OpID, task.ID)
+
+	// Materialise the clone's user_applications + user_application_states
+	// rows AFTER app-service accepts the clone (i.e. opID issued). Doing
+	// this in the HTTP handler before AddTask leaks "ghost" rows whenever
+	// app-service rejects the request — most commonly HTTP 422 when the
+	// user has not yet filled in required envs/entrances. Each retry with
+	// different request body hashes to a distinct newAppID (because
+	// requestHash covers Title/Envs/Entrances), each insert hits a fresh
+	// (user, source, app_id) tuple, and the UNIQUE constraint does not
+	// catch the duplicates.
+	//
+	// CloneUserApplication runs both the user_applications insert (with
+	// per-clone title / entrance-title overrides patched into the source
+	// row's JSONB columns) and the user_application_states pending row
+	// in a single PG transaction; partial failures cannot leave Market
+	// with a half-materialised clone.
+	//
+	// On failure here we still return the success envelope because
+	// app-service has already accepted the clone; the operation will
+	// proceed on the cluster. The missing rows are logged loudly so
+	// they show up in monitoring; a follow-up reconciliation pass can
+	// rematerialise them from NATS state events (UpsertStateFromNATS
+	// will silently skip until the user_applications row appears).
+	newAppID := metadataString(task.Metadata, "realAppID")
+	version := metadataString(task.Metadata, "version")
+	if newAppID == "" {
+		glog.Errorf("AppClone: missing realAppID in metadata after app-service success (task=%s app=%s opID=%s); skipping user_applications materialisation",
+			task.ID, urlAppName, task.OpID)
 	} else {
-		glog.Infof("Clone code is not 200 for task: %s, code: %v", task.ID, code)
-		// Return backend response with additional context
-		errorResult := map[string]interface{}{
-			"operation":        "clone",
-			"app_name":         urlAppName,
-			"user":             user,
-			"app_source":       appSource,
-			"api_source":       apiSource,
-			"cfgType":          cfgType,
-			"url":              urlStr,
-			"rawAppName":       rawAppName,
-			"requestHash":      requestHash,
-			"backend_response": responseData,
-			"error":            fmt.Sprintf("Clone failed with code: %v", code),
-			"status":           "failed",
+		// entranceTitles maps positionally onto user_applications.entrances
+		// per the clone-request contract (index-aligned, empty title at
+		// a covered index clears the inherited title, indices beyond the
+		// source's entrances are silently dropped). entrances above is
+		// already the typed []AppEntrance carried in task.Metadata; reuse
+		// it without re-reading the metadata map.
+		entranceTitles := make([]string, len(entrances))
+		for i, e := range entrances {
+			entranceTitles[i] = e.Title
 		}
-		errorJSON, _ := json.Marshal(errorResult)
-		return string(errorJSON), fmt.Errorf("clone failed with code: %v", code)
+		if err := store.CloneUserApplication(context.Background(), store.CloneUserApplicationInput{
+			UserID:              user,
+			SourceID:            appSource,
+			SrcAppName:          rawAppName,
+			NewAppID:            newAppID,
+			NewAppName:          urlAppName,
+			Title:               title,
+			EntranceTitles:      entranceTitles,
+			PendingStateVersion: version,
+		}); err != nil {
+			glog.Errorf("AppClone: failed to materialise clone rows after app-service success (task=%s user=%s source=%s src=%s -> new=%s/%s opID=%s): %v",
+				task.ID, user, appSource, rawAppName, urlAppName, newAppID, task.OpID, err)
+		}
 	}
 
-	// Return backend response with additional context on success
-	successResult := map[string]interface{}{
-		"operation":        "clone",
-		"app_name":         urlAppName,
-		"user":             user,
-		"app_source":       appSource,
-		"api_source":       apiSource,
-		"cfgType":          cfgType,
-		"url":              urlStr,
-		"rawAppName":       rawAppName,
-		"requestHash":      requestHash,
-		"title":            title,
-		"backend_response": responseData,
-		"opID":             task.OpID,
-		"status":           "success",
+	tm.linkStateOpID(task, task.AppName, "clone")
+
+	envelope := baseEnvelope()
+	envelope["backend_response"] = map[string]interface{}{
+		"code":    opResp.Code,
+		"message": opResp.Message,
+		"data":    map[string]interface{}{"opID": opResp.Data.OpID},
 	}
-	successJSON, _ := json.Marshal(successResult)
+	envelope["opID"] = task.OpID
+	envelope["status"] = "success"
+	successJSON, _ := json.Marshal(envelope)
 	glog.Infof("App clone completed successfully: task=%s, result_length=%d", task.ID, len(successJSON))
 	return string(successJSON), nil
 }

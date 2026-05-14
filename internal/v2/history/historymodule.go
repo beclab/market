@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"market/internal/v2/utils"
 	"os"
 	"strconv"
 	"time"
 
+	"market/internal/v2/db"
+	"market/internal/v2/helper"
+
 	"github.com/golang/glog"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	"gorm.io/gorm"
 )
 
 // HistoryType represents the type of history record
@@ -63,142 +65,37 @@ type HistoryModule struct {
 	cancel        context.CancelFunc
 }
 
-// NewHistoryModule creates a new history module instance
+// NewHistoryModule creates a new history module instance backed by the
+// shared PostgreSQL pool managed by package db. It does NOT open a new
+// connection: the underlying *sql.DB is borrowed from db.Global() and
+// wrapped in sqlx so the existing CRUD code paths continue to work
+// unchanged.
+//
+// Schema (table + indexes) is owned by internal/v2/db migrations (see
+// migrations/00005_init_history_records.sql) and is applied during
+// application startup before this constructor runs.
 func NewHistoryModule() (*HistoryModule, error) {
-
-	if utils.IsPublicEnvironment() {
+	if helper.IsPublicEnvironment() {
 		return nil, fmt.Errorf("in public environment, no need to load history module")
 	}
 
-	// Get database configuration from environment variables
-	dbHost := os.Getenv("POSTGRES_HOST")
-	if dbHost == "" {
-		dbHost = "localhost"
+	gormDB := db.Global()
+	if gormDB == nil {
+		return nil, fmt.Errorf("postgres not initialised; db.Open must run before NewHistoryModule")
 	}
-
-	dbPort := os.Getenv("POSTGRES_PORT")
-	if dbPort == "" {
-		dbPort = "5432"
-	}
-
-	dbName := os.Getenv("POSTGRES_DB")
-	if dbName == "" {
-		dbName = "history"
-	}
-
-	dbUser := os.Getenv("POSTGRES_USER")
-	if dbUser == "" {
-		dbUser = "postgres"
-	}
-
-	dbPassword := os.Getenv("POSTGRES_PASSWORD")
-	if dbPassword == "" {
-		dbPassword = "password"
-	}
-
-	// Build connection string
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
-
-	// Connect to database
-	db, err := sqlx.Connect("postgres", connStr)
+	sqlDB, err := gormDB.DB()
 	if err != nil {
-		glog.Errorf("Failed to connect to PostgreSQL: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("acquire underlying *sql.DB: %w", err)
 	}
-
-	// Test connection
-	if err := db.Ping(); err != nil {
-		glog.Errorf("Failed to ping PostgreSQL: %v", err)
-		return nil, err
-	}
-
-	glog.Infof("Connected to PostgreSQL successfully")
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	module := &HistoryModule{
-		db:     db,
+		db:     sqlx.NewDb(sqlDB, "postgres"),
 		ctx:    ctx,
 		cancel: cancel,
 	}
-
-	// Initialize database schema
-	if err := module.initSchema(); err != nil {
-		glog.Errorf("Failed to initialize database schema: %v", err)
-		return nil, err
-	}
-
-	// Start cleanup routine
 	module.startCleanupRoutine()
-
 	return module, nil
-}
-
-// initSchema creates the history_records table if it doesn't exist
-func (hm *HistoryModule) initSchema() error {
-	// First, create the table if it doesn't exist
-	createTableSchema := `
-	CREATE TABLE IF NOT EXISTS history_records (
-		id BIGSERIAL PRIMARY KEY,
-		type VARCHAR(100) NOT NULL,
-		message TEXT NOT NULL,
-		time BIGINT NOT NULL,
-		app VARCHAR(255) NOT NULL,
-		extended TEXT DEFAULT '',
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);`
-
-	_, err := hm.db.Exec(createTableSchema)
-	if err != nil {
-		glog.Errorf("Failed to create base table: %v", err)
-		return err
-	}
-
-	// Check if account column exists, if not add it
-	var columnExists bool
-	checkColumnQuery := `
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns 
-			WHERE table_name = 'history_records' 
-			AND column_name = 'account'
-		);`
-
-	err = hm.db.QueryRow(checkColumnQuery).Scan(&columnExists)
-	if err != nil {
-		glog.Errorf("Failed to check if account column exists: %v", err)
-		return err
-	}
-
-	// Add account column if it doesn't exist
-	if !columnExists {
-		glog.Infof("Account column does not exist, adding it...")
-		addColumnQuery := `ALTER TABLE history_records ADD COLUMN account VARCHAR(255) NOT NULL DEFAULT '';`
-		_, err = hm.db.Exec(addColumnQuery)
-		if err != nil {
-			glog.Errorf("Failed to add account column: %v", err)
-			return err
-		}
-		glog.Infof("Account column added successfully")
-	}
-
-	// Create indexes
-	indexSchema := `
-	CREATE INDEX IF NOT EXISTS idx_history_type ON history_records(type);
-	CREATE INDEX IF NOT EXISTS idx_history_app ON history_records(app);
-	CREATE INDEX IF NOT EXISTS idx_history_account ON history_records(account);
-	CREATE INDEX IF NOT EXISTS idx_history_time ON history_records(time);
-	CREATE INDEX IF NOT EXISTS idx_history_created_at ON history_records(created_at);
-	`
-
-	_, err = hm.db.Exec(indexSchema)
-	if err != nil {
-		glog.Errorf("Failed to create indexes: %v", err)
-		return err
-	}
-
-	glog.Infof("Database schema initialized successfully")
-	return nil
 }
 
 // StoreRecord stores a new history record
@@ -238,6 +135,64 @@ func (hm *HistoryModule) StoreRecord(record *HistoryRecord) error {
 	}
 
 	glog.Infof("Stored history record with ID: %d, type: %s, app: %s, account: %s", record.ID, record.Type, record.App, record.Account)
+	return nil
+}
+
+// StoreRecordInTx is the in-transaction variant of StoreRecord. The
+// caller supplies a *gorm.DB that wraps an open transaction (typically
+// obtained via gdb.Transaction(func(tx *gorm.DB) error { ... })). The
+// INSERT runs on that tx so the history write commits atomically with
+// whatever else the caller is doing — task_records + user_application_
+// states updates in the task module, today.
+//
+// Validation rules mirror StoreRecord exactly so the two entry points
+// have identical accept/reject semantics; only the connection handle
+// differs. record.ID is populated with the auto-increment id PG
+// returns, same as the non-tx path.
+//
+// Why gorm.DB and not sqlx.Tx: the rest of the project's transactional
+// writes use gorm (internal/v2/db.Global() returns *gorm.DB), so
+// accepting a *gorm.DB here lets a single caller stitch history into
+// the same tx as store.FailTaskInTx / store.CompleteTaskInTx without
+// juggling two different transaction abstractions on the same
+// underlying *sql.Conn.
+func (hm *HistoryModule) StoreRecordInTx(tx *gorm.DB, record *HistoryRecord) error {
+	if tx == nil {
+		return fmt.Errorf("StoreRecordInTx: nil tx")
+	}
+	if record == nil {
+		return fmt.Errorf("record cannot be nil")
+	}
+
+	if record.Account == "" {
+		return fmt.Errorf("account field cannot be empty")
+	}
+
+	if record.Time == 0 {
+		record.Time = time.Now().Unix()
+	}
+
+	if record.Extended != "" {
+		var temp interface{}
+		if err := json.Unmarshal([]byte(record.Extended), &temp); err != nil {
+			glog.Warningf("Invalid JSON in extended field, storing as plain text: %v", err)
+		}
+	}
+
+	// `RETURNING id` is supported by Postgres; gorm's Raw + Scan walks
+	// the returned row exactly once, populating record.ID without an
+	// extra round-trip. Errors are returned verbatim (no log here) so
+	// the enclosing transaction can roll back cleanly and the caller
+	// decides whether to log.
+	const query = `
+INSERT INTO history_records (type, message, time, app, account, extended)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id`
+	if err := tx.Raw(query,
+		record.Type, record.Message, record.Time, record.App, record.Account, record.Extended,
+	).Scan(&record.ID).Error; err != nil {
+		return fmt.Errorf("store history record (tx): %w", err)
+	}
 	return nil
 }
 
@@ -434,25 +389,19 @@ func (hm *HistoryModule) GetRecordCount(condition *QueryCondition) (int64, error
 	return count, nil
 }
 
-// Close closes the database connection and stops cleanup routine
+// Close stops the cleanup goroutine and tears down the module's local state.
+//
+// It deliberately does NOT close hm.db: the underlying *sql.DB is owned by
+// package db and closed once during graceful shutdown in main.go. Closing
+// it here would tear down the pool shared with task and any other consumer.
 func (hm *HistoryModule) Close() error {
 	glog.Infof("Closing history module")
-
-	// Stop cleanup routine
 	if hm.cleanupTicker != nil {
 		hm.cleanupTicker.Stop()
 	}
-
-	// Cancel context
 	if hm.cancel != nil {
 		hm.cancel()
 	}
-
-	// Close database connection
-	if hm.db != nil {
-		return hm.db.Close()
-	}
-
 	return nil
 }
 

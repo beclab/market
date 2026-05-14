@@ -127,24 +127,7 @@ func (sm *StateMonitor) HasStateChanged(
 
 // compareEntranceStatuses compares two arrays of entrance statuses
 func (sm *StateMonitor) compareEntranceStatuses(
-	newStatuses []struct {
-		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-		Name       string `json:"name"`
-		State      string `json:"state"`
-		StatusTime string `json:"statusTime"`
-		Reason     string `json:"reason"`
-		Url        string `json:"url"`
-		Invisible  bool   `json:"invisible"`
-	},
-	existingStatuses []struct {
-		ID         string `json:"id"` // ID extracted from URL's first segment after splitting by "."
-		Name       string `json:"name"`
-		State      string `json:"state"`
-		StatusTime string `json:"statusTime"`
-		Reason     string `json:"reason"`
-		Url        string `json:"url"`
-		Invisible  bool   `json:"invisible"`
-	},
+	newStatuses, existingStatuses []types.AppStateLatestDataEntrances,
 ) bool {
 	// If lengths are different, statuses have changed
 	if len(newStatuses) != len(existingStatuses) {
