@@ -8,8 +8,8 @@ func ConvertSystemAppToAppLatest(app *AppServiceResponse) *AppStateLatestData {
 		Settings:                       app.Spec.Settings,
 	}
 
-	spec.Title = app.Spec.Title
-	spec.RawAppName = app.Spec.RawAppName
+	spec.Title = app.Spec.Settings.Title
+	spec.RawAppName = app.Spec.Name
 	spec.State = app.Status.State
 	spec.StatusTime = app.Status.StatusTime
 	spec.UpdateTime = app.Status.UpdateTime

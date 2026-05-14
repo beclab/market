@@ -38,7 +38,7 @@ type Client interface {
 	// them require a per-call token because the upstream endpoints
 	// today are unauthenticated cluster-internal calls.
 	GetAllApps(ctx context.Context) ([]*types.AppServiceResponse, error)
-	GetMiddlewares(ctx context.Context) ([]*types.MiddlewareStatusResponseData, error)
+	GetMiddlewares(ctx context.Context) ([]types.MiddlewareStatusResponseData, error)
 	GetTerminusVersion(ctx context.Context) (string, error)
 
 	// User-info uses the per-user token because app-service decodes
@@ -155,7 +155,7 @@ func (c *httpClient) GetAllApps(ctx context.Context) ([]*types.AppServiceRespons
 // GetMiddlewares fetches the middleware status list. Distinct
 // endpoint, distinct response shape from GetAllApps (see Middleware
 // in types.go for why they are not unified).
-func (c *httpClient) GetMiddlewares(ctx context.Context) ([]*types.MiddlewareStatusResponseData, error) {
+func (c *httpClient) GetMiddlewares(ctx context.Context) ([]types.MiddlewareStatusResponseData, error) {
 	const ep = "get_middlewares"
 	body, status, err := c.doRequest(ctx, ep, http.MethodGet, "/app-service/v1/middlewares/status", nil, nil)
 	if err != nil {
@@ -165,12 +165,12 @@ func (c *httpClient) GetMiddlewares(ctx context.Context) ([]*types.MiddlewareSta
 		return nil, classifyHTTPStatus(status)
 	}
 
-	var middlewares []*types.MiddlewareStatusResponseData
+	var middlewares *types.MiddlewareStatusResponse
 	if err := json.Unmarshal(body, &middlewares); err != nil {
 		c.metrics.ObserveRequest(ep, status, 0, errKindDecode)
 		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 	}
-	return middlewares, nil
+	return middlewares.Data, nil
 }
 
 // GetTerminusVersion returns the app-service-reported Terminus

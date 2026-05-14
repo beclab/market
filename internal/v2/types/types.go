@@ -173,11 +173,11 @@ type AppStateLatestDataSpec struct {
 	AppStateLatestDataSpecMetadata
 	EntranceStatuses []AppStateLatestDataEntrances `json:"entranceStatuses"`
 	SharedEntrances  []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
-	Tailscale        map[string]interface{}        `json:"tailscale"`
+	Tailscale        map[string]interface{}        `json:"tailscale,omitempty"`
 	Settings         *AppStateLatestDataSettings   `json:"settings,omitempty"`
 }
 
-type AppStateLatestDataSpecMetadata struct {
+type AppStateLatestDataSpecMetadata struct { // + app state
 	Name               string `json:"name"`
 	RawAppName         string `json:"rawAppName"`
 	AppID              string `json:"appid,omitempty"`

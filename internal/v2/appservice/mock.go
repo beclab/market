@@ -33,7 +33,7 @@ import (
 type MockClient struct {
 	// Read endpoints
 	GetAllAppsFunc         func(ctx context.Context) ([]*types.AppServiceResponse, error)
-	GetMiddlewaresFunc     func(ctx context.Context) ([]*types.MiddlewareStatusResponseData, error)
+	GetMiddlewaresFunc     func(ctx context.Context) ([]types.MiddlewareStatusResponseData, error)
 	GetTerminusVersionFunc func(ctx context.Context) (string, error)
 	GetUserInfoFunc        func(ctx context.Context, token string) (*UserInfo, error)
 	GetAppEntranceURLsFunc func(ctx context.Context, appName, user string) (map[string]string, error)
@@ -75,7 +75,7 @@ func (m *MockClient) GetAllApps(ctx context.Context) ([]*types.AppServiceRespons
 	return nil, nil
 }
 
-func (m *MockClient) GetMiddlewares(ctx context.Context) ([]*types.MiddlewareStatusResponseData, error) {
+func (m *MockClient) GetMiddlewares(ctx context.Context) ([]types.MiddlewareStatusResponseData, error) {
 	m.GetMiddlewaresCalls++
 	if m.GetMiddlewaresFunc != nil {
 		return m.GetMiddlewaresFunc(ctx)

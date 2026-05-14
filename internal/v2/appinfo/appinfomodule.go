@@ -712,6 +712,8 @@ func (m *AppInfoModule) initStatusCorrectionChecker() error {
 		return fmt.Errorf("failed to start StatusCorrectionChecker: %w", err)
 	}
 
+	m.statusCorrectionChecker.ReconcileAppStatusesStartup()
+
 	glog.V(2).Info("StatusCorrectionChecker initialized (passive mode)")
 	return nil
 }

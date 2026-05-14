@@ -917,6 +917,14 @@ func (s *Server) getMarketData(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var systemAppStatus = s.statusChecker.GetSystemAppStatus(userID)
+
+	filtered.Sources["system"] = &FilteredSourceData{
+		Type:           "remote",
+		AppStateLatest: systemAppStatus,
+		AppInfoLatest:  []*FilteredAppInfoLatestData{},
+	}
+
 	response := MarketDataResponse{
 		UserData:  filtered,
 		UserID:    userID,

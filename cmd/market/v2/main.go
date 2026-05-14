@@ -341,7 +341,7 @@ func main() {
 	glog.V(3).Infof("  - History Module: %v", historyModule != nil)
 	glog.V(3).Infof("  - Runtime State Service: %v", runtimeStateService != nil)
 
-	server := api.NewServer("8080", cacheManager, hydrator, taskModule, historyModule, runtimeStateService)
+	server := api.NewServer("8080", cacheManager, hydrator, taskModule, historyModule, runtimeStateService, statusChecker)
 	glog.Info("HTTP server instance created successfully")
 	// glog.Infof("Task module instance ID: %s", taskModule.GetInstanceID())
 

@@ -1,6 +1,6 @@
 package types
 
-type AppServiceResponse struct {
+type AppServiceResponse struct { // + app states
 	Metadata *AppServiceResponseMetadata `json:"metadata"`
 	Spec     *AppServiceResponseSpec     `json:"spec"`
 	Status   *AppStateLatestDataStatus   `json:"status"`
@@ -12,10 +12,11 @@ type AppServiceResponseMetadata struct {
 	Namespace string `json:"namespace"`
 }
 
-type AppServiceResponseSpec struct {
+type AppServiceResponseSpec struct { // + app state
 	AppStateLatestDataSpecMetadata
 	EntranceStatuses []AppStateLatestDataEntrances `json:"entrances"`
 	SharedEntrances  []AppStateLatestDataEntrances `json:"sharedEntrances,omitempty"`
+	Tailscale        map[string]interface{}        `json:"tailscale,omitempty"`
 	Settings         *AppStateLatestDataSettings   `json:"settings,omitempty"`
 }
 

@@ -12,6 +12,7 @@ import (
 	"market/internal/v2/appservice"
 	"market/internal/v2/helper"
 	"market/internal/v2/history"
+	"market/internal/v2/store"
 	"market/internal/v2/task"
 	"market/internal/v2/types"
 	"market/internal/v2/utils"
@@ -169,7 +170,7 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 			us = append(us, state)
 		}
 
-		scc.userSystemApps.Swap(u.Id, us)
+		scc.userSystemApps.Swap(u.Name, us)
 	}
 
 	glog.V(3).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), helper.ParseJson(latestStatus))
@@ -342,6 +343,93 @@ func (scc *StatusCorrectionChecker) fetchLatestMiddlewaresStatus() ([]*types.App
 	}
 
 	return convertedResponses, nil
+}
+
+func (scc *StatusCorrectionChecker) GetSystemAppStatus(userId string) []*types.AppStateLatestData {
+	val, ok := scc.userSystemApps.Load(userId)
+	if !ok {
+		return nil
+	}
+
+	var res []*types.AppStateLatestData
+	var v = val.([]*types.AppStateLatestData)
+	if len(v) == 0 {
+		return nil
+	}
+
+	for _, item := range v {
+		res = append(res, item)
+	}
+
+	return res
+}
+
+func (scc *StatusCorrectionChecker) ReconcileAppStatuses() {
+	// todo
+}
+
+func (scc *StatusCorrectionChecker) ReconcileAppStatusesStartup() {
+	glog.Info("Reconcile, startup to sync states data")
+	apps, err := scc.fetchLatestStatus()
+	if err != nil {
+		glog.Errorf("Reconcile, app-service statuses error: %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dbAppStates, err := store.GetExistsAppStateRecords(ctx)
+	if err != nil {
+		glog.Errorf("Reconcile, query pg error: %v", err)
+		return
+	}
+
+	if len(dbAppStates) == 0 {
+		return
+	}
+
+	glog.Infof("Reconcile, sync states data, appservice: %d, pg: %d", len(apps), len(dbAppStates))
+
+	var in = make(map[int64]*types.AppServiceResponse)
+	var delUas []int64
+
+	// + Is it possible for a record to be missing in the DB but still exist in appservice?
+	// +
+	// + 1. Present in both DB and appservice
+	// +    ---> Update the state; use appservice to overwrite DB
+	// +
+	// + 2. Present in DB but missing in appservice
+	// +    2.1 ua exists, uas exists ---> Delete uas
+	// +    2.2 ua exists, uas does not exist ---> No action needed
+	// +    2.3 ua does not exist, uas exists ---> Delete uas
+	// +
+	// + 3. Missing in DB but present in appservice
+	// +    ---> Should this be repaired in the pipeline?
+	// +        (This may happen if an app was installed, then the system was upgraded,
+	// +        and during the next sync the app had already been removed from the marketplace.
+	// +        However, there should still be a record in the cloud, so it should be possible
+	// +        to sync it back to the local system.)
+	// +    ---> Therefore, this case can be repaired during the pipeline stage.
+	for _, dbAppState := range dbAppStates {
+		for _, app := range apps {
+			if app.Spec.IsSysApp {
+				continue
+			}
+
+			if dbAppState.AppUserId == app.Spec.Owner && dbAppState.AppId == app.Spec.AppID && dbAppState.AppSourceId == app.Spec.Settings.MarketSource {
+				in[dbAppState.UserAppStateId] = app
+				break
+			}
+		}
+		delUas = append(delUas, dbAppState.UserAppStateId)
+	}
+
+	glog.Infof("Reconcile, sync pg, update: %d, del: %d", len(in), len(delUas))
+
+	if err := store.UpdateAppStates(in, delUas); err != nil {
+		glog.Errorf("Reconcile, update pg error: %v", err)
+	}
 }
 
 // getExistingEntranceInvisibleMap collects cached invisible flags for the specified app.
