@@ -358,7 +358,7 @@ func (s *Server) getSystemStatus(w http.ResponseWriter, r *http.Request) {
 // Simple GET with token, returns parsed JSON or raw string
 func doGetWithToken(url, token string) (interface{}, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	glog.V(2).Infof("doGetWithToken: url=%s, token=%s", url, token)
+	glog.V(2).Infof("doGetWithToken: url=%s, has_token=%t", url, token != "")
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		glog.Errorf("doGetWithToken: failed to create request: %v", err)
