@@ -162,14 +162,25 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	resultChan := make(chan result, 1)
 
-	// Run the data retrieval in a goroutine
+	// Run the data retrieval in a goroutine. The goroutine checks
+	// ctx between steps so a cancelled / timed-out request stops
+	// doing expensive cache work (each cache read takes the
+	// CacheManager RWMutex, so spamming this endpoint with cancels
+	// otherwise schedules a flood of useless lock acquisitions).
 	go func() {
 		defer func() {
-			if r := recover(); r != nil {
-				glog.Errorf("Panic in getMarketInfo: %v", r)
-				resultChan <- result{err: fmt.Errorf("internal error occurred")}
+			if rec := recover(); rec != nil {
+				glog.Errorf("Panic in getMarketInfo: %v", rec)
+				select {
+				case resultChan <- result{err: fmt.Errorf("internal error occurred")}:
+				case <-ctx.Done():
+				}
 			}
 		}()
+
+		if ctx.Err() != nil {
+			return
+		}
 
 		// Get all users data from cache
 		allUsersData := s.cacheManager.GetAllUsersData()
@@ -178,11 +189,19 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 			allUsersData = make(map[string]*types.UserData)
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
+
 		// Get cache statistics
 		cacheStats := s.cacheManager.GetCacheStats()
 		if cacheStats == nil {
 			glog.V(3).Info("Warning: GetCacheStats returned nil")
 			cacheStats = make(map[string]interface{})
+		}
+
+		if ctx.Err() != nil {
+			return
 		}
 
 		// Create safe copies to avoid circular references
@@ -195,7 +214,10 @@ func (s *Server) getMarketInfo(w http.ResponseWriter, r *http.Request) {
 			TotalUsers: len(allUsersData),
 		}
 
-		resultChan <- result{data: responseData, stats: cacheStats}
+		select {
+		case resultChan <- result{data: responseData, stats: cacheStats}:
+		case <-ctx.Done():
+		}
 	}()
 
 	// Wait for result or timeout
