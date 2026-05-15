@@ -433,7 +433,9 @@ func (scc *StatusCorrectionChecker) ReconcileAppStatusesStartup() {
 
 	glog.Infof("Reconcile, sync pg, update: %d, del: %d", len(in), len(delUas))
 
-	if err := store.UpdateAppStates(in, delUas); err != nil {
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer writeCancel()
+	if err := store.UpdateAppStates(writeCtx, in, delUas); err != nil {
 		glog.Errorf("Reconcile, update pg error: %v", err)
 	}
 }
