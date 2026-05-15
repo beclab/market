@@ -17,6 +17,13 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// maxRequestBodyBytes is the upper bound applied to every inbound
+// request body by the body-cap middleware. None of the existing
+// endpoints expect uploads larger than this; the bound primarily
+// hardens the io.ReadAll / json.NewDecoder(r.Body) call sites
+// scattered across handlers against memory-exhaustion attempts.
+const maxRequestBodyBytes int64 = 1 << 20 // 1 MiB
+
 // Server represents the HTTP server
 type Server struct {
 	router              *mux.Router
@@ -264,6 +271,23 @@ func (s *Server) Start() error {
 	}
 	listener.Close()
 	glog.V(3).Infof("Port %s is available", s.port)
+
+	// Cap every request body to a small ceiling. None of the API
+	// endpoints expect uploads larger than a few hundred KiB (mostly
+	// JSON config payloads); anything bigger is either malformed or
+	// an attempt to exhaust memory via the many io.ReadAll /
+	// json.NewDecoder(r.Body) call sites scattered across the
+	// handlers. http.MaxBytesReader writes a 413 to the response
+	// when the cap is exceeded, so individual handlers do not need
+	// per-call wrappers.
+	s.router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil && r.Body != http.NoBody {
+				r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// Recover from panics in any downstream handler so a single bad
 	// request cannot crash the whole HTTP server process.
