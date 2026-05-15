@@ -1044,6 +1044,23 @@ func generateDashboardHTML(snapshotJSON string) string {
             snapshotData = {};
         }
         
+        // escapeHtml renders an upstream-controlled value safe for use
+        // inside innerHTML. The runtime dashboard mirrors strings from
+        // app-service / chart-repo (app names, error messages, user
+        // identifiers); without escaping, a crafted name could embed
+        // markup or scripts and execute under the operator dashboard
+        // origin.
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value).replace(/[&<>"']/g, function(c) {
+                return c === '&' ? '&amp;'
+                     : c === '<' ? '&lt;'
+                     : c === '>' ? '&gt;'
+                     : c === '"' ? '&quot;'
+                     : '&#39;';
+            });
+        }
+        
         function formatTimestamp(timestamp) {
             if (!timestamp) return 'N/A';
             const date = new Date(timestamp);
@@ -1088,7 +1105,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 badgeClass = 'badge-danger';
             }
             
-            const result = '<span class="badge ' + badgeClass + '">' + badgeText + '</span>';
+            const result = '<span class="badge ' + badgeClass + '">' + escapeHtml(badgeText) + '</span>';
             console.log('[DEBUG] getStatusBadge returning:', result);
             
             return result;
@@ -1168,10 +1185,10 @@ func generateDashboardHTML(snapshotJSON string) string {
             
             apps.forEach(app => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
-                    '<td>' + (app.user_id || 'N/A') + '</td>' +
-                    '<td>' + (app.source_id || 'N/A') + '</td>' +
-                    '<td>' + (app.version || 'N/A') + '</td>';
+                row.innerHTML = '<td>' + escapeHtml(app.app_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.user_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.source_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.version || 'N/A') + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -1227,13 +1244,13 @@ func generateDashboardHTML(snapshotJSON string) string {
                 const errorMsg = (task.status === 'failed' && task.error_msg) ? task.error_msg : '-';
                 
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.type || 'N/A') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(task.task_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.type || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>' +
                     '<td style="font-size: 11px;">' + formatTimestamp(task.created_at) + '</td>' +
                     '<td style="font-size: 11px;">' + formatTimestamp(updatedTime) + '</td>' +
-                    '<td style="font-size: 11px; color: ' + (task.status === 'failed' ? '#991b1b' : '#666') + ';">' + errorMsg + '</td>';
+                    '<td style="font-size: 11px; color: ' + (task.status === 'failed' ? '#991b1b' : '#666') + ';">' + escapeHtml(errorMsg) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -1257,10 +1274,10 @@ func generateDashboardHTML(snapshotJSON string) string {
                 }
                 
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.type || 'N/A') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(task.task_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.type || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>' +
                     '<td style="font-size: 11px;">' + formatTimestamp(timeValue) + '</td>';
                 tbody.appendChild(row);
             });
@@ -1278,10 +1295,10 @@ func generateDashboardHTML(snapshotJSON string) string {
             
             tasks.forEach(task => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.type || 'N/A') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(task.task_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.type || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>' +
                     '<td style="font-size: 11px;">' + formatTimestamp(task.completed_at || task.started_at || task.created_at) + '</td>';
                 tbody.appendChild(row);
             });
@@ -1302,11 +1319,11 @@ func generateDashboardHTML(snapshotJSON string) string {
                 const errorMsg = task.error_msg || '-';
                 
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.type || 'N/A') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(task.task_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.type || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
-                    '<td style="font-size: 11px; color: #991b1b;">' + errorMsg + '</td>' +
+                    '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px; color: #991b1b;">' + escapeHtml(errorMsg) + '</td>' +
                     '<td style="font-size: 11px;">' + formatTimestamp(failedTime) + '</td>';
                 tbody.appendChild(row);
             });
@@ -1329,7 +1346,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             
             compList.forEach(([name, comp]) => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td>' + name + '</td>' +
+                row.innerHTML = '<td>' + escapeHtml(name) + '</td>' +
                     '<td>' + getStatusBadge(comp.status || 'unknown') + '</td>' +
                     '<td>' + getStatusBadge(comp.healthy ? 'healthy' : 'unhealthy') + '</td>' +
                     '<td>' + formatTimestamp(comp.last_check) + '</td>';
@@ -1397,8 +1414,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             stats.forEach(stat => {
                 const row = document.createElement('tr');
                 const valueCell = stat.style ? 
-                    '<td style="' + stat.style + '">' + (stat.isHtml ? stat.value : stat.value) + '</td>' :
-                    '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
+                    '<td style="' + stat.style + '">' + (stat.isHtml ? stat.value : escapeHtml(stat.value)) + '</td>' :
+                    '<td>' + (stat.isHtml ? stat.value : escapeHtml(stat.value)) + '</td>';
                 row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' + valueCell;
                 tbody.appendChild(row);
             });
@@ -1420,7 +1437,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 // Add succeeded apps
                 if (details.succeeded_apps && details.succeeded_apps.length > 0) {
                     const row = document.createElement('tr');
-                    row.innerHTML = '<td style="padding-left: 20px;">Succeeded Apps (' + details.succeeded_apps.length + ')</td><td>' + details.succeeded_apps.join(', ') + '</td>';
+                    row.innerHTML = '<td style="padding-left: 20px;">Succeeded Apps (' + details.succeeded_apps.length + ')</td><td>' + escapeHtml(details.succeeded_apps.join(', ')) + '</td>';
                     tbody.appendChild(row);
                 }
                 
@@ -1430,7 +1447,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                     let failedAppsHtml = '<div style="max-height: 200px; overflow-y: auto;">';
                     details.failed_apps.forEach((failedApp, index) => {
                         failedAppsHtml += '<div style="margin-bottom: 8px;">';
-                        failedAppsHtml += '<strong>' + (failedApp.app_name || failedApp.app_id) + '</strong>: ';
+                        failedAppsHtml += '<strong>' + escapeHtml(failedApp.app_name || failedApp.app_id) + '</strong>: ';
                         failedAppsHtml += '<span style="color: #dc2626;">' + (failedApp.reason || 'Unknown error') + '</span>';
                         failedAppsHtml += '</div>';
                     });
@@ -1443,7 +1460,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             // Add status message if available
             if (syncer.message) {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td colspan="2" style="color: #dc2626; padding-top: 8px;"><strong>Note:</strong> ' + syncer.message + '</td>';
+                row.innerHTML = '<td colspan="2" style="color: #dc2626; padding-top: 8px;"><strong>Note:</strong> ' + escapeHtml(syncer.message) + '</td>';
                 tbody.appendChild(row);
             }
         }
@@ -1494,14 +1511,14 @@ func generateDashboardHTML(snapshotJSON string) string {
             stats.forEach(stat => {
                 const row = document.createElement('tr');
                 row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' +
-                    '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
+                    '<td>' + (stat.isHtml ? stat.value : escapeHtml(stat.value)) + '</td>';
                 tbody.appendChild(row);
             });
             
             // Add status message if available
             if (hydrator.message) {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td colspan="2" style="color: #dc2626; padding-top: 8px;"><strong>Note:</strong> ' + hydrator.message + '</td>';
+                row.innerHTML = '<td colspan="2" style="color: #dc2626; padding-top: 8px;"><strong>Note:</strong> ' + escapeHtml(hydrator.message) + '</td>';
                 tbody.appendChild(row);
             }
             
@@ -1536,7 +1553,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                 html += '<tr>';
                 html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
                 html += '<td>' + (task.app_id || 'N/A') + '</td>';
-                html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                html += '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>';
                 html += '<td>' + (task.user_id || 'N/A') + '</td>';
                 html += '<td>' + (task.source_id || 'N/A') + '</td>';
                 html += '<td>' + stepInfo + '</td>';
@@ -1620,7 +1637,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                     html += '<tr>';
                     html += '<td>' + taskIdDisplay + '</td>';
                     html += '<td>' + (task.app_id || 'N/A') + '</td>';
-                    html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                    html += '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>';
                     html += '<td>' + (task.user_id || 'N/A') + '</td>';
                     html += '<td>' + duration + '</td>';
                     html += '<td>' + (task.completed_at ? formatTimestamp(new Date(task.completed_at)) : 'N/A') + '</td>';
@@ -1644,7 +1661,7 @@ func generateDashboardHTML(snapshotJSON string) string {
                     html += '<tr>';
                     html += '<td>' + (task.task_id || 'N/A').substring(0, 20) + '...' + '</td>';
                     html += '<td>' + (task.app_id || 'N/A') + '</td>';
-                    html += '<td>' + (task.app_name || 'N/A') + '</td>';
+                    html += '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>';
                     html += '<td>' + (task.user_id || 'N/A') + '</td>';
                     html += '<td>' + (task.failed_step || 'N/A') + '</td>';
                     html += '<td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">';
@@ -1812,11 +1829,11 @@ func generateDashboardHTML(snapshotJSON string) string {
                 const updatedAt = state.updated_at ? formatTimestamp(new Date(state.updated_at)) : 'N/A';
                 
                 row.innerHTML = 
-                    '<td style="font-size: 11px;">' + (key || 'N/A') + '</td>' +
-                    '<td style="font-size: 11px;">' + (state.user_id || 'N/A') + '</td>' +
-                    '<td style="font-size: 11px;">' + (state.app_id || 'N/A') + '</td>' +
-                    '<td>' + (state.app_name || 'N/A') + '</td>' +
-                    '<td style="font-size: 11px;">' + (state.product_id || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + escapeHtml(key || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + escapeHtml(state.user_id || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + escapeHtml(state.app_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(state.app_name || 'N/A') + '</td>' +
+                    '<td style="font-size: 11px;">' + escapeHtml(state.product_id || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(state.payment_need || 'unknown') + '</td>' +
                     '<td>' + getStatusBadge(state.developer_sync || 'unknown') + '</td>' +
                     '<td>' + getStatusBadge(state.larepass_sync || 'unknown') + '</td>' +
@@ -2104,11 +2121,11 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             apps.forEach(app => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
-                    '<td>' + (app.user_id || 'N/A') + '</td>' +
-                    '<td>' + (app.source_id || 'N/A') + '</td>' +
+                row.innerHTML = '<td>' + escapeHtml(app.app_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.user_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.source_id || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(app.state || 'unknown') + '</td>' +
-                    '<td>' + (app.current_step ? app.current_step.name : '-') + '</td>' +
+                    '<td>' + escapeHtml(app.current_step ? app.current_step.name : '-') + '</td>' +
                     '<td>' + getChartRepoAppUpdatedAtLabel(app) + '</td>';
                 tbody.appendChild(row);
             });
@@ -2124,11 +2141,11 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             apps.forEach(app => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td>' + (app.app_name || 'N/A') + '</td>' +
-                    '<td>' + (app.user_id || 'N/A') + '</td>' +
-                    '<td>' + (app.source_id || 'N/A') + '</td>' +
+                row.innerHTML = '<td>' + escapeHtml(app.app_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.user_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.source_id || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(app.state || 'unknown') + '</td>' +
-                    '<td>' + (app.error ? app.error.message : '-') + '</td>' +
+                    '<td>' + escapeHtml(app.error ? app.error.message : '-') + '</td>' +
                     '<td>' + getChartRepoAppUpdatedAtLabel(app) + '</td>';
                 tbody.appendChild(row);
             });
@@ -2145,8 +2162,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             images.forEach(image => {
                 const progress = image.download_progress || 0;
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (image.image_name || 'N/A') + '</td>' +
-                    '<td>' + (image.app_name || '-') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(image.image_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(image.app_name || '-') + '</td>' +
                     '<td>' + getStatusBadge(image.status || 'unknown') + '</td>' +
                     '<td><div class="progress-bar"><div class="progress-fill" style="width: ' + progress.toFixed(2) + '%"></div></div></td>';
                 tbody.appendChild(row);
@@ -2163,8 +2180,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             images.forEach(image => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (image.image_name || 'N/A') + '</td>' +
-                    '<td>' + (image.app_name || '-') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(image.image_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(image.app_name || '-') + '</td>' +
                     '<td>' + getStatusBadge(image.status || 'unknown') + '</td>';
                 tbody.appendChild(row);
             });
@@ -2180,8 +2197,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             images.forEach(image => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (image.image_name || 'N/A') + '</td>' +
-                    '<td>' + (image.app_name || '-') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(image.image_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(image.app_name || '-') + '</td>' +
                     '<td>' + getStatusBadge(image.status || 'unknown') + '</td>' +
                     '<td>' + formatBytes(image.total_size) + '</td>';
                 tbody.appendChild(row);
@@ -2198,10 +2215,10 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             images.forEach(image => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (image.image_name || 'N/A') + '</td>' +
-                    '<td>' + (image.app_name || '-') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(image.image_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(image.app_name || '-') + '</td>' +
                     '<td>' + getStatusBadge(image.status || 'unknown') + '</td>' +
-                    '<td style="font-size: 11px;">' + (image.error_message || '-') + '</td>';
+                    '<td style="font-size: 11px;">' + escapeHtml(image.error_message || '-') + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -2250,7 +2267,7 @@ func generateDashboardHTML(snapshotJSON string) string {
             stats.forEach(stat => {
                 const row = document.createElement('tr');
                 row.innerHTML = '<td><strong>' + stat.label + '</strong></td>' +
-                    '<td>' + (stat.isHtml ? stat.value : stat.value) + '</td>';
+                    '<td>' + (stat.isHtml ? stat.value : escapeHtml(stat.value)) + '</td>';
                 tbody.appendChild(row);
             });
         }
@@ -2270,8 +2287,8 @@ func generateDashboardHTML(snapshotJSON string) string {
                 let cells = '';
                 
                 // Common cells
-                cells += '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>';
-                cells += '<td>' + (task.app_name || 'N/A') + '</td>';
+                cells += '<td style="font-size: 11px;">' + escapeHtml(task.task_id || 'N/A') + '</td>';
+                cells += '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>';
                 cells += '<td>' + getStatusBadge(task.status || 'unknown') + '</td>';
                 
                 // Context-specific cells based on tbodyId
@@ -2342,8 +2359,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             tasks.forEach(task => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(task.task_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.step_name || '-') + '</td>' +
                     '<td>' + (task.retry_count || 0) + '</td>' +
@@ -2362,8 +2379,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             tasks.forEach(task => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(task.task_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.step_name || '-') + '</td>' +
                     '<td>' + getChartRepoTaskUpdatedAtLabel(task) + '</td>';
@@ -2381,8 +2398,8 @@ func generateDashboardHTML(snapshotJSON string) string {
             }
             tasks.forEach(task => {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td style="font-size: 11px;">' + (task.task_id || 'N/A') + '</td>' +
-                    '<td>' + (task.app_name || 'N/A') + '</td>' +
+                row.innerHTML = '<td style="font-size: 11px;">' + escapeHtml(task.task_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(task.app_name || 'N/A') + '</td>' +
                     '<td>' + getStatusBadge(task.status || 'unknown') + '</td>' +
                     '<td>' + (task.step_name || '-') + '</td>' +
                     '<td style="font-size: 11px;">' + (task.last_error || '-') + '</td>' +
@@ -2817,15 +2834,27 @@ func generateDashboardAppHTML(snapshotJSON string) string {
             { name: 'DatabaseUpdateStep', key: 'database_update_step' }
         ];
         
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value).replace(/[&<>"']/g, function(c) {
+                return c === '&' ? '&amp;'
+                     : c === '<' ? '&lt;'
+                     : c === '>' ? '&gt;'
+                     : c === '"' ? '&quot;'
+                     : '&#39;';
+            });
+        }
+        
         function getStatusBadge(status) {
             if (!status) return '<span class="badge badge-pending">Unknown</span>';
+            const safeStatus = escapeHtml(status);
             const lower = status.toLowerCase();
             if (lower === 'completed' || lower === 'success' || lower === 'healthy') {
-                return '<span class="badge badge-success">' + status + '</span>';
+                return '<span class="badge badge-success">' + safeStatus + '</span>';
             } else if (lower === 'running' || lower === 'processing' || lower === 'active') {
-                return '<span class="badge badge-info">' + status + '</span>';
+                return '<span class="badge badge-info">' + safeStatus + '</span>';
             } else if (lower === 'failed' || lower === 'error' || lower === 'unhealthy') {
-                return '<span class="badge badge-danger">' + status + '</span>';
+                return '<span class="badge badge-danger">' + safeStatus + '</span>';
             } else if (lower === 'pending' || lower === 'waiting') {
                 return '<span class="badge badge-warning">' + status + '</span>';
             }
@@ -3342,12 +3371,12 @@ func generateDashboardAppHTML(snapshotJSON string) string {
             filteredApps.forEach(app => {
                 const row = document.createElement('tr');
                 row.innerHTML = 
-                    '<td>' + (app.appState.app_name || 'N/A') + '</td>' +
-                    '<td>' + (app.appState.user_id || 'N/A') + '</td>' +
-                    '<td>' + (app.appState.source_id || 'N/A') + '</td>' +
-                    '<td>' + (app.appState.version || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.appState.app_name || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.appState.user_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.appState.source_id || 'N/A') + '</td>' +
+                    '<td>' + escapeHtml(app.appState.version || 'N/A') + '</td>' +
                     '<td>' + renderFlowSteps(app.flowSteps) + '</td>' +
-                    '<td>' + app.currentStep + '</td>' +
+                    '<td>' + escapeHtml(app.currentStep) + '</td>' +
                     '<td>' + getStatusBadge(app.overallStatus) + '</td>' +
                     '<td>' + formatTimestamp(app.appState.last_update) + '</td>';
                 tbody.appendChild(row);
