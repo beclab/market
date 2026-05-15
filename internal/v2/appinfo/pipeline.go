@@ -76,10 +76,17 @@ func (p *Pipeline) SetStatusCorrectionChecker(scc *StatusCorrectionChecker) {
 }
 
 func (p *Pipeline) Start(ctx context.Context) error {
-	if p.isRunning.Load() {
+	// Use CompareAndSwap so a racing Start cannot double-spawn the
+	// loop goroutine, and so we only initialise a fresh stopChan
+	// when we are the goroutine that actually transitioned to the
+	// running state. A plain Load/Store left a window where a
+	// second Start (e.g. after a prior Stop closed stopChan) would
+	// race with the closing one and then reuse the already-closed
+	// channel.
+	if !p.isRunning.CompareAndSwap(false, true) {
 		return nil
 	}
-	p.isRunning.Store(true)
+	p.stopChan = make(chan struct{})
 	go p.loop(ctx)
 	glog.Infof("Pipeline started with interval %v", p.interval)
 	return nil
