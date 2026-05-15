@@ -167,6 +167,9 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 			}
 
 			state := types.ConvertSystemAppToAppLatest(s)
+			if state == nil {
+				continue
+			}
 			us = append(us, state)
 		}
 
