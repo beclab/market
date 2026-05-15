@@ -1567,6 +1567,15 @@ func (cm *CacheManager) ForceSync() error {
 	go func() {
 		var err error
 		for userID, userData := range userDataSnapshot {
+			// Bail out between Redis writes if the parent context
+			// expired. The 5s budget is shared across all users in
+			// the snapshot, so without this check a slow loop kept
+			// hammering Redis long after the caller returned with a
+			// timeout error.
+			if ctx.Err() != nil {
+				done <- ctx.Err()
+				return
+			}
 			if err = cm.redisClient.SaveUserDataToRedis(userID, userData); err != nil {
 				glog.Errorf("Failed to force sync user data: %v", err)
 				done <- err
