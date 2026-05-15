@@ -604,12 +604,20 @@ type DependencyServiceResponse struct {
 
 // checkDependencyService checks if the dependency service is available and has correct version
 func checkDependencyService() error {
-	// Get chart repo service host from environment
-	chartRepoHost := os.Getenv("CHART_REPO_SERVICE_HOST")
+	// CHART_REPO_SERVICE_HOST is expected to be a bare host:port pair
+	// (e.g. "chart-repo.svc.cluster.local:8080") so the assembly
+	// below can prefix "http://". When it was unset, the fallback
+	// "http://localhost:8080" produced "http://http://localhost:8080/..."
+	// because the next line prefixed "http://" again. Default to the
+	// bare form, and strip any accidentally-supplied scheme so a misconfigured
+	// env value does not break the URL either.
+	chartRepoHost := strings.TrimSpace(os.Getenv("CHART_REPO_SERVICE_HOST"))
 	if chartRepoHost == "" {
-		chartRepoHost = "http://localhost:8080" // Default fallback
+		chartRepoHost = "localhost:8080"
 		glog.Infof("CHART_REPO_SERVICE_HOST not set, using default: %s", chartRepoHost)
 	}
+	chartRepoHost = strings.TrimPrefix(chartRepoHost, "http://")
+	chartRepoHost = strings.TrimPrefix(chartRepoHost, "https://")
 
 	// Build the API endpoint URL
 	apiURL := "http://" + chartRepoHost + "/chart-repo/api/v2/version"
