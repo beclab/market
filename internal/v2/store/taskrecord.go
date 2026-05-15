@@ -303,7 +303,8 @@ type FailTaskInput struct {
 	ErrorMsg    string
 	CompletedAt time.Time
 
-	StateUpdate *FailedStateUpdate
+	StateUpdate       *FailedStateUpdate
+	AppOperationState string
 }
 
 // CancelTaskInput mirrors FailTaskInput. The split is purely semantic:
@@ -316,7 +317,8 @@ type CancelTaskInput struct {
 	ErrorMsg    string
 	CompletedAt time.Time
 
-	StateUpdate *FailedStateUpdate
+	StateUpdate       *FailedStateUpdate
+	AppOperationState string
 }
 
 // FailedStateUpdate is the user_application_states write performed by
@@ -370,7 +372,7 @@ func FailTask(ctx context.Context, in FailTaskInput) error {
 // *gorm.DB is allowed but defeats the atomic-write purpose.
 func FailTaskInTx(tx *gorm.DB, in FailTaskInput) error {
 	return finishTaskAsTerminalInTx(tx, "FailTask", taskStatusFailed,
-		in.TaskID, in.Result, in.ErrorMsg, in.CompletedAt, in.StateUpdate)
+		in.TaskID, in.Result, in.ErrorMsg, in.CompletedAt, in.StateUpdate, in.AppOperationState)
 }
 
 // CancelTask is the cancel-flavoured twin of FailTask. Identical SQL,
@@ -393,7 +395,7 @@ func CancelTask(ctx context.Context, in CancelTaskInput) error {
 // for the rationale.
 func CancelTaskInTx(tx *gorm.DB, in CancelTaskInput) error {
 	return finishTaskAsTerminalInTx(tx, "CancelTask", taskStatusCanceled,
-		in.TaskID, in.Result, in.ErrorMsg, in.CompletedAt, in.StateUpdate)
+		in.TaskID, in.Result, in.ErrorMsg, in.CompletedAt, in.StateUpdate, in.AppOperationState)
 }
 
 // finishTaskAsTerminalInTx is the shared body of FailTask/CancelTask
@@ -413,6 +415,7 @@ func finishTaskAsTerminalInTx(
 	taskID, result, errorMsg string,
 	completedAt time.Time,
 	stateUpdate *FailedStateUpdate,
+	appOperationState string,
 ) error {
 	if strings.TrimSpace(taskID) == "" {
 		return fmt.Errorf("%s: empty TaskID", caller)
@@ -432,7 +435,7 @@ UPDATE task_records
 	}
 
 	if stateUpdate != nil {
-		if err := applyFailedStateUpdate(tx, *stateUpdate); err != nil {
+		if err := applyFailedStateUpdate(tx, *stateUpdate, appOperationState); err != nil {
 			return err
 		}
 	}
@@ -579,7 +582,7 @@ UPDATE user_application_states uas
 // reached app-service the NATS pipeline will never deliver a terminal
 // event, and Market is the sole writer that can move the row out of
 // "pending".
-func applyFailedStateUpdate(tx *gorm.DB, in FailedStateUpdate) error {
+func applyFailedStateUpdate(tx *gorm.DB, in FailedStateUpdate, appOperationState string) error {
 	in.UserID = strings.TrimSpace(in.UserID)
 	in.SourceID = strings.TrimSpace(in.SourceID)
 	in.AppID = strings.TrimSpace(in.AppID)
@@ -591,11 +594,15 @@ func applyFailedStateUpdate(tx *gorm.DB, in FailedStateUpdate) error {
 	}
 
 	updates := map[string]any{
-		"state":  in.State,
+		// "state":  in.State,
 		"reason": truncate(in.Reason, stateReasonMaxLen),
 	}
 	if in.ClearTargetVersion {
 		updates["target_version"] = ""
+	}
+
+	if appOperationState != "" {
+		updates["state"] = appOperationState
 	}
 
 	res := tx.Exec(`

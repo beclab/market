@@ -76,7 +76,7 @@ func (s *Server) writePendingState(ctx context.Context, userID, sourceID, appID,
 const syncTaskHardTimeout = 30 * time.Minute
 
 type syncTaskResult struct {
-	result string
+	result *task.AppOperationMessage
 	err    error
 }
 
@@ -85,12 +85,12 @@ type syncTaskResult struct {
 // task result/error and whether the task actually completed. The returned
 // callback is safe for late invocation — it will never panic even if called
 // after this function has returned.
-func waitForSyncTask(ctx context.Context) (callback task.TaskCallback, wait func() (string, error, bool)) {
+func waitForSyncTask(ctx context.Context) (callback task.TaskCallback, wait func() (*task.AppOperationMessage, error, bool)) {
 	done := make(chan struct{})
 	var res syncTaskResult
 	var once sync.Once
 
-	callback = func(result string, err error) {
+	callback = func(result *task.AppOperationMessage, err error) {
 		once.Do(func() {
 			res.result = result
 			res.err = err
@@ -98,7 +98,7 @@ func waitForSyncTask(ctx context.Context) (callback task.TaskCallback, wait func
 		})
 	}
 
-	wait = func() (string, error, bool) {
+	wait = func() (*task.AppOperationMessage, error, bool) {
 		select {
 		case <-done:
 			return res.result, res.err, true
@@ -109,14 +109,14 @@ func waitForSyncTask(ctx context.Context) (callback task.TaskCallback, wait func
 				return res.result, res.err, true
 			default:
 			}
-			return "", nil, false
+			return nil, nil, false
 		case <-time.After(syncTaskHardTimeout):
 			select {
 			case <-done:
 				return res.result, res.err, true
 			default:
 			}
-			return "", nil, false
+			return nil, nil, false
 		}
 	}
 
@@ -410,28 +410,25 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var resultData map[string]interface{}
-		if taskResult != "" {
-			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				glog.Errorf("Failed to parse task result as JSON: %v", err)
-				resultData = map[string]interface{}{
-					"raw_result": taskResult,
-				}
-			}
-		}
+		// var resultData map[string]interface{}
+		// if taskResult != nil {
+		// 	resultData = map[string]interface{}{
+		// 		"raw_result": taskResult,
+		// 	}
+		// }
 
 		if taskError != nil {
 			glog.Errorf("Synchronous installation failed for app: %s, error: %v", request.AppName, taskError)
-			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Installation failed: %v", taskError), resultData)
+			s.sendResponse(w, http.StatusInternalServerError, false, fmt.Sprintf("Installation failed: %v", taskError), taskResult)
 		} else {
 			glog.V(2).Infof("Synchronous installation completed successfully for app: %s", request.AppName)
-			s.sendResponse(w, http.StatusOK, true, "App installation completed successfully", resultData)
+			s.sendResponse(w, http.StatusOK, true, "App installation completed successfully", taskResult)
 		}
 		return
 	}
 
 	// Handle asynchronous requests
-	callback := func(result string, err error) {
+	callback := func(result *task.AppOperationMessage, err error) {
 		// For async requests, callback is just for logging
 		if err != nil {
 			glog.Errorf("Asynchronous installation failed for app: %s, error: %v", request.AppName, err)
@@ -635,12 +632,9 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var resultData map[string]interface{}
-		if taskResult != "" {
-			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				glog.Errorf("Failed to parse task result as JSON: %v", err)
-				resultData = map[string]interface{}{
-					"raw_result": taskResult,
-				}
+		if taskResult != nil {
+			resultData = map[string]interface{}{
+				"raw_result": taskResult,
 			}
 		}
 
@@ -655,7 +649,7 @@ func (s *Server) cloneApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle asynchronous requests
-	callback := func(result string, err error) {
+	callback := func(result *task.AppOperationMessage, err error) {
 		// For async requests, callback is just for logging
 		if err != nil {
 			glog.Errorf("Asynchronous clone installation failed for app: %s, error: %v", newAppName, err)
@@ -777,12 +771,9 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var resultData map[string]interface{}
-		if taskResult != "" {
-			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				glog.Errorf("Failed to parse task result as JSON: %v", err)
-				resultData = map[string]interface{}{
-					"raw_result": taskResult,
-				}
+		if taskResult != nil {
+			resultData = map[string]interface{}{
+				"raw_result": taskResult,
 			}
 		}
 
@@ -797,7 +788,7 @@ func (s *Server) cancelInstall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle asynchronous requests
-	callback := func(result string, err error) {
+	callback := func(result *task.AppOperationMessage, err error) {
 		// For async requests, callback is just for logging
 		if err != nil {
 			glog.Errorf("Asynchronous cancel installation failed for app: %s, error: %v", appName, err)
@@ -943,12 +934,9 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var resultData map[string]interface{}
-		if taskResult != "" {
-			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				glog.Errorf("Failed to parse task result as JSON: %v", err)
-				resultData = map[string]interface{}{
-					"raw_result": taskResult,
-				}
+		if taskResult != nil {
+			resultData = map[string]interface{}{
+				"raw_result": taskResult,
 			}
 		}
 
@@ -963,7 +951,7 @@ func (s *Server) uninstallApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle asynchronous requests
-	callback := func(result string, err error) {
+	callback := func(result *task.AppOperationMessage, err error) {
 		// For async requests, callback is just for logging
 		if err != nil {
 			glog.Errorf("Asynchronous uninstallation failed for app: %s, error: %v", appName, err)
@@ -1130,12 +1118,9 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var resultData map[string]interface{}
-		if taskResult != "" {
-			if err := json.Unmarshal([]byte(taskResult), &resultData); err != nil {
-				glog.Errorf("Failed to parse task result as JSON: %v", err)
-				resultData = map[string]interface{}{
-					"raw_result": taskResult,
-				}
+		if taskResult != nil {
+			resultData = map[string]interface{}{
+				"raw_result": taskResult,
 			}
 		}
 
@@ -1150,7 +1135,7 @@ func (s *Server) upgradeApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle asynchronous requests
-	callback := func(result string, err error) {
+	callback := func(result *task.AppOperationMessage, err error) {
 		// For async requests, callback is just for logging
 		if err != nil {
 			glog.Errorf("Asynchronous upgrade failed for app: %s, error: %v", request.AppName, err)

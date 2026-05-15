@@ -2,9 +2,8 @@ package task
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -58,46 +57,23 @@ type Image struct {
 }
 
 // AppInstall installs an application using the app service
-func (tm *TaskModule) AppInstall(task *Task) (string, error) {
+func (tm *TaskModule) AppInstall(task *Task) (*AppOperationMessage, error) {
 	appName := task.AppName
 	user := task.User
 
 	glog.V(2).Infof("Starting app installation: app=%s, user=%s, task_id=%s", appName, user, task.ID)
 
-	// Check if there's already a running or pending install task for the same app
-	tm.mu.RLock()
-
-	// Check running tasks
-	for _, runningTask := range tm.runningTasks {
-		if runningTask.Type == InstallApp && runningTask.AppName == appName && runningTask.ID != task.ID {
-			tm.mu.RUnlock()
-			glog.Warningf("Installation failed: another install task is already running for app: %s, existing task ID: %s", appName, runningTask.ID)
-			errorResult := map[string]interface{}{
-				"operation":        "install",
-				"app_name":         appName,
-				"user":             user,
-				"error":            "Another installation task is already running for this app",
-				"status":           "failed",
-				"existing_task_id": runningTask.ID,
-			}
-			errorJSON, _ := json.Marshal(errorResult)
-			return string(errorJSON), fmt.Errorf("another installation task is already running for app: %s", appName)
-		}
-	}
-
-	tm.mu.RUnlock()
-
 	token, ok := task.Metadata["token"].(string)
 	if !ok {
 		glog.Warningf("Missing token in task metadata for task: %s", task.ID)
-		return "", fmt.Errorf("missing token in task metadata")
+		return BaseParamInvalid(), fmt.Errorf("missing token in task metadata")
 	}
 
 	// Get app source from metadata
 	appSource, ok := task.Metadata["source"].(string)
 	if !ok {
 		glog.Warningf("Missing source in task metadata for task: %s", task.ID)
-		return "", fmt.Errorf("missing source in task metadata")
+		return BaseParamInvalid(), fmt.Errorf("missing source in task metadata")
 	}
 
 	// Get cfgType from metadata
@@ -116,6 +92,19 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 	} else {
 		apiSource = "market"
 	}
+
+	envelope := BaseInstallEnvelope(task, cfgType, appSource, apiSource)
+
+	tm.mu.RLock()
+	for _, runningTask := range tm.runningTasks {
+		if runningTask.Type == InstallApp && runningTask.AppName == appName && runningTask.ID != task.ID {
+			tm.mu.RUnlock()
+			envelope.SetExistsEnvelope("Another installation task is already running for this app", "failed", runningTask.ID)
+
+			return envelope, fmt.Errorf("another installation task is already running, runningTaskId: %s", runningTask.ID)
+		}
+	}
+	tm.mu.RUnlock()
 
 	glog.V(2).Infof("App source: %s, API source: %s, cfgType: %s for task: %s", appSource, apiSource, cfgType, task.ID)
 
@@ -206,104 +195,35 @@ func (tm *TaskModule) AppInstall(task *Task) (string, error) {
 		MarketSource: appSource,
 	}
 
-	// Compose a base envelope shared by every return path so the wire
-	// shape stays compatible with the legacy raw-map projection that
-	// the API layer and frontend already consume. The legacy "url"
-	// field is no longer emitted: it duplicated the host/port that
-	// appservice.Client resolves itself, with no internal consumer
-	// (the API layer ships task_records.result through to the wire
-	// without inspecting it). Failure diagnostics live on the typed
-	// error path now.
-	baseEnvelope := func() map[string]interface{} {
-		return map[string]interface{}{
-			"operation":  "install",
-			"app_name":   appName,
-			"user":       user,
-			"app_source": appSource,
-			"api_source": apiSource,
-			"cfgType":    cfgType,
-		}
-	}
-
 	client, err := getAppServiceClient()
 	if err != nil {
 		glog.Errorf("App-service client unavailable for install task=%s: %v", task.ID, err)
-		envelope := baseEnvelope()
-		envelope["error"] = err.Error()
-		envelope["status"] = "failed"
-		errorJSON, _ := json.Marshal(envelope)
-		return string(errorJSON), err
+		envelope.SetFailed(err.Error())
+		return envelope, err
 	}
 
 	glog.Infof("[APP] Sending HTTP request for app installation: task=%s", task.ID)
-	opResp, err := client.InstallApp(context.Background(), appName, opts, hdr)
+	opResp, opHttpStatus, err := client.InstallApp(context.Background(), appName, opts, hdr)
 	if err != nil {
 		glog.Errorf("App-service install failed for task=%s: %v", task.ID, err)
-		envelope := baseEnvelope()
-		envelope["error"] = err.Error()
-		envelope["status"] = "failed"
-		// Surface the upstream business code/message envelope when we
-		// have one (HTTP 200 + Code != 200 path); transport-level
-		// failures (5xx / network) carry no useful body to expose.
-		var opErr *appservice.OpError
-		if errors.As(err, &opErr) {
-			backend := map[string]interface{}{
-				"code":    opErr.Code,
-				"message": opErr.Message,
-			}
-			// Prefer the upstream's full `data` envelope when present
-			// (e.g. install's 422 + appenv missingValues schema). The
-			// raw bytes are preserved verbatim by OpResponse.DataRaw —
-			// passing them as json.RawMessage keeps field ordering and
-			// case sensitivity ("Data" vs "data") intact for the
-			// frontend's backend_response.data view. The opID-only
-			// fallback covers older app-service builds that ship code/
-			// message without a data block.
-			switch {
-			case opResp != nil && len(opResp.DataRaw) > 0:
-				backend["data"] = json.RawMessage(opResp.DataRaw)
-			case opErr.OpID != "":
-				backend["data"] = map[string]interface{}{"opID": opErr.OpID}
-			}
-			envelope["backend_response"] = backend
-		}
-		errorJSON, _ := json.Marshal(envelope)
-		return string(errorJSON), err
+		envelope.SetFailed(err.Error())
+		return envelope, err
 	}
 
-	// HTTP 200 + Code 200. Validate that the upstream actually shipped
-	// an OpID; legacy code returned this as a failure with backend
-	// envelope, preserve that semantic.
-	if opResp == nil || opResp.Data == nil || opResp.Data.OpID == "" {
-		glog.V(3).Infof("opID not found in install response for task: %s", task.ID)
-		envelope := baseEnvelope()
-		backend := map[string]interface{}{}
-		if opResp != nil {
-			backend["code"] = opResp.Code
-			backend["message"] = opResp.Message
-		}
-		envelope["backend_response"] = backend
-		envelope["error"] = "opID not found in response data"
-		envelope["status"] = "failed"
-		errorJSON, _ := json.Marshal(envelope)
-		return string(errorJSON), fmt.Errorf("opID not found in response data")
+	if opResp.Code != http.StatusOK {
+		envelope.SetFailed("opID not found in response data")
+		envelope.SetResponse(opResp, opResp.Code, opResp.Data.String(), opHttpStatus)
+		return envelope, fmt.Errorf("opID not found in response data")
 	}
 
-	task.OpID = opResp.Data.OpID
-	glog.V(3).Infof("Successfully extracted opID: %s for task: %s", opResp.Data.OpID, task.ID)
-	tm.linkStateOpID(task, appName, "install")
+	task.OpID = opResp.Data.OpId
+	glog.V(3).Infof("Successfully extracted opID: %s for task: %s", opResp.Data.OpId, task.ID)
 
-	envelope := baseEnvelope()
-	envelope["backend_response"] = map[string]interface{}{
-		"code":    opResp.Code,
-		"message": opResp.Message,
-		"data":    map[string]interface{}{"opID": opResp.Data.OpID},
-	}
-	envelope["opID"] = task.OpID
-	envelope["status"] = "success"
-	successJSON, _ := json.Marshal(envelope)
-	glog.V(2).Infof("App installation completed successfully: task=%s, result_length=%d, result=%s", task.ID, len(successJSON), string(successJSON))
-	return string(successJSON), nil
+	envelope.SetSuccess()
+	envelope.SetOpId(opResp.Data.OpId)
+	envelope.SetResponse(opResp, opResp.Code, opResp.Data.String(), opHttpStatus)
+
+	return envelope, nil
 }
 
 // getRepoUrl returns the repository URL passed through to app-service in

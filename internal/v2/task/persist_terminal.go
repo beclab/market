@@ -151,6 +151,7 @@ func buildFailedStateUpdate(task *Task) *store.FailedStateUpdate {
 	if !ok {
 		return nil
 	}
+
 	return &store.FailedStateUpdate{
 		UserID:   uid,
 		SourceID: src,
@@ -165,12 +166,13 @@ func buildFailedStateUpdate(task *Task) *store.FailedStateUpdate {
 // when set (the caller is expected to have stamped it before this
 // runs); store.FailTaskInTx fills in time.Now() when zero, so the
 // nil-pointer branch is also tolerable.
-func buildFailTaskInput(task *Task) store.FailTaskInput {
+func buildFailTaskInput(task *Task, appOperationState string) store.FailTaskInput {
 	in := store.FailTaskInput{
-		TaskID:      task.ID,
-		Result:      task.Result,
-		ErrorMsg:    task.ErrorMsg,
-		StateUpdate: buildFailedStateUpdate(task),
+		TaskID:            task.ID,
+		Result:            task.Result,
+		ErrorMsg:          task.ErrorMsg,
+		StateUpdate:       buildFailedStateUpdate(task),
+		AppOperationState: appOperationState,
 	}
 	if task.CompletedAt != nil {
 		in.CompletedAt = *task.CompletedAt
@@ -189,8 +191,8 @@ func buildFailTaskInput(task *Task) store.FailTaskInput {
 // (handleTaskFailure + the three *TaskFailed external-signal helpers)
 // flow through, so future changes to the failure persistence policy
 // land in one place.
-func (tm *TaskModule) commitTaskFailure(ctx context.Context, task *Task, errMsg string) {
-	in := buildFailTaskInput(task)
+func (tm *TaskModule) commitTaskFailure(ctx context.Context, task *Task, errMsg string, appOperationState string) {
+	in := buildFailTaskInput(task, appOperationState)
 	hr := tm.buildTaskTerminalHistory(task, task.Result, fmt.Errorf("%s", errMsg))
 	if err := tm.persistTaskFailure(ctx, in, hr); err != nil {
 		glog.Errorf("[%s] persistTaskFailure (task=%s app=%s user=%s): %v",

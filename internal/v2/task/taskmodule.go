@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -52,7 +51,7 @@ const (
 const completedTaskLimit = 100
 
 // TaskCallback defines the callback function type for task completion
-type TaskCallback func(result string, err error)
+type TaskCallback func(result *AppOperationMessage, err error)
 
 // Task represents a task in the system
 type Task struct {
@@ -233,12 +232,6 @@ func pendingStateFromMetadata(taskType TaskType, user, appName string, metadata 
 
 	appID := metadataString(metadata, "realAppID")
 	if appID == "" {
-		appID = metadataString(metadata, "app_name")
-	}
-	if appID == "" {
-		appID = strings.TrimSpace(appName)
-	}
-	if appID == "" {
 		return nil
 	}
 
@@ -410,6 +403,9 @@ func (tm *TaskModule) persistTask(task *Task) error {
 }
 
 func (tm *TaskModule) finalizeTaskPersistence(task *Task) {
+
+	// + 这里需要迁移到 store 层，采用 tx，而且需要写入 state 表。
+
 	if err := tm.persistTask(task); err != nil {
 		glog.Errorf("[%s] Failed to persist finalized task %s: %v", tm.instanceID, task.ID, err)
 	}
@@ -604,21 +600,39 @@ func (tm *TaskModule) executeNextTask() {
 // recordTaskResult is intentionally NOT called separately — its
 // history-write work is now executed inside the persistTaskFailure
 // transaction, atomically with the task_records / state updates.
-func (tm *TaskModule) handleTaskFailure(task *Task, result string, err error, failureDesc string) {
+func (tm *TaskModule) handleTaskFailure(task *Task, result *AppOperationMessage, err error, failureDesc string) {
 	glog.Errorf("[TASK] %s for task: %s, name: %s, error: %v", failureDesc, task.ID, task.AppName, err)
-	task.Result = result
+	task.Result = result.String()
 	task.Status = Failed
 	task.ErrorMsg = fmt.Sprintf("%s: %v, task: %s", failureDesc, err, task.ID)
 	now := time.Now()
 	task.CompletedAt = &now
 
-	tm.commitTaskFailure(context.Background(), task, task.ErrorMsg)
+	appOperationState := tm.formatTaskFailureState(result.Operation, result.ResponseCode, result.ResponseHttpStatus)
+
+	tm.commitTaskFailure(context.Background(), task, task.ErrorMsg, appOperationState) // +
 
 	tm.removeRunningTask(task.ID)
 	tm.sendTaskFinishedUpdate(task, "failed")
 
 	if task.Callback != nil {
 		task.Callback(result, err)
+	}
+}
+
+func (tm *TaskModule) formatTaskFailureState(taskOperation string, responseCode, responseHttpStatus int) string {
+	switch taskOperation {
+	case "install", "clone":
+		if responseHttpStatus == 422 {
+			return "installingCanceled"
+		}
+		return "installFailed"
+	case "uninstall":
+		return "uninstalled"
+	case "upgrade":
+		return "upgradeFailed"
+	default:
+		return ""
 	}
 }
 
@@ -637,7 +651,7 @@ func (tm *TaskModule) executeTask(task *Task) {
 
 	tm.sendTaskExecutionUpdate(task)
 
-	var result string
+	var result *AppOperationMessage
 	var err error
 	switch task.Type {
 	case InstallApp:
@@ -655,12 +669,13 @@ func (tm *TaskModule) executeTask(task *Task) {
 	}
 
 	if err != nil {
+		glog.Errorf("[TASK] %s execute errored, ID=%s, App=%s", typeStr, task.ID, task.AppName)
 		tm.handleTaskFailure(task, result, err, typeStr+" failed")
 		return
 	}
 
 	glog.V(2).Infof("[TASK] %s completed: ID=%s, App=%s", typeStr, task.ID, task.AppName)
-	tm.handleTaskSuccess(task, result)
+	tm.handleTaskSuccess(task, result) // +
 }
 
 // handleTaskSuccess is the success-side counterpart of handleTaskFailure.
@@ -671,8 +686,8 @@ func (tm *TaskModule) executeTask(task *Task) {
 // success / failure paths read identically and lets future store-layer
 // migrations (CompleteTask / FailTask) land in a single function each
 // instead of being scattered through executeTask.
-func (tm *TaskModule) handleTaskSuccess(task *Task, result string) {
-	task.Result = result
+func (tm *TaskModule) handleTaskSuccess(task *Task, result *AppOperationMessage) {
+	task.Result = result.String()
 	task.Status = Completed
 	now := time.Now()
 	task.CompletedAt = &now
@@ -683,7 +698,7 @@ func (tm *TaskModule) handleTaskSuccess(task *Task, result string) {
 	}
 
 	tm.removeRunningTask(task.ID)
-	tm.finalizeTaskPersistence(task)
+	tm.finalizeTaskPersistence(task) // + 合并 recordTaskResult
 	tm.sendTaskFinishedUpdate(task, "succeed")
 
 	if task.Callback != nil {
@@ -909,7 +924,7 @@ func (tm *TaskModule) buildTaskTerminalHistory(task *Task, result string, err er
 // buildTaskTerminalHistory and pipe it into persistTaskFailure so
 // task_records + user_application_states + history_records commit in
 // one transaction — see persist_terminal.go.
-func (tm *TaskModule) recordTaskResult(task *Task, result string, err error) {
+func (tm *TaskModule) recordTaskResult(task *Task, result *AppOperationMessage, err error) {
 	if tm.historyModule == nil {
 		glog.V(3).Infof("History module not available, skipping task result record for task: %s", task.ID)
 		return
@@ -918,7 +933,7 @@ func (tm *TaskModule) recordTaskResult(task *Task, result string, err error) {
 	glog.V(2).Infof("Recording task result for task: %s, type: %s, app: %s, user: %s",
 		task.ID, getTaskTypeString(task.Type), task.AppName, task.User)
 
-	hr := tm.buildTaskTerminalHistory(task, result, err)
+	hr := tm.buildTaskTerminalHistory(task, result.String(), err)
 	if hr == nil {
 		return
 	}
@@ -1043,152 +1058,4 @@ func (tm *TaskModule) HasPendingOrRunningInstallTask(appName, user string) (hasT
 	}
 
 	return false, true
-}
-
-// InstallTaskSucceed marks an install or clone task as completed successfully by opID or appName+user
-func (tm *TaskModule) InstallTaskSucceed(opID, appName, user string) error {
-	resultMsg := "Installation completed successfully via external signal"
-	task, err := tm.completeRunningTask(opID, appName, user,
-		[]TaskType{InstallApp, CloneApp}, Completed, resultMsg, "")
-	if err != nil {
-		glog.Warningf("[%s] InstallTaskSucceed - %v", tm.instanceID, err)
-		return err
-	}
-	if task.Type == CloneApp {
-		task.Result = "Clone completed successfully via external signal"
-	}
-
-	glog.V(2).Infof("[%s] InstallTaskSucceed - Task completed: ID=%s, Type=%s, OpID=%s, App=%s, User=%s",
-		tm.instanceID, task.ID, getTaskTypeString(task.Type), task.OpID, task.AppName, task.User)
-
-	tm.finalizeTaskPersistence(task)
-	tm.recordTaskResult(task, task.Result, nil)
-	tm.sendTaskFinishedUpdate(task, "succeed")
-	return nil
-}
-
-// InstallTaskFailed marks an install task as failed by opID or appName+user.
-//
-// Triggered by an external NATS signal that app-service has finalised
-// the install as failed. completeRunningTask already removed the task
-// from runningTasks under tm.mu, so the order here is:
-//
-//  1. PG single-tx commit (task_records + user_application_states +
-//     history_records) via commitTaskFailure.
-//  2. NATS push, best-effort.
-//
-// No callback is invoked: the sync caller (if any) was already
-// unblocked when the executor's AppInstall returned (the "request
-// accepted, OpID assigned" success), long before this NATS-driven
-// terminal arrives.
-func (tm *TaskModule) InstallTaskFailed(opID, appName, user, errorMsg string) error {
-	task, err := tm.completeRunningTask(opID, appName, user,
-		[]TaskType{InstallApp}, Failed, "Installation failed via external signal", errorMsg)
-	if err != nil {
-		glog.Warningf("[%s] InstallTaskFailed - %v", tm.instanceID, err)
-		return err
-	}
-
-	glog.V(2).Infof("[%s] InstallTaskFailed - Task failed: ID=%s, OpID=%s, App=%s, User=%s, Error: %s",
-		tm.instanceID, task.ID, task.OpID, task.AppName, task.User, errorMsg)
-
-	tm.commitTaskFailure(context.Background(), task, errorMsg)
-	tm.sendTaskFinishedUpdate(task, "failed")
-	return nil
-}
-
-// InstallTaskCanceled marks an install task as canceled by app name and user
-func (tm *TaskModule) InstallTaskCanceled(appName, appVersion, source, user string) error {
-	task, err := tm.completeRunningTask("", appName, user,
-		[]TaskType{InstallApp}, Canceled, "Installation canceled via external signal", "Installation canceled via external signal")
-	if err != nil {
-		glog.V(2).Infof("[%s] InstallTaskCanceled - %v", tm.instanceID, err)
-		return err
-	}
-
-	glog.V(2).Infof("[%s] InstallTaskCanceled - Task canceled: ID=%s, App=%s, User=%s",
-		tm.instanceID, task.ID, task.AppName, task.User)
-
-	tm.finalizeTaskPersistence(task)
-	tm.recordTaskResult(task, task.Result, fmt.Errorf("installation canceled"))
-	tm.sendTaskFinishedUpdate(task, "canceled")
-	return nil
-}
-
-// CancelInstallTaskSucceed marks a cancel install task as completed successfully by opID or appName+user
-func (tm *TaskModule) CancelInstallTaskSucceed(opID, appName, user string) error {
-	task, err := tm.completeRunningTask(opID, appName, user,
-		[]TaskType{CancelAppInstall}, Completed, "Cancel installation completed successfully via external signal", "")
-	if err != nil {
-		glog.Warningf("[%s] CancelInstallTaskSucceed - %v", tm.instanceID, err)
-		return err
-	}
-
-	glog.V(2).Infof("[%s] CancelInstallTaskSucceed - Task completed: ID=%s, OpID=%s, App=%s, User=%s",
-		tm.instanceID, task.ID, task.OpID, task.AppName, task.User)
-
-	tm.finalizeTaskPersistence(task)
-	tm.recordTaskResult(task, task.Result, nil)
-	tm.sendTaskFinishedUpdate(task, "succeed")
-	return nil
-}
-
-// CancelInstallTaskFailed marks a cancel install task as failed by
-// opID or appName+user.
-//
-// Same shape as InstallTaskFailed. Notably the underlying app's
-// user_application_states row is NOT touched here — a failed cancel
-// does not change the install's state (see buildFailedStateUpdate's
-// per-type policy). Only this cancel task's own task_records row
-// moves to Failed.
-func (tm *TaskModule) CancelInstallTaskFailed(opID, appName, user, errorMsg string) error {
-	task, err := tm.completeRunningTask(opID, appName, user,
-		[]TaskType{CancelAppInstall}, Failed, "Cancel installation failed via external signal", errorMsg)
-	if err != nil {
-		glog.Warningf("[%s] CancelInstallTaskFailed - %v", tm.instanceID, err)
-		return err
-	}
-
-	glog.V(2).Infof("[%s] CancelInstallTaskFailed - Task failed: ID=%s, OpID=%s, App=%s, User=%s, Error: %s",
-		tm.instanceID, task.ID, task.OpID, task.AppName, task.User, errorMsg)
-
-	tm.commitTaskFailure(context.Background(), task, errorMsg)
-	tm.sendTaskFinishedUpdate(task, "failed")
-	return nil
-}
-
-// UninstallTaskSucceed marks an uninstall task as completed successfully by opID or appName+user
-func (tm *TaskModule) UninstallTaskSucceed(opID, appName, user string) error {
-	task, err := tm.completeRunningTask(opID, appName, user,
-		[]TaskType{UninstallApp}, Completed, "Uninstallation completed successfully via external signal", "")
-	if err != nil {
-		glog.Warningf("[%s] UninstallTaskSucceed - %v", tm.instanceID, err)
-		return err
-	}
-
-	glog.V(2).Infof("[%s] UninstallTaskSucceed - Task completed: ID=%s, OpID=%s, App=%s, User=%s",
-		tm.instanceID, task.ID, task.OpID, task.AppName, task.User)
-
-	tm.finalizeTaskPersistence(task)
-	tm.recordTaskResult(task, task.Result, nil)
-	tm.sendTaskFinishedUpdate(task, "succeed")
-	return nil
-}
-
-// UninstallTaskFailed marks an uninstall task as failed by opID or
-// appName+user. Same shape as InstallTaskFailed.
-func (tm *TaskModule) UninstallTaskFailed(opID, appName, user, errorMsg string) error {
-	task, err := tm.completeRunningTask(opID, appName, user,
-		[]TaskType{UninstallApp}, Failed, "Uninstallation failed via external signal", errorMsg)
-	if err != nil {
-		glog.Warningf("[%s] UninstallTaskFailed - %v", tm.instanceID, err)
-		return err
-	}
-
-	glog.V(2).Infof("[%s] UninstallTaskFailed - Task failed: ID=%s, OpID=%s, App=%s, User=%s, Error: %s",
-		tm.instanceID, task.ID, task.OpID, task.AppName, task.User, errorMsg)
-
-	tm.commitTaskFailure(context.Background(), task, errorMsg)
-	tm.sendTaskFinishedUpdate(task, "failed")
-	return nil
 }

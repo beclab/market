@@ -19,8 +19,8 @@ import (
 // the inverse during a brief window. Callers must nil-check before
 // dereferencing.
 type App struct {
-	Metadata AppMetadata               `json:"metadata"`
-	Spec     *AppSpec                  `json:"spec"`
+	Metadata AppMetadata                     `json:"metadata"`
+	Spec     *AppSpec                        `json:"spec"`
 	Status   *types.AppStateLatestDataStatus `json:"status"`
 }
 
@@ -264,10 +264,30 @@ type AppEntrance struct {
 // json:"-" tag suppresses the field on the marshal side so a re-
 // serialised OpResponse keeps the wire shape clean.
 type OpResponse struct {
+	// Code    int             `json:"code"`
+	// Message string          `json:"message,omitempty"`
+	// Data    *OpResult       `json:"data,omitempty"`
+	// DataRaw json.RawMessage `json:"-"`
 	Code    int             `json:"code"`
 	Message string          `json:"message,omitempty"`
-	Data    *OpResult       `json:"data,omitempty"`
-	DataRaw json.RawMessage `json:"-"`
+	Data    *OpResponseData `json:"data"`
+}
+
+func (op *OpResponse) String() string {
+	data, _ := json.Marshal(op)
+	return string(data)
+}
+
+type OpResponseData struct {
+	Uid         string                 `json:"uid"`
+	OpId        string                 `json:"opID"`
+	Type        string                 `json:"type"` // error
+	InvalidData map[string]interface{} `json:"Data"` // error data
+}
+
+func (opd *OpResponseData) String() string {
+	data, _ := json.Marshal(opd)
+	return string(data)
 }
 
 // UnmarshalJSON parses the upstream envelope and, in a single pass,
@@ -290,33 +310,33 @@ type OpResponse struct {
 //     bytes side-by-side.
 //   - doOp stays free of envelope-decoding details and keeps its
 //     focus on HTTP transport classification.
-func (r *OpResponse) UnmarshalJSON(b []byte) error {
-	type alias struct {
-		Code    int             `json:"code"`
-		Message string          `json:"message,omitempty"`
-		Data    json.RawMessage `json:"data,omitempty"`
-	}
-	var a alias
-	if err := json.Unmarshal(b, &a); err != nil {
-		return err
-	}
-	r.Code = a.Code
-	r.Message = a.Message
-	// `null` and empty are normalised to "no data" so callers can use
-	// `len(opResp.DataRaw) > 0` as the sentinel without further string
-	// comparisons against the literal "null".
-	if len(a.Data) > 0 && string(a.Data) != "null" {
-		r.DataRaw = a.Data
-		var or OpResult
-		// Unknown fields are tolerated; the decode succeeds with
-		// OpID="" when the upstream `data` does not carry an opID
-		// (typical for business-error payloads).
-		if err := json.Unmarshal(a.Data, &or); err == nil {
-			r.Data = &or
-		}
-	}
-	return nil
-}
+// func (r *OpResponse) UnmarshalJSON(b []byte) error {
+// 	type alias struct {
+// 		Code    int             `json:"code"`
+// 		Message string          `json:"message,omitempty"`
+// 		Data    json.RawMessage `json:"data,omitempty"`
+// 	}
+// 	var a alias
+// 	if err := json.Unmarshal(b, &a); err != nil {
+// 		return err
+// 	}
+// 	r.Code = a.Code
+// 	r.Message = a.Message
+// 	// `null` and empty are normalised to "no data" so callers can use
+// 	// `len(opResp.DataRaw) > 0` as the sentinel without further string
+// 	// comparisons against the literal "null".
+// 	if len(a.Data) > 0 && string(a.Data) != "null" {
+// 		r.DataRaw = a.Data
+// 		var or OpResult
+// 		// Unknown fields are tolerated; the decode succeeds with
+// 		// OpID="" when the upstream `data` does not carry an opID
+// 		// (typical for business-error payloads).
+// 		if err := json.Unmarshal(a.Data, &or); err == nil {
+// 			r.Data = &or
+// 		}
+// 	}
+// 	return nil
+// }
 
 // OpResult is the inner block of OpResponse that carries the OpID. We
 // model it as a pointer because some OpResponse paths legitimately omit

@@ -39,11 +39,11 @@ type MockClient struct {
 	GetAppEntranceURLsFunc func(ctx context.Context, appName, user string) (map[string]string, error)
 
 	// Operation endpoints
-	InstallAppFunc   func(ctx context.Context, appName string, opts InstallOptions, hdr OpHeaders) (*OpResponse, error)
-	CloneAppFunc     func(ctx context.Context, urlAppName string, opts CloneOptions, hdr OpHeaders) (*OpResponse, error)
-	UninstallAppFunc func(ctx context.Context, appName string, opts UninstallOptions, hdr OpHeaders) (*OpResponse, error)
-	UpgradeAppFunc   func(ctx context.Context, appName string, opts UpgradeOptions, hdr OpHeaders) (*OpResponse, error)
-	CancelAppFunc    func(ctx context.Context, appName string, hdr OpHeaders) (*OpResponse, error)
+	InstallAppFunc   func(ctx context.Context, appName string, opts InstallOptions, hdr OpHeaders) (*OpResponse, int, error)
+	CloneAppFunc     func(ctx context.Context, urlAppName string, opts CloneOptions, hdr OpHeaders) (*OpResponse, int, error)
+	UninstallAppFunc func(ctx context.Context, appName string, opts UninstallOptions, hdr OpHeaders) (*OpResponse, int, error)
+	UpgradeAppFunc   func(ctx context.Context, appName string, opts UpgradeOptions, hdr OpHeaders) (*OpResponse, int, error)
+	CancelAppFunc    func(ctx context.Context, appName string, hdr OpHeaders) (*OpResponse, int, error)
 
 	// Per-method invocation counts. Tests assert on these to verify
 	// "the code under test made exactly N calls to X". Pre-allocated
@@ -107,42 +107,42 @@ func (m *MockClient) GetAppEntranceURLs(ctx context.Context, appName, user strin
 	return nil, nil
 }
 
-func (m *MockClient) InstallApp(ctx context.Context, appName string, opts InstallOptions, hdr OpHeaders) (*OpResponse, error) {
+func (m *MockClient) InstallApp(ctx context.Context, appName string, opts InstallOptions, hdr OpHeaders) (*OpResponse, int, error) {
 	m.InstallAppCalls++
 	if m.InstallAppFunc != nil {
 		return m.InstallAppFunc(ctx, appName, opts, hdr)
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
-func (m *MockClient) CloneApp(ctx context.Context, urlAppName string, opts CloneOptions, hdr OpHeaders) (*OpResponse, error) {
+func (m *MockClient) CloneApp(ctx context.Context, urlAppName string, opts CloneOptions, hdr OpHeaders) (*OpResponse, int, error) {
 	m.CloneAppCalls++
 	if m.CloneAppFunc != nil {
 		return m.CloneAppFunc(ctx, urlAppName, opts, hdr)
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
-func (m *MockClient) UninstallApp(ctx context.Context, appName string, opts UninstallOptions, hdr OpHeaders) (*OpResponse, error) {
+func (m *MockClient) UninstallApp(ctx context.Context, appName string, opts UninstallOptions, hdr OpHeaders) (*OpResponse, int, error) {
 	m.UninstallAppCalls++
 	if m.UninstallAppFunc != nil {
 		return m.UninstallAppFunc(ctx, appName, opts, hdr)
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
-func (m *MockClient) UpgradeApp(ctx context.Context, appName string, opts UpgradeOptions, hdr OpHeaders) (*OpResponse, error) {
+func (m *MockClient) UpgradeApp(ctx context.Context, appName string, opts UpgradeOptions, hdr OpHeaders) (*OpResponse, int, error) {
 	m.UpgradeAppCalls++
 	if m.UpgradeAppFunc != nil {
 		return m.UpgradeAppFunc(ctx, appName, opts, hdr)
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
-func (m *MockClient) CancelApp(ctx context.Context, appName string, hdr OpHeaders) (*OpResponse, error) {
+func (m *MockClient) CancelApp(ctx context.Context, appName string, hdr OpHeaders) (*OpResponse, int, error) {
 	m.CancelAppCalls++
 	if m.CancelAppFunc != nil {
 		return m.CancelAppFunc(ctx, appName, hdr)
 	}
-	return nil, nil
+	return nil, 0, nil
 }

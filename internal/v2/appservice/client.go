@@ -63,11 +63,11 @@ type Client interface {
 	// surfaces that as *OpError (see errors.go) so callers can
 	// errors.As and inspect the upstream code/message instead of
 	// parsing strings.
-	InstallApp(ctx context.Context, appName string, opts InstallOptions, hdr OpHeaders) (*OpResponse, error)
-	CloneApp(ctx context.Context, urlAppName string, opts CloneOptions, hdr OpHeaders) (*OpResponse, error)
-	UninstallApp(ctx context.Context, appName string, opts UninstallOptions, hdr OpHeaders) (*OpResponse, error)
-	UpgradeApp(ctx context.Context, appName string, opts UpgradeOptions, hdr OpHeaders) (*OpResponse, error)
-	CancelApp(ctx context.Context, appName string, hdr OpHeaders) (*OpResponse, error)
+	InstallApp(ctx context.Context, appName string, opts InstallOptions, hdr OpHeaders) (*OpResponse, int, error)
+	CloneApp(ctx context.Context, urlAppName string, opts CloneOptions, hdr OpHeaders) (*OpResponse, int, error)
+	UninstallApp(ctx context.Context, appName string, opts UninstallOptions, hdr OpHeaders) (*OpResponse, int, error)
+	UpgradeApp(ctx context.Context, appName string, opts UpgradeOptions, hdr OpHeaders) (*OpResponse, int, error)
+	CancelApp(ctx context.Context, appName string, hdr OpHeaders) (*OpResponse, int, error)
 }
 
 // httpClient is the production implementation of Client backed by
@@ -261,7 +261,7 @@ func (c *httpClient) GetAppEntranceURLs(ctx context.Context, appName, user strin
 // OpResponse.Data. If the upstream contract ever evolves to accept a
 // caller-supplied OpID (idempotency token), wire it through opts and
 // the response code path stays identical.
-func (c *httpClient) InstallApp(ctx context.Context, appName string, opts InstallOptions, hdr OpHeaders) (*OpResponse, error) {
+func (c *httpClient) InstallApp(ctx context.Context, appName string, opts InstallOptions, hdr OpHeaders) (*OpResponse, int, error) {
 	const ep = "install_app"
 	path := "/app-service/v1/apps/" + url.PathEscape(appName) + "/install"
 	return c.doOp(ctx, ep, "install", path, opts, hdr)
@@ -272,7 +272,7 @@ func (c *httpClient) InstallApp(ctx context.Context, appName string, opts Instal
 // path segment app-service uses to disambiguate clones from the
 // original app — see task/app_clone.go for why it has to be assembled
 // outside the client.
-func (c *httpClient) CloneApp(ctx context.Context, urlAppName string, opts CloneOptions, hdr OpHeaders) (*OpResponse, error) {
+func (c *httpClient) CloneApp(ctx context.Context, urlAppName string, opts CloneOptions, hdr OpHeaders) (*OpResponse, int, error) {
 	const ep = "clone_app"
 	path := "/app-service/v1/apps/" + url.PathEscape(urlAppName) + "/install"
 	return c.doOp(ctx, ep, "clone", path, opts, hdr)
@@ -280,7 +280,7 @@ func (c *httpClient) CloneApp(ctx context.Context, urlAppName string, opts Clone
 
 // UninstallApp posts to /apps/{name}/uninstall with the {all,
 // deleteData} body app-service expects.
-func (c *httpClient) UninstallApp(ctx context.Context, appName string, opts UninstallOptions, hdr OpHeaders) (*OpResponse, error) {
+func (c *httpClient) UninstallApp(ctx context.Context, appName string, opts UninstallOptions, hdr OpHeaders) (*OpResponse, int, error) {
 	const ep = "uninstall_app"
 	path := "/app-service/v1/apps/" + url.PathEscape(appName) + "/uninstall"
 	return c.doOp(ctx, ep, "uninstall", path, opts, hdr)
@@ -288,7 +288,7 @@ func (c *httpClient) UninstallApp(ctx context.Context, appName string, opts Unin
 
 // UpgradeApp posts to /apps/{name}/upgrade with the version + envs +
 // images upgrade payload.
-func (c *httpClient) UpgradeApp(ctx context.Context, appName string, opts UpgradeOptions, hdr OpHeaders) (*OpResponse, error) {
+func (c *httpClient) UpgradeApp(ctx context.Context, appName string, opts UpgradeOptions, hdr OpHeaders) (*OpResponse, int, error) {
 	const ep = "upgrade_app"
 	path := "/app-service/v1/apps/" + url.PathEscape(appName) + "/upgrade"
 	return c.doOp(ctx, ep, "upgrade", path, opts, hdr)
@@ -298,7 +298,7 @@ func (c *httpClient) UpgradeApp(ctx context.Context, appName string, opts Upgrad
 // operate" query parameter is required by app-service to distinguish
 // operate-cancel from other cancel kinds; we hardcode it because
 // Market only ever issues operate cancels today.
-func (c *httpClient) CancelApp(ctx context.Context, appName string, hdr OpHeaders) (*OpResponse, error) {
+func (c *httpClient) CancelApp(ctx context.Context, appName string, hdr OpHeaders) (*OpResponse, int, error) {
 	const ep = "cancel_app"
 	path := "/app-service/v1/apps/" + url.PathEscape(appName) + "/cancel?type=operate"
 	return c.doOp(ctx, ep, "cancel", path, nil, hdr)
@@ -311,14 +311,14 @@ func (c *httpClient) CancelApp(ctx context.Context, appName string, hdr OpHeader
 // doOp is the shared body of every operation endpoint. opName is the
 // human-readable verb used in OpError; payload may be nil (cancel) and
 // is JSON-encoded otherwise.
-func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload interface{}, hdr OpHeaders) (*OpResponse, error) {
+func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload interface{}, hdr OpHeaders) (*OpResponse, int, error) {
 
 	var body io.Reader = nil
 	var payloadSize int
 	if payload != nil {
 		buf, err := json.Marshal(payload)
 		if err != nil {
-			return nil, fmt.Errorf("appservice: marshal %s payload: %w", opName, err)
+			return nil, 0, fmt.Errorf("appservice: marshal %s payload: %w", opName, err)
 		}
 		payloadSize = len(buf)
 		body = bytes.NewReader(buf)
@@ -333,9 +333,19 @@ func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload 
 	glog.V(4).Infof("[appservice] request path: %s, op: %s, payload: %s", path, opName, helper.ParseJson(payload))
 
 	respBody, status, err := c.doRequest(ctx, ep, http.MethodPost, path, opHeadersToMap(hdr), body)
+
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+
+	var opR *OpResponse
+	if err := json.Unmarshal(respBody, &opR); err != nil {
+		return nil, 0, err
+	}
+
+	glog.Infof("[appservice] resp path: %s, ep: %s, code: %d, content: %s", path, ep, status, opR.String())
+
+	return opR, status, nil
 
 	// Non-200 path. Two sub-shapes possible:
 	//   a) Plain-text body (sidecar 5xx, "Internal Server Error\n",
@@ -351,53 +361,53 @@ func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload 
 	//      *OpError so callers' errors.As(err, &opErr) matches the
 	//      same shape as the HTTP-200-business-error branch below.
 	//      This makes the two non-success paths symmetric.
-	if status != http.StatusOK {
-		var op OpResponse
-		_ = json.Unmarshal(respBody, &op)
+	// if status != http.StatusOK {
+	// 	var op OpResponse
+	// 	_ = json.Unmarshal(respBody, &op)
 
-		if op.Code != 0 || op.Message != "" || len(op.DataRaw) > 0 {
-			c.metrics.ObserveRequest(ep, status, 0, errKindBusinessError)
-			opID := ""
-			if op.Data != nil {
-				opID = op.Data.OpID
-			}
-			return &op, &OpError{
-				Op:      opName,
-				Code:    op.Code,
-				Message: op.Message,
-				OpID:    opID,
-			}
-		}
-		return nil, classifyHTTPStatus(status)
-	}
+	// 	if op.Code != 0 || op.Message != "" || len(op.DataRaw) > 0 {
+	// 		c.metrics.ObserveRequest(ep, status, 0, errKindBusinessError)
+	// 		opID := ""
+	// 		if op.Data != nil {
+	// 			opID = op.Data.OpID
+	// 		}
+	// 		return &op, &OpError{
+	// 			Op:      opName,
+	// 			Code:    op.Code,
+	// 			Message: op.Message,
+	// 			OpID:    opID,
+	// 		}
+	// 	}
+	// 	return nil, classifyHTTPStatus(status)
+	// }
 
-	// HTTP 200: decode the envelope strictly. A decode failure now
-	// indicates real protocol drift — surface ErrInvalidResponse so
-	// callers don't confuse it with a transient network blip.
-	var op OpResponse
-	if len(respBody) > 0 {
-		if err := json.Unmarshal(respBody, &op); err != nil {
-			c.metrics.ObserveRequest(ep, status, 0, errKindDecode)
-			return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-		}
-	}
+	// // HTTP 200: decode the envelope strictly. A decode failure now
+	// // indicates real protocol drift — surface ErrInvalidResponse so
+	// // callers don't confuse it with a transient network blip.
+	// var op OpResponse
+	// if len(respBody) > 0 {
+	// 	if err := json.Unmarshal(respBody, &op); err != nil {
+	// 		c.metrics.ObserveRequest(ep, status, 0, errKindDecode)
+	// 		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	// 	}
+	// }
 
-	// HTTP 200 but business code != 200 → typed OpError.
-	if op.Code != 0 && op.Code != http.StatusOK {
-		c.metrics.ObserveRequest(ep, status, 0, errKindBusinessError)
-		opID := ""
-		if op.Data != nil {
-			opID = op.Data.OpID
-		}
-		return &op, &OpError{
-			Op:      opName,
-			Code:    op.Code,
-			Message: op.Message,
-			OpID:    opID,
-		}
-	}
+	// // HTTP 200 but business code != 200 → typed OpError.
+	// if op.Code != 0 && op.Code != http.StatusOK {
+	// 	c.metrics.ObserveRequest(ep, status, 0, errKindBusinessError)
+	// 	opID := ""
+	// 	if op.Data != nil {
+	// 		opID = op.Data.OpID
+	// 	}
+	// 	return &op, &OpError{
+	// 		Op:      opName,
+	// 		Code:    op.Code,
+	// 		Message: op.Message,
+	// 		OpID:    opID,
+	// 	}
+	// }
 
-	return &op, nil
+	// return &op, nil
 }
 
 // doRequest is the single place every endpoint goes through to make
