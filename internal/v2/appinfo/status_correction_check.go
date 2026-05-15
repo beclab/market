@@ -412,6 +412,15 @@ func (scc *StatusCorrectionChecker) ReconcileAppStatusesStartup() {
 	// +        to sync it back to the local system.)
 	// +    ---> Therefore, this case can be repaired during the pipeline stage.
 	for _, dbAppState := range dbAppStates {
+		// Sys-app rows are reconciled by a separate code path
+		// (scc.userSystemApps); the inner loop below already
+		// `continue`s over IsSysApp entries from app-service, so a
+		// sys-app DB row could never find a match and would
+		// otherwise land in delUas and be deleted. Skip them here.
+		if dbAppState.IsSysApp {
+			continue
+		}
+
 		matched := false
 		for _, app := range apps {
 			if app.Spec.IsSysApp {
