@@ -313,16 +313,24 @@ func (c *httpClient) CancelApp(ctx context.Context, appName string, hdr OpHeader
 // is JSON-encoded otherwise.
 func (c *httpClient) doOp(ctx context.Context, ep, opName, path string, payload interface{}, hdr OpHeaders) (*OpResponse, error) {
 
-	glog.Infof("[appservice] request path: %s, op: %s, payload: %s, hdr: %s", path, opName, helper.ParseJson(payload), helper.ParseJson(hdr))
-
 	var body io.Reader = nil
+	var payloadSize int
 	if payload != nil {
 		buf, err := json.Marshal(payload)
 		if err != nil {
 			return nil, fmt.Errorf("appservice: marshal %s payload: %w", opName, err)
 		}
+		payloadSize = len(buf)
 		body = bytes.NewReader(buf)
 	}
+
+	// Log a non-secret breadcrumb: identifying fields + payload size +
+	// presence of the auth token. Never log the token itself or the
+	// raw payload, which can carry user-supplied secrets. Full payload
+	// stays available at V(4) for opt-in debugging.
+	glog.Infof("[appservice] request path: %s, op: %s, payload_size: %d, user: %s, market_user: %s, market_source: %s, has_token: %t",
+		path, opName, payloadSize, hdr.User, hdr.MarketUser, hdr.MarketSource, hdr.Token != "")
+	glog.V(4).Infof("[appservice] request path: %s, op: %s, payload: %s", path, opName, helper.ParseJson(payload))
 
 	respBody, status, err := c.doRequest(ctx, ep, http.MethodPost, path, opHeadersToMap(hdr), body)
 	if err != nil {
