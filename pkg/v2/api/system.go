@@ -940,10 +940,11 @@ func (s *Server) submitSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log raw request body
-	glog.V(2).Info("=== RAW REQUEST BODY ===")
-	glog.V(2).Infof("Body length: %d bytes", len(bodyBytes))
-	glog.V(2).Infof("Body content: %s", string(bodyBytes))
+	// Payment payloads carry JWS / verifiable credentials; keep only a
+	// non-sensitive breadcrumb at V(2) and gate the raw body behind
+	// V(4) so verbose debugging still works on demand.
+	glog.V(2).Infof("submitSignature: body length=%d bytes", len(bodyBytes))
+	glog.V(4).Infof("submitSignature: raw body: %s", string(bodyBytes))
 
 	// Parse request body from the read bytes
 	var req SubmitSignatureRequest
