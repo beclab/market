@@ -77,6 +77,14 @@ func (cm *CacheManager) GetOrCreateUserIDs(defaultUserID string) []string {
 		cm.mutex.RLock()
 		defer cm.mutex.RUnlock()
 
+		// Mirror the defensive guard used by GetUserIDs and other
+		// readers. cm.cache is set in NewCacheManager and should
+		// never be nil, but a caller racing with a hypothetical
+		// future reset would otherwise panic under the read lock.
+		if cm.cache == nil {
+			return nil
+		}
+
 		result := make([]string, 0, len(cm.cache.Users))
 		for id := range cm.cache.Users {
 			result = append(result, id)
@@ -90,6 +98,10 @@ func (cm *CacheManager) GetOrCreateUserIDs(defaultUserID string) []string {
 
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
+
+	if cm.cache == nil {
+		return nil
+	}
 
 	// Double-check after acquiring write lock
 	if len(cm.cache.Users) > 0 {
