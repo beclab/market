@@ -484,40 +484,66 @@ func GetExistsAppStateRecords(ctx context.Context) ([]*AppState, error) {
 	return rows, nil
 }
 
-func UpdateAppStates(in map[int64]*types.AppServiceResponse, delUas []int64) error {
+// UpdateAppStates applies a reconcile result to the
+// user_application_states table inside a single transaction.
+//
+// ctx is honored: if the caller already attached a deadline (e.g. a
+// request timeout or a reconcile-cycle budget), the transaction
+// inherits it. Otherwise we attach a 15s fallback so a stuck PG
+// connection cannot wedge a goroutine forever.
+//
+// Each entry in `in` originates from app-service JSON and may carry
+// nil pointer fields (Spec / Status / Settings). Treat them
+// defensively so a malformed reconcile payload never panics the
+// goroutine that calls us.
+func UpdateAppStates(ctx context.Context, in map[int64]*types.AppServiceResponse, delUas []int64) error {
 	gdb := db.Global()
 	if gdb == nil {
 		return fmt.Errorf("postgres not initialised; db.Open must run before CreateTask")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+	}
 
 	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if len(in) > 0 {
 			for id, item := range in {
-				var tailscale, settings, entrance any
-				if len(item.Spec.Tailscale) > 0 {
-					tailscale = models.NewJSONB(item.Spec.Tailscale)
-				} else {
-					tailscale = map[string]interface{}{}
+				if item == nil {
+					continue
 				}
 
-				if item.Spec.Settings != nil {
-					settings = models.NewJSONB(item.Spec.Settings)
-				} else {
-					settings = &types.AppStateLatestDataSettings{}
+				var (
+					tailscale         any            = map[string]interface{}{}
+					settings          any            = &types.AppStateLatestDataSettings{}
+					entrance          any            = []types.AppStateLatestDataEntrances{}
+					stateValue        string
+					logAppID, logName string
+				)
+
+				if item.Spec != nil {
+					logAppID = item.Spec.AppID
+					logName = item.Spec.Name
+					if len(item.Spec.Tailscale) > 0 {
+						tailscale = models.NewJSONB(item.Spec.Tailscale)
+					}
+					if item.Spec.Settings != nil {
+						settings = models.NewJSONB(item.Spec.Settings)
+					}
 				}
 
-				if len(item.Status.EntranceStatuses) > 0 {
-					entrance = models.NewJSONB(item.Status.EntranceStatuses)
-				} else {
-					entrance = []types.AppStateLatestDataEntrances{}
+				if item.Status != nil {
+					stateValue = item.Status.State
+					if len(item.Status.EntranceStatuses) > 0 {
+						entrance = models.NewJSONB(item.Status.EntranceStatuses)
+					}
 				}
 
 				const updateStateQuery = `UPDATE user_application_states SET state = ?, tailscale = ?, settings = ?, entrances = ? WHERE id = ?`
-				if err := tx.Exec(updateStateQuery, item.Status.State, tailscale, settings, entrance, id); err.Error != nil {
-					return fmt.Errorf("UpdateAppStates: update user_application_states id: %d, appId: %s, appName: %s, error: %v", id, item.Spec.AppID, item.Spec.Name, err.Error)
+				if err := tx.Exec(updateStateQuery, stateValue, tailscale, settings, entrance, id); err.Error != nil {
+					return fmt.Errorf("UpdateAppStates: update user_application_states id: %d, appId: %s, appName: %s, error: %v", id, logAppID, logName, err.Error)
 				}
 			}
 		}
