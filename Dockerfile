@@ -39,4 +39,23 @@ FROM alpine:3.23
 WORKDIR /opt/app
 COPY --from=builder /workspace/bytetrade.io/web3os/market/market .
 
+# Drop root: create a dedicated unprivileged user/group and hand
+# them ownership of the working directory before USER switches the
+# default execution identity. Running as root in the runtime image
+# was unnecessary (the binary opens an HTTP listener on an
+# unprivileged port and never touches the filesystem outside its
+# own workdir) and made the container an easy escalation target.
+RUN addgroup -S market && adduser -S -G market market \
+    && chown -R market:market /opt/app
+
+USER market
+
+# A lightweight liveness probe so orchestrators can detect a wedged
+# process without a network round-trip. The binary does not yet
+# expose a dedicated /healthz endpoint, so fall back to a process
+# check; this is enough to catch hangs and crashes that systemd /
+# docker would otherwise miss until the next request fails.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD pgrep -x market >/dev/null || exit 1
+
 ENTRYPOINT ["/opt/app/market", "-v", "2", "--logtostderr"]
