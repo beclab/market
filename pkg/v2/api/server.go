@@ -326,11 +326,13 @@ type Response struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-// sendResponse sends a JSON response
+// sendResponse sends a JSON response.
+//
+// The body is marshalled BEFORE WriteHeader so a marshal failure can
+// still escalate the response to 500; once WriteHeader has been
+// called the status line is committed and any later http.Error is a
+// no-op (and triggers "superfluous response.WriteHeader call" log).
 func (s *Server) sendResponse(w http.ResponseWriter, statusCode int, success bool, message string, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-
 	response := Response{
 		Success: success,
 		Message: message,
@@ -344,7 +346,11 @@ func (s *Server) sendResponse(w http.ResponseWriter, statusCode int, success boo
 		return
 	}
 
-	w.Write(jsonData)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if _, err := w.Write(jsonData); err != nil {
+		glog.V(2).Infof("sendResponse write failed: %v", err)
+	}
 }
 
 // getAppVersionHistory handles POST /api/v2/apps/version-history
