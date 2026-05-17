@@ -2,6 +2,7 @@ package appinfo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -159,6 +160,9 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 		var us []*types.AppStateLatestData
 
 		for _, s := range latestStatus {
+			if s == nil || s.Spec == nil {
+				continue
+			}
 			if s.Spec.Owner != u.Name {
 				continue
 			}
@@ -177,6 +181,12 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 	}
 
 	glog.V(3).Infof("[UserChanged] Fetched status for %d applications and middlewares from app-service: %s", len(latestStatus), helper.ParseJson(latestStatus))
+
+	repairCtx, repairCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer repairCancel()
+	for userID := range scc.repairPGAppStatesFromAppService(repairCtx, latestStatus) {
+		result[userID] = true
+	}
 
 	// cachedStatus := scc.getCachedStatus()
 	// if len(cachedStatus) == 0 {
@@ -230,6 +240,93 @@ func (scc *StatusCorrectionChecker) performStatusCheck() map[string]bool {
 
 	// glog.V(2).Infof("Status check cycle #%d completed in %v", cycle, time.Since(startTime))
 	return result
+}
+
+// repairPGAppStatesFromAppService backfills user_application_states from the
+// app-service snapshot after hydration has recreated user_applications. It is
+// deliberately conservative: entries with unclear identity/timestamps,
+// middleware, and sys-apps are skipped; this path only repairs regular app
+// state rows and does not emit NATS messages.
+func (scc *StatusCorrectionChecker) repairPGAppStatesFromAppService(ctx context.Context, apps []*types.AppServiceResponse) map[string]bool {
+	affectedUsers := make(map[string]bool)
+	for _, app := range apps {
+		if app == nil || app.Spec == nil || app.Status == nil || app.Spec.Settings == nil {
+			continue
+		}
+		if app.Spec.IsSysApp || strings.EqualFold(strings.TrimSpace(app.Spec.Source), "middleware") {
+			continue
+		}
+
+		userID := strings.TrimSpace(app.Spec.Owner)
+		sourceID := strings.TrimSpace(app.Spec.Settings.MarketSource)
+		appID := strings.TrimSpace(app.Spec.AppID)
+		state := strings.TrimSpace(app.Status.State)
+		if userID == "" || sourceID == "" || appID == "" || state == "" {
+			glog.V(3).Infof("[SCC] skip PG state repair with incomplete identity/state: user=%q source=%q appID=%q state=%q name=%q",
+				userID, sourceID, appID, state, app.Spec.Name)
+			continue
+		}
+
+		eventTime, ok := appServiceStatusTime(app)
+		if !ok {
+			glog.V(3).Infof("[SCC] skip PG state repair without app-service timestamp: user=%s source=%s appID=%s name=%q",
+				userID, sourceID, appID, app.Spec.Name)
+			continue
+		}
+
+		var statusEntrances []byte
+		if len(app.Status.EntranceStatuses) > 0 {
+			buf, err := json.Marshal(app.Status.EntranceStatuses)
+			if err != nil {
+				glog.Errorf("[SCC] marshal status entrances failed (user=%s source=%s appID=%s name=%q): %v",
+					userID, sourceID, appID, app.Spec.Name, err)
+				continue
+			}
+			statusEntrances = buf
+		}
+
+		applied, err := store.UpsertStateFromAppService(ctx, store.AppServiceStateUpdate{
+			UserID:           userID,
+			SourceID:         sourceID,
+			AppID:            appID,
+			State:            state,
+			InstalledVersion: strings.TrimSpace(app.Spec.Settings.Version),
+			EventCreateTime:  eventTime,
+			StatusEntrances:  statusEntrances,
+		})
+		if err != nil {
+			glog.Errorf("[SCC] repair PG state from app-service failed (user=%s source=%s appID=%s name=%q): %v",
+				userID, sourceID, appID, app.Spec.Name, err)
+			continue
+		}
+		if applied {
+			affectedUsers[userID] = true
+		}
+	}
+	if len(affectedUsers) > 0 {
+		glog.V(2).Infof("[SCC] repaired PG app states for %d user(s) from app-service snapshot", len(affectedUsers))
+	}
+	return affectedUsers
+}
+
+func appServiceStatusTime(app *types.AppServiceResponse) (time.Time, bool) {
+	if app == nil || app.Status == nil {
+		return time.Time{}, false
+	}
+	for _, raw := range []string{
+		app.Status.StatusTime,
+		app.Status.UpdateTime,
+		app.Status.LastTransitionTime,
+	} {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // fetchLatestStatus fetches the latest status from app-service

@@ -106,6 +106,27 @@ type StateNATSUpdate struct {
 	StatusEntrances []byte
 }
 
+// AppServiceStateUpdate captures the conservative subset of
+// /app-service/v1/all/apps that SCC can use to repair PG state rows after
+// hydration has recreated user_applications during Redis -> PG upgrades.
+//
+// Unlike the NATS path, app-service snapshots carry app_id, so this writer
+// matches the parent user_applications row by (user, source, app_id). Callers
+// must skip entries whose identity or timestamp is uncertain; this helper does
+// not invent timestamps because doing so could let an old snapshot overwrite a
+// newer NATS event.
+type AppServiceStateUpdate struct {
+	UserID   string
+	SourceID string
+	AppID    string
+
+	State            string
+	InstalledVersion string
+	EventCreateTime  time.Time
+
+	StatusEntrances []byte // raw JSON or nil
+}
+
 // UpsertPendingState records that a Market-initiated operation is being
 // dispatched for the (user, source, app) tuple. It UPSERTs by
 // user_application_id so a second click on an in-flight app refreshes
@@ -377,6 +398,67 @@ WHERE user_application_states.event_create_time < EXCLUDED.event_create_time
 	return res.RowsAffected > 0, nil
 }
 
+// UpsertStateFromAppService repairs user_application_states from an
+// app-service status snapshot. It is intentionally narrower than the NATS
+// writer: app-service reconciliation is a best-effort backfill path, not a
+// second realtime event source.
+//
+// Returns applied=false, err=nil when no parent user_applications row exists
+// yet (hydration has not rendered this app for the user) or when the monotonic
+// guard rejects an older snapshot.
+func UpsertStateFromAppService(ctx context.Context, in AppServiceStateUpdate) (bool, error) {
+	in.UserID = strings.TrimSpace(in.UserID)
+	in.SourceID = strings.TrimSpace(in.SourceID)
+	in.AppID = strings.TrimSpace(in.AppID)
+	in.State = strings.TrimSpace(in.State)
+	in.InstalledVersion = strings.TrimSpace(in.InstalledVersion)
+	if in.UserID == "" || in.SourceID == "" || in.AppID == "" || in.State == "" {
+		return false, fmt.Errorf("UpsertStateFromAppService: empty UserID/SourceID/AppID/State")
+	}
+	if in.EventCreateTime.IsZero() {
+		return false, fmt.Errorf("UpsertStateFromAppService: zero EventCreateTime; caller must parse app-service status time")
+	}
+
+	gdb := db.Global()
+	if gdb == nil {
+		return false, fmt.Errorf("postgres not initialised; db.Open must run before user application state store usage")
+	}
+
+	const query = `
+INSERT INTO user_application_states (
+    user_application_id,
+    installed_version,
+    state,
+    event_create_time,
+    status_entrances
+)
+SELECT ua.id, NULLIF($1, ''), $2, $3, $4
+FROM user_applications ua
+WHERE ua.user_id   = $5
+  AND ua.source_id = $6
+  AND ua.app_id    = $7
+ON CONFLICT (user_application_id) DO UPDATE SET
+    installed_version = COALESCE(NULLIF(EXCLUDED.installed_version, ''), user_application_states.installed_version),
+    state             = EXCLUDED.state,
+    event_create_time = EXCLUDED.event_create_time,
+    status_entrances  = COALESCE(EXCLUDED.status_entrances, user_application_states.status_entrances)
+WHERE user_application_states.event_create_time < EXCLUDED.event_create_time
+`
+
+	res := gdb.WithContext(ctx).Exec(query,
+		in.InstalledVersion,
+		in.State,
+		in.EventCreateTime,
+		nullableJSON(in.StatusEntrances),
+		in.UserID, in.SourceID, in.AppID,
+	)
+	if err := res.Error; err != nil {
+		return false, fmt.Errorf("upsert user_application_state from app-service (user=%s source=%s app=%s): %w",
+			in.UserID, in.SourceID, in.AppID, err)
+	}
+	return res.RowsAffected > 0, nil
+}
+
 // nullableJSON returns nil for nil/empty input so the SQL parameter is
 // SQL NULL (preserved by the COALESCE clause), rather than a zero-length
 // JSONB which would overwrite the existing payload with '{}' / '[]'.
@@ -516,9 +598,9 @@ func UpdateAppStates(ctx context.Context, in map[int64]*types.AppServiceResponse
 				}
 
 				var (
-					tailscale         any            = map[string]interface{}{}
-					settings          any            = &types.AppStateLatestDataSettings{}
-					entrance          any            = []types.AppStateLatestDataEntrances{}
+					tailscale         any = map[string]interface{}{}
+					settings          any = &types.AppStateLatestDataSettings{}
+					entrance          any = []types.AppStateLatestDataEntrances{}
 					stateValue        string
 					logAppID, logName string
 				)
