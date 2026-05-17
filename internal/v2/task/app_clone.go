@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"market/internal/v2/appservice"
+	"market/internal/v2/db/models"
 	"market/internal/v2/store"
+	"market/internal/v2/types"
 
 	"github.com/golang/glog"
 )
@@ -248,6 +251,8 @@ func (tm *TaskModule) AppClone(task *Task) (*AppOperationMessage, error) {
 		}); err != nil {
 			glog.Errorf("AppClone: failed to materialise clone rows after app-service success (task=%s user=%s source=%s src=%s -> new=%s/%s opID=%s): %v",
 				task.ID, user, appSource, rawAppName, urlAppName, newAppID, task.OpID, err)
+		} else {
+			tm.notifyCloneNewAppReady(context.Background(), task.ID, user, appSource, newAppID, version)
 		}
 	}
 
@@ -260,4 +265,144 @@ func (tm *TaskModule) AppClone(task *Task) (*AppOperationMessage, error) {
 	glog.Infof("App clone completed successfully: task=%s", task.ID)
 
 	return envelope, nil
+}
+
+// notifyCloneNewAppReady mirrors hydration's new_app_ready push for clone
+// materialisation. The clone row has already been copied into
+// user_applications, so rebuild app_info from PG instead of reusing the
+// original app's catalog entry.
+func (tm *TaskModule) notifyCloneNewAppReady(ctx context.Context, taskID, userID, sourceID, appID, appVersion string) {
+	if tm.dataSender == nil {
+		return
+	}
+
+	row, err := store.GetUserApplication(ctx, userID, sourceID, appID)
+	if err != nil {
+		glog.Errorf("AppClone: read clone user_applications for new_app_ready failed (task=%s user=%s source=%s app=%s): %v",
+			taskID, userID, sourceID, appID, err)
+		return
+	}
+	if row == nil {
+		glog.Warningf("AppClone: clone user_applications missing for new_app_ready (task=%s user=%s source=%s app=%s)",
+			taskID, userID, sourceID, appID)
+		return
+	}
+
+	if appVersion == "" {
+		appVersion = userApplicationMetadataVersion(row)
+	}
+
+	appInfo, err := composeUserApplicationInfo(row, appVersion)
+	if err != nil {
+		glog.Errorf("AppClone: compose clone app_info failed for new_app_ready (task=%s user=%s source=%s app=%s): %v",
+			taskID, userID, sourceID, appID, err)
+		appInfo = &types.ApplicationInfoEntry{
+			ID:         row.AppID,
+			AppID:      row.AppID,
+			Name:       row.AppName,
+			Version:    appVersion,
+			CfgType:    row.ManifestType,
+			ApiVersion: row.APIVersion,
+		}
+	}
+
+	update := types.MarketSystemUpdate{
+		Timestamp:  time.Now().Unix(),
+		User:       userID,
+		NotifyType: "market_system_point",
+		Point:      "new_app_ready",
+		Extensions: map[string]string{
+			"app_name":    row.AppName,
+			"app_version": appVersion,
+			"source":      row.SourceID,
+		},
+		ExtensionsObj: map[string]interface{}{
+			"app_info": appInfo,
+		},
+	}
+	if err := tm.dataSender.SendMarketSystemUpdate(update); err != nil {
+		glog.Errorf("AppClone: send new_app_ready failed (task=%s user=%s source=%s app=%s): %v",
+			taskID, userID, sourceID, appID, err)
+	}
+}
+
+func composeUserApplicationInfo(row *models.UserApplication, appVersion string) (*types.ApplicationInfoEntry, error) {
+	manifest := userApplicationManifest(row)
+	scalars := types.EntryScalars{
+		ID:         row.AppID,
+		AppID:      row.AppID,
+		Version:    appVersion,
+		CfgType:    row.ManifestType,
+		ApiVersion: row.APIVersion,
+	}
+	if row.I18n != nil {
+		scalars.I18n = types.NestI18nForEntry(row.I18n.Data)
+	}
+	if row.VersionHistory != nil && len(row.VersionHistory.Data) > 0 {
+		versionHistory := make([]*types.VersionInfo, 0, len(row.VersionHistory.Data))
+		for i := range row.VersionHistory.Data {
+			versionHistory = append(versionHistory, &row.VersionHistory.Data[i])
+		}
+		scalars.VersionHistory = versionHistory
+	}
+	entry, err := types.ComposeApplicationInfoEntry(manifest, scalars)
+	if err != nil {
+		return nil, err
+	}
+	if entry != nil {
+		entry.CreateTime = row.UpdatedAt.Unix()
+		entry.UpdateTime = row.UpdatedAt.Unix()
+	}
+	return entry, nil
+}
+
+func userApplicationManifest(row *models.UserApplication) *types.UserAppManifest {
+	m := &types.UserAppManifest{}
+	if row == nil {
+		return m
+	}
+	if row.Metadata != nil {
+		m.Metadata = row.Metadata.Data
+	}
+	if row.Spec != nil {
+		m.Spec = row.Spec.Data
+	}
+	if row.Resources != nil {
+		m.Resources = row.Resources.Data
+	}
+	if row.Options != nil {
+		m.Options = row.Options.Data
+	}
+	if row.Tailscale != nil {
+		m.Tailscale = row.Tailscale.Data
+	}
+	if row.Permission != nil {
+		m.Permission = row.Permission.Data
+	}
+	if row.Middleware != nil {
+		m.Middleware = row.Middleware.Data
+	}
+	if row.Entrances != nil {
+		m.Entrances = row.Entrances.Data
+	}
+	if row.SharedEntrances != nil {
+		m.SharedEntrances = row.SharedEntrances.Data
+	}
+	if row.Ports != nil {
+		m.Ports = row.Ports.Data
+	}
+	if row.Envs != nil {
+		m.Envs = row.Envs.Data
+	}
+	return m
+}
+
+func userApplicationMetadataVersion(row *models.UserApplication) string {
+	if row == nil || row.Metadata == nil {
+		return ""
+	}
+	if v, ok := row.Metadata.Data["version"].(string); ok {
+		return v
+	}
+	return ""
 }
